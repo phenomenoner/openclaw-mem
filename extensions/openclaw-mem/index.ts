@@ -29,7 +29,7 @@ const plugin = {
   id: "openclaw-mem",
   name: "OpenClaw Mem",
   description: "Capture tool results into JSONL for openclaw-mem ingestion",
-  kind: "memory",
+  kind: "utility",
 
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;

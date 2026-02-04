@@ -2,7 +2,7 @@
   "id": "openclaw-mem",
   "name": "OpenClaw Mem",
   "description": "Capture tool results into JSONL for openclaw-mem ingestion",
-  "kind": "memory",
+  "kind": "utility",
   "version": "0.1.0",
   "configSchema": {
     "type": "object",
