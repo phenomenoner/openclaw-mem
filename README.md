@@ -55,6 +55,24 @@ uv run --python 3.13 -- python -m openclaw_mem get 23 41 57 --json
 {"ts":"2026-02-04T13:00:00Z","kind":"tool","tool_name":"cron.list","summary":"cron list called","detail":{"ok":true}}
 ```
 
+## 🧠 AI Compression (script)
+
+Standalone script to compress `memory/YYYY-MM-DD.md` into `MEMORY.md` using OpenAI API.
+
+```bash
+# Explicit date
+OPENAI_API_KEY=... python scripts/compress_memory.py 2026-02-04
+
+# Default = yesterday
+python scripts/compress_memory.py --json --dry-run
+```
+
+Optional env vars:
+- `OPENCLAW_MEM_MODEL` (default: `gpt-4.1`)
+- `OPENCLAW_MEM_MAX_TOKENS` (default: 700)
+- `OPENCLAW_MEM_TEMPERATURE` (default: 0.2)
+- `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`)
+
 ## 🚀 Planned CLI (later phases)
 
 ```bash

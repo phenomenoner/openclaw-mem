@@ -33,9 +33,9 @@ One observation per line:
 ## Limitations (M0)
 - Manual ingestion only (no hooks yet).
 - FTS‑only search (no embeddings/hybrid).
-- No AI compression or MEMORY.md export.
+- AI compression is a **standalone script** (not wired into CLI export yet).
 
 ## Next steps
 - Hook-based auto-capture (`tool_result_persist`).
-- AI compression pipeline + export.
+- Wire AI compression + export into CLI (`summarize`, `export`).
 - Hybrid vector + BM25 scoring.
