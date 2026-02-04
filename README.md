@@ -43,6 +43,11 @@ openclaw-mem summarize --session latest    # Run AI compression
 openclaw-mem export --to MEMORY.md         # Export learnings to long-term memory
 ```
 
+**AI-native CLI design**
+- All commands support `--json` for structured output.
+- No interactive prompts by default; use `--yes`/`--force` for side-effectful actions.
+- Help text includes examples and explicit warnings for destructive flags.
+
 ## 📄 License
 
 MIT

@@ -115,6 +115,11 @@ Storage:
 
 ## 6) CLI interface design (openclaw-mem)
 
+### AI-native principles
+- **Help as prompt**: rich examples + explicit warnings for side-effectful flags.
+- **Structured output**: every command supports `--json` (machine-first).
+- **Non-interactive**: no blocking prompts; destructive ops require explicit `--yes`/`--force` to proceed.
+
 ### Global
 ```
 openclaw-mem [--agent <id>] [--db <path>] [--config <path>] [--json]
@@ -133,12 +138,15 @@ openclaw-mem [--agent <id>] [--db <path>] [--config <path>] [--json]
 - `export` — export summaries to Markdown (daily or full).
 - `config` — print merged config, or set via `--set key=value`.
 
+**Safety:** commands that overwrite or delete data (e.g., `export --to MEMORY.md`, `index --rebuild`) must include `--yes` or `--force` and should **fail fast** otherwise (no prompts).
+
 ### Example
 ```
-openclaw-mem search "oauth bug" --limit 20
-openclaw-mem timeline 23 41 57 --window 4
-openclaw-mem get 23 41 57
+openclaw-mem search "oauth bug" --limit 20 --json
+openclaw-mem timeline 23 41 57 --window 4 --json
+openclaw-mem get 23 41 57 --json
 openclaw-mem summarize --session latest
+openclaw-mem export --to MEMORY.md --yes
 ```
 
 ---
