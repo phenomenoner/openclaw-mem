@@ -1,0 +1,10 @@
+[project]
+name = "openclaw-mem"
+version = "0.1.0"
+description = "CLI-first memory store + search prototype for OpenClaw"
+requires-python = ">=3.10"
+readme = "README.md"
+license = { text = "MIT" }
+
+[project.scripts]
+openclaw-mem = "openclaw_mem.cli:main"

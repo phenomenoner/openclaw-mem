@@ -12,7 +12,7 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 
 ## 📄 Current Status
 
-🏗️ **Planning phase.** The adoption plan and architecture design live in [`docs/claude-mem-adoption-plan.md`](docs/claude-mem-adoption-plan.md). Implementation will follow a phased rollout.
+🚧 **M0 (minimal usable) in progress.** A CLI-first SQLite + FTS prototype is now in-repo; see "M0 Prototype" below. The adoption plan and architecture design live in [`docs/claude-mem-adoption-plan.md`](docs/claude-mem-adoption-plan.md).
 
 ## 📖 Architecture at a Glance
 
@@ -32,13 +32,32 @@ Tool executions (hook) → SQLite observations → AI batch compression
 - **Native storage** — SQLite + FTS5 + sqlite-vec. No ChromaDB, no external deps.
 - **Integrates with existing memory** — writes learnings into `memory/*.md`; OpenClaw's built-in `memorySearch` picks them up automatically.
 
-## 🚀 Planned CLI
+## ✅ M0 Prototype (minimal usable milestone)
+
+**Goal:** usable observation store + search CLI (SQLite + FTS5) with JSON output.
+See full notes: [`docs/m0-prototype.md`](docs/m0-prototype.md)
 
 ```bash
-openclaw-mem status                        # Store stats, embedding status
-openclaw-mem search "auth bug" --limit 20  # Layer 1: compact index
-openclaw-mem timeline 23 41 57 --window 4  # Layer 2: chronological context
-openclaw-mem get 23 41 57                  # Layer 3: full details
+# status
+uv run --python 3.13 -- python -m openclaw_mem status --json
+
+# ingest (JSONL)
+uv run --python 3.13 -- python -m openclaw_mem ingest --file observations.jsonl --json
+
+# search / timeline / get (progressive disclosure)
+uv run --python 3.13 -- python -m openclaw_mem search "gateway timeout" --limit 20 --json
+uv run --python 3.13 -- python -m openclaw_mem timeline 23 41 57 --window 4 --json
+uv run --python 3.13 -- python -m openclaw_mem get 23 41 57 --json
+```
+
+### Input JSONL format (ingest)
+```
+{"ts":"2026-02-04T13:00:00Z","kind":"tool","tool_name":"cron.list","summary":"cron list called","detail":{"ok":true}}
+```
+
+## 🚀 Planned CLI (later phases)
+
+```bash
 openclaw-mem summarize --session latest    # Run AI compression
 openclaw-mem export --to MEMORY.md         # Export learnings to long-term memory
 ```

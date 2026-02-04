@@ -5,6 +5,22 @@ OpenClaw already ships with a **native memory search subsystem** (SQLite + sqlit
 
 ---
 
+## 0) Minimal usable milestone (M0)
+
+**Goal (meaningful improvement):** a CLI-first observation store + search workflow that is usable without full plugin wiring.
+
+**Scope (M0):**
+- Local SQLite store (`openclaw-mem.sqlite`) with FTS5 index.
+- CLI commands: `status`, `ingest`, `search`, `timeline`, `get`.
+- **AI-native**: `--json` output, non-interactive, help with examples.
+- Manual ingestion via JSONL (tool logs or exported traces).
+
+**Out of scope (later):** hook-based auto-capture, AI compression, vector search, MEMORY.md export.
+
+**Docs:** see `docs/m0-prototype.md`.
+
+---
+
 ## 1) Evaluation: Adopt / Adapt / Skip
 
 | Concept | Decision | Rationale | OpenClaw mapping |
@@ -170,6 +186,11 @@ openclaw-mem export --to MEMORY.md --yes
 ---
 
 ## 8) Phased implementation plan (milestones)
+
+### M0 — Minimal usable (1–2 days)
+- SQLite store + FTS5 index.
+- CLI: `status`, `ingest`, `search`, `timeline`, `get`.
+- JSON output + non-interactive UX.
 
 ### Phase 0 — Discovery/Bootstrap (1–2 days)
 - Confirm plugin API surface for tool-result hook and workspace IO.
