@@ -8,7 +8,7 @@
 - [**Quickstart Guide**](QUICKSTART.md) — Get started in 5 minutes
 - [**CHANGELOG**](CHANGELOG.md) — See what's new
 - [**Auto-Capture Setup**](docs/auto-capture.md) — Enable plugin
-- [**Tests**](tests/) — 22 tests (unit + integration)
+- [**Tests**](tests/) — 26 tests (unit + integration)
 
 ## 🙏 Credits & Inspiration
 
@@ -27,14 +27,15 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 - AI-native: `--json` output, non-interactive, example-rich help
 - Atomic file operations (WAL mode, race-safe append)
 - AI compression script (`scripts/compress_memory.py`) with OpenAI API
-- 22 tests (unit + integration, 100% coverage) + GitHub Actions CI
+- 26 tests (unit + integration, 100% coverage) + GitHub Actions CI
 
 **What's next:**
 - ✅ Phase 1: Auto-capture via `tool_result_persist` hook (plugin ready)
 - ✅ Phase 2: AI compression integrated into CLI (`summarize` command)
 - ✅ Phase 3: Vector search (`embed` + `vsearch` cosine similarity)
 - ✅ Auto-config: Reads API key from `~/.openclaw/openclaw.json` (no env var needed)
-- ⏳ Phase 4: Hybrid scoring (BM25 + embeddings weights)
+- ✅ Phase 4: Hybrid search (`hybrid` RRF fusion) + proactive memory tools (`store`, `memory_store`, `memory_recall`)
+- ⏳ Next: Optional weighted hybrid scoring + sqlite-vec acceleration (align with OpenClaw native memory-core)
 
 ## 📖 Architecture at a Glance
 
@@ -244,7 +245,41 @@ openclaw-mem vsearch "ignored" --model test-model \
 
 ### Notes
 - Current implementation is **cosine similarity only**.
-- Hybrid scoring (BM25 + embeddings weights) is the next step.
+- Hybrid search is available via `openclaw-mem hybrid` (RRF fusion of FTS + vector results).
+- Weighted hybrid scoring (e.g., tuned BM25+vector weights) remains a possible future enhancement.
+
+## 🔀 Hybrid Search (Phase 4)
+
+Hybrid search combines:
+- **FTS5 BM25** (exact text matching)
+- **Embeddings cosine similarity** (semantic matching)
+
+Fusion method: **Reciprocal Rank Fusion (RRF)** — robust to score scale differences.
+
+```bash
+# (1) Ensure you have embeddings (Phase 3)
+openclaw-mem embed --limit 500 --json
+
+# (2) Hybrid search
+openclaw-mem hybrid "gateway timeout" --limit 10 --json
+```
+
+## 🧷 Proactive Memory Tools (Phase 4)
+
+### CLI: `store`
+
+Use this when the agent/user explicitly says “remember this”. It will:
+1) Insert into SQLite
+2) (If API key is available) embed it
+3) Append a short line to `memory/YYYY-MM-DD.md`
+
+```bash
+openclaw-mem store "Prefer Python 3.13 + uv" --category preference --importance 0.9 --json
+```
+
+### Plugin tools: `memory_store` / `memory_recall`
+
+The OpenClaw plugin also exposes `memory_store` + `memory_recall` tools to the agent (see `extensions/openclaw-mem/`).
 
 ## 🧪 Testing
 
@@ -271,11 +306,12 @@ uv run --python 3.13 -- python -m unittest tests/test_cli.py -v
 ### Test Fixtures
 - [`docs/hooks_examples/`](docs/hooks_examples/) — Sample OpenClaw hook payloads
 
-## 🚀 Planned CLI (later phases)
+## 🚀 Future CLI Ideas (later phases)
 
 ```bash
-openclaw-mem summarize --session latest    # Run AI compression
-openclaw-mem export --to MEMORY.md         # Export learnings to long-term memory
+openclaw-mem tail --follow                 # Stream recent observations
+openclaw-mem summarize --dates 2026-02-01..2026-02-07
+openclaw-mem export --to MEMORY.md --yes   # Export observations (and later: learnings) to long-term memory (guarded)
 ```
 
 **AI-native CLI design**
