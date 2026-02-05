@@ -1,0 +1,16 @@
+{
+  "toolName": "web_search",
+  "toolCallId": "toolu_01ABC123",
+  "message": {
+    "role": "toolResult",
+    "toolCallId": "toolu_01ABC123",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"results\":[{\"title\":\"Example\",\"url\":\"https://example.com\",\"snippet\":\"...\"}]}"
+      }
+    ]
+  },
+  "isSynthetic": false,
+  "_comment": "This is the payload passed to tool_result_persist hook. The 'message' field is an AgentMessage (toolResult) about to be persisted to the session transcript."
+}

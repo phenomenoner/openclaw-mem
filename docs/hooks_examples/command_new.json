@@ -1,0 +1,8 @@
+{
+  "type": "command",
+  "action": "new",
+  "timestamp": "2026-02-05T19:00:00.000Z",
+  "sessionKey": "agent:main:main",
+  "agentId": "main",
+  "_comment": "Emitted when user issues /new command. Use to mark session start."
+}

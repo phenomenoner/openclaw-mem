@@ -1,0 +1,8 @@
+{
+  "type": "command",
+  "action": "stop",
+  "timestamp": "2026-02-05T20:00:00.000Z",
+  "sessionKey": "agent:main:main",
+  "agentId": "main",
+  "_comment": "Emitted when user issues /stop command. Use to mark session end and trigger AI compression."
+}
