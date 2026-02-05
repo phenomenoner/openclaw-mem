@@ -691,6 +691,66 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(out, args.json)
 
 
+def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Auto-ingest and embed observations from log file."""
+    # 1. Determine source
+    default_source = os.path.expanduser("~/.openclaw/memory/openclaw-mem-observations.jsonl")
+    source = Path(args.source or default_source)
+
+    if not source.exists() or source.stat().st_size == 0:
+        if args.json:
+             print(json.dumps({"ok": True, "processed": 0, "reason": "source empty/missing"}))
+        else:
+             print("Source empty or missing.")
+        return
+
+    # 2. Rotate
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    processing = source.with_suffix(f".jsonl.{ts}.processing")
+    try:
+        source.rename(processing)
+    except OSError as e:
+        _emit({"error": f"Failed to rotate log: {e}"}, args.json)
+        sys.exit(1)
+
+    # 3. Ingest
+    inserted_ids = []
+    try:
+        with open(processing, "r", encoding="utf-8") as fp:
+            for obs in _iter_jsonl(fp):
+                inserted_ids.append(_insert_observation(conn, obs))
+        conn.commit()
+    except Exception as e:
+        _emit({"error": f"Ingest failed: {e}", "file": str(processing)}, args.json)
+        sys.exit(1)
+
+    # Emit ingest result
+    _emit({
+        "ok": True,
+        "ingested": len(inserted_ids),
+        "source": str(source),
+        "archive": str(args.archive_dir) if args.archive_dir else "deleted"
+    }, args.json)
+
+    # 4. Embed (Optional)
+    if args.embed:
+        # Prepare args for cmd_embed
+        embed_args = argparse.Namespace(**vars(args))
+        embed_args.limit = 500
+        embed_args.batch = 64
+        # Reuse cmd_embed
+        cmd_embed(conn, embed_args)
+
+    # 5. Archive or Delete
+    if args.archive_dir:
+        archive_dir = Path(args.archive_dir)
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        dest = archive_dir / processing.name
+        processing.rename(dest)
+    else:
+        processing.unlink()
+
+
 def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Proactive memory storage (SQLite + Vector + Markdown)."""
     text = args.text.strip()
@@ -897,6 +957,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
     sp.add_argument("--workspace", type=Path, help="Workspace root (default: cwd)")
     sp.set_defaults(func=cmd_store)
+
+    sp = sub.add_parser("harvest", help="Auto-ingest and embed observations from log file")
+    add_common(sp)
+    sp.add_argument("--source", help="JSONL source file (default: ~/.openclaw/memory/openclaw-mem-observations.jsonl)")
+    sp.add_argument("--archive-dir", help="Directory to move processed files (default: delete)")
+    sp.add_argument("--embed", action="store_true", default=True, help="Run embedding after ingest (default: True)")
+    sp.add_argument("--no-embed", dest="embed", action="store_false", help="Skip embedding")
+    sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
+    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.set_defaults(func=cmd_harvest)
 
     return p
 
