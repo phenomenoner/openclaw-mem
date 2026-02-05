@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from array import array
-from typing import Iterable, List, Sequence, Tuple
+from typing import Iterable, List, Sequence, Tuple, Dict
 
 
 def pack_f32(vec: Sequence[float]) -> bytes:
@@ -71,3 +71,27 @@ def rank_cosine(
 
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored[:limit]
+
+
+def rank_rrf(
+    *,
+    ranked_lists: Sequence[Sequence[int]],
+    k: int = 60,
+    limit: int = 20,
+) -> List[Tuple[int, float]]:
+    """Rank IDs using Reciprocal Rank Fusion (RRF).
+
+    ranked_lists: list of lists of IDs (e.g. [fts_ids, vec_ids])
+    Returns list of (id, rrf_score).
+    """
+    scores: Dict[int, float] = {}
+
+    for ranking in ranked_lists:
+        for rank, item_id in enumerate(ranking):
+            # RRF score = 1 / (k + rank)
+            # rank is 0-indexed here
+            scores[item_id] = scores.get(item_id, 0.0) + 1.0 / (k + rank + 1)
+
+    # Sort by score descending
+    sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return sorted_items[:limit]

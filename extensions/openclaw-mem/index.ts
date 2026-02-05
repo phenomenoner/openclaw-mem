@@ -1,6 +1,10 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const DEFAULT_OUTPUT = "~/.openclaw/memory/openclaw-mem-observations.jsonl";
 const MAX_MESSAGE_LENGTH = 1000; // Truncate large messages to prevent bloat
@@ -68,6 +72,61 @@ const plugin = {
   name: "OpenClaw Mem",
   description: "Capture tool results into JSONL for openclaw-mem ingestion",
   kind: "utility",
+
+  tools: {
+    memory_store: {
+      description: "Store a memory into the long-term knowledge base.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "The memory content to store" },
+          category: { type: "string", description: "Category (e.g., preference, fact, task)" },
+          importance: { type: "number", description: "Importance (1-5), default 3" },
+        },
+        required: ["text"],
+      },
+      handler: async (args: any) => {
+        try {
+          const cmdArgs = ["-m", "openclaw_mem", "store", "--text", args.text];
+          if (args.category) cmdArgs.push("--category", args.category);
+          if (args.importance) cmdArgs.push("--importance", String(args.importance));
+
+          const { stdout } = await execFileAsync("python", cmdArgs);
+          return { content: [{ type: "text", text: stdout.trim() || "Memory stored." }] };
+        } catch (err: any) {
+          return { 
+            isError: true, 
+            content: [{ type: "text", text: `Failed to store memory: ${err.message}\n${err.stderr || ""}` }] 
+          };
+        }
+      }
+    },
+    memory_recall: {
+      description: "Recall memories relevant to a query.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query" },
+          limit: { type: "number", description: "Max results (default 5)" }
+        },
+        required: ["query"]
+      },
+      handler: async (args: any) => {
+        try {
+          const cmdArgs = ["-m", "openclaw_mem", "hybrid", "--query", args.query];
+          if (args.limit) cmdArgs.push("--limit", String(args.limit));
+
+          const { stdout } = await execFileAsync("python", cmdArgs);
+          return { content: [{ type: "text", text: stdout.trim() }] };
+        } catch (err: any) {
+          return { 
+            isError: true, 
+            content: [{ type: "text", text: `Failed to recall memory: ${err.message}\n${err.stderr || ""}` }] 
+          };
+        }
+      }
+    }
+  },
 
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
