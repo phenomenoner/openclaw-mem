@@ -306,3 +306,17 @@ Retrieve the most relevant stored memories for a given query.
 - User says "remember …", "prefer …", "always …", "never …" → call `memory_store`.
 - Agent needs past context mid-session (e.g. "what did we decide about X?") → call `memory_recall`.
 - Routine session work → let auto-capture + AI compression handle it silently.
+
+---
+
+## 12) Support for Isolated Heartbeat (Smart RAG)
+
+OpenClaw employs an **"Isolated Heartbeat"** pattern (running in a stateless, low-cost cron session) to monitor for active tasks without loading full context. `openclaw-mem` plays a critical role in enabling the **"Smart RAG"** variant of this heartbeat.
+
+**Requirements:**
+1. **Vector-Enhanced Heartbeat:** The heartbeat cron job uses `memory_search` (or `openclaw-mem search`) to query for "active tasks", "pending decisions", or "high priority" items without needing the main session transcript.
+2. **Low-Latency Access:** The observation store and vector index must be accessible to isolated sessions (cron jobs) with minimal startup overhead.
+3. **Status Synthesis:** The AI compression step should explicitly tag or synthesize "current status" summaries so that a simple vector query for "status" yields the most relevant, up-to-date context immediately (Layer 1 retrieval).
+
+This ensures the agent maintains "situational awareness" at near-zero cost ($0.01/run) while keeping the full "Main Session" ($0.20+/run) sleeping until actual work is detected.
+
