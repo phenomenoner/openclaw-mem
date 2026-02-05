@@ -9,31 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (placeholder)
 
+## [0.4.1] - 2026-02-06
+
+### Changed
+- Packaging/version alignment: bump package version to `0.4.1`.
+- Documentation updates (README/CHANGELOG) to reflect that Phase 4 functionality is already shipped.
+
+### Testing
+- 26 unit/integration tests passing.
+
+## [0.4.0] - 2026-02-06
+
+### Added
+- Phase 4 complete release marker (hybrid RRF search + proactive memory tools).
+
 ## [0.3.0] - 2026-02-06
 
 ### Added
-
-#### Phase 1: Auto-Capture Plugin
-- OpenClaw plugin for automatic tool result capture via the `tool_result_persist` hook
-- Smart summary extraction (compact ~200 char extract)
-- Truncation + filter controls (include/exclude specific tools)
-- Optional full message capture (`captureMessage`)
-- Auto-capture setup docs and hook payload examples
-
-#### Phase 2: AI Compression (CLI)
-- `openclaw-mem summarize` CLI command for daily note compression
-- Direct OpenAI API integration via a mockable client abstraction
-- Dry-run mode + configurable model/temperature/max tokens
-- Workspace targeting via `--workspace`
-
-#### Export
-- `openclaw-mem export` to append observations into a Markdown file
-- Safety guard: exporting to `MEMORY.md` requires explicit `--yes`
-
-#### Phase 3: Vector Search
-- `openclaw-mem embed` command to compute/store embeddings (float32 BLOB + norm)
-- `openclaw-mem vsearch` command for cosine-similarity search over stored embeddings
-- Offline/test mode for vector search via `--query-vector-json` / `--query-vector-file`
 
 #### Phase 4: Hybrid Search + Proactive Memory Tools
 - Reciprocal Rank Fusion (RRF) implementation for robust hybrid ranking (FTS + vector)
@@ -41,25 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `openclaw-mem store` command (store + embed + append to `memory/YYYY-MM-DD.md`)
 - Plugin tools exposed to the agent: `memory_store` and `memory_recall`
 
-#### OpenClaw Integration Defaults
-- API key auto-resolution from **either** env **or** `~/.openclaw/openclaw.json`:
-  - `agents.defaults.memorySearch.remote.apiKey`
+## [0.2.0] - 2026-02-06
 
-### Changed
-- Default summarize model updated to `gpt-5.2`
-- Documentation updated to reflect Phase 3/4 shipping status
-
-### Fixed
-- Atomic file append (write-to-temp + rename) for corruption-safe writes
-- WAL mode + short-lived connections guidance for SQLite concurrency
-
-### Testing
-- 26 unit/integration tests passing
-- CI: GitHub Actions workflow (uv sync + unittest)
-
-### Security
-- Message truncation by default in auto-capture plugin
-- Explicit consent model for writing to `MEMORY.md` (`--yes`)
+### Added
+- Phase 3 vector search (`embed` + `vsearch`)
+- API key auto-resolution from env or `~/.openclaw/openclaw.json` (`agents.defaults.memorySearch.remote.apiKey`)
 
 ## [0.1.0-m0] - 2026-02-05
 
