@@ -21,12 +21,12 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 ✅ **M0 (minimal usable) complete!** A CLI-first SQLite + FTS5 prototype with full test coverage is ready. See "M0 Prototype" below for usage. The adoption plan and architecture design live in [`docs/claude-mem-adoption-plan.md`](docs/claude-mem-adoption-plan.md).
 
 **What works:**
-- CLI commands: `status`, `ingest`, `search`, `timeline`, `get`
-- FTS5 full-text search over observations
-- Progressive disclosure (3-layer search)
+- CLI commands: `status`, `ingest`, `search`, `timeline`, `get`, `summarize`, `export`, `embed`, `vsearch`, `hybrid`, `store`
+- Plugin: auto-capture via `tool_result_persist` + agent tools `memory_store` / `memory_recall`
+- FTS5 full-text search + progressive disclosure (3-layer search)
+- Vector search (cosine similarity) + hybrid search via RRF fusion
 - AI-native: `--json` output, non-interactive, example-rich help
-- Atomic file operations (WAL mode, race-safe append)
-- AI compression script (`scripts/compress_memory.py`) with OpenAI API
+- Atomic file operations + SQLite WAL mode guidance
 - 26 tests (unit + integration, 100% coverage) + GitHub Actions CI
 
 **What's next:**
@@ -35,7 +35,9 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 - ✅ Phase 3: Vector search (`embed` + `vsearch` cosine similarity)
 - ✅ Auto-config: Reads API key from `~/.openclaw/openclaw.json` (no env var needed)
 - ✅ Phase 4: Hybrid search (`hybrid` RRF fusion) + proactive memory tools (`store`, `memory_store`, `memory_recall`)
-- ⏳ Next: Optional weighted hybrid scoring + sqlite-vec acceleration (align with OpenClaw native memory-core)
+- ⏳ Next: Route embeddings/LLM calls via OpenClaw Gateway model routing (instead of direct OpenAI HTTP)
+- ⏳ Next: Add a first-class auto-ingest/auto-embed workflow (cron/systemd timer)
+- ⏳ Next (optional): Weighted hybrid scoring + sqlite-vec acceleration + index rebuild workflow
 
 ## 📖 Architecture at a Glance
 
@@ -52,7 +54,7 @@ Tool executions (hook) → SQLite observations → AI batch compression
 - **AI compression** — 50 raw observations → ~500-token summary (10x compression).
 - **Progressive disclosure search** — Layer 1 (compact index, ~50–100 tok/result) → Layer 2 (timeline context) → Layer 3 (full details). ~10x token savings vs. full dump.
 - **Proactive memory tools** — `memory_store` and `memory_recall` tools for the agent to explicitly save/retrieve important facts (preferences, decisions, entities).
-- **Native storage** — SQLite + FTS5 + sqlite-vec. No ChromaDB, no external deps.
+- **Native storage** — SQLite + FTS5 (+ optional sqlite-vec later). No ChromaDB, no external deps.
 - **Integrates with existing memory** — writes learnings into `memory/*.md`; OpenClaw's built-in `memorySearch` picks them up automatically.
 
 ## 🔌 Auto-Capture Plugin (Phase 1)
