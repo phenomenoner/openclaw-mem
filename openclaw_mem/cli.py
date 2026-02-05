@@ -221,6 +221,35 @@ def _print_row(item: Dict[str, Any]) -> None:
     print(f"#{_id} {ts} [{kind}] {tool} :: {summary}")
 
 
+def _get_api_key(env_var: str = "OPENAI_API_KEY") -> Optional[str]:
+    """Get API key from env or ~/.openclaw/openclaw.json."""
+    # 1. Try env
+    api_key = os.environ.get(env_var)
+    if api_key:
+        return api_key
+
+    # 2. Try config file
+    try:
+        config_path = os.path.expanduser("~/.openclaw/openclaw.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # Traversing: agents -> defaults -> memorySearch -> remote -> apiKey
+                key = (
+                    data.get("agents", {})
+                    .get("defaults", {})
+                    .get("memorySearch", {})
+                    .get("remote", {})
+                    .get("apiKey")
+                )
+                if key and isinstance(key, str):
+                    return key
+    except Exception:
+        pass  # Fail silently on config read errors, caller handles missing key
+
+    return None
+
+
 def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Run AI compression on observations (requires compress_memory.py)."""
     try:
@@ -232,9 +261,9 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # Get API key
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = _get_api_key()
     if not api_key:
-        _emit({"error": "OPENAI_API_KEY environment variable not set"}, args.json)
+        _emit({"error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json"}, args.json)
         sys.exit(1)
 
     # Determine workspace
@@ -389,9 +418,9 @@ class OpenAIEmbeddingsClient:
 
 def cmd_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Compute/store embeddings for observations."""
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = _get_api_key()
     if not api_key:
-        _emit({"error": "OPENAI_API_KEY environment variable not set"}, args.json)
+        _emit({"error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json"}, args.json)
         sys.exit(1)
 
     model = args.model
@@ -475,9 +504,9 @@ def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     elif getattr(args, "query_vector_file", None):
         query_vec = json.loads(Path(args.query_vector_file).read_text(encoding="utf-8"))
     else:
-        api_key = os.environ.get("OPENAI_API_KEY")
+        api_key = _get_api_key()
         if not api_key:
-            _emit({"error": "OPENAI_API_KEY not set (or provide --query-vector-json/--query-vector-file)"}, args.json)
+            _emit({"error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json (or provide --query-vector-json/--query-vector-file)"}, args.json)
             sys.exit(1)
         client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
         query_vec = client.embed([args.query], model=model)[0]
@@ -526,7 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
         "  openclaw-mem timeline 23 41 57 --window 4 --json\n"
         "  openclaw-mem get 23 41 57 --json\n"
         "\n"
-        "  # AI compression (requires OPENAI_API_KEY)\n"
+        "  # AI compression (requires API key via env or ~/.openclaw/openclaw.json)\n"
         "  export OPENAI_API_KEY=sk-...\n"
         "  openclaw-mem summarize --json  # yesterday's notes\n"
         "  openclaw-mem summarize 2026-02-04 --dry-run\n"
@@ -591,11 +620,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("ids", type=int, nargs="+", help="Observation IDs")
     sp.set_defaults(func=cmd_get)
 
-    sp = sub.add_parser("summarize", help="Run AI compression on daily notes (requires OPENAI_API_KEY)")
+    sp = sub.add_parser("summarize", help="Run AI compression on daily notes (requires API key)")
     add_common(sp)
     sp.add_argument("date", nargs="?", help="Date to compress (YYYY-MM-DD, default: yesterday)")
     sp.add_argument("--workspace", type=Path, help="Workspace root (default: cwd)")
-    sp.add_argument("--model", default="gpt-4.1", help="OpenAI model")
+    sp.add_argument("--model", default="gpt-5.2", help="OpenAI model")
     sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
     sp.add_argument("--max-tokens", type=int, default=700, help="Max output tokens")
     sp.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature")
@@ -611,7 +640,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--include-detail", action="store_true", help="Include detail_json blocks")
     sp.set_defaults(func=cmd_export)
 
-    sp = sub.add_parser("embed", help="Compute/store embeddings for observations (requires OPENAI_API_KEY)")
+    sp = sub.add_parser("embed", help="Compute/store embeddings for observations (requires API key)")
     add_common(sp)
     sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
     sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")

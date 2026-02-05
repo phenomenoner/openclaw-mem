@@ -32,8 +32,9 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 **What's next:**
 - ✅ Phase 1: Auto-capture via `tool_result_persist` hook (plugin ready)
 - ✅ Phase 2: AI compression integrated into CLI (`summarize` command)
-- ✅ Phase 3 (partial): Vector search (`embed` + `vsearch` cosine similarity)
-- ⏳ Phase 3 (next): Hybrid scoring (BM25 + embeddings weights)
+- ✅ Phase 3: Vector search (`embed` + `vsearch` cosine similarity)
+- ✅ Auto-config: Reads API key from `~/.openclaw/openclaw.json` (no env var needed)
+- ⏳ Phase 4: Hybrid scoring (BM25 + embeddings weights)
 
 ## 📖 Architecture at a Glance
 
@@ -170,7 +171,7 @@ Compress daily memory notes into `MEMORY.md` using OpenAI API.
 
 ```bash
 # Compress yesterday's note (default)
-export OPENAI_API_KEY=sk-...
+# Note: Automatically reads key from ~/.openclaw/openclaw.json if available
 openclaw-mem summarize --json
 
 # Compress specific date
@@ -193,7 +194,7 @@ OPENAI_API_KEY=sk-... python scripts/compress_memory.py --json
 ### Configuration
 
 CLI flags:
-- `--model` — OpenAI model (default: `gpt-4.1`)
+- `--model` — OpenAI model (default: `gpt-5.2`)
 - `--max-tokens` — Max output tokens (default: 700)
 - `--temperature` — Sampling temperature (default: 0.2)
 - `--base-url` — API base URL (default: `https://api.openai.com/v1`)
@@ -201,11 +202,12 @@ CLI flags:
 - `--dry-run` — Preview without writing
 
 Environment variables:
-- `OPENAI_API_KEY` — **Required** OpenAI API key
+- `OPENAI_API_KEY` — OpenAI API key (optional if set in `~/.openclaw/openclaw.json`)
 - `OPENCLAW_MEM_WORKSPACE` — Workspace root (used by standalone script)
 
 ### Features
 - ✅ Integrated into CLI (`openclaw-mem summarize`)
+- ✅ Auto-config: Reads `openclaw.json` for keys
 - ✅ Atomic file append (race-safe)
 - ✅ Date validation (YYYY-MM-DD)
 - ✅ Skip if already compressed
@@ -214,14 +216,15 @@ Environment variables:
 
 See [`tests/test_compress_memory.py`](tests/test_compress_memory.py) for examples.
 
-## 🔎 Vector Search (Phase 3 — partial)
+## 🔎 Vector Search (Phase 3)
 
 Vector search works in two steps:
 1. **Embed** observations (`openclaw-mem embed`) — stores embeddings in SQLite
 2. **Search** with cosine similarity (`openclaw-mem vsearch`)
 
 ```bash
-export OPENAI_API_KEY=sk-...
+# API key is read from ~/.openclaw/openclaw.json automatically
+# Or set export OPENAI_API_KEY=sk-... to override
 
 # Build embeddings (default model: text-embedding-3-small)
 openclaw-mem embed --limit 500 --json
