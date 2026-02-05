@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+          enable-cache: true
+
+      - name: Sync (locked)
+        run: uv sync --locked
+
+      - name: Unit tests
+        run: uv run -- python -m unittest discover -s tests -p 'test_*.py'
