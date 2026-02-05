@@ -8,7 +8,7 @@
 - [**Quickstart Guide**](QUICKSTART.md) — Get started in 5 minutes
 - [**CHANGELOG**](CHANGELOG.md) — See what's new
 - [**Auto-Capture Setup**](docs/auto-capture.md) — Enable plugin
-- [**Tests**](tests/) — 17 tests (13 unit + 4 integration)
+- [**Tests**](tests/) — 22 tests (unit + integration)
 
 ## 🙏 Credits & Inspiration
 
@@ -27,12 +27,13 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 - AI-native: `--json` output, non-interactive, example-rich help
 - Atomic file operations (WAL mode, race-safe append)
 - AI compression script (`scripts/compress_memory.py`) with OpenAI API
-- 13 unit tests (100% coverage) + GitHub Actions CI
+- 22 tests (unit + integration, 100% coverage) + GitHub Actions CI
 
 **What's next:**
 - ✅ Phase 1: Auto-capture via `tool_result_persist` hook (plugin ready)
 - ✅ Phase 2: AI compression integrated into CLI (`summarize` command)
-- ⏳ Phase 3: Vector search (hybrid BM25 + embeddings)
+- ✅ Phase 3 (partial): Vector search (`embed` + `vsearch` cosine similarity)
+- ⏳ Phase 3 (next): Hybrid scoring (BM25 + embeddings weights)
 
 ## 📖 Architecture at a Glance
 
@@ -212,6 +213,35 @@ Environment variables:
 - ✅ 100% test coverage
 
 See [`tests/test_compress_memory.py`](tests/test_compress_memory.py) for examples.
+
+## 🔎 Vector Search (Phase 3 — partial)
+
+Vector search works in two steps:
+1. **Embed** observations (`openclaw-mem embed`) — stores embeddings in SQLite
+2. **Search** with cosine similarity (`openclaw-mem vsearch`)
+
+```bash
+export OPENAI_API_KEY=sk-...
+
+# Build embeddings (default model: text-embedding-3-small)
+openclaw-mem embed --limit 500 --json
+
+# Vector search
+openclaw-mem vsearch "gateway timeout" --limit 10 --json
+```
+
+### Offline / Testing Mode
+
+You can run vector search without API calls by providing a query vector:
+
+```bash
+openclaw-mem vsearch "ignored" --model test-model \
+  --query-vector-json "[1.0, 0.0, 0.0]" --json
+```
+
+### Notes
+- Current implementation is **cosine similarity only**.
+- Hybrid scoring (BM25 + embeddings weights) is the next step.
 
 ## 🧪 Testing
 

@@ -73,6 +73,8 @@ class TestCliM0(unittest.TestCase):
         rows = json.loads(buf.getvalue())
         self.assertEqual([r["id"] for r in rows], [1, 2])
 
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,10 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dry-run mode for previewing summaries without writing
 - Workspace customization via `--workspace` flag
 - Model, temperature, and token limit configuration
-- `openclaw-mem export` placeholder (coming in future release)
+- `openclaw-mem export` command (export observations to Markdown; `--yes` required for MEMORY.md)
+
+#### Phase 3: Vector Search (Partial)
+- `openclaw-mem embed` command to compute/store embeddings (float32 BLOB)
+- `openclaw-mem vsearch` command for cosine-similarity search over embeddings
+- Offline/test mode: `--query-vector-json` / `--query-vector-file`
 
 #### Testing & CI
-- 13 unit tests with 100% coverage
+- 22 tests (unit + integration) with 100% coverage
 - GitHub Actions CI workflow (uv sync + unittest)
 - Test fixtures for CLI, atomic append, and AI compression
 - Mock OpenAI client for testability
@@ -88,14 +93,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Future Roadmap
 
-### Phase 3: Vector Search (Planned)
-- Hybrid BM25 + embeddings search
-- sqlite-vec integration
-- Embedding provider detection and fallback
-- Status reporting for vector index availability
+### Phase 3: Vector Search (Next)
+- Hybrid BM25 + embeddings scoring (weight tuning)
+- Optional sqlite-vec integration (performance)
+- Embedding provider detection and fallback (status reporting)
+- Index fingerprint + rebuild workflow
 
 ### Phase 4: Polish & UX (Planned)
-- `openclaw-mem export` implementation (write summaries to MEMORY.md)
+- `openclaw-mem export` enhancements: export AI summaries/learnings to MEMORY.md (not just observations)
 - `openclaw-mem tail` command (stream recent observations)
 - Cost estimation for AI compression
 - Batch processing for multiple dates

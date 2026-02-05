@@ -155,6 +155,49 @@ class TestE2EWorkflow(unittest.TestCase):
         self.assertIsInstance(result, list)
         self.assertEqual(len(result), 0)
 
+    def test_vsearch_offline_query_vector(self):
+        """Test vector search using --query-vector-json (no API calls)."""
+        # Ingest data
+        self._run_cli("ingest", "--file", str(self.jsonl_path))
+
+        # Insert fake embeddings directly
+        import sqlite3
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        conn = sqlite3.connect(self.db_path)
+        # Observation IDs will be 1..4
+        vecs = {
+            1: [1.0, 0.0],
+            2: [0.9, 0.1],
+            3: [0.0, 1.0],
+            4: [-1.0, 0.0],
+        }
+        for obs_id, v in vecs.items():
+            conn.execute(
+                "INSERT OR REPLACE INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (obs_id, "test-model", len(v), pack_f32(v), l2_norm(v), "2026-02-05T00:00:00Z"),
+            )
+        conn.commit()
+        conn.close()
+
+        # Query close to [1,0]
+        out = self._run_cli(
+            "vsearch",
+            "irrelevant-query",
+            "--model",
+            "test-model",
+            "--limit",
+            "3",
+            "--query-vector-json",
+            "[1.0, 0.0]",
+        )
+
+        self.assertIsInstance(out, list)
+        self.assertEqual(len(out), 3)
+        # Best match should be obs 1
+        self.assertEqual(out[0]["id"], 1)
+        self.assertGreater(out[0]["score"], out[1]["score"])
+
 
 if __name__ == "__main__":
     unittest.main()

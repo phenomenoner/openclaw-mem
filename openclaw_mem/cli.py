@@ -14,9 +14,14 @@ import json
 import os
 import sqlite3
 import sys
+import tempfile
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Dict, Any, List, Optional
+
+from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine
 
 DEFAULT_DB = os.path.expanduser("~/.openclaw/memory/openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
@@ -55,6 +60,23 @@ def _init_db(conn: sqlite3.Connection) -> None:
         USING fts5(summary, tool_name, detail_json, content='observations', content_rowid='id');
         """
     )
+
+    # Phase 3: vector embeddings (stored as float32 BLOB)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS observation_embeddings (
+            observation_id INTEGER PRIMARY KEY,
+            model TEXT NOT NULL,
+            dim INTEGER NOT NULL,
+            vector BLOB NOT NULL,
+            norm REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(observation_id) REFERENCES observations(id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_observation_embeddings_model ON observation_embeddings(model);")
+
     conn.commit()
 
 
@@ -88,11 +110,20 @@ def _iter_jsonl(fp) -> Iterable[Dict[str, Any]]:
 
 def cmd_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     row = conn.execute("SELECT COUNT(*) AS n, MIN(ts) AS min_ts, MAX(ts) AS max_ts FROM observations").fetchone()
+    emb_row = conn.execute("SELECT COUNT(*) AS n FROM observation_embeddings").fetchone()
+    emb_models = conn.execute(
+        "SELECT model, COUNT(*) AS n FROM observation_embeddings GROUP BY model ORDER BY n DESC"
+    ).fetchall()
+
     data = {
         "db": args.db,
         "count": row["n"],
         "min_ts": row["min_ts"],
         "max_ts": row["max_ts"],
+        "embeddings": {
+            "count": emb_row["n"],
+            "models": [{"model": r["model"], "count": r["n"]} for r in emb_models],
+        },
     }
     _emit(data, args.json)
 
@@ -243,18 +274,244 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _atomic_append_file(path_: Path, content: str) -> None:
+    """Append to a file atomically (write-to-temp + replace)."""
+    path_.parent.mkdir(parents=True, exist_ok=True)
+    existing = path_.read_text(encoding="utf-8") if path_.exists() else ""
+
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path_.parent,
+        delete=False,
+        prefix=".tmp_",
+        suffix=path_.suffix or ".txt",
+    ) as tmp:
+        tmp.write(existing + content)
+        tmp_path = Path(tmp.name)
+
+    tmp_path.replace(path_)
+
+
 def cmd_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    """Export observation summaries to MEMORY.md (placeholder for now)."""
-    # TODO: Implement export logic that reads summaries from DB and writes to MEMORY.md
-    # For now, this is a placeholder that directs users to use summarize command
+    """Export observations to a file (Markdown by default).
+
+    Safety:
+    - Writing to MEMORY.md requires --yes.
+    """
+    out_path = Path(args.to)
+
+    # Safety: exporting to MEMORY.md requires explicit confirmation
+    if out_path.name == "MEMORY.md" and not args.yes:
+        _emit(
+            {
+                "error": "Export to MEMORY.md requires --yes flag",
+                "hint": "See docs/privacy-export-rules.md",
+            },
+            args.json,
+        )
+        sys.exit(2)
+
+    ids: Optional[List[int]] = getattr(args, "ids", None)
+    limit: int = int(getattr(args, "limit", 50))
+    include_detail: bool = bool(getattr(args, "include_detail", False))
+
+    if ids:
+        q = f"SELECT * FROM observations WHERE id IN ({','.join(['?']*len(ids))}) ORDER BY id"
+        rows = conn.execute(q, ids).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM observations ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        rows = list(reversed(rows))
+
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    header = f"\n\n## Exported observations ({ts})\n"
+
+    md = [header]
+    for r in rows:
+        rid = r["id"]
+        rts = r["ts"]
+        kind = r["kind"] or ""
+        tool = r["tool_name"] or ""
+        summary = (r["summary"] or "").strip()
+        md.append(f"- #{rid} {rts} [{kind}] {tool} :: {summary}\n")
+        if include_detail:
+            md.append("\n```json\n")
+            md.append((r["detail_json"] or "{}").strip() + "\n")
+            md.append("```\n")
+
+    _atomic_append_file(out_path, "".join(md))
+
     _emit(
         {
-            "error": "Export not yet implemented. Use 'openclaw-mem summarize' to compress daily notes.",
-            "hint": "Phase 2 in progress",
+            "ok": True,
+            "exported": len(rows),
+            "to": str(out_path),
+            "include_detail": include_detail,
         },
         args.json,
     )
-    sys.exit(1)
+
+
+class OpenAIEmbeddingsClient:
+    def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1"):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+
+    def embed(self, texts: List[str], model: str) -> List[List[float]]:
+        url = self.base_url + "/embeddings"
+        payload = {"model": model, "input": texts}
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                body = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"OpenAI embeddings API error ({e.code}): {err_body}") from e
+        except Exception as e:
+            raise RuntimeError(f"Error calling OpenAI embeddings API: {e}") from e
+
+        data = json.loads(body)
+        out: List[List[float]] = []
+        for item in data.get("data", []):
+            out.append(item["embedding"])
+        return out
+
+
+def cmd_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Compute/store embeddings for observations."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        _emit({"error": "OPENAI_API_KEY environment variable not set"}, args.json)
+        sys.exit(1)
+
+    model = args.model
+    limit = int(args.limit)
+    batch = int(args.batch)
+    base_url = args.base_url
+
+    client = OpenAIEmbeddingsClient(api_key=api_key, base_url=base_url)
+
+    rows = conn.execute(
+        """
+        SELECT id, tool_name, summary
+        FROM observations
+        WHERE id NOT IN (
+            SELECT observation_id FROM observation_embeddings WHERE model = ?
+        )
+        ORDER BY id
+        LIMIT ?
+        """,
+        (model, limit),
+    ).fetchall()
+
+    todo = [dict(r) for r in rows]
+    inserted = 0
+    ids: List[int] = []
+
+    now = datetime.utcnow().isoformat()
+
+    for i in range(0, len(todo), batch):
+        chunk = todo[i : i + batch]
+        texts = []
+        chunk_ids = []
+        for r in chunk:
+            tid = int(r["id"])
+            tool = (r.get("tool_name") or "").strip()
+            summary = (r.get("summary") or "").strip()
+            text = f"{tool}: {summary}".strip(": ")
+            texts.append(text)
+            chunk_ids.append(tid)
+
+        vecs = client.embed(texts, model=model)
+        for tid, vec in zip(chunk_ids, vecs):
+            blob = pack_f32(vec)
+            norm = l2_norm(vec)
+            dim = len(vec)
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO observation_embeddings
+                (observation_id, model, dim, vector, norm, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (tid, model, dim, blob, norm, now),
+            )
+            inserted += 1
+            ids.append(tid)
+
+        conn.commit()
+
+    _emit(
+        {
+            "ok": True,
+            "model": model,
+            "embedded": inserted,
+            "ids": ids[:50],
+            "total_candidates": len(todo),
+        },
+        args.json,
+    )
+
+
+def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Vector search over stored embeddings (cosine similarity)."""
+    model = args.model
+    limit = int(args.limit)
+
+    # Get query vector from file/json or via OpenAI API
+    query_vec: Optional[List[float]] = None
+
+    if getattr(args, "query_vector_json", None):
+        query_vec = json.loads(args.query_vector_json)
+    elif getattr(args, "query_vector_file", None):
+        query_vec = json.loads(Path(args.query_vector_file).read_text(encoding="utf-8"))
+    else:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            _emit({"error": "OPENAI_API_KEY not set (or provide --query-vector-json/--query-vector-file)"}, args.json)
+            sys.exit(1)
+        client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
+        query_vec = client.embed([args.query], model=model)[0]
+
+    # Load embeddings
+    items = conn.execute(
+        "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ?",
+        (model,),
+    ).fetchall()
+
+    ranked = rank_cosine(
+        query_vec=query_vec,
+        items=((int(r[0]), r[1], float(r[2])) for r in items),
+        limit=limit,
+    )
+
+    if not ranked:
+        _emit([], args.json)
+        return
+
+    ids = [rid for rid, _ in ranked]
+    q = f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(ids))})"
+    rows = conn.execute(q, ids).fetchall()
+    obs_map = {int(r["id"]): dict(r) for r in rows}
+
+    out = []
+    for rid, score in ranked:
+        r = obs_map.get(rid)
+        if not r:
+            continue
+        r["score"] = score
+        out.append(r)
+
+    _emit(out, args.json)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -273,6 +530,15 @@ def build_parser() -> argparse.ArgumentParser:
         "  export OPENAI_API_KEY=sk-...\n"
         "  openclaw-mem summarize --json  # yesterday's notes\n"
         "  openclaw-mem summarize 2026-02-04 --dry-run\n"
+        "\n"
+        "  # Export observations (Markdown)\n"
+        "  openclaw-mem export --to /tmp/export.md --limit 20 --json\n"
+        "  openclaw-mem export --to MEMORY.md --yes --limit 20\n"
+        "\n"
+        "  # Vector search (Phase 3)\n"
+        "  export OPENAI_API_KEY=sk-...\n"
+        "  openclaw-mem embed --limit 500 --json\n"
+        "  openclaw-mem vsearch \"gateway timeout\" --limit 10 --json\n"
         "\n"
         "Global flags also work before the command:\n"
         "  openclaw-mem --db /tmp/mem.sqlite --json status\n"
@@ -336,11 +602,32 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", help="Preview without writing")
     sp.set_defaults(func=cmd_summarize)
 
-    sp = sub.add_parser("export", help="Export summaries to MEMORY.md (Phase 2, coming soon)")
+    sp = sub.add_parser("export", help="Export observations to a Markdown file")
     add_common(sp)
     sp.add_argument("--to", required=True, help="Target file (e.g., MEMORY.md)")
-    sp.add_argument("--yes", action="store_true", help="Skip confirmation")
+    sp.add_argument("--yes", action="store_true", help="Required when exporting to MEMORY.md")
+    sp.add_argument("--ids", type=int, nargs="+", help="Specific observation IDs to export")
+    sp.add_argument("--limit", type=int, default=50, help="Export last N observations (default: 50)")
+    sp.add_argument("--include-detail", action="store_true", help="Include detail_json blocks")
     sp.set_defaults(func=cmd_export)
+
+    sp = sub.add_parser("embed", help="Compute/store embeddings for observations (requires OPENAI_API_KEY)")
+    add_common(sp)
+    sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
+    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument("--limit", type=int, default=500, help="Max observations to embed (default: 500)")
+    sp.add_argument("--batch", type=int, default=64, help="Batch size per API call (default: 64)")
+    sp.set_defaults(func=cmd_embed)
+
+    sp = sub.add_parser("vsearch", help="Vector search over embeddings (cosine similarity)")
+    add_common(sp)
+    sp.add_argument("query", help="Query text")
+    sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
+    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--query-vector-json", help="Provide query vector as JSON array (testing/offline)")
+    sp.add_argument("--query-vector-file", help="Provide query vector from JSON file (testing/offline)")
+    sp.set_defaults(func=cmd_vsearch)
 
     return p
 

@@ -115,6 +115,20 @@ uv run --python 3.13 -- python -m openclaw_mem summarize --dry-run --json
 uv run --python 3.13 -- python -m openclaw_mem summarize --json
 ```
 
+## Step 7: Vector Search (Optional)
+
+Vector search requires embeddings. You can build embeddings for observations, then run cosine-similarity search.
+
+```bash
+export OPENAI_API_KEY=sk-...
+
+# Build embeddings for latest observations
+uv run --python 3.13 -- python -m openclaw_mem embed --limit 500 --json
+
+# Vector search
+uv run --python 3.13 -- python -m openclaw_mem vsearch "gateway timeout" --limit 10 --json
+```
+
 ## Next Steps
 
 - Read [`README.md`](README.md) for full documentation
@@ -160,6 +174,13 @@ openclaw-mem get 10 20 30 --json
 export OPENAI_API_KEY=sk-...
 openclaw-mem summarize --dry-run --json  # preview
 openclaw-mem summarize --json            # write
+
+# Export observations (Markdown)
+openclaw-mem export --to /tmp/export.md --limit 20 --json
+
+# Vector search
+openclaw-mem embed --limit 500 --json
+openclaw-mem vsearch "gateway timeout" --limit 10 --json
 ```
 
 ## Support
