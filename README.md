@@ -24,9 +24,9 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 - 13 unit tests (100% coverage) + GitHub Actions CI
 
 **What's next:**
-- Phase 1: Auto-capture via `tool_result_persist` hook
-- Phase 2: Integrate AI compression into CLI
-- Phase 3: Vector search (hybrid BM25 + embeddings)
+- ✅ Phase 1: Auto-capture via `tool_result_persist` hook (plugin ready)
+- ⏳ Phase 2: Integrate AI compression into CLI
+- ⏳ Phase 3: Vector search (hybrid BM25 + embeddings)
 
 ## 📖 Architecture at a Glance
 
@@ -45,6 +45,42 @@ Tool executions (hook) → SQLite observations → AI batch compression
 - **Proactive memory tools** — `memory_store` and `memory_recall` tools for the agent to explicitly save/retrieve important facts (preferences, decisions, entities).
 - **Native storage** — SQLite + FTS5 + sqlite-vec. No ChromaDB, no external deps.
 - **Integrates with existing memory** — writes learnings into `memory/*.md`; OpenClaw's built-in `memorySearch` picks them up automatically.
+
+## 🔌 Auto-Capture Plugin (Phase 1)
+
+The `openclaw-mem` plugin automatically captures tool executions via the `tool_result_persist` hook.
+
+### Quick Setup
+
+```bash
+# Symlink plugin into OpenClaw plugins directory
+ln -s "$(pwd)/extensions/openclaw-mem" ~/.openclaw/plugins/openclaw-mem
+
+# Add config to openclaw.json
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem": {
+        "enabled": true,
+        "config": {
+          "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl"
+        }
+      }
+    }
+  }
+}
+
+# Restart gateway
+openclaw gateway restart
+```
+
+**Features:**
+- ✅ Captures all tool results automatically
+- ✅ Smart summaries (200 char extract from results)
+- ✅ Filter controls (include/exclude specific tools)
+- ✅ Optional full message capture (truncated)
+
+See [`docs/auto-capture.md`](docs/auto-capture.md) for full documentation.
 
 ## 📦 Installation
 

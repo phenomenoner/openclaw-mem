@@ -10,8 +10,26 @@
     "properties": {
       "enabled": { "type": "boolean", "default": true },
       "outputPath": { "type": "string", "default": "~/.openclaw/memory/openclaw-mem-observations.jsonl" },
-      "includeTools": { "type": "array", "items": { "type": "string" } },
-      "excludeTools": { "type": "array", "items": { "type": "string" } }
+      "includeTools": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "If set, only capture these tools (allowlist)"
+      },
+      "excludeTools": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "If set, exclude these tools (denylist)"
+      },
+      "captureMessage": {
+        "type": "boolean",
+        "default": false,
+        "description": "Capture full tool message (truncated). Warning: can be large."
+      },
+      "maxMessageLength": {
+        "type": "number",
+        "default": 1000,
+        "description": "Max message length per content block when captureMessage=true"
+      }
     }
   }
 }
