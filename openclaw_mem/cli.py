@@ -25,6 +25,26 @@ from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 
 DEFAULT_DB = os.path.expanduser("~/.openclaw/memory/openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
+_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _read_openclaw_config() -> Dict[str, Any]:
+    """Read ~/.openclaw/openclaw.json (cached)."""
+    global _CONFIG_CACHE
+    if _CONFIG_CACHE is not None:
+        return _CONFIG_CACHE
+
+    try:
+        config_path = os.path.expanduser("~/.openclaw/openclaw.json")
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                _CONFIG_CACHE = json.load(f)
+                return _CONFIG_CACHE
+    except Exception:
+        pass
+    
+    _CONFIG_CACHE = {}
+    return _CONFIG_CACHE
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -39,6 +59,7 @@ def _connect(db_path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL;")
     _init_db(conn)
     return conn
+
 
 
 def _init_db(conn: sqlite3.Connection) -> None:
@@ -229,25 +250,55 @@ def _get_api_key(env_var: str = "OPENAI_API_KEY") -> Optional[str]:
         return api_key
 
     # 2. Try config file
-    try:
-        config_path = os.path.expanduser("~/.openclaw/openclaw.json")
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                # Traversing: agents -> defaults -> memorySearch -> remote -> apiKey
-                key = (
-                    data.get("agents", {})
-                    .get("defaults", {})
-                    .get("memorySearch", {})
-                    .get("remote", {})
-                    .get("apiKey")
-                )
-                if key and isinstance(key, str):
-                    return key
-    except Exception:
-        pass  # Fail silently on config read errors, caller handles missing key
+    data = _read_openclaw_config()
+    # Traversing: agents -> defaults -> memorySearch -> remote -> apiKey
+    key = (
+        data.get("agents", {})
+        .get("defaults", {})
+        .get("memorySearch", {})
+        .get("remote", {})
+        .get("apiKey")
+    )
+    if key and isinstance(key, str):
+        return key
 
     return None
+
+
+def _get_gateway_config(args: argparse.Namespace) -> Dict[str, str]:
+    """Resolve Gateway connection details (URL, token, agent_id)."""
+    config = _read_openclaw_config()
+    
+    # 1. URL
+    url = getattr(args, "gateway_url", None)
+    if not url:
+        url = os.environ.get("OPENCLAW_GATEWAY_URL")
+    if not url:
+        # Construct from config port
+        port = config.get("gateway", {}).get("http", {}).get("port", 18789)
+        url = f"http://127.0.0.1:{port}"
+    
+    # Ensure /v1 suffix if missing (simplistic check)
+    if not url.endswith("/v1"):
+        url = f"{url.rstrip('/')}/v1"
+
+    # 2. Token
+    token = getattr(args, "gateway_token", None)
+    if not token:
+        token = os.environ.get("OPENCLAW_GATEWAY_TOKEN")
+    if not token:
+        token = config.get("gateway", {}).get("auth", {}).get("token")
+    
+    # 3. Agent ID
+    agent_id = getattr(args, "agent_id", None)
+    if not agent_id:
+        agent_id = os.environ.get("OPENCLAW_AGENT_ID", "main")
+
+    return {
+        "url": url,
+        "token": token or "",
+        "agent_id": agent_id,
+    }
 
 
 def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -260,14 +311,38 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         _emit({"error": f"Failed to import compress_memory: {e}"}, args.json)
         sys.exit(1)
 
-    # Get API key
-    api_key = _get_api_key()
-    if not api_key:
-        _emit({"error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json"}, args.json)
-        sys.exit(1)
+    use_gateway = bool(getattr(args, "gateway", False) or os.environ.get("OPENCLAW_MEM_USE_GATEWAY") == "1")
+    
+    api_key: Optional[str] = None
+    base_url: str = "https://api.openai.com/v1"
+    extra_headers: Dict[str, str] = {}
+    model = args.model if hasattr(args, "model") else "gpt-5.2"
+
+    if use_gateway:
+        gw_conf = _get_gateway_config(args)
+        base_url = gw_conf["url"]
+        api_key = gw_conf["token"]
+        extra_headers["x-openclaw-agent-id"] = gw_conf["agent_id"]
+        
+        # Switch default model if user didn't override it (heuristic: check against default)
+        # We assume if it's "gpt-5.2" (the parser default), we can switch to "openclaw:<agent>"
+        if model == "gpt-5.2":
+             model = f"openclaw:{gw_conf['agent_id']}"
+             
+        if not api_key:
+             _emit({"error": "Gateway token not found (check ~/.openclaw/openclaw.json or use --gateway-token)"}, args.json)
+             sys.exit(1)
+    else:
+        # Get API key (standard OpenAI path)
+        api_key = _get_api_key()
+        if not api_key:
+            _emit({"error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json"}, args.json)
+            sys.exit(1)
+        base_url = args.base_url if hasattr(args, "base_url") else "https://api.openai.com/v1"
 
     # Determine workspace
     workspace = Path(args.workspace) if hasattr(args, "workspace") and args.workspace else DEFAULT_WORKSPACE
+
     memory_dir = workspace / "memory"
     memory_file = workspace / "MEMORY.md"
     prompt_file = workspace / "scripts/prompts/compress_memory.txt"
@@ -281,7 +356,8 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     # Create client
     client = OpenAIClient(
         api_key=api_key,
-        base_url=args.base_url if hasattr(args, "base_url") else "https://api.openai.com/v1",
+        base_url=base_url,
+        extra_headers=extra_headers,
     )
 
     # Run compression
@@ -292,7 +368,7 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             memory_file=memory_file,
             prompt_file=prompt_file,
             client=client,
-            model=args.model if hasattr(args, "model") else "gpt-4.1",
+            model=model,
             max_tokens=args.max_tokens if hasattr(args, "max_tokens") else 700,
             temperature=args.temperature if hasattr(args, "temperature") else 0.2,
             dry_run=args.dry_run if hasattr(args, "dry_run") else False,
@@ -769,6 +845,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--max-tokens", type=int, default=700, help="Max output tokens")
     sp.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature")
     sp.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    # Gateway options
+    sp.add_argument("--gateway", action="store_true", help="Use OpenClaw Gateway for model routing")
+    sp.add_argument("--gateway-url", help="OpenClaw Gateway base URL (auto-detected if unset)")
+    sp.add_argument("--gateway-token", help="OpenClaw Gateway token (auto-detected from ~/.openclaw/openclaw.json)")
+    sp.add_argument("--agent-id", default="main", help="Target agent ID for Gateway (default: main)")
     sp.set_defaults(func=cmd_summarize)
 
     sp = sub.add_parser("export", help="Export observations to a Markdown file")

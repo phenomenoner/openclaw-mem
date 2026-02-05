@@ -27,9 +27,10 @@ class CompressError(Exception):
 class OpenAIClient:
     """Abstraction for OpenAI API calls (mockable for tests)."""
 
-    def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1"):
+    def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1", extra_headers: Optional[dict[str, str]] = None):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
+        self.extra_headers = extra_headers or {}
 
     def complete(self, prompt: str, model: str, max_tokens: int, temperature: float) -> str:
         url = self.base_url + "/chat/completions"
@@ -43,13 +44,16 @@ class OpenAIClient:
             "max_tokens": max_tokens,
         }
 
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        headers.update(self.extra_headers)
+
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             method="POST",
         )
 
