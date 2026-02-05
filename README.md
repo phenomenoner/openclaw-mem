@@ -4,6 +4,12 @@
 
 `openclaw-mem` is the planned memory-layer plugin for [OpenClaw](https://openclaw.ai). It captures tool-use observations automatically, compresses them with AI into structured learnings, and exposes a token-efficient 3-layer progressive disclosure search CLI. Designed to slot into OpenClaw's native `memory-core` (sqlite-vec + BM25 hybrid) without adding external dependencies.
 
+**🚀 Quick Links:**
+- [**Quickstart Guide**](QUICKSTART.md) — Get started in 5 minutes
+- [**CHANGELOG**](CHANGELOG.md) — See what's new
+- [**Auto-Capture Setup**](docs/auto-capture.md) — Enable plugin
+- [**Tests**](tests/) — 17 tests (13 unit + 4 integration)
+
 ## 🙏 Credits & Inspiration
 
 This project is heavily inspired by **[thedotmack/claude-mem](https://github.com/thedotmack/claude-mem)** — a persistent memory compression system for Claude Code that pioneered the observation → AI compression → progressive disclosure pipeline. The core architecture (hook-based capture, SQLite + FTS5 storage, 3-layer search, session lifecycle management) is adapted from that work for the OpenClaw ecosystem.
