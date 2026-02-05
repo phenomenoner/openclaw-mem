@@ -87,11 +87,15 @@ const plugin = {
       },
       handler: async (args: any) => {
         try {
-          const cmdArgs = ["-m", "openclaw_mem", "store", "--text", args.text];
+          // text is positional in CLI
+          const cmdArgs = ["-m", "openclaw_mem", "store", args.text];
           if (args.category) cmdArgs.push("--category", args.category);
           if (args.importance) cmdArgs.push("--importance", String(args.importance));
 
-          const { stdout } = await execFileAsync("python", cmdArgs);
+          // Use uv to run with correct python environment
+          const { stdout } = await execFileAsync("uv", ["run", "--python", "3.13", "--", "python", ...cmdArgs], {
+            cwd: path.resolve(__dirname, "../../..") // Go up to workspace root where pyproject.toml is
+          });
           return { content: [{ type: "text", text: stdout.trim() || "Memory stored." }] };
         } catch (err: any) {
           return { 
@@ -113,10 +117,14 @@ const plugin = {
       },
       handler: async (args: any) => {
         try {
-          const cmdArgs = ["-m", "openclaw_mem", "hybrid", "--query", args.query];
+          // query is positional in CLI
+          const cmdArgs = ["-m", "openclaw_mem", "hybrid", args.query];
           if (args.limit) cmdArgs.push("--limit", String(args.limit));
 
-          const { stdout } = await execFileAsync("python", cmdArgs);
+          // Use uv to run with correct python environment
+          const { stdout } = await execFileAsync("uv", ["run", "--python", "3.13", "--", "python", ...cmdArgs], {
+            cwd: path.resolve(__dirname, "../../..")
+          });
           return { content: [{ type: "text", text: stdout.trim() }] };
         } catch (err: any) {
           return { 

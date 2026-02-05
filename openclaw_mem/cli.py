@@ -545,155 +545,6 @@ def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Hybrid search (FTS + Vector) using RRF."""
-    q = args.query.strip()
-    if not q:
-        _emit({"error": "empty query"}, True)
-        sys.exit(2)
-
-    model = args.model
-    limit = int(args.limit)
-
-    # 1. FTS Search (best first)
-    # We fetch more than limit to have good overlap for RRF (e.g. fixed 60)
-    fts_limit = 60
-    fts_rows = conn.execute(
-        """
-        SELECT rowid
-        FROM observations_fts
-        WHERE observations_fts MATCH ?
-        ORDER BY bm25(observations_fts) ASC
-        LIMIT ?;
-        """,
-        (q, fts_limit),
-    ).fetchall()
-    fts_ids = [r["rowid"] for r in fts_rows]
-
-    # 2. Vector Search (best first)
-    api_key = _get_api_key()
-    if not api_key:
-        _emit({"error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json"}, args.json)
-        sys.exit(1)
-
-    client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
-    try:
-        query_vec = client.embed([q], model=model)[0]
-    except Exception as e:
-        _emit({"error": str(e)}, args.json)
-        sys.exit(1)
-
-    # Load embeddings
-    items = conn.execute(
-        "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ?",
-        (model,),
-    ).fetchall()
-
-    vec_ranked = rank_cosine(
-        query_vec=query_vec,
-        items=((int(r[0]), r[1], float(r[2])) for r in items),
-        limit=fts_limit,
-    )
-    vec_ids = [r[0] for r in vec_ranked]
-
-    # 3. RRF
-    rrf_ranked = rank_rrf([fts_ids, vec_ids], k=60, limit=limit)
-
-    if not rrf_ranked:
-        _emit([], args.json)
-        return
-
-    final_ids = [rid for rid, _ in rrf_ranked]
-
-    # 4. Fetch details
-    q_sql = f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(final_ids))})"
-    rows = conn.execute(q_sql, final_ids).fetchall()
-    obs_map = {int(r["id"]): dict(r) for r in rows}
-
-    out = []
-    for rid, score in rrf_ranked:
-        r = obs_map.get(rid)
-        if not r:
-            continue
-        r["rrf_score"] = score
-        out.append(r)
-
-    _emit(out, args.json)
-
-
-def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    """Store an observation, embed it, and append to daily note."""
-    text = args.text.strip()
-    if not text:
-        _emit({"error": "empty text"}, True)
-        sys.exit(2)
-
-    category = args.category
-    importance = args.importance
-
-    # 1. Insert into SQLite
-    obs = {
-        "kind": category,
-        "summary": text,
-        "tool_name": "cli",
-        "detail": {"importance": importance},
-    }
-    rowid = _insert_observation(conn, obs)
-
-    # 2. Embed
-    api_key = _get_api_key()
-    if not api_key:
-        _emit({"error": "OPENAI_API_KEY not set", "id": rowid}, args.json)
-        return
-
-    client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
-    model = args.model
-
-    try:
-        vec = client.embed([text], model=model)[0]
-        blob = pack_f32(vec)
-        norm = l2_norm(vec)
-        dim = len(vec)
-        now_iso = datetime.utcnow().isoformat()
-
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO observation_embeddings
-            (observation_id, model, dim, vector, norm, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (rowid, model, dim, blob, norm, now_iso),
-        )
-        conn.commit()
-    except Exception as e:
-        _emit({"error": f"Embedding failed: {e}", "id": rowid}, args.json)
-        return
-
-    # 3. Append to memory/YYYY-MM-DD.md
-    workspace = Path(args.workspace) if hasattr(args, "workspace") and args.workspace else DEFAULT_WORKSPACE
-    today = datetime.now().strftime("%Y-%m-%d")
-    daily_file = workspace / "memory" / f"{today}.md"
-
-    ts_str = datetime.now().strftime("%H:%M")
-    line = f"- {ts_str} [{category}] {text} (importance: {importance})\n"
-
-    try:
-        _atomic_append_file(daily_file, line)
-    except Exception as e:
-        _emit({"error": f"Failed to write to file: {e}", "id": rowid}, args.json)
-        return
-
-    _emit(
-        {
-            "ok": True,
-            "id": rowid,
-            "file": str(daily_file),
-            "embedded": True,
-        },
-        args.json,
-    )
-
-
-def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    """Hybrid search (FTS + Vector) using RRF."""
     # 1. Vector Search
     model = args.model
     limit = int(args.limit)
@@ -705,7 +556,11 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         sys.exit(1)
 
     client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
-    query_vec = client.embed([args.query], model=model)[0]
+    try:
+        query_vec = client.embed([args.query], model=model)[0]
+    except Exception as e:
+        _emit({"error": str(e)}, args.json)
+        sys.exit(1)
 
     vec_rows = conn.execute(
         "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ?",
@@ -733,12 +588,13 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     fts_ids = [int(r["rowid"]) for r in fts_rows]
 
     # 3. RRF Fusion
-    final_ranking = rank_rrf(ranked_lists=[vec_ids, fts_ids], k=k, limit=limit)
-    final_ids = [rid for rid, _ in final_ranking]
-
-    if not final_ids:
+    final_ranking = rank_rrf([fts_ids, vec_ids], k=k, limit=limit)
+    
+    if not final_ranking:
         _emit([], args.json)
         return
+
+    final_ids = [rid for rid, _ in final_ranking]
 
     # 4. Fetch Details
     q_sql = f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(final_ids))})"
@@ -751,6 +607,9 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         if not r:
             continue
         r["rrf_score"] = score
+        r["match"] = []
+        if rid in fts_ids: r["match"].append("text")
+        if rid in vec_ids: r["match"].append("vector")
         out.append(r)
 
     _emit(out, args.json)
@@ -798,13 +657,26 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     # 3. Append to memory/YYYY-MM-DD.md
     workspace = Path(args.workspace) if hasattr(args, "workspace") and args.workspace else DEFAULT_WORKSPACE
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    md_file = workspace / "memory" / f"{date_str}.md"
     
-    md_entry = f"- **{args.category.upper()}**: {text} (importance: {args.importance})\n"
-    _atomic_append_file(md_file, md_entry)
+    # Fallback logic for workspace memory dir
+    memory_dir = workspace / "memory"
+    if not memory_dir.exists():
+         alt = Path(os.path.expanduser("~/.openclaw/memory"))
+         if alt.exists():
+             memory_dir = alt
 
-    _emit({"ok": True, "id": rowid, "file": str(md_file)}, args.json)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    md_file = memory_dir / f"{date_str}.md"
+    
+    md_entry = f"- [{args.category.upper()}] {text} (importance: {args.importance})\n"
+    
+    try:
+        _atomic_append_file(md_file, md_entry)
+        stored_path = str(md_file)
+    except Exception as e:
+        stored_path = f"failed ({e})"
+
+    _emit({"ok": True, "id": rowid, "file": stored_path, "embedded": bool(api_key)}, args.json)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -832,6 +704,10 @@ def build_parser() -> argparse.ArgumentParser:
         "  export OPENAI_API_KEY=sk-...\n"
         "  openclaw-mem embed --limit 500 --json\n"
         "  openclaw-mem vsearch \"gateway timeout\" --limit 10 --json\n"
+        "\n"
+        "  # Hybrid Search & Store (Phase 4)\n"
+        "  openclaw-mem hybrid \"python error\" --limit 5 --json\n"
+        "  openclaw-mem store \"Prefer tabs over spaces\" --category preference --importance 0.9 --json\n"
         "\n"
         "Global flags also work before the command:\n"
         "  openclaw-mem --db /tmp/mem.sqlite --json status\n"
@@ -922,24 +798,6 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--query-vector-file", help="Provide query vector from JSON file (testing/offline)")
     sp.set_defaults(func=cmd_vsearch)
 
-    sp = sub.add_parser("hybrid", help="Hybrid search (FTS + Vector)")
-    add_common(sp)
-    sp.add_argument("query", help="Query text")
-    sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
-    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
-    sp.add_argument("--limit", type=int, default=20)
-    sp.set_defaults(func=cmd_hybrid)
-
-    sp = sub.add_parser("store", help="Proactively store a memory")
-    add_common(sp)
-    sp.add_argument("text", help="Memory text")
-    sp.add_argument("--category", default="fact", choices=["fact", "preference", "decision", "entity"], help="Memory category")
-    sp.add_argument("--importance", type=float, default=0.7, help="Importance (0.0-1.0)")
-    sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
-    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
-    sp.add_argument("--workspace", type=Path, help="Workspace root")
-    sp.set_defaults(func=cmd_store)
-
     sp = sub.add_parser("hybrid", help="Hybrid search (Vector + FTS) using RRF")
     add_common(sp)
     sp.add_argument("query", help="Query text")
@@ -960,150 +818,6 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_store)
 
     return p
-
-
-def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    """Hybrid search (FTS + Vector) using RRF."""
-    model = args.model
-    limit = int(args.limit)
-    q_text = args.query.strip()
-
-    if not q_text:
-        _emit({"error": "empty query"}, True)
-        sys.exit(2)
-
-    # 1. FTS Search
-    fts_rows = conn.execute(
-        "SELECT rowid FROM observations_fts WHERE observations_fts MATCH ? ORDER BY rank LIMIT ?",
-        (q_text, limit * 2),
-    ).fetchall()
-    fts_ids = [r["rowid"] for r in fts_rows]
-
-    # 2. Vector Search
-    api_key = _get_api_key()
-    if not api_key:
-        # Fallback to just FTS if no key
-        _emit({"warning": "No API key, falling back to FTS only"}, args.json)
-        vec_ids = []
-    else:
-        client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
-        try:
-            query_vec = client.embed([q_text], model=model)[0]
-            # Get all vectors for model (M0 optimization: scan all)
-            items = conn.execute(
-                "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ?",
-                (model,),
-            ).fetchall()
-            vec_ranked = rank_cosine(
-                query_vec=query_vec,
-                items=((int(r[0]), r[1], float(r[2])) for r in items),
-                limit=limit * 2,
-            )
-            vec_ids = [rid for rid, _ in vec_ranked]
-        except Exception as e:
-            # Fallback on error
-            _emit({"warning": f"Vector search failed ({e}), falling back to FTS"}, args.json)
-            vec_ids = []
-
-    # 3. RRF
-    rrf_ranked = rank_rrf([fts_ids, vec_ids], limit=limit)
-
-    if not rrf_ranked:
-        _emit([], args.json)
-        return
-
-    final_ids = [rid for rid, _ in rrf_ranked]
-    q_sql = f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(final_ids))})"
-    rows = conn.execute(q_sql, final_ids).fetchall()
-    obs_map = {int(r["id"]): dict(r) for r in rows}
-
-    out = []
-    for rid, score in rrf_ranked:
-        r = obs_map.get(rid)
-        if not r:
-            continue
-        r["score"] = score
-        r["match"] = []
-        if rid in fts_ids: r["match"].append("text")
-        if rid in vec_ids: r["match"].append("vector")
-        out.append(r)
-
-    _emit(out, args.json)
-
-
-def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    """Proactively store a memory."""
-    text = args.text
-    category = args.category
-    importance = float(args.importance)
-
-    # 1. Insert observation
-    obs = {
-        "kind": "user",
-        "tool_name": "memory_store",
-        "summary": text,
-        "detail": {
-            "category": category,
-            "importance": importance,
-            "source": "proactive"
-        }
-    }
-    obs_id = _insert_observation(conn, obs)
-
-    # 2. Embed
-    api_key = _get_api_key()
-    embedded = False
-    if api_key:
-        try:
-            client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
-            vec = client.embed([text], model=args.model)[0]
-            
-            blob = pack_f32(vec)
-            norm = l2_norm(vec)
-            dim = len(vec)
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO observation_embeddings
-                (observation_id, model, dim, vector, norm, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (obs_id, args.model, dim, blob, norm, datetime.utcnow().isoformat()),
-            )
-            embedded = True
-        except Exception as e:
-            print(f"Warning: Failed to embed memory #{obs_id}: {e}", file=sys.stderr)
-    
-    conn.commit()
-
-    # 3. Append to Markdown
-    workspace = Path(args.workspace) if hasattr(args, "workspace") and args.workspace else DEFAULT_WORKSPACE
-    # Fallback logic for workspace
-    if not (workspace / "memory").exists():
-         alt = Path(os.path.expanduser("~/.openclaw/memory"))
-         if alt.exists():
-             memory_dir = alt
-         else:
-             memory_dir = workspace / "memory"
-    else:
-        memory_dir = workspace / "memory"
-
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    md_path = memory_dir / f"{date_str}.md"
-    
-    try:
-        line = f"- [{category}] {text} (imp: {importance}) <!-- id: {obs_id} -->\n"
-        _atomic_append_file(md_path, line)
-        stored_path = str(md_path)
-    except Exception as e:
-        stored_path = f"failed ({e})"
-
-    _emit({
-        "id": obs_id,
-        "stored": True,
-        "file": stored_path,
-        "embedded": embedded
-    }, args.json)
-
 
 
 def main() -> None:

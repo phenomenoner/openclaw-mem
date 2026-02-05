@@ -74,7 +74,6 @@ def rank_cosine(
 
 
 def rank_rrf(
-    *,
     ranked_lists: Sequence[Sequence[int]],
     k: int = 60,
     limit: int = 20,
