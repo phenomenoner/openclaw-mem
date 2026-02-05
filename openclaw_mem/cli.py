@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""openclaw-mem CLI (M0 prototype)
+"""openclaw-mem CLI
 
 AI-native design:
 - Non-interactive (no prompts)
@@ -14,10 +14,12 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime
-from typing import Iterable, Dict, Any, List
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Iterable, Dict, Any, List, Optional
 
 DEFAULT_DB = os.path.expanduser("~/.openclaw/memory/openclaw-mem.sqlite")
+DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -188,14 +190,89 @@ def _print_row(item: Dict[str, Any]) -> None:
     print(f"#{_id} {ts} [{kind}] {tool} :: {summary}")
 
 
+def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Run AI compression on observations (requires compress_memory.py)."""
+    try:
+        # Import compress_memory module
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        from compress_memory import OpenAIClient, compress_daily_note, CompressError
+    except ImportError as e:
+        _emit({"error": f"Failed to import compress_memory: {e}"}, args.json)
+        sys.exit(1)
+
+    # Get API key
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        _emit({"error": "OPENAI_API_KEY environment variable not set"}, args.json)
+        sys.exit(1)
+
+    # Determine workspace
+    workspace = Path(args.workspace) if hasattr(args, "workspace") and args.workspace else DEFAULT_WORKSPACE
+    memory_dir = workspace / "memory"
+    memory_file = workspace / "MEMORY.md"
+    prompt_file = workspace / "scripts/prompts/compress_memory.txt"
+
+    # Determine date
+    if args.date:
+        target_date = args.date
+    else:
+        target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # Create client
+    client = OpenAIClient(
+        api_key=api_key,
+        base_url=args.base_url if hasattr(args, "base_url") else "https://api.openai.com/v1",
+    )
+
+    # Run compression
+    try:
+        result = compress_daily_note(
+            date=target_date,
+            memory_dir=memory_dir,
+            memory_file=memory_file,
+            prompt_file=prompt_file,
+            client=client,
+            model=args.model if hasattr(args, "model") else "gpt-4.1",
+            max_tokens=args.max_tokens if hasattr(args, "max_tokens") else 700,
+            temperature=args.temperature if hasattr(args, "temperature") else 0.2,
+            dry_run=args.dry_run if hasattr(args, "dry_run") else False,
+        )
+        _emit(result, args.json)
+    except CompressError as e:
+        _emit({"error": str(e)}, args.json)
+        sys.exit(1)
+
+
+def cmd_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Export observation summaries to MEMORY.md (placeholder for now)."""
+    # TODO: Implement export logic that reads summaries from DB and writes to MEMORY.md
+    # For now, this is a placeholder that directs users to use summarize command
+    _emit(
+        {
+            "error": "Export not yet implemented. Use 'openclaw-mem summarize' to compress daily notes.",
+            "hint": "Phase 2 in progress",
+        },
+        args.json,
+    )
+    sys.exit(1)
+
+
 def build_parser() -> argparse.ArgumentParser:
     epilog = (
         "Examples:\n"
+        "  # Observation store\n"
         "  openclaw-mem status --json\n"
         "  openclaw-mem ingest --file observations.jsonl --json\n"
+        "\n"
+        "  # Progressive disclosure search\n"
         "  openclaw-mem search \"gateway timeout\" --limit 20 --json\n"
         "  openclaw-mem timeline 23 41 57 --window 4 --json\n"
         "  openclaw-mem get 23 41 57 --json\n"
+        "\n"
+        "  # AI compression (requires OPENAI_API_KEY)\n"
+        "  export OPENAI_API_KEY=sk-...\n"
+        "  openclaw-mem summarize --json  # yesterday's notes\n"
+        "  openclaw-mem summarize 2026-02-04 --dry-run\n"
         "\n"
         "Global flags also work before the command:\n"
         "  openclaw-mem --db /tmp/mem.sqlite --json status\n"
@@ -247,6 +324,23 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.add_argument("ids", type=int, nargs="+", help="Observation IDs")
     sp.set_defaults(func=cmd_get)
+
+    sp = sub.add_parser("summarize", help="Run AI compression on daily notes (requires OPENAI_API_KEY)")
+    add_common(sp)
+    sp.add_argument("date", nargs="?", help="Date to compress (YYYY-MM-DD, default: yesterday)")
+    sp.add_argument("--workspace", type=Path, help="Workspace root (default: cwd)")
+    sp.add_argument("--model", default="gpt-4.1", help="OpenAI model")
+    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument("--max-tokens", type=int, default=700, help="Max output tokens")
+    sp.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature")
+    sp.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    sp.set_defaults(func=cmd_summarize)
+
+    sp = sub.add_parser("export", help="Export summaries to MEMORY.md (Phase 2, coming soon)")
+    add_common(sp)
+    sp.add_argument("--to", required=True, help="Target file (e.g., MEMORY.md)")
+    sp.add_argument("--yes", action="store_true", help="Skip confirmation")
+    sp.set_defaults(func=cmd_export)
 
     return p
 

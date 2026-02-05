@@ -25,7 +25,7 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 
 **What's next:**
 - ✅ Phase 1: Auto-capture via `tool_result_persist` hook (plugin ready)
-- ⏳ Phase 2: Integrate AI compression into CLI
+- ✅ Phase 2: AI compression integrated into CLI (`summarize` command)
 - ⏳ Phase 3: Vector search (hybrid BM25 + embeddings)
 
 ## 📖 Architecture at a Glance
@@ -155,41 +155,54 @@ openclaw-mem status --db /tmp/test.sqlite --json
 Environment variables:
 - `OPENCLAW_MEM_DB` — SQLite DB path (default: `~/.openclaw/memory/openclaw-mem.sqlite`)
 
-## 🧠 AI Compression Script
+## 🧠 AI Compression (Phase 2)
 
 Compress daily memory notes into `MEMORY.md` using OpenAI API.
 
-### Usage
+### CLI Command (Recommended)
 
 ```bash
 # Compress yesterday's note (default)
-OPENAI_API_KEY=sk-... python scripts/compress_memory.py --json
+export OPENAI_API_KEY=sk-...
+openclaw-mem summarize --json
 
 # Compress specific date
-python scripts/compress_memory.py 2026-02-04
+openclaw-mem summarize 2026-02-04
 
 # Dry run (preview without writing)
-python scripts/compress_memory.py --dry-run
+openclaw-mem summarize --dry-run --json
 
 # Custom workspace
-OPENCLAW_MEM_WORKSPACE=/path/to/workspace python scripts/compress_memory.py
+openclaw-mem summarize --workspace /path/to/workspace
+```
+
+### Standalone Script (Alternative)
+
+```bash
+# Run directly without CLI
+OPENAI_API_KEY=sk-... python scripts/compress_memory.py --json
 ```
 
 ### Configuration
 
+CLI flags:
+- `--model` — OpenAI model (default: `gpt-4.1`)
+- `--max-tokens` — Max output tokens (default: 700)
+- `--temperature` — Sampling temperature (default: 0.2)
+- `--base-url` — API base URL (default: `https://api.openai.com/v1`)
+- `--workspace` — Workspace root (default: current directory)
+- `--dry-run` — Preview without writing
+
 Environment variables:
 - `OPENAI_API_KEY` — **Required** OpenAI API key
-- `OPENCLAW_MEM_WORKSPACE` — Workspace root (default: repo root)
-- `OPENCLAW_MEM_MODEL` — Model name (default: `gpt-4.1`)
-- `OPENCLAW_MEM_MAX_TOKENS` — Max output tokens (default: 700)
-- `OPENCLAW_MEM_TEMPERATURE` — Sampling temperature (default: 0.2)
-- `OPENAI_BASE_URL` — API base URL (default: `https://api.openai.com/v1`)
+- `OPENCLAW_MEM_WORKSPACE` — Workspace root (used by standalone script)
 
 ### Features
+- ✅ Integrated into CLI (`openclaw-mem summarize`)
 - ✅ Atomic file append (race-safe)
 - ✅ Date validation (YYYY-MM-DD)
 - ✅ Skip if already compressed
-- ✅ Configurable via env vars & CLI flags
+- ✅ Configurable via CLI flags & env vars
 - ✅ 100% test coverage
 
 See [`tests/test_compress_memory.py`](tests/test_compress_memory.py) for examples.
