@@ -62,7 +62,7 @@ Build openclaw-mem from concept to production-ready M0 release with:
 - `README.md` — Overview, installation, usage examples (updated 3x)
 - `QUICKSTART.md` — 5-minute setup guide with sample data
 - `CHANGELOG.md` — Complete feature tracking (M0, Phase 1, Phase 2)
-- `LICENSE` — MIT license
+- `LICENSE` — Apache-2.0 license
 
 **Developer-Facing**
 - `docs/auto-capture.md` — Plugin setup, config, troubleshooting (5.9 KB)

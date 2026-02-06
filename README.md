@@ -364,4 +364,4 @@ openclaw-mem export --to MEMORY.md --yes   # Export observations (and later: lea
 
 ## 📄 License
 
-MIT
+Apache-2.0 (see [LICENSE](LICENSE)).
