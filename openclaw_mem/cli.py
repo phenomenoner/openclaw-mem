@@ -933,6 +933,87 @@ def cmd_semantic(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     )
 
 
+def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Lightweight local triage over recent observations.
+
+    Intended for cron/heartbeat: run a deterministic scan using SQLite only,
+    and return machine-readable JSON + a meaningful exit code.
+
+    Exit codes:
+      0 = no issues found
+      10 = needs attention (matches found)
+      2 = invalid args / error
+    """
+    try:
+        since_minutes = int(getattr(args, "since_minutes", 60))
+        limit = int(getattr(args, "limit", 10))
+    except Exception:
+        _emit({"error": "invalid since/limit"}, True)
+        sys.exit(2)
+
+    since_minutes = max(0, since_minutes)
+    limit = max(1, min(200, limit))
+
+    kw_raw = getattr(args, "keywords", None)
+    if kw_raw:
+        keywords = [k.strip().lower() for k in str(kw_raw).split(",") if k.strip()]
+    else:
+        keywords = [
+            "error",
+            "failed",
+            "exception",
+            "traceback",
+            "timeout",
+            "rate_limit",
+            "unauthorized",
+            "forbidden",
+            "not allowed",
+            "db locked",
+        ]
+
+    from datetime import timezone
+
+    since_dt = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
+    since_ts = since_dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    clauses: List[str] = []
+    params: List[Any] = [since_ts]
+    for k in keywords:
+        like = f"%{k}%"
+        clauses.append("(lower(coalesce(summary,'')) LIKE ? OR lower(coalesce(tool_name,'')) LIKE ? OR lower(coalesce(detail_json,'')) LIKE ?)")
+        params.extend([like, like, like])
+
+    where_kw = " OR ".join(clauses) if clauses else "1=0"
+    q = f"""
+        SELECT id, ts, kind, tool_name, summary
+        FROM observations
+        WHERE ts >= ? AND ({where_kw})
+        ORDER BY ts DESC
+        LIMIT ?
+    """
+    params.append(limit)
+
+    rows = conn.execute(q, params).fetchall()
+    matches = [dict(r) for r in rows]
+
+    out = {
+        "ok": True,
+        "since_minutes": since_minutes,
+        "since_utc": since_ts,
+        "keywords": keywords,
+        "found": len(matches),
+        "needs_attention": len(matches) > 0,
+        "matches": matches,
+    }
+
+    # Always produce JSON for cron-compat; still respect --json for consistency.
+    _emit(out, True)
+
+    if matches:
+        sys.exit(10)
+    sys.exit(0)
+
+
 def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Auto-ingest and embed observations from log file."""
     # 1. Determine source
@@ -1224,6 +1305,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--gateway-token", help="OpenClaw Gateway token (auto-detected from ~/.openclaw/openclaw.json)")
     sp.add_argument("--agent-id", default="main", help="Target agent ID for Gateway (default: main)")
     sp.set_defaults(func=cmd_semantic)
+
+    sp = sub.add_parser("triage", help="Deterministic local scan over recent observations (for heartbeat)")
+    add_common(sp)
+    sp.add_argument("--since-minutes", type=int, default=60, help="Look back window in minutes")
+    sp.add_argument("--limit", type=int, default=10, help="Max matches to return")
+    sp.add_argument("--keywords", help="Comma-separated keywords override")
+    sp.set_defaults(func=cmd_triage)
 
     sp = sub.add_parser("harvest", help="Auto-ingest and embed observations from log file")
     add_common(sp)

@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Changed license from MIT to Apache-2.0.
 - (placeholder)
+
+## [0.5.3] - 2026-02-06
+
+### Added
+- `openclaw-mem triage`: deterministic local scan over recent observations (for cron/heartbeat), with non-zero exit code when attention is needed.
+
+### Changed
+- Version bump to `0.5.3`.
+- License: MIT → Apache-2.0.
 
 ## [0.5.2] - 2026-02-06
 

@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, cmd_ingest, cmd_search, cmd_get, cmd_timeline
+from openclaw_mem.cli import _connect, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage
 
 
 class TestCliM0(unittest.TestCase):
@@ -72,6 +72,53 @@ class TestCliM0(unittest.TestCase):
             cmd_get(conn, args)
         rows = json.loads(buf.getvalue())
         self.assertEqual([r["id"] for r in rows], [1, 2])
+
+        conn.close()
+
+    def test_triage_exit_code_and_json(self):
+        conn = _connect(":memory:")
+
+        # Ingest one normal and one error-ish observation
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps({"ts": now, "kind": "tool", "tool_name": "web_fetch", "summary": "ok", "detail": {}}),
+                json.dumps({"ts": now, "kind": "tool", "tool_name": "exec", "summary": "Error: command failed", "detail": {}}),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        args = type(
+            "Args",
+            (),
+            {
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+
+        # Should signal attention
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["needs_attention"])
+        self.assertGreaterEqual(out["found"], 1)
 
         conn.close()
 
