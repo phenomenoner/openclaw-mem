@@ -4,9 +4,9 @@ Get openclaw-mem up and running in under 5 minutes.
 
 ## Prerequisites
 
-- Python 3.13+
+- Python 3.10+ (recommended: Python 3.13)
 - [uv](https://github.com/astral-sh/uv) installed
-- OpenClaw gateway running (for auto-capture plugin)
+- OpenClaw gateway running (only needed for the auto-capture plugin)
 
 ## Step 1: Install
 
@@ -70,20 +70,24 @@ To automatically capture tool executions:
 ln -s "$(pwd)/extensions/openclaw-mem" ~/.openclaw/plugins/openclaw-mem
 
 # Add config to ~/.openclaw/openclaw.json
-cat >> ~/.openclaw/openclaw.json <<'JSON'
+# IMPORTANT: openclaw.json is a full JSON document.
+# Don’t blindly append a second JSON object.
+# Instead, edit ~/.openclaw/openclaw.json and merge in this fragment:
+
 {
   "plugins": {
     "entries": {
       "openclaw-mem": {
         "enabled": true,
         "config": {
-          "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl"
+          "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl",
+          "captureMessage": false,
+          "redactSensitive": true
         }
       }
     }
   }
 }
-JSON
 
 # Restart gateway
 openclaw gateway restart
