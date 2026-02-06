@@ -8,7 +8,7 @@
 - [**Quickstart Guide**](QUICKSTART.md) — Get started in 5 minutes
 - [**CHANGELOG**](CHANGELOG.md) — See what's new
 - [**Auto-Capture Setup**](docs/auto-capture.md) — Enable plugin
-- [**Tests**](tests/) — 26 tests (unit + integration)
+- [**Tests**](tests/) — 30 tests (unit + integration)
 
 ## 🙏 Credits & Inspiration
 
@@ -21,13 +21,13 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 ✅ **M0 (minimal usable) complete!** A CLI-first SQLite + FTS5 prototype with full test coverage is ready. See "M0 Prototype" below for usage. The adoption plan and architecture design live in [`docs/claude-mem-adoption-plan.md`](docs/claude-mem-adoption-plan.md).
 
 **What works:**
-- CLI commands: `status`, `ingest`, `search`, `timeline`, `get`, `summarize`, `export`, `embed`, `vsearch`, `hybrid`, `store`, `harvest`, `index`, `semantic`
+- CLI commands: `status`, `ingest`, `search`, `timeline`, `get`, `summarize`, `export`, `embed`, `vsearch`, `hybrid`, `store`, `harvest`, `index`, `semantic`, `triage`
 - Plugin: auto-capture via `tool_result_persist` + agent tools `memory_store` / `memory_recall`
 - FTS5 full-text search + progressive disclosure (3-layer search)
 - Vector search (cosine similarity) + hybrid search via RRF fusion
 - AI-native: `--json` output, non-interactive, example-rich help
 - Atomic file operations + SQLite WAL mode guidance
-- 26 tests (unit + integration, 100% coverage) + GitHub Actions CI
+- 30 tests (unit + integration, 100% coverage) + GitHub Actions CI
 
 **What's next:**
 - ✅ Phase 1: Auto-capture via `tool_result_persist` hook (plugin ready)
