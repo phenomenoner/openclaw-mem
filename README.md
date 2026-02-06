@@ -21,7 +21,7 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 ✅ **M0 (minimal usable) complete!** A CLI-first SQLite + FTS5 prototype with full test coverage is ready. See "M0 Prototype" below for usage. The adoption plan and architecture design live in [`docs/claude-mem-adoption-plan.md`](docs/claude-mem-adoption-plan.md).
 
 **What works:**
-- CLI commands: `status`, `ingest`, `search`, `timeline`, `get`, `summarize`, `export`, `embed`, `vsearch`, `hybrid`, `store`
+- CLI commands: `status`, `ingest`, `search`, `timeline`, `get`, `summarize`, `export`, `embed`, `vsearch`, `hybrid`, `store`, `harvest`, `index`, `semantic`
 - Plugin: auto-capture via `tool_result_persist` + agent tools `memory_store` / `memory_recall`
 - FTS5 full-text search + progressive disclosure (3-layer search)
 - Vector search (cosine similarity) + hybrid search via RRF fusion
@@ -35,8 +35,9 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 - ✅ Phase 3: Vector search (`embed` + `vsearch` cosine similarity)
 - ✅ Auto-config: Reads API key from `~/.openclaw/openclaw.json` (no env var needed)
 - ✅ Phase 4: Hybrid search (`hybrid` RRF fusion) + proactive memory tools (`store`, `memory_store`, `memory_recall`)
-- ⏳ Next: Route embeddings/LLM calls via OpenClaw Gateway model routing (instead of direct OpenAI HTTP)
-- ⏳ Next: Add a first-class auto-ingest/auto-embed workflow (cron/systemd timer)
+- ✅ Route LLM calls via OpenClaw Gateway (`summarize --gateway`)
+- ✅ Route *semantic recall / embeddings* via OpenClaw built-in `memory_search` (Route A: black-box embeddings)
+- ✅ Add a first-class auto-ingest workflow (`harvest` + cron)
 - ⏳ Next (optional): Weighted hybrid scoring + sqlite-vec acceleration + index rebuild workflow
 
 ## 📖 Architecture at a Glance
@@ -265,6 +266,46 @@ openclaw-mem embed --limit 500 --json
 # (2) Hybrid search
 openclaw-mem hybrid "gateway timeout" --limit 10 --json
 ```
+
+## 🧠 Semantic Recall via OpenClaw `memory_search` (Route A)
+
+If you want **fully integrated embeddings** (no separate OpenAI embeddings calls, no duplicate config), you can treat OpenClaw’s built-in `memory_search` as a black-box semantic engine.
+
+### 1) Build an index file
+
+```bash
+# Writes to ~/.openclaw/memory/openclaw-mem/observations-index.md by default
+openclaw-mem index --json
+```
+
+### 2) Include the index in OpenClaw memorySearch
+
+Add this to `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "memorySearch": {
+        "extraPaths": ["../memory/openclaw-mem"]
+      }
+    }
+  }
+}
+```
+
+Then restart the gateway.
+
+### 3) Semantic recall (black-box embeddings)
+
+```bash
+openclaw-mem semantic "harvest test" --json
+```
+
+This will:
+1) call Gateway `POST /tools/invoke` → `memory_search`
+2) parse `obs#<id>` from the snippet
+3) resolve those IDs back into the openclaw-mem SQLite DB.
 
 ## 🧷 Proactive Memory Tools (Phase 4)
 

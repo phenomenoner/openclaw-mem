@@ -23,6 +23,8 @@ from typing import Iterable, Dict, Any, List, Optional
 
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 
+DEFAULT_INDEX_PATH = os.path.expanduser("~/.openclaw/memory/openclaw-mem/observations-index.md")
+
 DEFAULT_DB = os.path.expanduser("~/.openclaw/memory/openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
@@ -265,22 +267,27 @@ def _get_api_key(env_var: str = "OPENAI_API_KEY") -> Optional[str]:
     return None
 
 
-def _get_gateway_config(args: argparse.Namespace) -> Dict[str, str]:
-    """Resolve Gateway connection details (URL, token, agent_id)."""
+def _get_gateway_config(args: argparse.Namespace, *, want_v1: bool = True) -> Dict[str, str]:
+    """Resolve Gateway connection details (URL, token, agent_id).
+
+    want_v1:
+      - True: returns base URL ending with /v1
+      - False: returns raw gateway base URL (no forced /v1)
+    """
     config = _read_openclaw_config()
-    
+
     # 1. URL
     url = getattr(args, "gateway_url", None)
     if not url:
         url = os.environ.get("OPENCLAW_GATEWAY_URL")
     if not url:
         # Construct from config port
-        port = config.get("gateway", {}).get("http", {}).get("port", 18789)
+        port = config.get("gateway", {}).get("http", {}).get("port") or config.get("gateway", {}).get("port", 18789)
         url = f"http://127.0.0.1:{port}"
-    
-    # Ensure /v1 suffix if missing (simplistic check)
-    if not url.endswith("/v1"):
-        url = f"{url.rstrip('/')}/v1"
+
+    url = url.rstrip("/")
+    if want_v1 and not url.endswith("/v1"):
+        url = f"{url}/v1"
 
     # 2. Token
     token = getattr(args, "gateway_token", None)
@@ -288,7 +295,7 @@ def _get_gateway_config(args: argparse.Namespace) -> Dict[str, str]:
         token = os.environ.get("OPENCLAW_GATEWAY_TOKEN")
     if not token:
         token = config.get("gateway", {}).get("auth", {}).get("token")
-    
+
     # 3. Agent ID
     agent_id = getattr(args, "agent_id", None)
     if not agent_id:
@@ -299,6 +306,55 @@ def _get_gateway_config(args: argparse.Namespace) -> Dict[str, str]:
         "token": token or "",
         "agent_id": agent_id,
     }
+
+
+def _gateway_tools_invoke(
+    args: argparse.Namespace,
+    *,
+    tool: str,
+    tool_args: Dict[str, Any],
+    session_key: str = "main",
+    timeout: int = 120,
+) -> Any:
+    """Call OpenClaw Gateway `POST /tools/invoke`.
+
+    This is the recommended black-box path for embeddings/memorySearch.
+    """
+    gw = _get_gateway_config(args, want_v1=False)
+    if not gw["token"]:
+        raise RuntimeError("Gateway token not found (set OPENCLAW_GATEWAY_TOKEN or configure gateway.auth.token)")
+
+    url = gw["url"].rstrip("/") + "/tools/invoke"
+    payload = {
+        "tool": tool,
+        "args": tool_args,
+        "sessionKey": session_key,
+    }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {gw['token']}",
+            "Content-Type": "application/json",
+            "x-openclaw-agent-id": gw["agent_id"],
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Gateway tools/invoke error ({e.code}): {err_body}") from e
+    except Exception as e:
+        raise RuntimeError(f"Error calling Gateway tools/invoke: {e}") from e
+
+    data = json.loads(body)
+    if not isinstance(data, dict) or not data.get("ok"):
+        raise RuntimeError(f"tools/invoke returned error: {body[:2000]}")
+    return data.get("result")
 
 
 def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -691,6 +747,192 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(out, args.json)
 
 
+def _atomic_write(path_: Path, content: str) -> None:
+    path_.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path_.parent,
+        delete=False,
+        prefix=".tmp_",
+        suffix=path_.suffix or ".txt",
+    ) as tmp:
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path_)
+
+
+def _format_index_line(row: sqlite3.Row) -> str:
+    rid = int(row["id"])
+    ts = (row["ts"] or "").strip()
+    tool = (row["tool_name"] or "").strip()
+    kind = (row["kind"] or "").strip()
+    summary = (row["summary"] or "").replace("\n", " ").strip()
+    return f"- obs#{rid} {ts} [{kind}] {tool} :: {summary}\n"
+
+
+def _build_index(conn: sqlite3.Connection, out_path: Path, limit: int) -> int:
+    rows = conn.execute(
+        "SELECT id, ts, kind, tool_name, summary FROM observations ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    rows = list(reversed(rows))
+
+    header = (
+        "# openclaw-mem observations index\n\n"
+        "This file is auto-generated. It is safe to embed and search via OpenClaw memorySearch.\n\n"
+    )
+    body = "".join(_format_index_line(r) for r in rows)
+    _atomic_write(out_path, header + body)
+    return len(rows)
+
+
+def cmd_index(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Build a Markdown index file that OpenClaw memorySearch can embed (Route A)."""
+    out_path = Path(args.to or DEFAULT_INDEX_PATH)
+    limit = int(args.limit)
+
+    n = _build_index(conn, out_path, limit)
+    _emit({"ok": True, "to": str(out_path), "rows": n}, args.json)
+
+
+def _extract_obs_ids(text: str) -> List[int]:
+    import re
+
+    ids = set()
+    for m in re.finditer(r"\bobs#(\d+)\b", text or ""):
+        try:
+            ids.add(int(m.group(1)))
+        except Exception:
+            continue
+    return sorted(ids)
+
+
+def _tokenize_query(q: str) -> List[str]:
+    import re
+
+    q = (q or "").lower().strip()
+    if not q:
+        return []
+    parts = re.split(r"[^a-z0-9_#]+", q)
+    toks = [p for p in parts if len(p) >= 3 or p.startswith("obs#")]
+    return toks[:20]
+
+
+def _rank_obs_ids_from_snippet(snippet: str, query: str, base_score: float = 0.0) -> List[tuple[int, float]]:
+    """Heuristically map a memory_search snippet back to obs IDs.
+
+    memory_search returns chunk-level matches; a snippet may contain multiple obs lines.
+    We score each obs line by simple token overlap with the query.
+    """
+    import re
+
+    toks = _tokenize_query(query)
+    if not snippet:
+        return []
+
+    ranked: List[tuple[int, float]] = []
+    for line in str(snippet).splitlines():
+        m = re.search(r"\bobs#(\d+)\b", line)
+        if not m:
+            continue
+        try:
+            oid = int(m.group(1))
+        except Exception:
+            continue
+
+        line_l = line.lower()
+        overlap = sum(1 for t in toks if t in line_l)
+        # Strongly prefer exact obs# queries
+        exact = 5 if f"obs#{oid}" in (query or "").lower() else 0
+        score = overlap + exact + (base_score * 2.0)
+        ranked.append((oid, float(score)))
+
+    # Highest score first
+    ranked.sort(key=lambda x: (-x[1], x[0]))
+    return ranked
+
+
+def cmd_semantic(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Semantic recall via OpenClaw memory_search (black-box embeddings).
+
+    Steps:
+      1) Call Gateway /tools/invoke for memory_search
+      2) Parse obs#IDs from snippets
+      3) Resolve IDs back into openclaw-mem SQLite observations
+    """
+    query = args.query.strip()
+    if not query:
+        _emit({"error": "empty query"}, True)
+        sys.exit(2)
+
+    # Call OpenClaw's built-in memory_search tool
+    tool_args = {
+        "query": query,
+        "maxResults": int(args.max_results),
+        "minScore": float(args.min_score),
+    }
+    try:
+        result = _gateway_tools_invoke(args, tool="memory_search", tool_args=tool_args, session_key=args.session_key)
+    except Exception as e:
+        _emit({"error": str(e)}, args.json)
+        sys.exit(1)
+
+    # Parse results
+    results: Any = None
+    if isinstance(result, dict):
+        # /tools/invoke wraps tool details
+        details = result.get("details")
+        if isinstance(details, dict) and isinstance(details.get("results"), list):
+            results = details.get("results")
+        elif isinstance(result.get("results"), list):
+            results = result.get("results")
+    elif isinstance(result, list):
+        results = result
+
+    if not isinstance(results, list):
+        _emit({"error": f"unexpected memory_search result shape: {type(result).__name__}"}, args.json)
+        sys.exit(1)
+
+    scores: Dict[int, float] = {}
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        snippet = str(r.get("snippet") or "")
+        base = float(r.get("score") or 0.0)
+        for oid, sc in _rank_obs_ids_from_snippet(snippet, query, base_score=base):
+            scores[oid] = max(scores.get(oid, 0.0), sc)
+
+    if not scores:
+        _emit({"ok": True, "query": query, "matches": [], "raw": results[: int(args.raw_limit)]}, args.json)
+        return
+
+    ids_ranked = [oid for oid, _ in sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+    # Resolve observations
+    q = f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(ids_ranked))})"
+    rows = conn.execute(q, ids_ranked).fetchall()
+    obs_map = {int(r["id"]): dict(r) for r in rows}
+
+    out = []
+    for oid in ids_ranked[: int(args.limit)]:
+        r = obs_map.get(oid)
+        if not r:
+            continue
+        out.append(r)
+
+    _emit(
+        {
+            "ok": True,
+            "query": query,
+            "ids": ids_ranked[: int(args.limit)],
+            "matches": out,
+            "raw": results[: int(args.raw_limit)],
+        },
+        args.json,
+    )
+
+
 def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Auto-ingest and embed observations from log file."""
     # 1. Determine source
@@ -698,10 +940,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     source = Path(args.source or default_source)
 
     if not source.exists() or source.stat().st_size == 0:
-        if args.json:
-             print(json.dumps({"ok": True, "processed": 0, "reason": "source empty/missing"}))
-        else:
-             print("Source empty or missing.")
+        _emit({"ok": True, "processed": 0, "reason": "source empty/missing"}, args.json)
         return
 
     # 2. Rotate
@@ -724,24 +963,33 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         _emit({"error": f"Ingest failed: {e}", "file": str(processing)}, args.json)
         sys.exit(1)
 
-    # Emit ingest result
-    _emit({
-        "ok": True,
-        "ingested": len(inserted_ids),
-        "source": str(source),
-        "archive": str(args.archive_dir) if args.archive_dir else "deleted"
-    }, args.json)
+    # 4. Update index (Route A)
+    if getattr(args, "update_index", True):
+        try:
+            out_path = Path(getattr(args, "index_to", None) or DEFAULT_INDEX_PATH)
+            _build_index(conn, out_path, int(getattr(args, "index_limit", 5000)))
+        except Exception as e:
+            print(f"Warning: failed to update index: {e}", file=sys.stderr)
 
-    # 4. Embed (Optional)
+    # Emit ingest result
+    _emit(
+        {
+            "ok": True,
+            "ingested": len(inserted_ids),
+            "source": str(source),
+            "archive": str(args.archive_dir) if args.archive_dir else "deleted",
+        },
+        args.json,
+    )
+
+    # 5. Embed (Optional)
     if args.embed:
-        # Prepare args for cmd_embed
         embed_args = argparse.Namespace(**vars(args))
         embed_args.limit = 500
         embed_args.batch = 64
-        # Reuse cmd_embed
         cmd_embed(conn, embed_args)
 
-    # 5. Archive or Delete
+    # 6. Archive or Delete
     if args.archive_dir:
         archive_dir = Path(args.archive_dir)
         archive_dir.mkdir(parents=True, exist_ok=True)
@@ -958,6 +1206,25 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--workspace", type=Path, help="Workspace root (default: cwd)")
     sp.set_defaults(func=cmd_store)
 
+    sp = sub.add_parser("index", help="Build Markdown index for OpenClaw memory_search (Route A)")
+    add_common(sp)
+    sp.add_argument("--to", help=f"Output path (default: {DEFAULT_INDEX_PATH})")
+    sp.add_argument("--limit", type=int, default=5000, help="Max observations to include")
+    sp.set_defaults(func=cmd_index)
+
+    sp = sub.add_parser("semantic", help="Semantic recall via OpenClaw memory_search (black-box embeddings)")
+    add_common(sp)
+    sp.add_argument("query", help="Search query")
+    sp.add_argument("--limit", type=int, default=10, help="Max matched observation IDs to resolve")
+    sp.add_argument("--max-results", type=int, default=8, help="memory_search maxResults")
+    sp.add_argument("--min-score", type=float, default=0.0, help="memory_search minScore")
+    sp.add_argument("--raw-limit", type=int, default=8, help="Include first N raw memory_search hits")
+    sp.add_argument("--session-key", default="main", help="Gateway sessionKey for tools/invoke")
+    sp.add_argument("--gateway-url", help="OpenClaw Gateway base URL (auto-detected if unset)")
+    sp.add_argument("--gateway-token", help="OpenClaw Gateway token (auto-detected from ~/.openclaw/openclaw.json)")
+    sp.add_argument("--agent-id", default="main", help="Target agent ID for Gateway (default: main)")
+    sp.set_defaults(func=cmd_semantic)
+
     sp = sub.add_parser("harvest", help="Auto-ingest and embed observations from log file")
     add_common(sp)
     sp.add_argument("--source", help="JSONL source file (default: ~/.openclaw/memory/openclaw-mem-observations.jsonl)")
@@ -966,6 +1233,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-embed", dest="embed", action="store_false", help="Skip embedding")
     sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
     sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument("--update-index", action="store_true", default=True, help="Update Route A index file after ingest (default: True)")
+    sp.add_argument("--no-update-index", dest="update_index", action="store_false", help="Skip index update")
+    sp.add_argument("--index-to", default=None, help=f"Index output path (default: {DEFAULT_INDEX_PATH})")
+    sp.add_argument("--index-limit", type=int, default=5000, help="Index: max observations to include")
     sp.set_defaults(func=cmd_harvest)
 
     return p
