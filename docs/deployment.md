@@ -49,6 +49,7 @@ Add to `~/.openclaw/openclaw.json` (or `/etc/openclaw/openclaw.json` for system-
         "config": {
           "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl",
           "captureMessage": false,
+          "redactSensitive": true,
           
           // Recommended safety default: avoid persisting high-sensitivity tools.
           // This plugin captures *tool results* (not raw user inbound messages).

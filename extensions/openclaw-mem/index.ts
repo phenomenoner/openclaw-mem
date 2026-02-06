@@ -16,6 +16,7 @@ type PluginConfig = {
   excludeTools?: string[];
   captureMessage?: boolean; // Default: false (message can be huge)
   maxMessageLength?: number;
+  redactSensitive?: boolean; // Default: true
 };
 
 function shouldCapture(toolName: string | undefined, cfg: PluginConfig): boolean {
@@ -32,35 +33,60 @@ function shouldCapture(toolName: string | undefined, cfg: PluginConfig): boolean
   return true;
 }
 
-function extractSummary(message: any): string {
+function redactSensitiveText(text: string): string {
+  if (!text) return text;
+
+  // Best-effort redaction (avoid persisting obvious secrets). This is intentionally conservative.
+  const patterns: Array<[RegExp, string]> = [
+    [/\bsk-[A-Za-z0-9]{16,}\b/g, "sk-[REDACTED]"],
+    [/\bsk-proj-[A-Za-z0-9\-_]{16,}\b/g, "sk-proj-[REDACTED]"],
+    [/\bBearer\s+[A-Za-z0-9\-_.=]{8,}\b/g, "Bearer [REDACTED]"],
+    [/\bAuthorization:\s*Bearer\s+[A-Za-z0-9\-_.=]{8,}\b/gi, "Authorization: Bearer [REDACTED]"],
+    [/\b\d{8,12}:[A-Za-z0-9_-]{20,}\b/g, "[TELEGRAM_BOT_TOKEN_REDACTED]"],
+  ];
+
+  let out = text;
+  for (const [re, rep] of patterns) out = out.replace(re, rep);
+  return out;
+}
+
+function extractSummary(message: any, redactSensitive: boolean): string {
   // Extract a compact summary from the message content
   if (!message || !message.content) return "";
-  
+
   try {
     const content = Array.isArray(message.content) ? message.content : [message.content];
     const textParts = content
       .filter((c: any) => c.type === "text")
       .map((c: any) => c.text || "")
       .join(" ");
-    
-    return textParts.slice(0, 200).trim();
+
+    const summary = textParts.slice(0, 200).trim();
+    return redactSensitive ? redactSensitiveText(summary) : summary;
   } catch {
     return "";
   }
 }
 
-function truncateMessage(message: any, maxLength: number): any {
+function truncateMessage(message: any, maxLength: number, redactSensitive: boolean): any {
   if (!message || !message.content) return message;
-  
+
   try {
     const content = Array.isArray(message.content) ? message.content : [message.content];
     const truncated = content.map((c: any) => {
-      if (c.type === "text" && c.text && c.text.length > maxLength) {
-        return { ...c, text: c.text.slice(0, maxLength) + "... [truncated]" };
+      if (c.type === "text" && typeof c.text === "string") {
+        let text = c.text;
+        if (text.length > maxLength) {
+          text = text.slice(0, maxLength) + "... [truncated]";
+        }
+        if (redactSensitive) {
+          text = redactSensitiveText(text);
+        }
+        return { ...c, text };
       }
       return c;
     });
-    
+
     return { ...message, content: truncated };
   } catch {
     return message;
@@ -141,12 +167,13 @@ const plugin = {
     const outputPath = api.resolvePath(cfg.outputPath ?? DEFAULT_OUTPUT);
     const captureMessage = cfg.captureMessage ?? false;
     const maxMessageLength = cfg.maxMessageLength ?? MAX_MESSAGE_LENGTH;
+    const redactSensitive = cfg.redactSensitive ?? true;
 
     api.on("tool_result_persist", (event, ctx) => {
       if (!shouldCapture(event.toolName ?? ctx.toolName, cfg)) return;
 
       const toolName = event.toolName ?? ctx.toolName;
-      const summary = extractSummary(event.message);
+      const summary = extractSummary(event.message, redactSensitive);
 
       const obs: any = {
         ts: new Date().toISOString(),
@@ -161,7 +188,7 @@ const plugin = {
 
       // Optionally include full message (truncated)
       if (captureMessage && event.message) {
-        obs.message = truncateMessage(event.message, maxMessageLength);
+        obs.message = truncateMessage(event.message, maxMessageLength, redactSensitive);
       }
 
       try {
