@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (placeholder)
 
-## [0.5.3] - 2026-02-06
+## [0.5.4] - 2026-02-06
 
 ### Added
 - `openclaw-mem triage`: deterministic local scan over recent observations (for cron/heartbeat), with non-zero exit code when attention is needed.
