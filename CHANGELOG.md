@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (placeholder)
 
+## [0.5.6] - 2026-02-06
+
+### Added
+- `openclaw-mem triage --mode tasks`: deterministic scan for newly stored tasks (from `memory_store` / `openclaw-mem store --category task`).
+- `openclaw-mem triage` now uses a small state file to **dedupe alerts** (new-only) and avoid repeating the same heartbeat notifications.
+
+### Changed
+- `triage --mode heartbeat` now includes: observations scan + cron-errors scan + tasks scan.
+- Version bump to `0.5.6`.
+
 ## [0.5.5] - 2026-02-06
 
 ### Added

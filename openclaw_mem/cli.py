@@ -957,8 +957,7 @@ def _triage_observations(conn: sqlite3.Connection, since_ts: str, keywords: List
 def _triage_cron_errors(*, since_ms: int, cron_jobs_path: str, limit: int) -> List[Dict[str, Any]]:
     """Detect cron jobs whose lastStatus != ok.
 
-    Reads OpenClaw cron store (jobs.json). This is deterministic and does not
-    require any LLM calls.
+    Reads OpenClaw cron store (jobs.json). Deterministic and no LLM calls.
     """
     p = Path(os.path.expanduser(cron_jobs_path))
     if not p.exists():
@@ -1000,17 +999,95 @@ def _triage_cron_errors(*, since_ms: int, cron_jobs_path: str, limit: int) -> Li
     return bad[:limit]
 
 
+def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: float, limit: int) -> List[Dict[str, Any]]:
+    """Scan proactively stored items (tool_name=memory_store) for tasks.
+
+    Deterministic: all logic is local.
+
+    Matching rules:
+    - kind == 'task' OR
+    - summary starts with TODO:/TASK:/REMINDER:
+
+    Importance is best-effort parsed from detail_json.importance.
+    """
+    rows = conn.execute(
+        """
+        SELECT id, ts, kind, tool_name, summary, detail_json
+        FROM observations
+        WHERE ts >= ? AND tool_name = 'memory_store'
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (since_ts, max(50, limit * 20)),
+    ).fetchall()
+
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        kind = (r["kind"] or "").strip().lower()
+        summary = (r["summary"] or "").strip()
+        if not summary:
+            continue
+
+        is_task = kind == "task" or summary.upper().startswith(("TODO:", "TASK:", "REMINDER:"))
+        if not is_task:
+            continue
+
+        imp = 0.0
+        try:
+            dj = json.loads(r["detail_json"] or "{}")
+            imp_val = dj.get("importance")
+            if isinstance(imp_val, (int, float)):
+                imp = float(imp_val)
+        except Exception:
+            imp = 0.0
+
+        if imp < float(importance_min):
+            continue
+
+        out.append({"id": int(r["id"]), "ts": r["ts"], "kind": r["kind"], "tool_name": r["tool_name"], "summary": summary, "importance": imp})
+        if len(out) >= limit:
+            break
+
+    return out
+
+
+def _load_triage_state(path_: Path) -> Dict[str, Any]:
+    try:
+        if not path_.exists():
+            return {}
+        return json.loads(path_.read_text("utf-8"))
+    except Exception:
+        return {}
+
+
+def _atomic_write_json(path_: Path, data: Dict[str, Any]) -> None:
+    path_.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path_.parent,
+        delete=False,
+        prefix=".tmp_",
+        suffix=path_.suffix or ".json",
+    ) as tmp:
+        json.dump(data, tmp, ensure_ascii=False, indent=2)
+        tmp.write("\n")
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path_)
+
+
 def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    """Lightweight local triage.
+    """Deterministic local triage.
 
     Modes:
-    - heartbeat (default): scan observations + cron job errors
-    - observations: scan observations only
-    - cron-errors: scan cron store only
+    - heartbeat (default): observations + cron-errors + tasks (new-only)
+    - observations: observations only
+    - cron-errors: cron store only
+    - tasks: tasks only (new-only)
 
     Exit codes:
-      0 = no issues found
-      10 = needs attention (matches found)
+      0 = no new issues
+      10 = needs attention (new matches found)
       2 = invalid args / error
     """
     try:
@@ -1021,7 +1098,7 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         sys.exit(2)
 
     mode = str(getattr(args, "mode", "heartbeat") or "heartbeat").strip().lower()
-    if mode not in {"heartbeat", "observations", "cron-errors"}:
+    if mode not in {"heartbeat", "observations", "cron-errors", "tasks"}:
         _emit({"error": f"invalid mode: {mode}"}, True)
         sys.exit(2)
 
@@ -1047,22 +1124,45 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     cron_jobs_path = getattr(args, "cron_jobs_path", None) or "~/.openclaw/cron/jobs.json"
 
+    # Tasks scan is typically longer-lived than a 30m error window.
+    tasks_since_minutes = int(getattr(args, "tasks_since_minutes", 24 * 60))
+    importance_min = float(getattr(args, "importance_min", 0.7))
+
+    state_path = Path(os.path.expanduser(getattr(args, "state_path", None) or "~/.openclaw/memory/openclaw-mem/triage-state.json"))
+    state = _load_triage_state(state_path)
+
+    last_obs_id = int(((state.get("observations") or {}).get("last_alerted_id") or 0))
+    last_task_id = int(((state.get("tasks") or {}).get("last_alerted_id") or 0))
+    last_cron_ms = int(((state.get("cron") or {}).get("last_alerted_bad_run_at_ms") or 0))
+
     from datetime import timezone
 
     since_dt = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
     since_utc = since_dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
     since_ms = int(since_dt.timestamp() * 1000)
 
-    obs_matches: List[Dict[str, Any]] = []
-    cron_matches: List[Dict[str, Any]] = []
+    tasks_since_dt = datetime.now(timezone.utc) - timedelta(minutes=max(0, tasks_since_minutes))
+    tasks_since_utc = tasks_since_dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    obs_all: List[Dict[str, Any]] = []
+    cron_all: List[Dict[str, Any]] = []
+    tasks_all: List[Dict[str, Any]] = []
 
     if mode in {"heartbeat", "observations"}:
-        obs_matches = _triage_observations(conn, since_utc, keywords, limit)
+        obs_all = _triage_observations(conn, since_utc, keywords, limit)
 
     if mode in {"heartbeat", "cron-errors"}:
-        cron_matches = _triage_cron_errors(since_ms=since_ms, cron_jobs_path=str(cron_jobs_path), limit=limit)
+        cron_all = _triage_cron_errors(since_ms=since_ms, cron_jobs_path=str(cron_jobs_path), limit=limit)
 
-    needs_attention = (len(obs_matches) > 0) or (len(cron_matches) > 0)
+    if mode in {"heartbeat", "tasks"}:
+        tasks_all = _triage_tasks(conn, since_ts=tasks_since_utc, importance_min=importance_min, limit=limit)
+
+    # Dedupe: only alert on *new* items
+    obs_new = [m for m in obs_all if int(m.get("id") or 0) > last_obs_id]
+    tasks_new = [m for m in tasks_all if int(m.get("id") or 0) > last_task_id]
+    cron_new = [m for m in cron_all if int(m.get("lastRunAtMs") or 0) > last_cron_ms]
+
+    needs_attention = (len(obs_new) > 0) or (len(cron_new) > 0) or (len(tasks_new) > 0)
 
     out = {
         "ok": True,
@@ -1071,16 +1171,42 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "since_utc": since_utc,
         "keywords": keywords,
         "cron_jobs_path": os.path.expanduser(str(cron_jobs_path)),
+        "tasks_since_minutes": tasks_since_minutes,
+        "tasks_since_utc": tasks_since_utc,
+        "importance_min": importance_min,
+        "state_path": str(state_path),
         "needs_attention": needs_attention,
         "observations": {
-            "found": len(obs_matches),
-            "matches": obs_matches,
+            "found_total": len(obs_all),
+            "found_new": len(obs_new),
+            "matches": obs_new,
         },
         "cron": {
-            "found": len(cron_matches),
-            "matches": cron_matches,
+            "found_total": len(cron_all),
+            "found_new": len(cron_new),
+            "matches": cron_new,
+        },
+        "tasks": {
+            "found_total": len(tasks_all),
+            "found_new": len(tasks_new),
+            "matches": tasks_new,
         },
     }
+
+    if needs_attention:
+        # Update state maxima
+        if obs_new:
+            last_obs_id = max(last_obs_id, max(int(m.get("id") or 0) for m in obs_new))
+        if tasks_new:
+            last_task_id = max(last_task_id, max(int(m.get("id") or 0) for m in tasks_new))
+        if cron_new:
+            last_cron_ms = max(last_cron_ms, max(int(m.get("lastRunAtMs") or 0) for m in cron_new))
+
+        new_state = dict(state) if isinstance(state, dict) else {}
+        new_state["observations"] = {"last_alerted_id": last_obs_id}
+        new_state["tasks"] = {"last_alerted_id": last_task_id}
+        new_state["cron"] = {"last_alerted_bad_run_at_ms": last_cron_ms}
+        _atomic_write_json(state_path, new_state)
 
     _emit(out, True)
 
@@ -1355,7 +1481,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("store", help="Proactively store a memory")
     add_common(sp)
     sp.add_argument("text", help="Memory content")
-    sp.add_argument("--category", default="fact", choices=["fact", "preference", "decision", "entity", "other"])
+    sp.add_argument("--category", default="fact", choices=["fact", "preference", "decision", "entity", "task", "other"])
     sp.add_argument("--importance", type=float, default=0.7)
     sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
     sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
@@ -1387,7 +1513,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument(
         "--mode",
         default="heartbeat",
-        choices=["heartbeat", "observations", "cron-errors"],
+        choices=["heartbeat", "observations", "cron-errors", "tasks"],
         help="Scan mode (default: heartbeat)",
     )
     sp.add_argument("--since-minutes", type=int, default=60, help="Look back window in minutes")
@@ -1397,6 +1523,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--cron-jobs-path",
         dest="cron_jobs_path",
         help="Path to OpenClaw cron jobs store (default: ~/.openclaw/cron/jobs.json)",
+    )
+    sp.add_argument(
+        "--tasks-since-minutes",
+        dest="tasks_since_minutes",
+        type=int,
+        default=24 * 60,
+        help="Tasks lookback window in minutes (default: 1440)",
+    )
+    sp.add_argument(
+        "--importance-min",
+        dest="importance_min",
+        type=float,
+        default=0.7,
+        help="Min importance for tasks mode (default: 0.7)",
+    )
+    sp.add_argument(
+        "--state-path",
+        dest="state_path",
+        help="State file for dedupe (default: ~/.openclaw/memory/openclaw-mem/triage-state.json)",
     )
     sp.set_defaults(func=cmd_triage)
 
