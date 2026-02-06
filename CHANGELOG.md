@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (placeholder)
 
+## [0.5.2] - 2026-02-06
+
+### Changed
+- Packaging/version alignment: bump Python package to `0.5.2` (fixes mismatch vs git tags).
+- Plugin manifest version aligned to `0.5.2`.
+
+### Docs
+- Deployment guidance: recommended `excludeTools` defaults + logrotate examples.
+- Privacy export rules checklist updated ("export requires --yes") now marked done.
+
+### Testing
+- Unit tests passing (see CI / local run).
+
+## [0.5.1] - 2026-02-06
+
+### Added
+- Route A semantic recall: `openclaw-mem index` + `openclaw-mem semantic` using OpenClaw Gateway `/tools/invoke` → `memory_search` (black-box embeddings).
+
+### Testing
+- Added Route A tests (snippet→obs id extraction + ranking).
+
+## [0.5.0] - 2026-02-06
+
+### Added
+- Gateway routing for `summarize` (`--gateway`, `OPENCLAW_MEM_USE_GATEWAY=1`).
+- Auto-ingest workflow: `openclaw-mem harvest`.
+
 ## [0.4.1] - 2026-02-06
 
 ### Changed

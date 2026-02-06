@@ -78,7 +78,7 @@ openclaw-mem export --to MEMORY.md --yes --redact
 ```
 
 ## Implementation Checklist
-- [ ] Add `--yes` / `--force` flags to `export` command
+- [x] Add `--yes` / `--force` flags to `export` command (implemented: `--yes` required for MEMORY.md)
 - [ ] Check session metadata for `export_disabled`
 - [ ] Add audit signature line to exports
 - [ ] Add config schema for `autoExport`

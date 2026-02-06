@@ -40,7 +40,7 @@ ln -s ~/openclaw-mem/extensions/openclaw-mem ~/.openclaw/plugins/openclaw-mem
 
 Add to `~/.openclaw/openclaw.json` (or `/etc/openclaw/openclaw.json` for system-wide):
 
-```json
+```jsonc
 {
   "plugins": {
     "entries": {
@@ -49,13 +49,29 @@ Add to `~/.openclaw/openclaw.json` (or `/etc/openclaw/openclaw.json` for system-
         "config": {
           "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl",
           "captureMessage": false,
-          "excludeTools": ["session_status", "cron.list"]
+          
+          // Recommended safety default: avoid persisting high-sensitivity tools.
+          // This plugin captures *tool results* (not raw user inbound messages).
+          // For user preferences / reminders, use `memory_store` explicitly.
+          "excludeTools": ["exec", "read", "browser", "gateway", "message", "nodes", "canvas"]
+          
+          // Alternative (stricter): use includeTools allowlist instead.
+          // "includeTools": ["memory_store", "web_search", "web_fetch"]
         }
       }
     }
   }
 }
 ```
+
+### About `excludeTools` (and your concern about missing personalization)
+
+- This plugin listens to **`tool_result_persist`** events, so it captures **tool results**, not raw inbound user messages.
+- Excluding `message` mainly avoids persisting **outbound sendMessage payloads** (which may include private info), and does **not** prevent you from storing user preferences.
+- Recommended pattern for personal / task-like facts ("buy coffee this afternoon", preferences, etc.):
+  - use the explicit tool **`memory_store`** (plugin tool) or CLI **`openclaw-mem store`** when the agent/user says “remember this”.
+
+If you want broader capture for debugging, prefer **includeTools allowlist** over capturing everything.
 
 ## 2. Periodic Ingestion
 
@@ -72,7 +88,7 @@ After=network.target
 Type=oneshot
 WorkingDirectory=/home/YOUR_USER/openclaw-mem
 Environment="PATH=/home/YOUR_USER/.local/bin:/usr/bin:/bin"
-ExecStart=/usr/bin/uv run --python 3.13 -- python -m openclaw_mem ingest --file /home/YOUR_USER/.openclaw/memory/openclaw-mem-observations.jsonl --json
+ExecStart=/usr/bin/uv run --python 3.13 -- python -m openclaw_mem harvest --source /home/YOUR_USER/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --json
 
 [Install]
 WantedBy=default.target
@@ -120,7 +136,7 @@ Add to OpenClaw config:
         "wakeMode": "next-heartbeat",
         "payload": {
           "kind": "agentTurn",
-          "message": "Run: cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem ingest --file ~/.openclaw/memory/openclaw-mem-observations.jsonl --json",
+          "message": "Run: cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source ~/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --json",
           "deliver": false,
           "model": "gemini-3-flash"
         }
@@ -137,7 +153,7 @@ Add to OpenClaw config:
 crontab -e
 
 # Add line (runs every 5 minutes)
-*/5 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem ingest --file ~/.openclaw/memory/openclaw-mem-observations.jsonl --json >> ~/.openclaw/logs/openclaw-mem-ingest.log 2>&1
+*/5 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source ~/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --json >> ~/.openclaw/logs/openclaw-mem-harvest.log 2>&1
 ```
 
 ## 3. Log Rotation
@@ -147,15 +163,16 @@ crontab -e
 Create `/etc/logrotate.d/openclaw-mem` (or `~/.logrotate.d/openclaw-mem`):
 
 ```
-/home/*/.openclaw/memory/openclaw-mem-observations.jsonl {
+/home/*/.openclaw/memory/openclaw-mem-observations.jsonl
+/home/*/.openclaw/logs/openclaw-mem-*.log {
     daily
     rotate 30
+    size 50M
     compress
     delaycompress
     missingok
     notifempty
-    create 644 user user
-    sharedscripts
+    create 0600 user user
 }
 ```
 
