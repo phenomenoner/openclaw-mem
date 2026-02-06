@@ -933,11 +933,80 @@ def cmd_semantic(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     )
 
 
-def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    """Lightweight local triage over recent observations.
+def _triage_observations(conn: sqlite3.Connection, since_ts: str, keywords: List[str], limit: int) -> List[Dict[str, Any]]:
+    clauses: List[str] = []
+    params: List[Any] = [since_ts]
+    for k in keywords:
+        like = f"%{k}%"
+        clauses.append("(lower(coalesce(summary,'')) LIKE ? OR lower(coalesce(tool_name,'')) LIKE ? OR lower(coalesce(detail_json,'')) LIKE ?)")
+        params.extend([like, like, like])
 
-    Intended for cron/heartbeat: run a deterministic scan using SQLite only,
-    and return machine-readable JSON + a meaningful exit code.
+    where_kw = " OR ".join(clauses) if clauses else "1=0"
+    q = f"""
+        SELECT id, ts, kind, tool_name, summary
+        FROM observations
+        WHERE ts >= ? AND ({where_kw})
+        ORDER BY ts DESC
+        LIMIT ?
+    """
+    params.append(limit)
+    rows = conn.execute(q, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _triage_cron_errors(*, since_ms: int, cron_jobs_path: str, limit: int) -> List[Dict[str, Any]]:
+    """Detect cron jobs whose lastStatus != ok.
+
+    Reads OpenClaw cron store (jobs.json). This is deterministic and does not
+    require any LLM calls.
+    """
+    p = Path(os.path.expanduser(cron_jobs_path))
+    if not p.exists():
+        return []
+
+    try:
+        data = json.loads(p.read_text("utf-8"))
+    except Exception:
+        return []
+
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    if not isinstance(jobs, list):
+        return []
+
+    bad: List[Dict[str, Any]] = []
+    for j in jobs:
+        if not isinstance(j, dict):
+            continue
+        state = j.get("state") if isinstance(j.get("state"), dict) else {}
+        last_status = state.get("lastStatus")
+        last_run = state.get("lastRunAtMs")
+        if last_status in (None, "ok"):
+            continue
+        if isinstance(last_run, (int, float)) and int(last_run) < int(since_ms):
+            continue
+        bad.append(
+            {
+                "id": j.get("id"),
+                "name": j.get("name"),
+                "enabled": j.get("enabled"),
+                "lastStatus": last_status,
+                "lastRunAtMs": last_run,
+                "lastDurationMs": state.get("lastDurationMs"),
+                "nextRunAtMs": (state.get("nextRunAtMs") if isinstance(state, dict) else None),
+            }
+        )
+
+    bad.sort(key=lambda x: (-(int(x.get("lastRunAtMs") or 0)), str(x.get("name") or "")))
+    return bad[:limit]
+
+
+def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Lightweight local triage.
+
+    Modes:
+    - heartbeat (default): scan observations + cron job errors
+    - observations: scan observations only
+    - cron-errors: scan cron store only
 
     Exit codes:
       0 = no issues found
@@ -949,6 +1018,11 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         limit = int(getattr(args, "limit", 10))
     except Exception:
         _emit({"error": "invalid since/limit"}, True)
+        sys.exit(2)
+
+    mode = str(getattr(args, "mode", "heartbeat") or "heartbeat").strip().lower()
+    if mode not in {"heartbeat", "observations", "cron-errors"}:
+        _emit({"error": f"invalid mode: {mode}"}, True)
         sys.exit(2)
 
     since_minutes = max(0, since_minutes)
@@ -971,45 +1045,46 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "db locked",
         ]
 
+    cron_jobs_path = getattr(args, "cron_jobs_path", None) or "~/.openclaw/cron/jobs.json"
+
     from datetime import timezone
 
     since_dt = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
-    since_ts = since_dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    since_utc = since_dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    since_ms = int(since_dt.timestamp() * 1000)
 
-    clauses: List[str] = []
-    params: List[Any] = [since_ts]
-    for k in keywords:
-        like = f"%{k}%"
-        clauses.append("(lower(coalesce(summary,'')) LIKE ? OR lower(coalesce(tool_name,'')) LIKE ? OR lower(coalesce(detail_json,'')) LIKE ?)")
-        params.extend([like, like, like])
+    obs_matches: List[Dict[str, Any]] = []
+    cron_matches: List[Dict[str, Any]] = []
 
-    where_kw = " OR ".join(clauses) if clauses else "1=0"
-    q = f"""
-        SELECT id, ts, kind, tool_name, summary
-        FROM observations
-        WHERE ts >= ? AND ({where_kw})
-        ORDER BY ts DESC
-        LIMIT ?
-    """
-    params.append(limit)
+    if mode in {"heartbeat", "observations"}:
+        obs_matches = _triage_observations(conn, since_utc, keywords, limit)
 
-    rows = conn.execute(q, params).fetchall()
-    matches = [dict(r) for r in rows]
+    if mode in {"heartbeat", "cron-errors"}:
+        cron_matches = _triage_cron_errors(since_ms=since_ms, cron_jobs_path=str(cron_jobs_path), limit=limit)
+
+    needs_attention = (len(obs_matches) > 0) or (len(cron_matches) > 0)
 
     out = {
         "ok": True,
+        "mode": mode,
         "since_minutes": since_minutes,
-        "since_utc": since_ts,
+        "since_utc": since_utc,
         "keywords": keywords,
-        "found": len(matches),
-        "needs_attention": len(matches) > 0,
-        "matches": matches,
+        "cron_jobs_path": os.path.expanduser(str(cron_jobs_path)),
+        "needs_attention": needs_attention,
+        "observations": {
+            "found": len(obs_matches),
+            "matches": obs_matches,
+        },
+        "cron": {
+            "found": len(cron_matches),
+            "matches": cron_matches,
+        },
     }
 
-    # Always produce JSON for cron-compat; still respect --json for consistency.
     _emit(out, True)
 
-    if matches:
+    if needs_attention:
         sys.exit(10)
     sys.exit(0)
 
@@ -1306,11 +1381,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--agent-id", default="main", help="Target agent ID for Gateway (default: main)")
     sp.set_defaults(func=cmd_semantic)
 
-    sp = sub.add_parser("triage", help="Deterministic local scan over recent observations (for heartbeat)")
+    sp = sub.add_parser("triage", help="Deterministic local scan (heartbeat/cron)"
+    )
     add_common(sp)
+    sp.add_argument(
+        "--mode",
+        default="heartbeat",
+        choices=["heartbeat", "observations", "cron-errors"],
+        help="Scan mode (default: heartbeat)",
+    )
     sp.add_argument("--since-minutes", type=int, default=60, help="Look back window in minutes")
     sp.add_argument("--limit", type=int, default=10, help="Max matches to return")
-    sp.add_argument("--keywords", help="Comma-separated keywords override")
+    sp.add_argument("--keywords", help="Comma-separated keywords override (observations modes)")
+    sp.add_argument(
+        "--cron-jobs-path",
+        dest="cron_jobs_path",
+        help="Path to OpenClaw cron jobs store (default: ~/.openclaw/cron/jobs.json)",
+    )
     sp.set_defaults(func=cmd_triage)
 
     sp = sub.add_parser("harvest", help="Auto-ingest and embed observations from log file")

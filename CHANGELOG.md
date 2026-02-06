@@ -9,13 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (placeholder)
 
+## [0.5.5] - 2026-02-06
+
+### Added
+- `openclaw-mem triage --mode cron-errors`: deterministic scan of OpenClaw cron job store (`~/.openclaw/cron/jobs.json`) for jobs whose `lastStatus != ok`.
+- `openclaw-mem triage --mode heartbeat` now includes both: observations scan + cron error scan.
+
+### Changed
+- Version bump to `0.5.5`.
+
 ## [0.5.4] - 2026-02-06
 
 ### Added
 - `openclaw-mem triage`: deterministic local scan over recent observations (for cron/heartbeat), with non-zero exit code when attention is needed.
 
 ### Changed
-- Version bump to `0.5.3`.
+- Version bump to `0.5.4`.
 - License: MIT → Apache-2.0.
 
 ## [0.5.2] - 2026-02-06

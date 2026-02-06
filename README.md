@@ -8,7 +8,7 @@
 - [**Quickstart Guide**](QUICKSTART.md) — Get started in 5 minutes
 - [**CHANGELOG**](CHANGELOG.md) — See what's new
 - [**Auto-Capture Setup**](docs/auto-capture.md) — Enable plugin
-- [**Tests**](tests/) — 30 tests (unit + integration)
+- [**Tests**](tests/) — 31 tests (unit + integration)
 
 ## 🙏 Credits & Inspiration
 
@@ -27,7 +27,7 @@ Thank you [@thedotmack](https://github.com/thedotmack) 🎉
 - Vector search (cosine similarity) + hybrid search via RRF fusion
 - AI-native: `--json` output, non-interactive, example-rich help
 - Atomic file operations + SQLite WAL mode guidance
-- 30 tests (unit + integration, 100% coverage) + GitHub Actions CI
+- 31 tests (unit + integration, 100% coverage) + GitHub Actions CI
 
 **What's next:**
 - ✅ Phase 1: Auto-capture via `tool_result_persist` hook (plugin ready)
