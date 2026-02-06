@@ -25,6 +25,11 @@
         "default": false,
         "description": "Capture full tool message (truncated). Warning: can be large."
       },
+      "redactSensitive": {
+        "type": "boolean",
+        "default": true,
+        "description": "Redact common secret patterns from summaries/messages before persisting. Recommended true."
+      },
       "maxMessageLength": {
         "type": "number",
         "default": 1000,
