@@ -1,6 +1,6 @@
 [project]
 name = "openclaw-mem"
-version = "0.5.5"
+version = "0.5.6"
 description = "CLI-first memory store + search prototype for OpenClaw"
 requires-python = ">=3.10"
 readme = "README.md"

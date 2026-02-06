@@ -98,13 +98,23 @@ class TestCliM0(unittest.TestCase):
         finally:
             sys.stdin = old_stdin
 
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
         args = type(
             "Args",
             (),
             {
+                "mode": "observations",
                 "since_minutes": 60,
                 "limit": 10,
                 "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
                 "json": True,
             },
         )()
@@ -118,7 +128,76 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(cm.exception.code, 10)
         out = json.loads(buf.getvalue())
         self.assertTrue(out["needs_attention"])
-        self.assertGreaterEqual(out["observations"]["found"], 1)
+        self.assertGreaterEqual(out["observations"]["found_new"], 1)
+
+        conn.close()
+
+    def test_triage_tasks_mode_dedupes_by_state(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "task",
+                        "tool_name": "memory_store",
+                        "summary": "TODO: buy coffee this afternoon",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "tasks",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        # First run: should alert
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["tasks"]["found_new"], 1)
+
+        # Second run: should NOT alert again (state dedupe)
+        buf2 = io.StringIO()
+        with redirect_stdout(buf2):
+            with self.assertRaises(SystemExit) as cm2:
+                cmd_triage(conn, args)
+        self.assertEqual(cm2.exception.code, 0)
+        out2 = json.loads(buf2.getvalue())
+        self.assertEqual(out2["tasks"]["found_new"], 0)
 
         conn.close()
 
@@ -147,6 +226,11 @@ class TestCliM0(unittest.TestCase):
             tmp_path = tmp.name
 
         conn = _connect(":memory:")
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
         args = type(
             "Args",
             (),
@@ -156,6 +240,9 @@ class TestCliM0(unittest.TestCase):
                 "limit": 10,
                 "keywords": None,
                 "cron_jobs_path": tmp_path,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
                 "json": True,
             },
         )()
@@ -166,7 +253,7 @@ class TestCliM0(unittest.TestCase):
                 cmd_triage(conn, args)
         self.assertEqual(cm.exception.code, 10)
         out = json.loads(buf.getvalue())
-        self.assertEqual(out["cron"]["found"], 1)
+        self.assertEqual(out["cron"]["found_new"], 1)
         self.assertEqual(out["cron"]["matches"][0]["id"], "job2")
 
         conn.close()
