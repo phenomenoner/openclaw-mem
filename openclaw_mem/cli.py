@@ -72,17 +72,45 @@ def _init_db(conn: sqlite3.Connection) -> None:
             ts TEXT NOT NULL,
             kind TEXT,
             summary TEXT,
+            summary_en TEXT,
+            lang TEXT,
             tool_name TEXT,
             detail_json TEXT
         );
         """
     )
+
+    # Backward-compatible migration for existing DBs.
+    obs_cols = {r[1] for r in conn.execute("PRAGMA table_info(observations)").fetchall()}
+    if "summary_en" not in obs_cols:
+        conn.execute("ALTER TABLE observations ADD COLUMN summary_en TEXT")
+    if "lang" not in obs_cols:
+        conn.execute("ALTER TABLE observations ADD COLUMN lang TEXT")
+
     conn.execute(
         """
         CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts
-        USING fts5(summary, tool_name, detail_json, content='observations', content_rowid='id');
+        USING fts5(summary, summary_en, tool_name, detail_json, content='observations', content_rowid='id');
         """
     )
+
+    # If this DB already had an older FTS schema, rebuild once with summary_en included.
+    fts_cols = [r[1] for r in conn.execute("PRAGMA table_info(observations_fts)").fetchall()]
+    if "summary_en" not in fts_cols:
+        conn.execute("DROP TABLE IF EXISTS observations_fts")
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE observations_fts
+            USING fts5(summary, summary_en, tool_name, detail_json, content='observations', content_rowid='id');
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO observations_fts(rowid, summary, summary_en, tool_name, detail_json)
+            SELECT id, summary, summary_en, tool_name, detail_json
+            FROM observations;
+            """
+        )
 
     # Phase 3: vector embeddings (stored as float32 BLOB)
     conn.execute(
@@ -107,18 +135,20 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any]) -> int:
     ts = obs.get("ts") or datetime.utcnow().isoformat()
     kind = obs.get("kind")
     summary = obs.get("summary")
+    summary_en = obs.get("summary_en") or obs.get("text_en")
+    lang = obs.get("lang")
     tool_name = obs.get("tool_name") or obs.get("tool")
     detail = obs.get("detail") or obs.get("detail_json") or {}
     detail_json = detail if isinstance(detail, str) else json.dumps(detail, ensure_ascii=False)
 
     cur = conn.execute(
-        "INSERT INTO observations (ts, kind, summary, tool_name, detail_json) VALUES (?, ?, ?, ?, ?)",
-        (ts, kind, summary, tool_name, detail_json),
+        "INSERT INTO observations (ts, kind, summary, summary_en, lang, tool_name, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (ts, kind, summary, summary_en, lang, tool_name, detail_json),
     )
     rowid = cur.lastrowid
     conn.execute(
-        "INSERT INTO observations_fts (rowid, summary, tool_name, detail_json) VALUES (?, ?, ?, ?)",
-        (rowid, summary, tool_name, detail_json),
+        "INSERT INTO observations_fts (rowid, summary, summary_en, tool_name, detail_json) VALUES (?, ?, ?, ?, ?)",
+        (rowid, summary, summary_en, tool_name, detail_json),
     )
     return int(rowid)
 
@@ -176,8 +206,9 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     rows = conn.execute(
         """
-        SELECT o.id, o.ts, o.kind, o.tool_name, o.summary,
+        SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
                snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
+               snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
                bm25(observations_fts) AS score
         FROM observations_fts
         JOIN observations o ON o.id = observations_fts.rowid
@@ -677,10 +708,11 @@ def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Hybrid search (FTS + Vector) using RRF."""
-    # 1. Vector Search
     model = args.model
     limit = int(args.limit)
     k = int(args.k)
+    query = args.query
+    query_en = (getattr(args, "query_en", None) or "").strip() or None
 
     api_key = _get_api_key()
     if not api_key:
@@ -689,7 +721,10 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
     try:
-        query_vec = client.embed([args.query], model=model)[0]
+        embed_inputs = [query] + ([query_en] if query_en else [])
+        embed_vecs = client.embed(embed_inputs, model=model)
+        query_vec = embed_vecs[0]
+        query_en_vec = embed_vecs[1] if query_en else None
     except Exception as e:
         _emit({"error": str(e)}, args.json)
         sys.exit(1)
@@ -702,11 +737,19 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     vec_ranked = rank_cosine(
         query_vec=query_vec,
         items=((int(r[0]), r[1], float(r[2])) for r in vec_rows),
-        limit=limit * 2,  # Fetch more for reranking
+        limit=limit * 2,
     )
     vec_ids = [rid for rid, _ in vec_ranked]
 
-    # 2. FTS Search
+    vec_en_ids: List[int] = []
+    if query_en_vec is not None:
+        vec_en_ranked = rank_cosine(
+            query_vec=query_en_vec,
+            items=((int(r[0]), r[1], float(r[2])) for r in vec_rows),
+            limit=limit * 2,
+        )
+        vec_en_ids = [rid for rid, _ in vec_en_ranked]
+
     fts_rows = conn.execute(
         """
         SELECT rowid
@@ -715,21 +758,23 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         ORDER BY bm25(observations_fts) ASC
         LIMIT ?;
         """,
-        (args.query, limit * 2),
+        (query, limit * 2),
     ).fetchall()
     fts_ids = [int(r["rowid"]) for r in fts_rows]
 
-    # 3. RRF Fusion
-    final_ranking = rank_rrf([fts_ids, vec_ids], k=k, limit=limit)
-    
+    ranked_lists = [fts_ids, vec_ids]
+    if vec_en_ids:
+        ranked_lists.append(vec_en_ids)
+
+    final_ranking = rank_rrf(ranked_lists, k=k, limit=limit)
+
     if not final_ranking:
         _emit([], args.json)
         return
 
     final_ids = [rid for rid, _ in final_ranking]
 
-    # 4. Fetch Details
-    q_sql = f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(final_ids))})"
+    q_sql = f"SELECT id, ts, kind, tool_name, summary, summary_en, lang FROM observations WHERE id IN ({','.join(['?']*len(final_ids))})"
     rows = conn.execute(q_sql, final_ids).fetchall()
     obs_map = {int(r["id"]): dict(r) for r in rows}
 
@@ -740,8 +785,12 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             continue
         r["rrf_score"] = score
         r["match"] = []
-        if rid in fts_ids: r["match"].append("text")
-        if rid in vec_ids: r["match"].append("vector")
+        if rid in fts_ids:
+            r["match"].append("text")
+        if rid in vec_ids:
+            r["match"].append("vector")
+        if rid in vec_en_ids:
+            r["match"].append("vector_en")
         out.append(r)
 
     _emit(out, args.json)
@@ -1288,10 +1337,15 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         _emit({"error": "empty text"}, args.json)
         sys.exit(1)
 
+    text_en = (getattr(args, "text_en", None) or "").strip() or None
+    lang = (getattr(args, "lang", None) or "").strip() or None
+
     # 1. Insert into SQLite
     obs = {
         "kind": args.category,  # e.g., 'fact', 'preference'
         "summary": text,
+        "summary_en": text_en,
+        "lang": lang,
         "tool_name": "memory_store",
         "detail": {"importance": args.importance}
     }
@@ -1472,6 +1526,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("hybrid", help="Hybrid search (Vector + FTS) using RRF")
     add_common(sp)
     sp.add_argument("query", help="Query text")
+    sp.add_argument("--query-en", help="Optional English query for additional vector route")
     sp.add_argument("--limit", type=int, default=20)
     sp.add_argument("--k", type=int, default=60, help="RRF constant (default: 60)")
     sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
@@ -1481,6 +1536,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("store", help="Proactively store a memory")
     add_common(sp)
     sp.add_argument("text", help="Memory content")
+    sp.add_argument("--text-en", help="Optional English translation/summary")
+    sp.add_argument("--lang", help="Original text language code (e.g., ko, ja, es)")
     sp.add_argument("--category", default="fact", choices=["fact", "preference", "decision", "entity", "task", "other"])
     sp.add_argument("--importance", type=float, default=0.7)
     sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")

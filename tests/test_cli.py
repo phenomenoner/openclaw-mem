@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage
+from openclaw_mem.cli import _connect, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid
 
 
 class TestCliM0(unittest.TestCase):
@@ -256,6 +256,108 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["cron"]["found_new"], 1)
         self.assertEqual(out["cron"]["matches"][0]["id"], "job2")
 
+        conn.close()
+
+    def test_store_persists_dual_language_fields(self):
+        conn = _connect(":memory:")
+
+        args = type(
+            "Args",
+            (),
+            {
+                "text": "나는 커피를 좋아해",
+                "text_en": "I like coffee",
+                "lang": "ko",
+                "category": "preference",
+                "importance": 0.8,
+                "model": "test-model",
+                "base_url": "https://example.com/v1",
+                "workspace": None,
+                "json": True,
+            },
+        )()
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value=None):
+            with redirect_stdout(buf):
+                cmd_store(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["ok"])
+        row = conn.execute("SELECT summary, summary_en, lang FROM observations WHERE id = ?", (out["id"],)).fetchone()
+        self.assertEqual(row["summary"], "나는 커피를 좋아해")
+        self.assertEqual(row["summary_en"], "I like coffee")
+        self.assertEqual(row["lang"], "ko")
+        conn.close()
+
+    def test_hybrid_supports_query_en_route(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps({"ts": "2026-02-04T13:00:00Z", "kind": "fact", "summary": "사과", "summary_en": "apple", "tool_name": "memory_store", "detail": {}}),
+                json.dumps({"ts": "2026-02-04T13:01:00Z", "kind": "fact", "summary": "바나나", "summary_en": "banana", "tool_name": "memory_store", "detail": {}}),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "test-model", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (2, "test-model", 2, pack_f32([0.0, 1.0]), l2_norm([0.0, 1.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                out = []
+                for t in texts:
+                    out.append([1.0, 0.0] if t == "apple" else [0.0, 1.0])
+                return out
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "apple",
+                "query_en": "banana",
+                "model": "test-model",
+                "limit": 5,
+                "k": 60,
+                "base_url": "https://example.com/v1",
+                "json": True,
+            },
+        )()
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                cmd_hybrid(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(len(out), 2)
+        by_id = {r["id"]: r for r in out}
+        self.assertIn("vector_en", by_id[2]["match"])
+        self.assertIn("vector", by_id[1]["match"])
         conn.close()
 
 

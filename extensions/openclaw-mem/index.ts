@@ -106,6 +106,8 @@ const plugin = {
         type: "object",
         properties: {
           text: { type: "string", description: "The memory content to store" },
+          text_en: { type: "string", description: "Optional English translation/summary" },
+          lang: { type: "string", description: "Language code for original text (e.g., ko, ja, es)" },
           category: { type: "string", description: "Category (e.g., preference, fact, task)" },
           importance: { type: "number", description: "Importance (1-5), default 3" },
         },
@@ -115,6 +117,8 @@ const plugin = {
         try {
           // text is positional in CLI
           const cmdArgs = ["-m", "openclaw_mem", "store", args.text];
+          if (args.text_en) cmdArgs.push("--text-en", args.text_en);
+          if (args.lang) cmdArgs.push("--lang", args.lang);
           if (args.category) cmdArgs.push("--category", args.category);
           if (args.importance) cmdArgs.push("--importance", String(args.importance));
 
@@ -137,6 +141,7 @@ const plugin = {
         type: "object",
         properties: {
           query: { type: "string", description: "Search query" },
+          query_en: { type: "string", description: "Optional English query for additional vector route" },
           limit: { type: "number", description: "Max results (default 5)" }
         },
         required: ["query"]
@@ -145,6 +150,7 @@ const plugin = {
         try {
           // query is positional in CLI
           const cmdArgs = ["-m", "openclaw_mem", "hybrid", args.query];
+          if (args.query_en) cmdArgs.push("--query-en", args.query_en);
           if (args.limit) cmdArgs.push("--limit", String(args.limit));
 
           // Use uv to run with correct python environment

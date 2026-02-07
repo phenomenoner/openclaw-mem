@@ -91,6 +91,6 @@ def rank_rrf(
             # rank is 0-indexed here
             scores[item_id] = scores.get(item_id, 0.0) + 1.0 / (k + rank + 1)
 
-    # Sort by score descending
-    sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    # Sort deterministically: score desc, then id asc for stable ties.
+    sorted_items = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
     return sorted_items[:limit]
