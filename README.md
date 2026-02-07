@@ -1,112 +1,82 @@
 # openclaw-mem
 
-> A lightweight memory layer for OpenClaw agents — capture → store → search → (optional) compress.
+Lightweight long-term memory for OpenClaw agents.
 
-`openclaw-mem` helps OpenClaw agents build **useful long-term memory** without dragging a heavyweight stack into your deployment.
+`openclaw-mem` captures useful observations, stores them in local SQLite, and gives you cheap progressive recall (search → context window → full record), with optional embeddings/hybrid recall and deterministic triage.
 
-It can:
-- **auto-capture** tool-use observations (via OpenClaw `tool_result_persist` hook)
-- store everything locally in **SQLite + FTS5**
-- provide **token-efficient progressive disclosure** search (search → timeline → get)
-- optionally add **embeddings + hybrid search**
-- run **deterministic triage** for heartbeats (cron errors + new tasks only; deduped)
+## What you get
 
-Apache-2.0 licensed. No external DB required.
+- Local memory store: **SQLite + FTS5**
+- Progressive disclosure recall: `search` → `timeline` → `get`
+- Optional vector recall: `embed`, `vsearch`, `hybrid`
+- Dual-language memory support:
+  - store original + optional English text (`--text-en`)
+  - optional dedicated EN embeddings (`observation_embeddings_en`)
+  - EN assist query route in hybrid (`--query-en`)
+- Proactive writes: `store`
+- Auto-ingest pipeline: `harvest`
+- Deterministic heartbeat triage: `triage` (`heartbeat` / `cron-errors` / `tasks`)
+- Optional daily memory compression: `summarize`
 
-## 🔗 Quick links
+No external DB required.
 
-- [Quickstart](QUICKSTART.md) (5 minutes)
-- [Changelog](CHANGELOG.md)
-- [Deployment guide](docs/deployment.md)
-- [Auto-capture plugin setup](docs/auto-capture.md)
-- [Privacy & export rules](docs/privacy-export-rules.md)
-- [Dual-language memory strategy](docs/dual-language-memory-strategy.md)
-- [Tests](tests/) (32 unit + integration)
-
-## ✨ Why it’s useful (the pitch, but true)
-
-If you’re building agents, you quickly hit two problems:
-1) **Context is expensive** (token/cost + latency)
-2) **Logs are noisy** (you want the 1% that matters)
-
-`openclaw-mem` is built around a simple idea:
-- store raw observations locally
-- retrieve them **progressively** (small → bigger → full)
-- keep proactive “things to remember” explicit (`memory_store` / `openclaw-mem store`)
-- keep automation **deterministic** by default (no LLM in heartbeats)
-
-## ✅ What’s included (milestone wrap-up)
-
-**Core capabilities**
-- Observation DB: **SQLite + FTS5**
-- Search UX: **progressive disclosure** (search → timeline → get)
-- AI compression: `openclaw-mem summarize` (can route via **OpenClaw Gateway**)
-- Embeddings: `embed` + `vsearch` (cosine similarity, supports `--field original|english|both`)
-- Hybrid search: `hybrid` (RRF fusion)
-- Proactive memory: `store` CLI + plugin tools `memory_store` / `memory_recall`
-- Auto-ingest: `harvest` (log rotation + ingest + optional embed)
-- Deterministic triage: `triage` modes `heartbeat` / `cron-errors` / `tasks` (dedup state)
-- OpenClaw-native semantic recall (black-box embeddings): `index` + `semantic` (via Gateway `/tools/invoke` → `memory_search`)
-
-**Safety defaults**
-- Plugin defaults are designed to reduce accidental persistence of sensitive data:
-  - `captureMessage: false`
-  - `redactSensitive: true` (best-effort pattern redaction)
-  - `excludeTools` recommended for high-sensitivity tools (see deployment guide)
-
-## 🧭 Docs index (systematic)
-
-Start here:
-- **[QUICKSTART.md](QUICKSTART.md)** — install + first search
-
-## 🌐 Dual-language memory (zh/en)
-
-For mixed-language memory deployments, see **[docs/dual-language-memory-strategy.md](docs/dual-language-memory-strategy.md)**.
-It covers rationale, field design (`text` + optional `text_en`), query fallback flow, tradeoffs, and rollout KPIs.
-
-Then pick what you need:
-- **[docs/auto-capture.md](docs/auto-capture.md)** — enable the plugin + troubleshooting
-- **[docs/deployment.md](docs/deployment.md)** — production setup: timers/cron, rotation, backups, permissions
-- **[docs/privacy-export-rules.md](docs/privacy-export-rules.md)** — guardrails for exporting memory
-- **[docs/db-concurrency.md](docs/db-concurrency.md)** — WAL mode + avoiding lock issues
-- **[docs/embedding-status.md](docs/embedding-status.md)** — embeddings options & tradeoffs
-- **[docs/m0-prototype.md](docs/m0-prototype.md)** — original M0 design notes
-- **[docs/claude-mem-adoption-plan.md](docs/claude-mem-adoption-plan.md)** — architecture/adaptation notes
-
-## 🏁 Quickstart (tiny demo)
+## Install
 
 ```bash
-# status (creates DB if missing)
+git clone https://github.com/phenomenoner/openclaw-mem.git
+cd openclaw-mem
+uv sync --locked
+```
+
+## Quick usage
+
+```bash
+# Create/open DB and show counts
 uv run --python 3.13 -- python -m openclaw_mem status --json
 
-# ingest JSONL
+# Ingest JSONL observations
 uv run --python 3.13 -- python -m openclaw_mem ingest --file observations.jsonl --json
 
-# search (Layer 1)
+# Layer 1 recall (compact)
 uv run --python 3.13 -- python -m openclaw_mem search "gateway timeout" --limit 10 --json
+
+# Layer 2 recall (nearby context)
+uv run --python 3.13 -- python -m openclaw_mem timeline 42 --window 3 --json
+
+# Layer 3 recall (full rows)
+uv run --python 3.13 -- python -m openclaw_mem get 42 --json
 ```
 
-Full quickstart: [QUICKSTART.md](QUICKSTART.md)
+## Dual-language memory (zh/en etc.)
 
-## 🧩 How it works (architecture)
+```bash
+# Store original text + optional English companion
+openclaw-mem store "偏好：發布前先跑整合測試" \
+  --text-en "Preference: run integration tests before release" \
+  --lang zh --category preference --importance 0.9 --json
 
+# Build original embeddings (default)
+openclaw-mem embed --field original --limit 500 --json
+
+# Build English embeddings from summary_en/text_en
+openclaw-mem embed --field english --limit 500 --json
+
+# Build both in one pass
+openclaw-mem embed --field both --limit 500 --json
+
+# Hybrid recall with optional EN assist query
+openclaw-mem hybrid "發布前流程" --query-en "pre-release process" --limit 5 --json
 ```
-Tool executions (hook) → JSONL → SQLite observations
-                                   ↓
-                     (optional) embeddings / hybrid search
-                                   ↓
-                CLI search: search → timeline → get (progressive)
-                                   ↓
-         (optional) summarize → memory/*.md → OpenClaw native memorySearch
-```
 
-The design goal is **cheap retrieval**: most of the time you only need the small “index-like” layer.
+Design notes and rollout details:
+- `docs/dual-language-memory-strategy.md`
+- `docs/plans/2026-02-07-dual-language-rollout.md`
 
-## 🔌 Auto-capture plugin (hook)
+## Auto-capture plugin
 
-The plugin listens to OpenClaw’s `tool_result_persist` hook and writes JSONL.
+`extensions/openclaw-mem` listens to OpenClaw `tool_result_persist` and writes JSONL for ingestion.
 
-**Important:** treat the config snippet below as a **fragment** to merge into your existing `~/.openclaw/openclaw.json`.
+Minimal config fragment for `~/.openclaw/openclaw.json`:
 
 ```jsonc
 {
@@ -125,20 +95,30 @@ The plugin listens to OpenClaw’s `tool_result_persist` hook and writes JSONL.
 }
 ```
 
-Setup guide: [docs/auto-capture.md](docs/auto-capture.md)
-
-## 🧪 Tests
+## Deterministic triage (heartbeat-safe)
 
 ```bash
-python -m unittest discover -s tests -q
+# 0: no new issues, 10: attention needed
+openclaw-mem triage --mode heartbeat --json
 ```
 
-CI runs on GitHub Actions.
+## Docs map
 
-## 🙏 Credits & inspiration
+- `QUICKSTART.md` — 5-minute setup
+- `docs/auto-capture.md` — plugin setup + troubleshooting
+- `docs/deployment.md` — production timers/permissions/rotation
+- `docs/privacy-export-rules.md` — export safety rules
+- `docs/db-concurrency.md` — WAL + lock guidance
+- `docs/embedding-status.md` — embedding status/tradeoffs
+- `docs/claude-mem-adoption-plan.md` — architecture/adaptation notes
+- `docs/m0-prototype.md` — original M0 notes
 
-This project is heavily inspired by **[thedotmack/claude-mem](https://github.com/thedotmack/claude-mem)** — the observation → AI compression → progressive disclosure pipeline was pioneered there, and adapted here for the OpenClaw ecosystem.
+## Test
 
-## 📄 License
+```bash
+uv run --python 3.13 -- python -m unittest discover -s tests -p 'test_*.py'
+```
 
-Apache-2.0 (see [LICENSE](LICENSE)).
+## License
+
+Apache-2.0 (`LICENSE`).
