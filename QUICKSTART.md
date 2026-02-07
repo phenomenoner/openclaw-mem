@@ -145,8 +145,11 @@ Vector search requires embeddings. You can build embeddings for observations, th
 ```bash
 export OPENAI_API_KEY=sk-...
 
-# Build embeddings for latest observations
+# Build embeddings for original text (default)
 uv run --python 3.13 -- python -m openclaw_mem embed --limit 500 --json
+
+# Backfill English embeddings from summary_en/text_en
+uv run --python 3.13 -- python -m openclaw_mem embed --field english --limit 500 --json
 
 # Vector search
 uv run --python 3.13 -- python -m openclaw_mem vsearch "gateway timeout" --limit 10 --json
@@ -203,6 +206,7 @@ openclaw-mem export --to /tmp/export.md --limit 20 --json
 
 # Vector search
 openclaw-mem embed --limit 500 --json
+openclaw-mem embed --field english --limit 500 --json  # EN backfill
 openclaw-mem vsearch "gateway timeout" --limit 10 --json
 ```
 

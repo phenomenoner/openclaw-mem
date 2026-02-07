@@ -41,7 +41,7 @@ If you’re building agents, you quickly hit two problems:
 - Observation DB: **SQLite + FTS5**
 - Search UX: **progressive disclosure** (search → timeline → get)
 - AI compression: `openclaw-mem summarize` (can route via **OpenClaw Gateway**)
-- Embeddings: `embed` + `vsearch` (cosine similarity)
+- Embeddings: `embed` + `vsearch` (cosine similarity, supports `--field original|english|both`)
 - Hybrid search: `hybrid` (RRF fusion)
 - Proactive memory: `store` CLI + plugin tools `memory_store` / `memory_recall`
 - Auto-ingest: `harvest` (log rotation + ingest + optional embed)

@@ -4,10 +4,29 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid
+from openclaw_mem.cli import _connect, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status
 
 
 class TestCliM0(unittest.TestCase):
+    def test_schema_contains_english_embeddings_table(self):
+        conn = _connect(":memory:")
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        self.assertIn("observation_embeddings_en", tables)
+
+        args = type("Args", (), {"db": ":memory:", "json": True})()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_status(conn, args)
+        out = json.loads(buf.getvalue())
+        self.assertIn("embeddings_en", out)
+        self.assertEqual(out["embeddings_en"]["count"], 0)
+        conn.close()
+
     def test_ingest_search_timeline_get_json(self):
         conn = _connect(":memory:")
 
@@ -292,6 +311,44 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(row["lang"], "ko")
         conn.close()
 
+    def test_store_persists_english_embedding_when_text_en_present(self):
+        conn = _connect(":memory:")
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = type(
+            "Args",
+            (),
+            {
+                "text": "원문",
+                "text_en": "english",
+                "lang": "ko",
+                "category": "fact",
+                "importance": 0.7,
+                "model": "test-model",
+                "base_url": "https://example.com/v1",
+                "workspace": None,
+                "json": True,
+            },
+        )()
+
+        from unittest.mock import patch
+
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(io.StringIO()):
+                cmd_store(conn, args)
+
+        orig = conn.execute("SELECT COUNT(*) FROM observation_embeddings").fetchone()[0]
+        en = conn.execute("SELECT COUNT(*) FROM observation_embeddings_en").fetchone()[0]
+        self.assertEqual(orig, 1)
+        self.assertEqual(en, 1)
+        conn.close()
+
     def test_hybrid_supports_query_en_route(self):
         conn = _connect(":memory:")
 
@@ -312,6 +369,8 @@ class TestCliM0(unittest.TestCase):
             sys.stdin = old_stdin
 
         from openclaw_mem.vector import pack_f32, l2_norm
+
+        # Original table: id=1 aligns with [1,0], id=2 aligns with [0,1]
         conn.execute(
             "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (1, "test-model", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
@@ -319,6 +378,15 @@ class TestCliM0(unittest.TestCase):
         conn.execute(
             "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (2, "test-model", 2, pack_f32([0.0, 1.0]), l2_norm([0.0, 1.0]), "2026-02-05T00:00:00Z"),
+        )
+        # EN table intentionally reversed so we can detect table preference.
+        conn.execute(
+            "INSERT INTO observation_embeddings_en (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "test-model", 2, pack_f32([0.0, 1.0]), l2_norm([0.0, 1.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO observation_embeddings_en (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (2, "test-model", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
         )
         conn.commit()
 
@@ -329,14 +397,17 @@ class TestCliM0(unittest.TestCase):
             def embed(self, texts, model):
                 out = []
                 for t in texts:
-                    out.append([1.0, 0.0] if t == "apple" else [0.0, 1.0])
+                    if t == "zzzz":
+                        out.append([0.0, 0.0])
+                    else:
+                        out.append([1.0, 0.0])
                 return out
 
         args = type(
             "Args",
             (),
             {
-                "query": "apple",
+                "query": "zzzz",
                 "query_en": "banana",
                 "model": "test-model",
                 "limit": 5,
@@ -354,10 +425,9 @@ class TestCliM0(unittest.TestCase):
                 cmd_hybrid(conn, args)
 
         out = json.loads(buf.getvalue())
-        self.assertEqual(len(out), 2)
-        by_id = {r["id"]: r for r in out}
-        self.assertIn("vector_en", by_id[2]["match"])
-        self.assertIn("vector", by_id[1]["match"])
+        self.assertGreaterEqual(len(out), 1)
+        self.assertEqual(out[0]["id"], 2)
+        self.assertIn("vector_en", out[0]["match"])
         conn.close()
 
 

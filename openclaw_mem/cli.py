@@ -128,6 +128,22 @@ def _init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_observation_embeddings_model ON observation_embeddings(model);")
 
+    # Backward-compatible parallel table for English embeddings.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS observation_embeddings_en (
+            observation_id INTEGER PRIMARY KEY,
+            model TEXT NOT NULL,
+            dim INTEGER NOT NULL,
+            vector BLOB NOT NULL,
+            norm REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(observation_id) REFERENCES observations(id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_observation_embeddings_en_model ON observation_embeddings_en(model);")
+
     conn.commit()
 
 
@@ -167,6 +183,10 @@ def cmd_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     emb_models = conn.execute(
         "SELECT model, COUNT(*) AS n FROM observation_embeddings GROUP BY model ORDER BY n DESC"
     ).fetchall()
+    emb_en_row = conn.execute("SELECT COUNT(*) AS n FROM observation_embeddings_en").fetchone()
+    emb_en_models = conn.execute(
+        "SELECT model, COUNT(*) AS n FROM observation_embeddings_en GROUP BY model ORDER BY n DESC"
+    ).fetchall()
 
     data = {
         "db": args.db,
@@ -176,6 +196,10 @@ def cmd_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "embeddings": {
             "count": emb_row["n"],
             "models": [{"model": r["model"], "count": r["n"]} for r in emb_models],
+        },
+        "embeddings_en": {
+            "count": emb_en_row["n"],
+            "models": [{"model": r["model"], "count": r["n"]} for r in emb_en_models],
         },
     }
     _emit(data, args.json)
@@ -579,6 +603,17 @@ class OpenAIEmbeddingsClient:
         return out
 
 
+def _embed_targets(field: str) -> List[Dict[str, str]]:
+    if field == "original":
+        return [{"name": "original", "text_col": "summary", "table": "observation_embeddings"}]
+    if field == "english":
+        return [{"name": "english", "text_col": "summary_en", "table": "observation_embeddings_en"}]
+    return [
+        {"name": "original", "text_col": "summary", "table": "observation_embeddings"},
+        {"name": "english", "text_col": "summary_en", "table": "observation_embeddings_en"},
+    ]
+
+
 def cmd_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Compute/store embeddings for observations."""
     api_key = _get_api_key()
@@ -590,65 +625,80 @@ def cmd_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     limit = int(args.limit)
     batch = int(args.batch)
     base_url = args.base_url
+    field = getattr(args, "field", "original")
 
     client = OpenAIEmbeddingsClient(api_key=api_key, base_url=base_url)
 
-    rows = conn.execute(
-        """
-        SELECT id, tool_name, summary
-        FROM observations
-        WHERE id NOT IN (
-            SELECT observation_id FROM observation_embeddings WHERE model = ?
-        )
-        ORDER BY id
-        LIMIT ?
-        """,
-        (model, limit),
-    ).fetchall()
-
-    todo = [dict(r) for r in rows]
-    inserted = 0
+    per_field: Dict[str, Dict[str, Any]] = {}
+    inserted_total = 0
     ids: List[int] = []
-
     now = datetime.utcnow().isoformat()
 
-    for i in range(0, len(todo), batch):
-        chunk = todo[i : i + batch]
-        texts = []
-        chunk_ids = []
-        for r in chunk:
-            tid = int(r["id"])
-            tool = (r.get("tool_name") or "").strip()
-            summary = (r.get("summary") or "").strip()
-            text = f"{tool}: {summary}".strip(": ")
-            texts.append(text)
-            chunk_ids.append(tid)
-
-        vecs = client.embed(texts, model=model)
-        for tid, vec in zip(chunk_ids, vecs):
-            blob = pack_f32(vec)
-            norm = l2_norm(vec)
-            dim = len(vec)
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO observation_embeddings
-                (observation_id, model, dim, vector, norm, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (tid, model, dim, blob, norm, now),
+    for target in _embed_targets(field):
+        rows = conn.execute(
+            f"""
+            SELECT id, tool_name, {target['text_col']} AS text_value
+            FROM observations
+            WHERE id NOT IN (
+                SELECT observation_id FROM {target['table']} WHERE model = ?
             )
-            inserted += 1
-            ids.append(tid)
+            AND trim(coalesce({target['text_col']}, '')) <> ''
+            ORDER BY id
+            LIMIT ?
+            """,
+            (model, limit),
+        ).fetchall()
 
-        conn.commit()
+        todo = [dict(r) for r in rows]
+        inserted = 0
+        field_ids: List[int] = []
+
+        for i in range(0, len(todo), batch):
+            chunk = todo[i : i + batch]
+            texts = []
+            chunk_ids = []
+            for r in chunk:
+                tid = int(r["id"])
+                tool = (r.get("tool_name") or "").strip()
+                summary = (r.get("text_value") or "").strip()
+                text = f"{tool}: {summary}".strip(": ")
+                texts.append(text)
+                chunk_ids.append(tid)
+
+            vecs = client.embed(texts, model=model)
+            for tid, vec in zip(chunk_ids, vecs):
+                blob = pack_f32(vec)
+                norm = l2_norm(vec)
+                dim = len(vec)
+                conn.execute(
+                    f"""
+                    INSERT OR REPLACE INTO {target['table']}
+                    (observation_id, model, dim, vector, norm, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (tid, model, dim, blob, norm, now),
+                )
+                inserted += 1
+                inserted_total += 1
+                field_ids.append(tid)
+                ids.append(tid)
+
+            conn.commit()
+
+        per_field[target["name"]] = {
+            "embedded": inserted,
+            "ids": field_ids[:50],
+            "total_candidates": len(todo),
+        }
 
     _emit(
         {
             "ok": True,
             "model": model,
-            "embedded": inserted,
+            "field": field,
+            "embedded": inserted_total,
             "ids": ids[:50],
-            "total_candidates": len(todo),
+            "per_field": per_field,
         },
         args.json,
     )
@@ -743,9 +793,17 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     vec_en_ids: List[int] = []
     if query_en_vec is not None:
+        vec_en_rows = conn.execute(
+            "SELECT observation_id, vector, norm FROM observation_embeddings_en WHERE model = ?",
+            (model,),
+        ).fetchall()
+
+        # Backward-compatible fallback when dedicated EN table is not populated.
+        search_rows = vec_en_rows if vec_en_rows else vec_rows
+
         vec_en_ranked = rank_cosine(
             query_vec=query_en_vec,
-            items=((int(r[0]), r[1], float(r[2])) for r in vec_rows),
+            items=((int(r[0]), r[1], float(r[2])) for r in search_rows),
             limit=limit * 2,
         )
         vec_en_ids = [rid for rid, _ in vec_en_ranked]
@@ -1356,6 +1414,8 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if api_key:
         try:
             client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
+            created_at = datetime.utcnow().isoformat()
+
             vec = client.embed([text], model=args.model)[0]
             blob = pack_f32(vec)
             norm = l2_norm(vec)
@@ -1365,8 +1425,22 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 (observation_id, model, dim, vector, norm, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (rowid, args.model, len(vec), blob, norm, datetime.utcnow().isoformat()),
+                (rowid, args.model, len(vec), blob, norm, created_at),
             )
+
+            if text_en:
+                vec_en = client.embed([text_en], model=args.model)[0]
+                blob_en = pack_f32(vec_en)
+                norm_en = l2_norm(vec_en)
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO observation_embeddings_en
+                    (observation_id, model, dim, vector, norm, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (rowid, args.model, len(vec_en), blob_en, norm_en, created_at),
+                )
+
             conn.commit()
         except Exception as e:
             # Non-fatal: storage succeeded, vector failed
@@ -1511,6 +1585,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
     sp.add_argument("--limit", type=int, default=500, help="Max observations to embed (default: 500)")
     sp.add_argument("--batch", type=int, default=64, help="Batch size per API call (default: 64)")
+    sp.add_argument("--field", choices=["original", "english", "both"], default="original", help="Embedding source field (default: original)")
     sp.set_defaults(func=cmd_embed)
 
     sp = sub.add_parser("vsearch", help="Vector search over embeddings (cosine similarity)")
