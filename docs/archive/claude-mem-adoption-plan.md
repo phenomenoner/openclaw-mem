@@ -17,7 +17,7 @@ OpenClaw already ships with a **native memory search subsystem** (SQLite + sqlit
 
 **Out of scope (later):** hook-based auto-capture, AI compression, vector search, MEMORY.md export.
 
-**Docs:** see `docs/m0-prototype.md`.
+**Docs:** see `m0-prototype.md` (archived M0 notes).
 
 ---
 

@@ -70,7 +70,7 @@ openclaw-mem hybrid "發布前流程" --query-en "pre-release process" --limit 5
 
 Design notes and rollout details:
 - `docs/dual-language-memory-strategy.md`
-- `docs/plans/2026-02-07-dual-language-rollout.md`
+- `docs/archive/2026-02-07-dual-language-rollout.md` (historical rollout plan)
 
 ## Auto-capture plugin
 
@@ -104,14 +104,16 @@ openclaw-mem triage --mode heartbeat --json
 
 ## Docs map
 
+Core docs:
 - `QUICKSTART.md` — 5-minute setup
 - `docs/auto-capture.md` — plugin setup + troubleshooting
 - `docs/deployment.md` — production timers/permissions/rotation
 - `docs/privacy-export-rules.md` — export safety rules
 - `docs/db-concurrency.md` — WAL + lock guidance
-- `docs/embedding-status.md` — embedding status/tradeoffs
-- `docs/claude-mem-adoption-plan.md` — architecture/adaptation notes
-- `docs/m0-prototype.md` — original M0 notes
+- `docs/dual-language-memory-strategy.md` — current zh/en memory approach
+
+Historical docs (archived):
+- `docs/archive/README.md`
 
 ## Test
 
