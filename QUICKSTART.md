@@ -61,6 +61,25 @@ uv run --python 3.13 -- python -m openclaw_mem get 1 --json
 uv run --python 3.13 -- python -m openclaw_mem timeline 2 --window 2 --json
 ```
 
+## Step 4.5: Dual-language memory (optional)
+
+If your build includes dual-language flags, you can store original text plus optional English text, then recall with an English assist query.
+
+```bash
+# Store: original + optional English companion
+openclaw-mem store "偏好：发布前先跑集成测试" \
+  --text-en "Preference: run integration tests before release" \
+  --category preference --importance 0.9 --json
+
+# Recall: original query + optional English assist query
+openclaw-mem recall "发布前流程" \
+  --query-en "pre-release process" \
+  --limit 5 --json
+```
+
+Use the original text as canonical; English text is retrieval assist.
+See: [`docs/dual-language-memory-strategy.md`](docs/dual-language-memory-strategy.md).
+
 ## Step 5: Enable Auto-Capture (Optional)
 
 To automatically capture tool executions:

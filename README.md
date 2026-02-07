@@ -20,6 +20,7 @@ Apache-2.0 licensed. No external DB required.
 - [Deployment guide](docs/deployment.md)
 - [Auto-capture plugin setup](docs/auto-capture.md)
 - [Privacy & export rules](docs/privacy-export-rules.md)
+- [Dual-language memory strategy](docs/dual-language-memory-strategy.md)
 - [Tests](tests/) (32 unit + integration)
 
 ## ✨ Why it’s useful (the pitch, but true)
@@ -57,6 +58,11 @@ If you’re building agents, you quickly hit two problems:
 
 Start here:
 - **[QUICKSTART.md](QUICKSTART.md)** — install + first search
+
+## 🌐 Dual-language memory (zh/en)
+
+For mixed-language memory deployments, see **[docs/dual-language-memory-strategy.md](docs/dual-language-memory-strategy.md)**.
+It covers rationale, field design (`text` + optional `text_en`), query fallback flow, tradeoffs, and rollout KPIs.
 
 Then pick what you need:
 - **[docs/auto-capture.md](docs/auto-capture.md)** — enable the plugin + troubleshooting
