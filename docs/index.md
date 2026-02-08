@@ -1,21 +1,42 @@
 # openclaw-mem
 
-Local-first memory **sidecar** for OpenClaw.
+**Local-first memory sidecar for OpenClaw.**
 
-What it does (operator view):
+Turn your agent’s work into a durable, searchable memory trail—without taking over the canonical memory slot.
 
-- **Capture** tool results as append-only observations (JSONL)
-- **Harvest** into a local SQLite ledger (FTS)
-- **Recall cheaply** via progressive disclosure: **search → timeline → get**
-- Optional upgrades: embeddings, hybrid search, AI compression
+## Why operators use it
 
-## Where to start
+- **Always-fresh recall:** keep “what just happened?” searchable in minutes (or less).
+- **Cheap progressive recall:** `search → timeline → get` keeps most lookups local.
+- **Auditability:** one SQLite ledger you can grep, backup, diff, and export.
+- **Safe boundaries:** OpenClaw backends stay canonical; this project stays sidecar.
 
-- **Quickstart:** [Quickstart](quickstart.md)
-- **Ecosystem boundaries / slot ownership:** [Ecosystem fit](ecosystem-fit.md)
-- **Production ops (always-fresh ingest):** [Deployment](deployment.md)
+## How it works (one screen)
 
-## Canonical sources
+```text
+OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progressive recall
+                           └────────────── optional: embeddings / compression
+```
 
-- GitHub README (full feature map): <https://github.com/phenomenoner/openclaw-mem>
-- QUICKSTART.md (canonical): <https://github.com/phenomenoner/openclaw-mem/blob/main/QUICKSTART.md>
+## Start here
+
+| | | |
+|---|---|---|
+| **Quickstart** | **Ecosystem fit** | **Deployment** |
+| Install + run the 5‑minute tour. | Who owns which memory tools/slots. | Always‑fresh ingest profile + ops tips. |
+| [Go →](quickstart.md) | [Go →](ecosystem-fit.md) | [Go →](deployment.md) |
+
+## Minimal CLI taste
+
+```bash
+# Create/open DB and show counts
+uv run --python 3.13 -- python -m openclaw_mem status --json
+
+# Cheap recall
+uv run --python 3.13 -- python -m openclaw_mem search "gateway timeout" --limit 10 --json
+```
+
+## Links
+
+- Repo: <https://github.com/phenomenoner/openclaw-mem>
+- Issues: <https://github.com/phenomenoner/openclaw-mem/issues>
