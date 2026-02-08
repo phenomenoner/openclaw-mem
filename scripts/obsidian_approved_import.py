@@ -157,28 +157,62 @@ def _parse_queue_items(queue_block: list[str]) -> list[QueueItem]:
     return items
 
 
-def _run_store(item: QueueItem) -> dict[str, Any]:
+def _run_store(item: QueueItem, *, workspace: Path | None) -> dict[str, Any]:
+    # openclaw-mem's installed console script may not exist in some uv setups
+    # (e.g., when the project isn't packaged). So we call the module directly
+    # using the current interpreter (expected: `uv run ... python ...`).
+
+    # Map vault-friendly aliases to openclaw-mem categories.
+    cat = item.category.strip().lower()
+    if cat == "note":
+        cat = "other"
+
     cmd = [
-        "openclaw-mem",
+        sys.executable,
+        "-m",
+        "openclaw_mem",
         "store",
         item.text,
         "--category",
-        item.category,
+        cat,
         "--importance",
         str(item.importance),
         "--json",
     ]
+
+    if workspace is not None:
+        cmd += ["--workspace", str(workspace)]
+
     if item.text_en:
         cmd += ["--text-en", item.text_en]
 
-    # Important: this expects to be executed inside the openclaw-mem uv environment.
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
         raise RuntimeError(f"store failed ({p.returncode}): {p.stderr.strip() or p.stdout.strip()}")
 
     # openclaw-mem prints warnings to stderr; JSON result should be on stdout.
-    out = p.stdout.strip().splitlines()[-1].strip()
-    return json.loads(out)
+    stdout = (p.stdout or "").strip()
+    stderr = (p.stderr or "").strip()
+    if not stdout:
+        raise RuntimeError(f"store produced no stdout (expected JSON). stderr={stderr[:400]}")
+
+    try:
+        return json.loads(stdout)
+    except Exception as e:
+        # If stdout contains extra non-JSON lines, attempt to salvage the last JSON block.
+        s = stdout
+        start = s.rfind("{")
+        if start != -1:
+            tail = s[start:]
+            try:
+                return json.loads(tail)
+            except Exception:
+                pass
+        raise RuntimeError(
+            "store stdout was not valid JSON: "
+            + str(e)
+            + f" | stdout_head={stdout[:200]!r} | stderr_head={stderr[:200]!r}"
+        )
 
 
 def main() -> None:
@@ -196,12 +230,18 @@ def main() -> None:
     )
     ap.add_argument("--apply", action="store_true", help="Actually modify files/state")
     ap.add_argument("--limit", type=int, default=50, help="Max items per run")
+    ap.add_argument(
+        "--workspace",
+        default="~/.openclaw/workspace",
+        help="OpenClaw workspace root for writing memory/YYYY-MM-DD.md (default: ~/.openclaw/workspace)",
+    )
 
     args = ap.parse_args()
 
     vault = Path(args.vault)
     approved_path = vault / args.approved_file
     state_path = vault / args.state_file
+    workspace = Path(args.workspace).expanduser()
 
     if not approved_path.exists():
         print(json.dumps({"ok": False, "error": f"missing approved file: {approved_path}"}))
@@ -228,8 +268,23 @@ def main() -> None:
 
     for it in to_process:
         h = _sha(it.raw_line)
+
+        # Dry-run mode: do NOT write to openclaw-mem; just report what would happen.
+        if not args.apply:
+            results.append(
+                {
+                    "ok": True,
+                    "hash": h,
+                    "planned": True,
+                    "category": it.category,
+                    "importance": it.importance,
+                    "raw": it.raw_line,
+                }
+            )
+            continue
+
         try:
-            res = _run_store(it)
+            res = _run_store(it, workspace=workspace)
             processed[h] = {
                 "ts": datetime.now(timezone.utc).isoformat(),
                 "id": res.get("id"),
