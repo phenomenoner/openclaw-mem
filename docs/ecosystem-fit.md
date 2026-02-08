@@ -150,15 +150,4 @@ Use a split pipeline:
 +------------------------------+
 ```
 
-### Mermaid
-
-```mermaid
-flowchart TD
-    A[OpenClaw Sessions\n(main + cron)] -->|native memory APIs| B[memory-core OR memory-lancedb\n(canonical slot owner)]
-    A -->|tool_result_persist| C[openclaw-mem capture plugin\n(sidecar)]
-    C --> D[openclaw-mem-observations.jsonl]
-    D -->|every 5m\n--no-embed --no-update-index| E[openclaw-mem.sqlite + FTS]
-    D -->|hourly\n--embed --update-index| F[Embeddings + Index refresh]
-    E --> G[Progressive recall\nsearch -> timeline -> get]
-    E --> H[Ops telemetry\nusage-ledger + 12h overhead report]
-```
+(Mermaid diagram removed due GitHub renderer compatibility issues; ASCII diagram above is canonical.)

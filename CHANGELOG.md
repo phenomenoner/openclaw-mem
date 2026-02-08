@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `README`, `QUICKSTART`, `docs/auto-capture`, `docs/deployment` with deployment topology guidance and value framing.
 - Expanded onboarding docs for freshness operations:
   - documented the ingest-lag issue pattern and split-lane fix (`5m` no-embed ingest + hourly embed/index refresh)
-  - added one-screen architecture diagrams (ASCII + Mermaid) in `docs/ecosystem-fit.md`
+  - added one-screen architecture diagrams in `docs/ecosystem-fit.md` (kept ASCII as canonical)
   - clarified token-overhead tradeoff between OS scheduler vs OpenClaw cron `agentTurn` wrappers.
+  - removed Mermaid block from `docs/ecosystem-fit.md` due GitHub rich-render compatibility issues.
 
 ## [0.5.9] - 2026-02-08
 
