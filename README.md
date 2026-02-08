@@ -95,6 +95,15 @@ uv run openclaw-mem hybrid "tabs or spaces preference" --limit 5 --json
 
 ---
 
+## Typical outcomes (what it enables)
+
+This is what a “serious” always-on agent starts to feel like when memory is stable:
+
+- Wake up to a **daily briefing** (what matters today + what broke overnight)
+- Fewer context drops: the agent can **carry threads across days**
+- Less busywork: deterministic background scans + human approval only when needed
+- A growing, auditable trail you can browse later (and optionally visualize in Obsidian)
+
 ## How it fits together (system view)
 
 **Capture → Ingest → Recall**
@@ -178,6 +187,12 @@ This is designed to be safe for heartbeat automation: fast, local, and determini
 
 ---
 
+## Obsidian (optional): turn memory into a “second brain”
+
+If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, daily notes), Obsidian is a great human-facing UI on top of the artifacts `openclaw-mem` produces.
+
+- Guide: `docs/obsidian.md`
+
 ## Documentation map
 
 - `QUICKSTART.md` — 5-minute setup
@@ -186,6 +201,7 @@ This is designed to be safe for heartbeat automation: fast, local, and determini
 - `docs/privacy-export-rules.md` — export safety rules
 - `docs/db-concurrency.md` — WAL + lock guidance
 - `docs/dual-language-memory-strategy.md` — current zh/en memory approach
+- `docs/obsidian.md` — optional Obsidian adoption guide
 - `CHANGELOG.md` — notable changes (Keep a Changelog)
 
 ---
