@@ -85,6 +85,17 @@ Goal: automation without losing trust.
 - Only allow append-only writes initially.
 - Use deterministic triage + approval prompts for risky actions.
 
+#### Minimal closed-loop (v0): approve → import
+
+A practical way to turn Obsidian into a *real* learning loop (instead of just a viewer) is:
+
+1. Agent writes proposals into `OpenClaw/Inbox/`.
+2. Human approves by adding bullet items into `OpenClaw/Approved/approved_memories.md`.
+3. Importer persists approved items into `openclaw-mem` using `openclaw-mem store`.
+
+Reference importer script:
+- `scripts/obsidian_approved_import.py`
+
 ---
 
 ## Practical integration patterns
