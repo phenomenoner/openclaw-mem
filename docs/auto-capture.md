@@ -1,41 +1,54 @@
-# Auto-Capture Plugin
+# Auto-Capture Plugin (`openclaw-mem`)
 
 ## Overview
 
-The `openclaw-mem` plugin automatically captures tool execution results via the `tool_result_persist` hook and writes them to a JSONL file for ingestion into the observation store.
+The OpenClaw plugin in `extensions/openclaw-mem/` provides two complementary capabilities:
+
+1. **Auto-capture**: listens to the OpenClaw `tool_result_persist` hook and writes compact JSONL observations for later ingestion into the local SQLite store.
+2. **Agent memory tools**: exposes `memory_store` / `memory_recall` tools that call into the `openclaw-mem` CLI.
+
+This makes `openclaw-mem` feel like a real “memory layer”:
+- passive capture for factual traces of agent work
+- explicit store/recall for preferences/tasks you want to persist reliably
+
+---
 
 ## Features
 
-✅ **Automatic capture** — No manual logging required  
-✅ **Filter controls** — Include/exclude specific tools  
-✅ **Smart summaries** — Extracts compact summaries from tool results  
-✅ **Message truncation** — Optional full message capture (size-limited)  
-✅ **Crash-safe** — Append-only JSONL (durable on process termination)
+✅ Automatic capture (append-only JSONL)  
+✅ Include/exclude filtering for noisy tools  
+✅ Smart summaries (compact extraction from tool results)  
+✅ Optional message capture with truncation  
+✅ Best-effort secret redaction before persisting  
+✅ Agent tools: `memory_store`, `memory_recall`
+
+---
 
 ## Installation
 
-The plugin is located at `extensions/openclaw-mem/` in this repo.
+The plugin source is at: `extensions/openclaw-mem/`.
 
-### Option 1: Symlink (Development)
+### Option 1: Symlink (recommended)
+
+This keeps the plugin located *inside* the `openclaw-mem` repo, which is important if you want `memory_store` / `memory_recall` to work.
 
 ```bash
 # From openclaw-mem repo root
 ln -s "$(pwd)/extensions/openclaw-mem" ~/.openclaw/plugins/openclaw-mem
-
-# Restart OpenClaw gateway
 openclaw gateway restart
 ```
 
-### Option 2: Copy (Production)
+### Option 2: Copy (capture-only)
+
+If you copy only the plugin folder into `~/.openclaw/plugins`, auto-capture still works.
+However, `memory_store` / `memory_recall` may not work unless the Python project/CLI is installed and available.
 
 ```bash
 cp -r extensions/openclaw-mem ~/.openclaw/plugins/
 openclaw gateway restart
 ```
 
-### Option 3: Plugin Load Path
-
-Add to `openclaw.json`:
+### Option 3: Plugin load path
 
 ```json
 {
@@ -47,11 +60,13 @@ Add to `openclaw.json`:
 }
 ```
 
+---
+
 ## Configuration
 
-Add to `openclaw.json`:
+Add to `~/.openclaw/openclaw.json`:
 
-```json
+```jsonc
 {
   "plugins": {
     "entries": {
@@ -59,8 +74,10 @@ Add to `openclaw.json`:
         "enabled": true,
         "config": {
           "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl",
+          "enabled": true,
           "captureMessage": false,
           "maxMessageLength": 1000,
+          "redactSensitive": true,
           "includeTools": [],
           "excludeTools": ["web_fetch"]
         }
@@ -70,20 +87,24 @@ Add to `openclaw.json`:
 }
 ```
 
-### Config Options
+### Config options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `enabled` | boolean | `true` | Enable/disable capture |
+| `enabled` | boolean | `true` | Enable/disable capture behavior inside the plugin |
 | `outputPath` | string | `~/.openclaw/memory/openclaw-mem-observations.jsonl` | JSONL output file |
 | `captureMessage` | boolean | `false` | Include full tool message (truncated) |
 | `maxMessageLength` | number | `1000` | Max message length per content block |
-| `includeTools` | string[] | `[]` | Allowlist (if set, only these tools) |
-| `excludeTools` | string[] | `[]` | Denylist (excludes specific tools) |
+| `redactSensitive` | boolean | `true` | Redact common secret patterns before persisting |
+| `includeTools` | string[] | `[]` | Allowlist (if set, only these tools are captured) |
+| `excludeTools` | string[] | `[]` | Denylist (excluded tools are not captured) |
 
-**Note:** If both `includeTools` and `excludeTools` are empty, all tools are captured.
+Note:
+- If both `includeTools` and `excludeTools` are empty, all tools are captured.
 
-## Output Format
+---
+
+## Output format
 
 Each captured tool execution is written as a single-line JSON object:
 
@@ -91,113 +112,55 @@ Each captured tool execution is written as a single-line JSON object:
 {"ts":"2026-02-05T20:00:00.000Z","kind":"tool","tool_name":"web_search","tool_call_id":"toolu_01ABC","session_key":"agent:main:main","agent_id":"main","is_synthetic":false,"summary":"searched for OpenClaw docs"}
 ```
 
-### Fields
-
+Fields:
 - `ts` — ISO 8601 timestamp
-- `kind` — Always `"tool"` (reserved for future: `"user"`, `"assistant"`)
-- `tool_name` — Tool that was executed
-- `tool_call_id` — Unique call ID from LLM
+- `kind` — currently always `"tool"`
+- `tool_name` — tool that was executed
+- `tool_call_id` — unique call id
 - `session_key` — OpenClaw session identifier
-- `agent_id` — Agent ID
-- `is_synthetic` — `true` if synthesized by guard/repair logic
-- `summary` — Compact summary extracted from tool result
-- `message` — (optional) Full tool message if `captureMessage=true`
+- `agent_id` — agent id
+- `is_synthetic` — true if synthesized by guard/repair logic
+- `summary` — compact summary extracted from tool result
+- `message` — (optional) full tool message if `captureMessage=true`
 
-## Usage Workflow
+---
 
-### 1. Enable Plugin
+## Agent memory tools (`memory_store`, `memory_recall`)
+
+When the plugin is enabled, it exposes tools to the agent runtime:
+
+- `memory_store`: stores a memory (calls `openclaw-mem store ...`)
+- `memory_recall`: recalls memories (calls `openclaw-mem hybrid ...`)
+
+Practical notes:
+- These tools are best used for **explicit** memory: preferences, tasks, durable facts.
+- They require `openclaw-mem` to be runnable (either via `uv` in the repo, or via an installed CLI on PATH).
+
+---
+
+## Usage workflow
+
+### 1) Enable plugin + verify capture
 
 ```bash
-# Add to openclaw.json, then restart
-openclaw gateway restart
-```
-
-### 2. Verify Capture
-
-```bash
-# Check that observations are being written
 tail -f ~/.openclaw/memory/openclaw-mem-observations.jsonl
 ```
 
-### 3. Ingest into SQLite
+### 2) Ingest into SQLite
 
 ```bash
 cd /path/to/openclaw-mem
-uv run --python 3.13 -- python -m openclaw_mem ingest \
+uv run openclaw-mem ingest \
   --file ~/.openclaw/memory/openclaw-mem-observations.jsonl --json
 ```
 
-### 4. Search
+### 3) Search
 
 ```bash
-uv run --python 3.13 -- python -m openclaw_mem search "web_search" --json
+uv run openclaw-mem search "web_search" --json
 ```
 
-## Advanced: Periodic Ingestion (Cron)
-
-Add a cron job to automatically ingest new observations:
-
-```json
-{
-  "cron": {
-    "jobs": [
-      {
-        "name": "Ingest openclaw-mem observations",
-        "schedule": { "kind": "every", "everyMs": 300000 },
-        "sessionTarget": "isolated",
-        "payload": {
-          "kind": "agentTurn",
-          "message": "Run: cd /path/to/openclaw-mem && uv run -- python -m openclaw_mem ingest --file ~/.openclaw/memory/openclaw-mem-observations.jsonl --json",
-          "deliver": false
-        }
-      }
-    ]
-  }
-}
-```
-
-## Filtering Examples
-
-### Capture Only Specific Tools
-
-```json
-{
-  "openclaw-mem": {
-    "config": {
-      "includeTools": ["web_search", "web_fetch", "exec"]
-    }
-  }
-}
-```
-
-### Exclude Noisy Tools
-
-```json
-{
-  "openclaw-mem": {
-    "config": {
-      "excludeTools": ["session_status", "cron.list"]
-    }
-  }
-}
-```
-
-## Performance & Storage
-
-**Typical observation size:** ~200-500 bytes (without full message)  
-**With full message:** ~1-5 KB per observation (depends on tool output)
-
-**Storage estimates:**
-- 1000 tool calls/day × 300 bytes = ~300 KB/day = ~9 MB/month
-- 1000 tool calls/day × 2 KB = ~2 MB/day = ~60 MB/month (with messages)
-
-**Rotation:** Use `logrotate` or a cron job to archive old JSONL files:
-
-```bash
-# ~/.openclaw/memory/openclaw-mem-observations.jsonl
-# Rotate daily, keep 30 days
-0 0 * * * mv ~/.openclaw/memory/openclaw-mem-observations.jsonl ~/.openclaw/memory/openclaw-mem-observations-$(date +\%Y-\%m-\%d).jsonl
-```
+---
 
 ## Troubleshooting
 
@@ -218,24 +181,15 @@ Add a cron job to automatically ingest new observations:
    tail -f ~/.openclaw/logs/gateway.log | grep openclaw-mem
    ```
 
-### Permission errors
-
-Ensure output directory exists and is writable:
-```bash
-mkdir -p ~/.openclaw/memory
-chmod 755 ~/.openclaw/memory
-```
-
 ### JSONL file growing too large
 
-1. Enable rotation (see Performance section)
-2. Reduce capture scope (use `excludeTools`)
-3. Disable `captureMessage` if enabled
+1. Reduce scope (`excludeTools` or `includeTools`)
+2. Keep `captureMessage=false`
+3. Rotate JSONL periodically (see `docs/deployment.md`)
 
-## Next Steps
+---
 
-After auto-capture is running:
-1. Set up periodic ingestion (cron job)
-2. Explore search & timeline commands
-3. Configure AI compression (Phase 2)
-4. Enable vector search (Phase 3)
+## Next steps
+
+- Deployment patterns: `docs/deployment.md`
+- Privacy/export rules: `docs/privacy-export-rules.md`

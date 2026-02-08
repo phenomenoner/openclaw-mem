@@ -1,98 +1,91 @@
 # Quickstart Guide
 
-Get openclaw-mem up and running in under 5 minutes.
+Get openclaw-mem up and running in ~5 minutes.
 
 ## Prerequisites
 
 - Python 3.10+ (recommended: Python 3.13)
-- [uv](https://github.com/astral-sh/uv) installed
-- OpenClaw gateway running (only needed for the auto-capture plugin)
+- [uv](https://github.com/astral-sh/uv)
+- OpenClaw gateway running (only needed for the plugin / Route A)
+
+---
 
 ## Step 1: Install
 
 ```bash
-# Clone the repo
 git clone https://github.com/phenomenoner/openclaw-mem.git
 cd openclaw-mem
-
-# Install dependencies
 uv sync --locked
 ```
+
+---
 
 ## Step 2: Quick Test
 
 ```bash
-# Run status check (creates empty DB)
-uv run --python 3.13 -- python -m openclaw_mem status --json
-
-# Expected output:
-# {
-#   "db": "~/.openclaw/memory/openclaw-mem.sqlite",
-#   "count": 0,
-#   "min_ts": null,
-#   "max_ts": null
-# }
+# Creates/open DB and prints stats
+uv run openclaw-mem status --json
 ```
+
+---
 
 ## Step 3: Ingest Sample Data
 
 ```bash
-# Create sample observations
 cat > /tmp/sample.jsonl <<'EOF'
 {"ts":"2026-02-05T10:00:00Z","kind":"tool","tool_name":"web_search","summary":"searched for OpenClaw","detail":{"results":5}}
 {"ts":"2026-02-05T10:01:00Z","kind":"tool","tool_name":"web_fetch","summary":"fetched openclaw.ai","detail":{"ok":true}}
 {"ts":"2026-02-05T10:02:00Z","kind":"tool","tool_name":"exec","summary":"ran git status","detail":{"exit_code":0}}
 EOF
 
-# Ingest
-uv run --python 3.13 -- python -m openclaw_mem ingest --file /tmp/sample.jsonl --json
+uv run openclaw-mem ingest --file /tmp/sample.jsonl --json
 ```
 
-## Step 4: Search
+---
+
+## Step 4: Progressive recall (search → timeline → get)
 
 ```bash
-# Search for observations
-uv run --python 3.13 -- python -m openclaw_mem search "OpenClaw" --json
-
-# Get details for ID 1
-uv run --python 3.13 -- python -m openclaw_mem get 1 --json
-
-# Timeline around ID 2 (±2 observations)
-uv run --python 3.13 -- python -m openclaw_mem timeline 2 --window 2 --json
+uv run openclaw-mem search "OpenClaw" --limit 10 --json
+uv run openclaw-mem timeline 2 --window 2 --json
+uv run openclaw-mem get 1 --json
 ```
+
+---
 
 ## Step 4.5: Dual-language memory (optional)
 
-If your build includes dual-language flags, you can store original text plus optional English text, then recall with an English assist query.
-
 ```bash
-# Store: original + optional English companion
-openclaw-mem store "偏好：发布前先跑集成测试" \
+uv run openclaw-mem store "偏好：发布前先跑集成测试" \
   --text-en "Preference: run integration tests before release" \
-  --category preference --importance 0.9 --json
+  --lang zh --category preference --importance 0.9 --json
 
-# Recall: original query + optional English assist query
-openclaw-mem recall "发布前流程" \
+uv run openclaw-mem hybrid "发布前流程" \
   --query-en "pre-release process" \
   --limit 5 --json
 ```
 
-Use the original text as canonical; English text is retrieval assist.
-See: [`docs/dual-language-memory-strategy.md`](docs/dual-language-memory-strategy.md).
+See: `docs/dual-language-memory-strategy.md`.
 
-## Step 5: Enable Auto-Capture (Optional)
+---
 
-To automatically capture tool executions:
+## Step 5: Enable the OpenClaw plugin (optional)
+
+The plugin provides:
+- auto-capture (writes tool results to JSONL)
+- `memory_store` + `memory_recall` tools for agents
 
 ```bash
 # Symlink plugin into OpenClaw
 ln -s "$(pwd)/extensions/openclaw-mem" ~/.openclaw/plugins/openclaw-mem
 
-# Add config to ~/.openclaw/openclaw.json
-# IMPORTANT: openclaw.json is a full JSON document.
-# Don’t blindly append a second JSON object.
-# Instead, edit ~/.openclaw/openclaw.json and merge in this fragment:
+# Restart gateway
+openclaw gateway restart
+```
 
+Minimal config fragment for `~/.openclaw/openclaw.json`:
+
+```jsonc
 {
   "plugins": {
     "entries": {
@@ -107,111 +100,40 @@ ln -s "$(pwd)/extensions/openclaw-mem" ~/.openclaw/plugins/openclaw-mem
     }
   }
 }
-
-# Restart gateway
-openclaw gateway restart
 ```
 
 Verify capture is working:
 
 ```bash
-# Check that observations are being written
 tail -f ~/.openclaw/memory/openclaw-mem-observations.jsonl
+```
 
-# Ingest them periodically
-uv run --python 3.13 -- python -m openclaw_mem ingest \
+Ingest captured observations:
+
+```bash
+uv run openclaw-mem ingest \
   --file ~/.openclaw/memory/openclaw-mem-observations.jsonl --json
 ```
 
-## Step 6: AI Compression (Optional)
+---
 
-To compress daily notes into MEMORY.md:
-
-```bash
-# Set API key
-export OPENAI_API_KEY=sk-...
-
-# Compress yesterday's note (dry-run first)
-uv run --python 3.13 -- python -m openclaw_mem summarize --dry-run --json
-
-# Actually write to MEMORY.md
-uv run --python 3.13 -- python -m openclaw_mem summarize --json
-```
-
-## Step 7: Vector Search (Optional)
-
-Vector search requires embeddings. You can build embeddings for observations, then run cosine-similarity search.
+## Step 6: Deterministic triage (optional)
 
 ```bash
-export OPENAI_API_KEY=sk-...
-
-# Build embeddings for original text (default)
-uv run --python 3.13 -- python -m openclaw_mem embed --limit 500 --json
-
-# Backfill English embeddings from summary_en/text_en
-uv run --python 3.13 -- python -m openclaw_mem embed --field english --limit 500 --json
-
-# Vector search
-uv run --python 3.13 -- python -m openclaw_mem vsearch "gateway timeout" --limit 10 --json
+uv run openclaw-mem triage --mode heartbeat --json
 ```
 
-## Next Steps
+---
 
-- Read [`README.md`](README.md) for full documentation
-- See [`docs/auto-capture.md`](docs/auto-capture.md) for plugin setup details
-- Check [`CHANGELOG.md`](CHANGELOG.md) for complete feature list
-- Run tests: `uv run --python 3.13 -- python -m unittest discover -s tests`
+## Next steps
 
-## Common Issues
+- Full docs: `README.md`
+- Plugin details: `docs/auto-capture.md`
+- Deployment: `docs/deployment.md`
+- Changes/features: `CHANGELOG.md`
 
-### "ModuleNotFoundError: No module named 'openclaw_mem'"
-
-Make sure you're in the openclaw-mem directory and have run `uv sync --locked`.
-
-### "database is locked" errors
-
-Enable WAL mode (already done by default) and ensure you're using short-lived connections. See [`docs/db-concurrency.md`](docs/db-concurrency.md).
-
-### Plugin not capturing
-
-1. Check plugin is loaded: `openclaw plugins list | grep openclaw-mem`
-2. Check config: `openclaw config get | jq '.plugins.entries["openclaw-mem"]'`
-3. Check logs: `tail -f ~/.openclaw/logs/gateway.log | grep openclaw-mem`
-
-## CLI Cheat Sheet
+## Tests
 
 ```bash
-# Status
-openclaw-mem status --json
-
-# Ingest
-openclaw-mem ingest --file observations.jsonl --json
-
-# Search (Layer 1: compact results)
-openclaw-mem search "keyword" --limit 20 --json
-
-# Timeline (Layer 2: context window)
-openclaw-mem timeline 10 20 30 --window 4 --json
-
-# Get (Layer 3: full details)
-openclaw-mem get 10 20 30 --json
-
-# AI compression
-export OPENAI_API_KEY=sk-...
-openclaw-mem summarize --dry-run --json  # preview
-openclaw-mem summarize --json            # write
-
-# Export observations (Markdown)
-openclaw-mem export --to /tmp/export.md --limit 20 --json
-
-# Vector search
-openclaw-mem embed --limit 500 --json
-openclaw-mem embed --field english --limit 500 --json  # EN backfill
-openclaw-mem vsearch "gateway timeout" --limit 10 --json
+uv run --python 3.13 -- python -m unittest discover -s tests -p 'test_*.py'
 ```
-
-## Support
-
-- GitHub Issues: https://github.com/phenomenoner/openclaw-mem/issues
-- OpenClaw Discord: https://discord.com/invite/clawd
-- Documentation: See [`README.md`](README.md)
