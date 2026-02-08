@@ -73,7 +73,8 @@ See: `docs/dual-language-memory-strategy.md`.
 
 The plugin provides:
 - auto-capture (writes tool results to JSONL)
-- `memory_store` + `memory_recall` tools for agents
+
+For explicit memory writes/reads, use CLI commands (`openclaw-mem store` / `openclaw-mem hybrid`).
 
 ```bash
 # Symlink plugin into OpenClaw

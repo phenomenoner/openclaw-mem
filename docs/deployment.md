@@ -53,11 +53,11 @@ Add to `~/.openclaw/openclaw.json` (or `/etc/openclaw/openclaw.json` for system-
           
           // Recommended safety default: avoid persisting high-sensitivity tools.
           // This plugin captures *tool results* (not raw user inbound messages).
-          // For user preferences / reminders, use `memory_store` explicitly.
+          // For user preferences / reminders, use `openclaw-mem store` explicitly.
           "excludeTools": ["exec", "read", "browser", "gateway", "message", "nodes", "canvas"]
           
           // Alternative (stricter): use includeTools allowlist instead.
-          // "includeTools": ["memory_store", "web_search", "web_fetch"]
+          // "includeTools": ["web_search", "web_fetch"]
         }
       }
     }
@@ -70,7 +70,7 @@ Add to `~/.openclaw/openclaw.json` (or `/etc/openclaw/openclaw.json` for system-
 - This plugin listens to **`tool_result_persist`** events, so it captures **tool results**, not raw inbound user messages.
 - Excluding `message` mainly avoids persisting **outbound sendMessage payloads** (which may include private info), and does **not** prevent you from storing user preferences.
 - Recommended pattern for personal / task-like facts ("buy coffee this afternoon", preferences, etc.):
-  - use the explicit tool **`memory_store`** (plugin tool) or CLI **`openclaw-mem store`** when the agent/user says “remember this”.
+  - use explicit CLI write **`openclaw-mem store`** when the agent/user says “remember this”.
 
 If you want broader capture for debugging, prefer **includeTools allowlist** over capturing everything.
 

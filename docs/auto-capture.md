@@ -2,14 +2,14 @@
 
 ## Overview
 
-The OpenClaw plugin in `extensions/openclaw-mem/` provides two complementary capabilities:
+The OpenClaw plugin in `extensions/openclaw-mem/` is **capture-only**:
 
-1. **Auto-capture**: listens to the OpenClaw `tool_result_persist` hook and writes compact JSONL observations for later ingestion into the local SQLite store.
-2. **Agent memory tools**: exposes `memory_store` / `memory_recall` tools that call into the `openclaw-mem` CLI.
+- listens to `tool_result_persist`
+- writes compact JSONL observations for later ingestion into the local SQLite store
 
-This makes `openclaw-mem` feel like a real “memory layer”:
-- passive capture for factual traces of agent work
-- explicit store/recall for preferences/tasks you want to persist reliably
+For explicit long-term memory writes/reads, use CLI directly:
+- `openclaw-mem store ...`
+- `openclaw-mem hybrid ...`
 
 ---
 
@@ -19,8 +19,7 @@ This makes `openclaw-mem` feel like a real “memory layer”:
 ✅ Include/exclude filtering for noisy tools  
 ✅ Smart summaries (compact extraction from tool results)  
 ✅ Optional message capture with truncation  
-✅ Best-effort secret redaction before persisting  
-✅ Agent tools: `memory_store`, `memory_recall`
+✅ Best-effort secret redaction before persisting
 
 ---
 
@@ -30,18 +29,13 @@ The plugin source is at: `extensions/openclaw-mem/`.
 
 ### Option 1: Symlink (recommended)
 
-This keeps the plugin located *inside* the `openclaw-mem` repo, which is important if you want `memory_store` / `memory_recall` to work.
-
 ```bash
 # From openclaw-mem repo root
 ln -s "$(pwd)/extensions/openclaw-mem" ~/.openclaw/plugins/openclaw-mem
 openclaw gateway restart
 ```
 
-### Option 2: Copy (capture-only)
-
-If you copy only the plugin folder into `~/.openclaw/plugins`, auto-capture still works.
-However, `memory_store` / `memory_recall` may not work unless the Python project/CLI is installed and available.
+### Option 2: Copy
 
 ```bash
 cp -r extensions/openclaw-mem ~/.openclaw/plugins/
@@ -102,18 +96,6 @@ Add to `~/.openclaw/openclaw.json`:
 Note:
 - If both `includeTools` and `excludeTools` are empty, all tools are captured.
 
-Tool policy note:
-- If your OpenClaw setup uses strict tool policy, explicitly opt-in plugin tools so the agent can call them.
-- Recommended additive config (keeps existing profile/allow behavior):
-
-```jsonc
-{
-  "tools": {
-    "alsoAllow": ["memory_store", "memory_recall"]
-  }
-}
-```
-
 ---
 
 ## Output format
@@ -137,23 +119,6 @@ Fields:
 
 ---
 
-## Agent memory tools (`memory_store`, `memory_recall`)
-
-When the plugin is enabled, it exposes tools to the agent runtime:
-
-- `memory_store`: stores a memory (calls `openclaw-mem store ...`)
-- `memory_recall`: recalls memories (calls `openclaw-mem hybrid ...`)
-
-Implementation note:
-- Tool exposure is wired using the official OpenClaw plugin API (`api.registerTool(...)` in `register()`), matching first-party extensions.
-- If capture logs appear but these tools are missing, verify you are running a plugin build that includes this registration path and restart the gateway.
-
-Practical notes:
-- These tools are best used for **explicit** memory: preferences, tasks, durable facts.
-- They require `openclaw-mem` to be runnable (either via `uv` in the repo, or via an installed CLI on PATH).
-
----
-
 ## Usage workflow
 
 ### 1) Enable plugin + verify capture
@@ -174,6 +139,13 @@ uv run openclaw-mem ingest \
 
 ```bash
 uv run openclaw-mem search "web_search" --json
+```
+
+### 4) Explicit memory write/read (CLI)
+
+```bash
+uv run openclaw-mem store "Prefer dark theme" --category preference --importance 0.8 --json
+uv run openclaw-mem hybrid "theme preference" --limit 5 --json
 ```
 
 ---
