@@ -11,6 +11,14 @@ For explicit long-term memory writes/reads, use CLI directly:
 - `openclaw-mem store ...`
 - `openclaw-mem hybrid ...`
 
+### Ecosystem boundaries (why this is sidecar-only)
+
+- `memory-core` and `memory-lancedb` are the canonical OpenClaw memory backends.
+- `openclaw-mem` focuses on capture, local ingest/recall, and operations visibility.
+- This keeps backend migration and rollback low-risk: slot ownership stays native, while capture/audit remains continuous.
+
+If you want the full deployment matrix, see `docs/ecosystem-fit.md`.
+
 ---
 
 ## Features

@@ -124,6 +124,22 @@ This design is intentionally practical:
 - deterministic baseline behavior
 - optional AI where it provides leverage (compression/embeddings), not as the only way the system works
 
+### Ecosystem fit with OpenClaw native memory
+
+`openclaw-mem` is intentionally a **sidecar**, not a slot owner:
+
+- `memory-core` owns native baseline tools (`memory_search`, `memory_get`)
+- `memory-lancedb` owns official semantic tools (`memory_store`, `memory_recall`, `memory_forget`)
+- `openclaw-mem` adds capture, local-first recall, triage, and backend-aware observability
+
+Practical effect for operators:
+- you can switch memory slot (`memory-core` ↔ `memory-lancedb`) without rebuilding your memory ledger pipeline
+- you keep a stable local audit trail during migrations and incidents
+- rollback remains one slot flip away
+
+See detailed deployment patterns:
+- `docs/ecosystem-fit.md`
+
 ---
 
 ## Dual-language memory (zh/en etc.)
@@ -211,6 +227,7 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 - `docs/dual-language-memory-strategy.md` — current zh/en memory approach
 - `docs/obsidian.md` — optional Obsidian adoption guide
 - `docs/v0.5.9-adapter-spec.md` — minimal-risk adapter design for `memory-core`/`memory-lancedb`
+- `docs/ecosystem-fit.md` — ownership boundaries + deployment patterns (`memory-core`/`memory-lancedb` + `openclaw-mem`)
 - `CHANGELOG.md` — notable changes (Keep a Changelog)
 
 ---

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs
+- Added `docs/ecosystem-fit.md` to clarify ownership boundaries:
+  - `memory-core` / `memory-lancedb` as canonical backend owners
+  - `openclaw-mem` as sidecar capture + local recall + observability layer
+- Updated `README`, `QUICKSTART`, `docs/auto-capture`, `docs/deployment` with deployment topology guidance and value framing.
+
 ## [0.5.9] - 2026-02-08
 
 ### Added

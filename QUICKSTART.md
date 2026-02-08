@@ -76,6 +76,11 @@ See: `docs/dual-language-memory-strategy.md`.
 
 The plugin provides:
 - auto-capture (writes tool results to JSONL)
+- backend-aware annotations (when `backendMode=auto`) for memory ops observability
+
+Ownership model (important):
+- `memory-core` / `memory-lancedb` remain canonical memory backends
+- `openclaw-mem` is sidecar capture + local recall + triage
 
 For explicit memory writes/reads, use CLI commands (`openclaw-mem store` / `openclaw-mem hybrid`).
 
@@ -136,6 +141,7 @@ uv run openclaw-mem triage --mode heartbeat --json
 - Full docs: `README.md`
 - Plugin details: `docs/auto-capture.md`
 - Deployment: `docs/deployment.md`
+- Ecosystem fit: `docs/ecosystem-fit.md`
 - Changes/features: `CHANGELOG.md`
 
 ## Tests

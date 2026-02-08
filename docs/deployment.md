@@ -11,6 +11,17 @@ For production use, you'll want:
 4. **AI compression** — Periodic compression of daily notes (optional)
 5. **Monitoring** — Health checks and error alerts
 
+## Memory ecosystem fit (recommended topologies)
+
+- **Stable baseline**: slot=`memory-core` + `openclaw-mem` sidecar.
+- **Semantic-first**: slot=`memory-lancedb` + `openclaw-mem` sidecar + `memory-core` kept enabled for rollback.
+- **Controlled migration**: keep both entries enabled, switch only `plugins.slots.memory`, smoke test, rollback with one slot flip if needed.
+
+`openclaw-mem` does not own the memory slot; it adds durable capture, local recall, and observability across both native backends.
+
+Detailed ownership boundaries and rollout patterns:
+- `docs/ecosystem-fit.md`
+
 ## 1. Plugin Installation
 
 ### System-Wide (Recommended)
