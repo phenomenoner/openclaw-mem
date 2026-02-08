@@ -72,6 +72,9 @@ Add to `~/.openclaw/openclaw.json`:
           "captureMessage": false,
           "maxMessageLength": 1000,
           "redactSensitive": true,
+          "backendMode": "auto",
+          "annotateMemoryTools": true,
+          "memoryToolNames": ["memory_search", "memory_get", "memory_store", "memory_recall", "memory_forget"],
           "includeTools": [],
           "excludeTools": ["web_fetch"]
         }
@@ -92,6 +95,9 @@ Add to `~/.openclaw/openclaw.json`:
 | `redactSensitive` | boolean | `true` | Redact common secret patterns before persisting |
 | `includeTools` | string[] | `[]` | Allowlist (if set, only these tools are captured) |
 | `excludeTools` | string[] | `[]` | Denylist (excluded tools are not captured) |
+| `backendMode` | string | `auto` | Memory backend annotation mode (`auto`, `memory-core`, `memory-lancedb`) |
+| `annotateMemoryTools` | boolean | `true` | Write backend/tool metadata into `detail_json` |
+| `memoryToolNames` | string[] | canonical set | Tool names treated as memory actions for annotations |
 
 Note:
 - If both `includeTools` and `excludeTools` are empty, all tools are captured.

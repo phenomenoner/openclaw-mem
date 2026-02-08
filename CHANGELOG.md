@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-02-08
+
+### Added
+- Minimal-risk adapter annotations in capture plugin:
+  - backend metadata (`memory_backend`, `memory_backend_ready`, `memory_backend_mode`)
+  - memory action tags (`memory_tool`, `memory_operation`) for canonical memory tools.
+- New CLI command: `openclaw-mem backend --json` for memory slot/readiness/fallback posture checks.
+- New spec doc: `docs/v0.5.9-adapter-spec.md`.
+
+### Changed
+- `ingest` now preserves extra JSONL top-level fields by merging them into `detail_json`.
+- Plugin config schema extended with `backendMode`, `annotateMemoryTools`, `memoryToolNames`.
+- Version bump to `0.5.9` (Python package + plugin manifest).
+
 ## [0.5.8] - 2026-02-08
 
 ### Changed

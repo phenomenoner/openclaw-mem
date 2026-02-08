@@ -154,8 +154,40 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any]) -> int:
     summary_en = obs.get("summary_en") or obs.get("text_en")
     lang = obs.get("lang")
     tool_name = obs.get("tool_name") or obs.get("tool")
-    detail = obs.get("detail") or obs.get("detail_json") or {}
-    detail_json = detail if isinstance(detail, str) else json.dumps(detail, ensure_ascii=False)
+
+    base_detail = obs.get("detail")
+    if base_detail is None:
+        base_detail = obs.get("detail_json") or {}
+
+    if isinstance(base_detail, str):
+        try:
+            detail_obj: Dict[str, Any] = json.loads(base_detail)
+            if not isinstance(detail_obj, dict):
+                detail_obj = {"_raw_detail": base_detail}
+        except Exception:
+            detail_obj = {"_raw_detail": base_detail}
+    elif isinstance(base_detail, dict):
+        detail_obj = dict(base_detail)
+    else:
+        detail_obj = {"_detail": base_detail}
+
+    known_keys = {
+        "ts",
+        "kind",
+        "summary",
+        "summary_en",
+        "text_en",
+        "lang",
+        "tool_name",
+        "tool",
+        "detail",
+        "detail_json",
+    }
+    extras = {k: v for k, v in obs.items() if k not in known_keys}
+    if extras:
+        detail_obj.update(extras)
+
+    detail_json = json.dumps(detail_obj, ensure_ascii=False)
 
     cur = conn.execute(
         "INSERT INTO observations (ts, kind, summary, summary_en, lang, tool_name, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -203,6 +235,70 @@ def cmd_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         },
     }
     _emit(data, args.json)
+
+
+def _resolve_memory_slot(config: Dict[str, Any]) -> str:
+    slot = config.get("plugins", {}).get("slots", {}).get("memory")
+    if isinstance(slot, str) and slot:
+        return slot
+    return "memory-core"
+
+
+def _is_enabled_entry(config: Dict[str, Any], plugin_id: str) -> bool:
+    entry = config.get("plugins", {}).get("entries", {}).get(plugin_id)
+    if not isinstance(entry, dict):
+        return False
+    return entry.get("enabled", True) is not False
+
+
+def _lancedb_api_key_ready(config: Dict[str, Any]) -> bool:
+    entry = config.get("plugins", {}).get("entries", {}).get("memory-lancedb")
+    if not isinstance(entry, dict):
+        return False
+    cfg = entry.get("config", {})
+    if not isinstance(cfg, dict):
+        return False
+    embedding = cfg.get("embedding", {})
+    if not isinstance(embedding, dict):
+        return False
+
+    api_key = embedding.get("apiKey")
+    if not isinstance(api_key, str) or not api_key.strip():
+        return False
+
+    if "${" in api_key and "}" in api_key:
+        # Supports ${OPENAI_API_KEY}-style expansion in memory-lancedb.
+        var_name = api_key.strip().removeprefix("${").removesuffix("}").strip()
+        return bool(var_name and os.environ.get(var_name))
+
+    return True
+
+
+def cmd_backend(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    cfg = _read_openclaw_config()
+
+    slot = _resolve_memory_slot(cfg)
+    memory_core_enabled = _is_enabled_entry(cfg, "memory-core")
+    memory_lancedb_enabled = _is_enabled_entry(cfg, "memory-lancedb")
+    openclaw_mem_enabled = _is_enabled_entry(cfg, "openclaw-mem")
+
+    out = {
+        "memory_slot": slot,
+        "entries": {
+            "memory-core": {"enabled": memory_core_enabled},
+            "memory-lancedb": {
+                "enabled": memory_lancedb_enabled,
+                "embedding_api_key_ready": _lancedb_api_key_ready(cfg),
+            },
+            "openclaw-mem": {"enabled": openclaw_mem_enabled},
+        },
+        "fallback": {
+            "recommended_slot": "memory-core",
+            "reason": "Fast rollback path if memory-lancedb has runtime issues",
+        },
+    }
+
+    _emit(out, args.json)
 
 
 def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -1478,6 +1574,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Examples:\n"
         "  # Observation store\n"
         "  openclaw-mem status --json\n"
+        "  openclaw-mem backend --json\n"
         "  openclaw-mem ingest --file observations.jsonl --json\n"
         "\n"
         "  # Progressive disclosure search\n"
@@ -1531,6 +1628,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("status", help="Show store stats")
     add_common(sp)
     sp.set_defaults(func=cmd_status)
+
+    sp = sub.add_parser("backend", help="Inspect active OpenClaw memory backend + fallback posture")
+    add_common(sp)
+    sp.set_defaults(func=cmd_backend)
 
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)

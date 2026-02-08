@@ -3,7 +3,7 @@
   "name": "OpenClaw Mem",
   "description": "Capture tool results into JSONL for openclaw-mem ingestion",
   "kind": "utility",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -34,6 +34,23 @@
         "type": "number",
         "default": 1000,
         "description": "Max message length per content block when captureMessage=true"
+      },
+      "backendMode": {
+        "type": "string",
+        "enum": ["auto", "memory-core", "memory-lancedb"],
+        "default": "auto",
+        "description": "Adapter backend mode for memory metadata annotation. auto = follow plugins.slots.memory"
+      },
+      "annotateMemoryTools": {
+        "type": "boolean",
+        "default": true,
+        "description": "Annotate captured rows with memory backend/tool metadata in detail_json"
+      },
+      "memoryToolNames": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["memory_search", "memory_get", "memory_store", "memory_recall", "memory_forget"],
+        "description": "Tool names treated as memory actions for adapter annotation"
       }
     }
   }

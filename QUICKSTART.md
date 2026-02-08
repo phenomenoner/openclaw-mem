@@ -25,6 +25,9 @@ uv sync --locked
 ```bash
 # Creates/open DB and prints stats
 uv run openclaw-mem status --json
+
+# Inspect active OpenClaw memory backend + fallback posture
+uv run openclaw-mem backend --json
 ```
 
 ---
@@ -95,7 +98,9 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
         "config": {
           "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl",
           "captureMessage": false,
-          "redactSensitive": true
+          "redactSensitive": true,
+          "backendMode": "auto",
+          "annotateMemoryTools": true
         }
       }
     }

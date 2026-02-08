@@ -34,6 +34,10 @@ Optional upgrades add embeddings + hybrid ranking, dual-language assist (zh/en, 
 ### Optional (OpenClaw integration)
 
 - **Auto-capture plugin** (`extensions/openclaw-mem`): listens to `tool_result_persist` and writes JSONL for ingestion.
+- **Backend adapter annotations (v0.5.9)**:
+  - capture layer remains sidecar-only (no tool registration)
+  - records memory backend metadata (`memory-core` / `memory-lancedb`) into `detail_json`
+  - tracks memory tool actions (`memory_store` / `memory_recall` / `memory_forget` / `memory_search` / `memory_get`) for audit and monitoring
 - **Gateway-assisted semantic recall (Route A)**:
   - `index` (build markdown index)
   - `semantic` (use OpenClaw `memory_search` as a black-box semantic retriever)
@@ -67,6 +71,9 @@ After syncing, you can run either:
 ```bash
 # 1) Create/open DB and show counts
 uv run openclaw-mem status --json
+
+# 1.5) Check active OpenClaw memory backend + fallback posture
+uv run openclaw-mem backend --json
 
 # 2) Ingest JSONL observations
 uv run openclaw-mem ingest --file observations.jsonl --json
@@ -156,7 +163,9 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
         "config": {
           "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl",
           "captureMessage": false,
-          "redactSensitive": true
+          "redactSensitive": true,
+          "backendMode": "auto",
+          "annotateMemoryTools": true
         }
       }
     }
@@ -166,6 +175,8 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
 
 Notes (important):
 - The capture hook listens to **tool results**, not raw inbound chat messages.
+- `openclaw-mem` plugin is a **sidecar adapter** (capture + annotations), not the canonical memory backend.
+- Canonical memory tools depend on your active memory slot backend (e.g., `memory-core` vs `memory-lancedb`).
 - For preferences/tasks that must be remembered reliably, use **explicit** writes via CLI (`openclaw-mem store`).
 
 More detail:
@@ -199,6 +210,7 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 - `docs/db-concurrency.md` — WAL + lock guidance
 - `docs/dual-language-memory-strategy.md` — current zh/en memory approach
 - `docs/obsidian.md` — optional Obsidian adoption guide
+- `docs/v0.5.9-adapter-spec.md` — minimal-risk adapter design for `memory-core`/`memory-lancedb`
 - `CHANGELOG.md` — notable changes (Keep a Changelog)
 
 ---

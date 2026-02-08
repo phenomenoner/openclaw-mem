@@ -4,6 +4,15 @@ import path from "node:path";
 
 const DEFAULT_OUTPUT = "~/.openclaw/memory/openclaw-mem-observations.jsonl";
 const MAX_MESSAGE_LENGTH = 1000; // Truncate large messages to prevent bloat
+const DEFAULT_MEMORY_TOOLS = [
+  "memory_search",
+  "memory_get",
+  "memory_store",
+  "memory_recall",
+  "memory_forget",
+];
+
+type BackendMode = "auto" | "memory-core" | "memory-lancedb";
 
 type PluginConfig = {
   enabled?: boolean;
@@ -13,6 +22,10 @@ type PluginConfig = {
   captureMessage?: boolean; // Default: false (message can be huge)
   maxMessageLength?: number;
   redactSensitive?: boolean; // Default: true
+  // v0.5.9 adapter fields
+  backendMode?: BackendMode;
+  annotateMemoryTools?: boolean;
+  memoryToolNames?: string[];
 };
 
 function shouldCapture(toolName: string | undefined, cfg: PluginConfig): boolean {
@@ -89,6 +102,60 @@ function truncateMessage(message: any, maxLength: number, redactSensitive: boole
   }
 }
 
+function resolveBackendMode(input: unknown): BackendMode {
+  if (input === "memory-core" || input === "memory-lancedb" || input === "auto") {
+    return input;
+  }
+  return "auto";
+}
+
+function resolveMemoryBackend(api: OpenClawPluginApi, mode: BackendMode): string {
+  if (mode !== "auto") {
+    return mode;
+  }
+
+  const slot = (api.config as any)?.plugins?.slots?.memory;
+  if (typeof slot === "string" && slot.trim()) {
+    return slot;
+  }
+  return "unknown";
+}
+
+function isMemoryBackendReady(api: OpenClawPluginApi, backend: string): boolean {
+  if (!backend || backend === "unknown") {
+    return false;
+  }
+  const entry = (api.config as any)?.plugins?.entries?.[backend];
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+  return (entry as any).enabled !== false;
+}
+
+function classifyMemoryOperation(toolName: string): string | undefined {
+  switch (toolName) {
+    case "memory_store":
+      return "store";
+    case "memory_recall":
+      return "recall";
+    case "memory_forget":
+      return "forget";
+    case "memory_search":
+      return "search";
+    case "memory_get":
+      return "get";
+    default:
+      return undefined;
+  }
+}
+
+function normalizedMemoryToolSet(cfg: PluginConfig): Set<string> {
+  const src = Array.isArray(cfg.memoryToolNames) && cfg.memoryToolNames.length > 0
+    ? cfg.memoryToolNames
+    : DEFAULT_MEMORY_TOOLS;
+  return new Set(src.filter((x) => typeof x === "string" && x.trim()).map((x) => x.trim()));
+}
+
 const plugin = {
   id: "openclaw-mem",
   name: "OpenClaw Mem",
@@ -101,12 +168,20 @@ const plugin = {
     const captureMessage = cfg.captureMessage ?? false;
     const maxMessageLength = cfg.maxMessageLength ?? MAX_MESSAGE_LENGTH;
     const redactSensitive = cfg.redactSensitive ?? true;
+    const annotateMemoryTools = cfg.annotateMemoryTools ?? true;
+    const backendMode = resolveBackendMode(cfg.backendMode);
+    const memoryTools = normalizedMemoryToolSet(cfg);
+
+    const resolvedMemoryBackend = resolveMemoryBackend(api, backendMode);
+    const memoryBackendReady = isMemoryBackendReady(api, resolvedMemoryBackend);
 
     api.on("tool_result_persist", (event, ctx) => {
       if (!shouldCapture(event.toolName ?? ctx.toolName, cfg)) return;
 
-      const toolName = event.toolName ?? ctx.toolName;
+      const toolName = (event.toolName ?? ctx.toolName)!;
       const summary = extractSummary(event.message, redactSensitive);
+      const isMemoryTool = memoryTools.has(toolName);
+      const memoryOperation = classifyMemoryOperation(toolName);
 
       const obs: any = {
         ts: new Date().toISOString(),
@@ -119,9 +194,26 @@ const plugin = {
         summary: summary || `${toolName} called`,
       };
 
+      const detail: any = {};
+      if (annotateMemoryTools) {
+        detail.memory_backend = resolvedMemoryBackend;
+        detail.memory_backend_ready = memoryBackendReady;
+        detail.memory_backend_mode = backendMode;
+        detail.memory_tool = isMemoryTool;
+        if (isMemoryTool && memoryOperation) {
+          detail.memory_operation = memoryOperation;
+        }
+      }
+
       // Optionally include full message (truncated)
       if (captureMessage && event.message) {
-        obs.message = truncateMessage(event.message, maxMessageLength, redactSensitive);
+        const msg = truncateMessage(event.message, maxMessageLength, redactSensitive);
+        obs.message = msg;
+        detail.message = msg;
+      }
+
+      if (Object.keys(detail).length > 0) {
+        obs.detail = detail;
       }
 
       try {
@@ -135,7 +227,9 @@ const plugin = {
       return;
     });
 
-    api.logger.info(`openclaw-mem: capturing tool results to ${outputPath}`);
+    api.logger.info(
+      `openclaw-mem: capturing tool results to ${outputPath} (backend=${resolvedMemoryBackend}, ready=${memoryBackendReady})`,
+    );
   },
 };
 

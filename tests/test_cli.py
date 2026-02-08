@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status
+from openclaw_mem.cli import _connect, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_backend
 
 
 class TestCliM0(unittest.TestCase):
@@ -25,6 +25,68 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertIn("embeddings_en", out)
         self.assertEqual(out["embeddings_en"]["count"], 0)
+        conn.close()
+
+    def test_backend_reports_slot_and_readiness(self):
+        conn = _connect(":memory:")
+
+        fake_cfg = {
+            "plugins": {
+                "slots": {"memory": "memory-lancedb"},
+                "entries": {
+                    "memory-core": {"enabled": True},
+                    "memory-lancedb": {
+                        "enabled": True,
+                        "config": {"embedding": {"apiKey": "${OPENAI_API_KEY}"}},
+                    },
+                    "openclaw-mem": {"enabled": True},
+                },
+            }
+        }
+
+        from unittest.mock import patch
+
+        args = type("Args", (), {"json": True})()
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._read_openclaw_config", return_value=fake_cfg), patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=False):
+            with redirect_stdout(buf):
+                cmd_backend(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["memory_slot"], "memory-lancedb")
+        self.assertTrue(out["entries"]["memory-lancedb"]["embedding_api_key_ready"])
+        conn.close()
+
+    def test_ingest_preserves_extra_fields_into_detail_json(self):
+        conn = _connect(":memory:")
+
+        sample = json.dumps(
+            {
+                "ts": "2026-02-04T13:00:00Z",
+                "kind": "tool",
+                "tool_name": "memory_recall",
+                "summary": "Found memories",
+                "detail": {"base": 1},
+                "memory_backend": "memory-lancedb",
+                "memory_backend_ready": True,
+                "memory_operation": "recall",
+            }
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        row = conn.execute("SELECT detail_json FROM observations WHERE id = 1").fetchone()
+        detail = json.loads(row["detail_json"])
+        self.assertEqual(detail["base"], 1)
+        self.assertEqual(detail["memory_backend"], "memory-lancedb")
+        self.assertEqual(detail["memory_operation"], "recall")
         conn.close()
 
     def test_ingest_search_timeline_get_json(self):
