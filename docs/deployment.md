@@ -87,6 +87,24 @@ If you want broader capture for debugging, prefer **includeTools allowlist** ove
 
 ## 2. Periodic Ingestion
 
+### Recommended profile: always-fresh + controlled semantic refresh
+
+Use two separate cadences:
+
+- **Fast ingest lane (freshness):** every 5 minutes
+  - `harvest --no-embed --no-update-index`
+- **Slow semantic lane (quality):** every 60 minutes (or slower)
+  - `harvest --embed --update-index`
+
+Why split?
+- Fast lane keeps recent recall near real-time.
+- Slow lane avoids paying embedding/index cost on every small batch.
+- Operationally, this reduced observed lag from ~118 minutes to sub-minute in field testing.
+
+Cost note:
+- **Cheapest:** run harvest via system scheduler (systemd/cron), no LLM wrapper tokens.
+- **Convenient:** OpenClaw cron `agentTurn` orchestration, but each run still consumes model tokens.
+
 ### Option A: systemd Timer (Linux)
 
 Create `~/.config/systemd/user/openclaw-mem-ingest.service`:
@@ -100,7 +118,7 @@ After=network.target
 Type=oneshot
 WorkingDirectory=/home/YOUR_USER/openclaw-mem
 Environment="PATH=/home/YOUR_USER/.local/bin:/usr/bin:/bin"
-ExecStart=/usr/bin/uv run --python 3.13 -- python -m openclaw_mem harvest --source /home/YOUR_USER/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --json
+ExecStart=/usr/bin/uv run --python 3.13 -- python -m openclaw_mem harvest --source /home/YOUR_USER/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --no-update-index --json
 
 [Install]
 WantedBy=default.target
@@ -142,16 +160,30 @@ Add to OpenClaw config:
   "cron": {
     "jobs": [
       {
-        "name": "Ingest openclaw-mem observations",
+        "name": "openclaw-mem ingest (5m)",
         "schedule": { "kind": "every", "everyMs": 300000 },
         "sessionTarget": "isolated",
         "wakeMode": "next-heartbeat",
         "payload": {
           "kind": "agentTurn",
-          "message": "Run: cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source ~/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --json",
-          "deliver": false,
-          "model": "gemini-3-flash"
-        }
+          "model": "google-antigravity/gemini-3-flash",
+          "thinking": "minimal",
+          "message": "Run exactly one exec, then output ONLY NO_REPLY:\n\nbash -lc 'cd /opt/openclaw-mem && set -euo pipefail && uv run --python 3.13 -- python -m openclaw_mem harvest --source ~/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --no-update-index --json'"
+        },
+        "delivery": { "mode": "none" }
+      },
+      {
+        "name": "openclaw-mem embed+index (hourly)",
+        "schedule": { "kind": "every", "everyMs": 3600000 },
+        "sessionTarget": "isolated",
+        "wakeMode": "next-heartbeat",
+        "payload": {
+          "kind": "agentTurn",
+          "model": "google-antigravity/gemini-3-flash",
+          "thinking": "minimal",
+          "message": "Run exactly one exec, then output ONLY NO_REPLY:\n\nbash -lc 'cd /opt/openclaw-mem && set -euo pipefail && uv run --python 3.13 -- python -m openclaw_mem harvest --source ~/.openclaw/memory/openclaw-mem-observations.jsonl --embed --update-index --json'"
+        },
+        "delivery": { "mode": "none" }
       }
     ]
   }
@@ -165,7 +197,7 @@ Add to OpenClaw config:
 crontab -e
 
 # Add line (runs every 5 minutes)
-*/5 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source ~/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --json >> ~/.openclaw/logs/openclaw-mem-harvest.log 2>&1
+*/5 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source ~/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --no-update-index --json >> ~/.openclaw/logs/openclaw-mem-harvest.log 2>&1
 ```
 
 ## 3. Log Rotation

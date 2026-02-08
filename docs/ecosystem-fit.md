@@ -68,3 +68,97 @@ Expected value:
 - Deterministic triage for heartbeat/ops workflows, so important issues surface early.
 
 In short: OpenClaw backends provide the canonical memory APIs; `openclaw-mem` makes the memory system easier to operate, audit, and trust over time.
+
+## Field issue: ingestion lag (and the practical fix)
+
+### What can go wrong
+
+If harvest runs too infrequently, captured events can pile up in JSONL before they reach SQLite.
+In one real run we observed:
+
+- ingest lag: ~118 minutes
+- pending captured rows: 89
+
+That is enough to make “what happened just now?” recall feel stale.
+
+### Minimal-risk solution (always-fresh profile)
+
+Use a split pipeline:
+
+1. **Fast lane (freshness first)**
+   - every 5 minutes
+   - `harvest --no-embed --no-update-index`
+   - keeps DB close to real-time with low local workload
+
+2. **Slow lane (quality refresh)**
+   - every hour (or slower, depending on budget)
+   - `harvest --embed --update-index`
+   - refreshes semantic quality without blocking freshness
+
+3. **Optional overhead check**
+   - run a 12h token/cost report from `memory/usage-ledger.jsonl`
+   - include model breakdown so ops can see exactly what the scheduler costs
+
+### Cost note
+
+- Lowest-cost setup is OS-level scheduler (systemd/cron) for harvest commands.
+- OpenClaw cron `agentTurn` works and is convenient, but still spends model tokens on each run wrapper.
+
+## One-screen architecture diagram
+
+### ASCII
+
+```text
+                         (canonical memory slot)
+                 +--------------------------------------+
+                 |  memory-core  OR  memory-lancedb     |
+                 |  tools: search/get OR store/recall   |
+                 +-------------------+------------------+
+                                     ^
+                                     | native memory APIs
++---------------------+              |
+|  OpenClaw Sessions  |--------------+
+|  (main + cron)      |
++----------+----------+
+           |
+           | tool_result_persist
+           v
++------------------------------+
+| openclaw-mem capture plugin  |
+| (sidecar, no slot ownership) |
++---------------+--------------+
+                |
+                | append-only JSONL
+                v
++------------------------------+
+| openclaw-mem-observations    |
+| .jsonl                       |
++----------+-------------------+
+           |
+           | harvest (fast lane): --no-embed --no-update-index (5m)
+           v
++------------------------------+         +---------------------------+
+| openclaw-mem.sqlite (FTS)    |<------->| embed/index (slow lane)   |
+| recall: search→timeline→get  |         | hourly / budgeted         |
++----------+-------------------+         +---------------------------+
+           |
+           | ops visibility
+           v
++------------------------------+
+| usage-ledger + 12h overhead  |
+| report (tokens/cost/models)  |
++------------------------------+
+```
+
+### Mermaid
+
+```mermaid
+flowchart TD
+    A[OpenClaw Sessions\n(main + cron)] -->|native memory APIs| B[memory-core OR memory-lancedb\n(canonical slot owner)]
+    A -->|tool_result_persist| C[openclaw-mem capture plugin\n(sidecar)]
+    C --> D[openclaw-mem-observations.jsonl]
+    D -->|every 5m\n--no-embed --no-update-index| E[openclaw-mem.sqlite + FTS]
+    D -->|hourly\n--embed --update-index| F[Embeddings + Index refresh]
+    E --> G[Progressive recall\nsearch -> timeline -> get]
+    E --> H[Ops telemetry\nusage-ledger + 12h overhead report]
+```
