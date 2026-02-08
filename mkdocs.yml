@@ -1,5 +1,6 @@
 site_name: openclaw-mem
 site_description: Local-first memory sidecar for OpenClaw
+site_url: https://phenomenoner.github.io/openclaw-mem/
 repo_url: https://github.com/phenomenoner/openclaw-mem
 repo_name: phenomenoner/openclaw-mem
 
