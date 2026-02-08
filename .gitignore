@@ -4,3 +4,6 @@ __pycache__/
 *.sqlite
 .DS_Store
 SESSION_SUMMARY*.md
+
+# MkDocs build output
+site/

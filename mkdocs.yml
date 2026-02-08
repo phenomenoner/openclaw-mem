@@ -1,0 +1,38 @@
+site_name: openclaw-mem
+site_description: Local-first memory sidecar for OpenClaw
+repo_url: https://github.com/phenomenoner/openclaw-mem
+repo_name: phenomenoner/openclaw-mem
+
+# GitHub Pages builds from MkDocs' docs_dir. We keep it clean and point it to ./docs.
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Reference:
+      - Ecosystem fit: ecosystem-fit.md
+      - Deployment: deployment.md
+      - Auto-capture: auto-capture.md
+      - Privacy/export rules: privacy-export-rules.md
+      - Obsidian: obsidian.md
+      - Adapter spec (v0.5.9): v0.5.9-adapter-spec.md
