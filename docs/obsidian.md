@@ -125,6 +125,34 @@ This is powerful, but you must be careful about:
 
 ---
 
+## Optional: use `obsidian-skills` for cleaner agent-written notes
+
+Repo: <https://github.com/kepano/obsidian-skills>
+
+`obsidian-skills` is a set of **Agent Skills** (spec: agentskills.io) that teaches an agent how to write:
+
+- Obsidian Flavored Markdown (`.md`) — wikilinks, callouts, properties/frontmatter, embeds
+- Obsidian Bases (`.base`) — YAML schema for views/filters/formulas
+- JSON Canvas (`.canvas`) — the canvas JSON spec (and common pitfalls like proper `\n` newlines)
+
+Why it helps us:
+- If you use **Claude Code** or **Codex CLI** to edit your vault, these skills reduce formatting mistakes.
+- If we later add a `openclaw-mem export-obsidian` helper, we can align exports with Obsidian-friendly conventions.
+
+### Install (Claude Code)
+
+Copy the repo contents into a `/.claude` folder **inside your vault root**.
+
+### Install (Codex CLI)
+
+Copy `skills/` into your Codex skills path (typically `~/.codex/skills`).
+
+Operational note:
+- These skills are “syntax + file-format guardrails” — they don’t change what `openclaw-mem` stores.
+- Keep your automation policy the same: start read-only, then allow controlled writes (Inbox/Approved pattern).
+
+---
+
 ## Suggested next step
 
 If you want, we can add a tiny helper command to `openclaw-mem` later:
