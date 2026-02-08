@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- (placeholder)
+## [0.5.7] - 2026-02-08
+
+### Fixed
+- Plugin tool exposure now follows official OpenClaw extension pattern: `memory_store` and `memory_recall` are registered inside `register()` via `api.registerTool(...)`.
+- Fixed extension-side registration path mismatch (capture hook could load while tool registration path diverged from first-party pattern).
+
+### Changed
+- Refactored plugin tool handlers to shared CLI launcher (`uv run --python 3.13 -- python -m openclaw_mem ...`) for clearer error handling.
+- Added docs note for strict tool policy opt-in (`tools.alsoAllow` for `memory_store` / `memory_recall`).
+- Version bump to `0.5.7` (Python package + plugin manifest).
 
 ## [0.5.6] - 2026-02-06
 

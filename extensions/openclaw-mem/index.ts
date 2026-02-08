@@ -8,6 +8,7 @@ const execFileAsync = promisify(execFile);
 
 const DEFAULT_OUTPUT = "~/.openclaw/memory/openclaw-mem-observations.jsonl";
 const MAX_MESSAGE_LENGTH = 1000; // Truncate large messages to prevent bloat
+const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 
 type PluginConfig = {
   enabled?: boolean;
@@ -93,80 +94,19 @@ function truncateMessage(message: any, maxLength: number, redactSensitive: boole
   }
 }
 
+async function runOpenClawMemCli(args: string[]): Promise<string> {
+  const cmd = ["run", "--python", "3.13", "--", "python", "-m", "openclaw_mem", ...args];
+  const { stdout } = await execFileAsync("uv", cmd, {
+    cwd: PROJECT_ROOT,
+  });
+  return stdout.trim();
+}
+
 const plugin = {
   id: "openclaw-mem",
   name: "OpenClaw Mem",
   description: "Capture tool results into JSONL for openclaw-mem ingestion",
   kind: "utility",
-
-  tools: {
-    memory_store: {
-      description: "Store a memory into the long-term knowledge base.",
-      parameters: {
-        type: "object",
-        properties: {
-          text: { type: "string", description: "The memory content to store" },
-          text_en: { type: "string", description: "Optional English translation/summary" },
-          lang: { type: "string", description: "Language code for original text (e.g., ko, ja, es)" },
-          category: { type: "string", description: "Category (e.g., preference, fact, task)" },
-          importance: { type: "number", description: "Importance (1-5), default 3" },
-        },
-        required: ["text"],
-      },
-      handler: async (args: any) => {
-        try {
-          // text is positional in CLI
-          const cmdArgs = ["-m", "openclaw_mem", "store", args.text];
-          if (args.text_en) cmdArgs.push("--text-en", args.text_en);
-          if (args.lang) cmdArgs.push("--lang", args.lang);
-          if (args.category) cmdArgs.push("--category", args.category);
-          if (args.importance) cmdArgs.push("--importance", String(args.importance));
-
-          // Use uv to run with correct python environment
-          const { stdout } = await execFileAsync("uv", ["run", "--python", "3.13", "--", "python", ...cmdArgs], {
-            cwd: path.resolve(__dirname, "../../..") // Go up to workspace root where pyproject.toml is
-          });
-          return { content: [{ type: "text", text: stdout.trim() || "Memory stored." }] };
-        } catch (err: any) {
-          return { 
-            isError: true, 
-            content: [{ type: "text", text: `Failed to store memory: ${err.message}\n${err.stderr || ""}` }] 
-          };
-        }
-      }
-    },
-    memory_recall: {
-      description: "Recall memories relevant to a query.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Search query" },
-          query_en: { type: "string", description: "Optional English query for additional vector route" },
-          limit: { type: "number", description: "Max results (default 5)" }
-        },
-        required: ["query"]
-      },
-      handler: async (args: any) => {
-        try {
-          // query is positional in CLI
-          const cmdArgs = ["-m", "openclaw_mem", "hybrid", args.query];
-          if (args.query_en) cmdArgs.push("--query-en", args.query_en);
-          if (args.limit) cmdArgs.push("--limit", String(args.limit));
-
-          // Use uv to run with correct python environment
-          const { stdout } = await execFileAsync("uv", ["run", "--python", "3.13", "--", "python", ...cmdArgs], {
-            cwd: path.resolve(__dirname, "../../..")
-          });
-          return { content: [{ type: "text", text: stdout.trim() }] };
-        } catch (err: any) {
-          return { 
-            isError: true, 
-            content: [{ type: "text", text: `Failed to recall memory: ${err.message}\n${err.stderr || ""}` }] 
-          };
-        }
-      }
-    }
-  },
 
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
@@ -174,6 +114,109 @@ const plugin = {
     const captureMessage = cfg.captureMessage ?? false;
     const maxMessageLength = cfg.maxMessageLength ?? MAX_MESSAGE_LENGTH;
     const redactSensitive = cfg.redactSensitive ?? true;
+
+    // Official OpenClaw tool registration path (api.registerTool)
+    api.registerTool(
+      {
+        name: "memory_store",
+        description: "Store a memory into the openclaw-mem long-term knowledge base.",
+        parameters: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "The memory content to store" },
+            text_en: { type: "string", description: "Optional English translation/summary" },
+            lang: { type: "string", description: "Language code for original text (e.g., zh, ja, es)" },
+            category: { type: "string", description: "Category (e.g., preference, fact, task)" },
+            importance: { type: "number", description: "Importance (1-5), default 3" },
+          },
+          required: ["text"],
+        },
+        async execute(_toolCallId: string, rawParams: unknown) {
+          const args = (rawParams ?? {}) as {
+            text?: string;
+            text_en?: string;
+            lang?: string;
+            category?: string;
+            importance?: number;
+          };
+
+          if (!args.text) {
+            return {
+              isError: true,
+              content: [{ type: "text", text: "Missing required parameter: text" }],
+            };
+          }
+
+          try {
+            const cmdArgs = ["store", args.text];
+            if (args.text_en) cmdArgs.push("--text-en", args.text_en);
+            if (args.lang) cmdArgs.push("--lang", args.lang);
+            if (args.category) cmdArgs.push("--category", args.category);
+            if (args.importance !== undefined) cmdArgs.push("--importance", String(args.importance));
+
+            const out = await runOpenClawMemCli(cmdArgs);
+            return { content: [{ type: "text", text: out || "Memory stored." }] };
+          } catch (err: any) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: `Failed to store memory: ${err?.message || String(err)}\n${err?.stderr || ""}`,
+                },
+              ],
+            };
+          }
+        },
+      },
+      { name: "memory_store" },
+    );
+
+    api.registerTool(
+      {
+        name: "memory_recall",
+        description: "Recall memories relevant to a query from openclaw-mem.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Search query" },
+            query_en: { type: "string", description: "Optional English query for additional vector route" },
+            limit: { type: "number", description: "Max results (default 5)" },
+          },
+          required: ["query"],
+        },
+        async execute(_toolCallId: string, rawParams: unknown) {
+          const args = (rawParams ?? {}) as { query?: string; query_en?: string; limit?: number };
+
+          if (!args.query) {
+            return {
+              isError: true,
+              content: [{ type: "text", text: "Missing required parameter: query" }],
+            };
+          }
+
+          try {
+            const cmdArgs = ["hybrid", args.query];
+            if (args.query_en) cmdArgs.push("--query-en", args.query_en);
+            if (args.limit !== undefined) cmdArgs.push("--limit", String(args.limit));
+
+            const out = await runOpenClawMemCli(cmdArgs);
+            return { content: [{ type: "text", text: out }] };
+          } catch (err: any) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: `Failed to recall memory: ${err?.message || String(err)}\n${err?.stderr || ""}`,
+                },
+              ],
+            };
+          }
+        },
+      },
+      { name: "memory_recall" },
+    );
 
     api.on("tool_result_persist", (event, ctx) => {
       if (!shouldCapture(event.toolName ?? ctx.toolName, cfg)) return;
@@ -209,6 +252,7 @@ const plugin = {
     });
 
     api.logger.info(`openclaw-mem: capturing tool results to ${outputPath}`);
+    api.logger.info("openclaw-mem: registered tools memory_store + memory_recall via api.registerTool");
   },
 };
 

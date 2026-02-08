@@ -37,6 +37,7 @@ Optional upgrades add embeddings + hybrid ranking, dual-language assist (zh/en, 
 - **Agent tools** exposed by the plugin:
   - `memory_store` → calls `openclaw-mem store`
   - `memory_recall` → calls `openclaw-mem hybrid`
+  - Registered via official OpenClaw plugin API (`api.registerTool(...)` in `register()`) for compatibility with current extension loading behavior.
 - **Gateway-assisted semantic recall (Route A)**:
   - `index` (build markdown index)
   - `semantic` (use OpenClaw `memory_search` as a black-box semantic retriever)
@@ -170,6 +171,7 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
 Notes (important):
 - The capture hook listens to **tool results**, not raw inbound chat messages.
 - For preferences/tasks that must be remembered reliably, use **explicit** writes (`memory_store` tool or `openclaw-mem store`).
+- If you run strict tool policy, opt-in plugin tools explicitly (recommended: `tools.alsoAllow: ["memory_store", "memory_recall"]`).
 
 More detail:
 - `docs/auto-capture.md`
@@ -197,6 +199,7 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 
 - `QUICKSTART.md` — 5-minute setup
 - `docs/auto-capture.md` — plugin setup + troubleshooting
+- `docs/tool-exposure-fix-plan.md` — tiny fix plan for `memory_store` / `memory_recall` registration path
 - `docs/deployment.md` — timers/permissions/rotation/monitoring
 - `docs/privacy-export-rules.md` — export safety rules
 - `docs/db-concurrency.md` — WAL + lock guidance

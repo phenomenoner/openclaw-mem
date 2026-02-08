@@ -102,6 +102,18 @@ Add to `~/.openclaw/openclaw.json`:
 Note:
 - If both `includeTools` and `excludeTools` are empty, all tools are captured.
 
+Tool policy note:
+- If your OpenClaw setup uses strict tool policy, explicitly opt-in plugin tools so the agent can call them.
+- Recommended additive config (keeps existing profile/allow behavior):
+
+```jsonc
+{
+  "tools": {
+    "alsoAllow": ["memory_store", "memory_recall"]
+  }
+}
+```
+
 ---
 
 ## Output format
@@ -131,6 +143,10 @@ When the plugin is enabled, it exposes tools to the agent runtime:
 
 - `memory_store`: stores a memory (calls `openclaw-mem store ...`)
 - `memory_recall`: recalls memories (calls `openclaw-mem hybrid ...`)
+
+Implementation note:
+- Tool exposure is wired using the official OpenClaw plugin API (`api.registerTool(...)` in `register()`), matching first-party extensions.
+- If capture logs appear but these tools are missing, verify you are running a plugin build that includes this registration path and restart the gateway.
 
 Practical notes:
 - These tools are best used for **explicit** memory: preferences, tasks, durable facts.
