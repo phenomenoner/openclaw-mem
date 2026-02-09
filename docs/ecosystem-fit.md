@@ -104,6 +104,22 @@ Use a split pipeline:
 - Lowest-cost setup is OS-level scheduler (systemd/cron) for harvest commands.
 - OpenClaw cron `agentTurn` works and is convenient, but still spends model tokens on each run wrapper.
 
+## Upstream ops insight: heartbeat token sink and context control
+
+From recent OpenClaw cost/tuning threads, one pattern repeated across operators:
+
+- **Native heartbeat can become a token sink** when each cycle carries heavy active-session context.
+- A practical mitigation is to use a **lightweight isolated heartbeat** for health checks and keep healthy runs silent (`NO_REPLY`).
+
+How this affects `openclaw-mem` users:
+
+1. Keep `openclaw-mem` ingest/report jobs isolated and silent on success.
+2. Avoid adding extra high-frequency cron loops when an existing heartbeat cadence can carry health checks.
+3. Keep auditability in sidecar storage, but keep routine scheduler chatter out of interactive transcripts.
+
+Longer-term architecture direction (upstream):
+- A first-class context-provider slot would complement this sidecar model by letting operators control prompt payload directly, while retaining full transcript persistence for audit/replay.
+
 ## One-screen architecture diagram
 
 ### ASCII
