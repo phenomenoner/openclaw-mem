@@ -26,6 +26,10 @@ Optional upgrades add embeddings + hybrid ranking, dual-language assist (zh/en, 
 
 - **Embeddings**: `embed`, `vsearch`
 - **Hybrid retrieval**: `hybrid` (FTS + vector, **RRF** fusion)
+- **Optional post-retrieval rerank (opt-in)** on hybrid path:
+  - `--rerank-provider jina|cohere`
+  - `--rerank-model ... --rerank-topn ...`
+  - fail-open fallback to base RRF ranking on provider/network errors
 - **Dual-language memory** (original + optional English companion):
   - `store --text-en ...`
   - dedicated EN embedding table (`observation_embeddings_en`)
@@ -95,6 +99,8 @@ uv run openclaw-mem store "Prefer tabs over spaces" \
   --category preference --importance 0.9 --json
 
 uv run openclaw-mem hybrid "tabs or spaces preference" --limit 5 --json
+uv run openclaw-mem hybrid "tabs or spaces preference" \
+  --rerank-provider jina --rerank-topn 20 --json
 ```
 
 ---
@@ -225,6 +231,7 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 - `docs/privacy-export-rules.md` — export safety rules
 - `docs/db-concurrency.md` — WAL + lock guidance
 - `docs/dual-language-memory-strategy.md` — current zh/en memory approach
+- `docs/rerank-poc-plan.md` — hybrid post-retrieval rerank POC + A/B evaluation plan
 - `docs/obsidian.md` — optional Obsidian adoption guide
 - `docs/v0.5.9-adapter-spec.md` — minimal-risk adapter design for `memory-core`/`memory-lancedb`
 - `docs/ecosystem-fit.md` — ownership boundaries + deployment patterns (`memory-core`/`memory-lancedb` + `openclaw-mem`)

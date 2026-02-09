@@ -19,7 +19,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterable, Dict, Any, List, Optional
+from typing import Iterable, Dict, Any, List, Optional, Tuple
 
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 
@@ -920,13 +920,110 @@ def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(out, args.json)
 
 
+def _resolve_rerank_api_key(provider: str, args: argparse.Namespace) -> Optional[str]:
+    cli_key = getattr(args, "rerank_api_key", None)
+    if cli_key:
+        return str(cli_key)
+
+    env_map = {
+        "jina": "JINA_API_KEY",
+        "cohere": "COHERE_API_KEY",
+    }
+    env_key = env_map.get(provider)
+    if env_key:
+        val = os.environ.get(env_key)
+        if val:
+            return val
+
+    return None
+
+
+def _default_rerank_url(provider: str) -> str:
+    if provider == "jina":
+        return "https://api.jina.ai/v1/rerank"
+    if provider == "cohere":
+        return "https://api.cohere.com/v2/rerank"
+    raise ValueError(f"unsupported rerank provider: {provider}")
+
+
+def _call_rerank_provider(
+    *,
+    provider: str,
+    query: str,
+    documents: List[str],
+    model: str,
+    top_n: int,
+    api_key: str,
+    base_url: Optional[str] = None,
+    timeout_sec: int = 15,
+) -> List[Tuple[int, float]]:
+    url = (base_url or _default_rerank_url(provider)).rstrip("/")
+
+    payload = {
+        "model": model,
+        "query": query,
+        "documents": documents,
+        "top_n": int(top_n),
+    }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"rerank HTTP {e.code}: {body}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"rerank network error: {e}") from e
+
+    parsed = json.loads(raw)
+    rows = parsed.get("results") if isinstance(parsed, dict) else None
+    if not isinstance(rows, list):
+        return []
+
+    out: List[Tuple[int, float]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        idx = row.get("index")
+        score = row.get("relevance_score", row.get("score", 0.0))
+        try:
+            out.append((int(idx), float(score)))
+        except Exception:
+            continue
+
+    return out
+
+
 def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    """Hybrid search (FTS + Vector) using RRF."""
+    """Hybrid search (FTS + Vector) using RRF.
+
+    Optional post-retrieval rerank (opt-in):
+    - provider: none|jina|cohere
+    - fail-open: rerank errors do not break search
+    """
     model = args.model
     limit = int(args.limit)
     k = int(args.k)
     query = args.query
     query_en = (getattr(args, "query_en", None) or "").strip() or None
+
+    rerank_provider = str(getattr(args, "rerank_provider", "none") or "none").lower()
+    rerank_enabled = rerank_provider != "none"
+    rerank_topn = max(1, int(getattr(args, "rerank_topn", limit) or limit))
+    candidate_limit = limit * 2
+    if rerank_enabled:
+        # Keep a wider candidate pool before final rerank.
+        candidate_limit = max(candidate_limit, rerank_topn * 3)
 
     api_key = _get_api_key()
     if not api_key:
@@ -951,7 +1048,7 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     vec_ranked = rank_cosine(
         query_vec=query_vec,
         items=((int(r[0]), r[1], float(r[2])) for r in vec_rows),
-        limit=limit * 2,
+        limit=candidate_limit,
     )
     vec_ids = [rid for rid, _ in vec_ranked]
 
@@ -968,7 +1065,7 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         vec_en_ranked = rank_cosine(
             query_vec=query_en_vec,
             items=((int(r[0]), r[1], float(r[2])) for r in search_rows),
-            limit=limit * 2,
+            limit=candidate_limit,
         )
         vec_en_ids = [rid for rid, _ in vec_en_ranked]
 
@@ -980,7 +1077,7 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         ORDER BY bm25(observations_fts) ASC
         LIMIT ?;
         """,
-        (query, limit * 2),
+        (query, candidate_limit),
     ).fetchall()
     fts_ids = [int(r["rowid"]) for r in fts_rows]
 
@@ -988,24 +1085,83 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if vec_en_ids:
         ranked_lists.append(vec_en_ids)
 
-    final_ranking = rank_rrf(ranked_lists, k=k, limit=limit)
-
-    if not final_ranking:
+    rrf_ranking = rank_rrf(ranked_lists, k=k, limit=candidate_limit)
+    if not rrf_ranking:
         _emit([], args.json)
         return
 
-    final_ids = [rid for rid, _ in final_ranking]
+    rrf_scores = {rid: score for rid, score in rrf_ranking}
+    ordered_ids = [rid for rid, _ in rrf_ranking]
 
-    q_sql = f"SELECT id, ts, kind, tool_name, summary, summary_en, lang FROM observations WHERE id IN ({','.join(['?']*len(final_ids))})"
-    rows = conn.execute(q_sql, final_ids).fetchall()
+    q_sql = f"SELECT id, ts, kind, tool_name, summary, summary_en, lang FROM observations WHERE id IN ({','.join(['?']*len(ordered_ids))})"
+    rows = conn.execute(q_sql, ordered_ids).fetchall()
     obs_map = {int(r["id"]): dict(r) for r in rows}
 
+    rerank_scores: Dict[int, float] = {}
+    rerank_applied = False
+
+    if rerank_enabled and ordered_ids:
+        if rerank_provider not in {"jina", "cohere"}:
+            print(
+                f"[openclaw-mem] rerank provider '{rerank_provider}' unsupported; using base RRF ranking.",
+                file=sys.stderr,
+            )
+        else:
+            rerank_api_key = _resolve_rerank_api_key(rerank_provider, args)
+            if not rerank_api_key:
+                print(
+                    f"[openclaw-mem] rerank provider '{rerank_provider}' enabled but API key missing; using base RRF ranking.",
+                    file=sys.stderr,
+                )
+            else:
+                docs = [
+                    (obs_map.get(rid, {}).get("summary_en") or obs_map.get(rid, {}).get("summary") or "")
+                    for rid in ordered_ids
+                ]
+                try:
+                    rerank_rows = _call_rerank_provider(
+                        provider=rerank_provider,
+                        query=query_en or query,
+                        documents=docs,
+                        model=str(getattr(args, "rerank_model", "jina-reranker-v2-base-multilingual")),
+                        top_n=min(rerank_topn, len(docs)),
+                        api_key=rerank_api_key,
+                        base_url=getattr(args, "rerank_base_url", None),
+                        timeout_sec=int(getattr(args, "rerank_timeout_sec", 15) or 15),
+                    )
+                    if rerank_rows:
+                        seen: set[int] = set()
+                        reranked: List[int] = []
+
+                        for idx, score in rerank_rows:
+                            if idx < 0 or idx >= len(ordered_ids):
+                                continue
+                            rid = ordered_ids[idx]
+                            if rid in seen:
+                                continue
+                            seen.add(rid)
+                            reranked.append(rid)
+                            rerank_scores[rid] = float(score)
+
+                        for rid in ordered_ids:
+                            if rid not in seen:
+                                reranked.append(rid)
+
+                        ordered_ids = reranked
+                        rerank_applied = True
+                except Exception as e:
+                    print(
+                        f"[openclaw-mem] rerank failed ({type(e).__name__}: {e}); using base RRF ranking.",
+                        file=sys.stderr,
+                    )
+
     out = []
-    for rid, score in final_ranking:
+    for rid in ordered_ids[:limit]:
         r = obs_map.get(rid)
         if not r:
             continue
-        r["rrf_score"] = score
+
+        r["rrf_score"] = float(rrf_scores.get(rid, 0.0))
         r["match"] = []
         if rid in fts_ids:
             r["match"].append("text")
@@ -1013,6 +1169,14 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             r["match"].append("vector")
         if rid in vec_en_ids:
             r["match"].append("vector_en")
+
+        if rerank_enabled:
+            r["rerank_provider"] = rerank_provider
+            if rid in rerank_scores:
+                r["rerank_score"] = float(rerank_scores[rid])
+            if rerank_applied:
+                r["rank_stage"] = "rerank" if rid in rerank_scores else "rrf-fallback"
+
         out.append(r)
 
     _emit(out, args.json)
@@ -1666,6 +1830,7 @@ def build_parser() -> argparse.ArgumentParser:
         "\n"
         "  # Hybrid Search & Store (Phase 4)\n"
         "  openclaw-mem hybrid \"python error\" --limit 5 --json\n"
+        "  openclaw-mem hybrid \"python error\" --rerank-provider jina --rerank-topn 20 --json\n"
         "  openclaw-mem store \"Prefer tabs over spaces\" --category preference --importance 0.9 --json\n"
         "\n"
         "Global flags also work before the command:\n"
@@ -1775,6 +1940,26 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--k", type=int, default=60, help="RRF constant (default: 60)")
     sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
     sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument(
+        "--rerank-provider",
+        choices=["none", "jina", "cohere"],
+        default="none",
+        help="Optional post-retrieval rerank provider (default: none)",
+    )
+    sp.add_argument(
+        "--rerank-model",
+        default="jina-reranker-v2-base-multilingual",
+        help="Reranker model name (provider-specific)",
+    )
+    sp.add_argument(
+        "--rerank-topn",
+        type=int,
+        default=20,
+        help="Top-N reranked items to prioritize before RRF fallback",
+    )
+    sp.add_argument("--rerank-api-key", help="Reranker API key (or env: JINA_API_KEY/COHERE_API_KEY)")
+    sp.add_argument("--rerank-base-url", help="Optional reranker endpoint override")
+    sp.add_argument("--rerank-timeout-sec", type=int, default=15, help="Reranker HTTP timeout in seconds")
     sp.set_defaults(func=cmd_hybrid)
 
     sp = sub.add_parser("store", help="Proactively store a memory")

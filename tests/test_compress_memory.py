@@ -1,15 +1,12 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
 
 # Import from parent directory
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from compress_memory import (
-    OpenAIClient,
     CompressError,
     validate_date,
     atomic_append,

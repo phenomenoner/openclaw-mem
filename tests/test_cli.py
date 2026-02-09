@@ -538,6 +538,155 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("vector_en", out[0]["match"])
         conn.close()
 
+    def test_hybrid_rerank_reorders_results(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps({"ts": "2026-02-04T13:00:00Z", "kind": "fact", "summary": "first", "summary_en": "first", "tool_name": "memory_store", "detail": {}}),
+                json.dumps({"ts": "2026-02-04T13:01:00Z", "kind": "fact", "summary": "second", "summary_en": "second", "tool_name": "memory_store", "detail": {}}),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "test-model", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (2, "test-model", 2, pack_f32([0.0, 1.0]), l2_norm([0.0, 1.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "zzzz",
+                "query_en": None,
+                "model": "test-model",
+                "limit": 5,
+                "k": 60,
+                "base_url": "https://example.com/v1",
+                "rerank_provider": "jina",
+                "rerank_model": "jina-reranker-v2-base-multilingual",
+                "rerank_topn": 2,
+                "rerank_api_key": "test-rerank-key",
+                "rerank_base_url": None,
+                "rerank_timeout_sec": 5,
+                "json": True,
+            },
+        )()
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient), patch(
+            "openclaw_mem.cli._call_rerank_provider", return_value=[(1, 0.9), (0, 0.1)]
+        ):
+            with redirect_stdout(buf):
+                cmd_hybrid(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out[0]["id"], 2)
+        self.assertEqual(out[0].get("rerank_provider"), "jina")
+        self.assertEqual(out[0].get("rank_stage"), "rerank")
+        conn.close()
+
+    def test_hybrid_rerank_fail_open_keeps_rrf_order(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps({"ts": "2026-02-04T13:00:00Z", "kind": "fact", "summary": "first", "summary_en": "first", "tool_name": "memory_store", "detail": {}}),
+                json.dumps({"ts": "2026-02-04T13:01:00Z", "kind": "fact", "summary": "second", "summary_en": "second", "tool_name": "memory_store", "detail": {}}),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "test-model", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (2, "test-model", 2, pack_f32([0.0, 1.0]), l2_norm([0.0, 1.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "zzzz",
+                "query_en": None,
+                "model": "test-model",
+                "limit": 5,
+                "k": 60,
+                "base_url": "https://example.com/v1",
+                "rerank_provider": "jina",
+                "rerank_model": "jina-reranker-v2-base-multilingual",
+                "rerank_topn": 2,
+                "rerank_api_key": "test-rerank-key",
+                "rerank_base_url": None,
+                "rerank_timeout_sec": 5,
+                "json": True,
+            },
+        )()
+
+        from unittest.mock import patch
+        from contextlib import redirect_stderr
+
+        buf = io.StringIO()
+        err = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient), patch(
+            "openclaw_mem.cli._call_rerank_provider", side_effect=RuntimeError("boom")
+        ):
+            with redirect_stdout(buf), redirect_stderr(err):
+                cmd_hybrid(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out[0]["id"], 1)
+        self.assertEqual(out[0].get("rerank_provider"), "jina")
+        self.assertNotIn("rank_stage", out[0])
+        self.assertIn("rerank failed", err.getvalue())
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()
