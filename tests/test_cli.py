@@ -156,6 +156,52 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_cjk_search_fallback_when_fts_misses(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "tool",
+                        "tool_name": "memorybench",
+                        "summary": "我今天在台北開產品會議，晚上再整理筆記。",
+                        "detail": {"session_id": "s-zh-1"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "tool",
+                        "tool_name": "memorybench",
+                        "summary": "I booked a train ticket to Taichung for next week.",
+                        "detail": {"session_id": "s-en-1"},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        # This query is semantically related but not an exact phrase; CJK fallback should recover it.
+        args = type("Args", (), {"query": "今天會議在什麼城市", "limit": 10, "json": True})()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_search(conn, args)
+
+        hits = json.loads(buf.getvalue())
+        self.assertGreaterEqual(len(hits), 1)
+        self.assertIn("台北", hits[0]["summary"])
+        conn.close()
+
     def test_triage_exit_code_and_json(self):
         conn = _connect(":memory:")
 

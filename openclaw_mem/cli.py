@@ -318,6 +318,70 @@ def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit({"inserted": len(inserted), "ids": inserted[:50]}, args.json)
 
 
+def _has_cjk(text: str) -> bool:
+    import re
+
+    return bool(re.search(r"[\u3400-\u9fff]", text or ""))
+
+
+def _cjk_terms(query: str, max_terms: int = 16) -> List[str]:
+    """Extract CJK-aware fallback terms for LIKE matching.
+
+    Strategy:
+    - keep CJK runs (length>=2)
+    - add overlapping bigrams for longer runs
+    """
+    import re
+
+    runs = re.findall(r"[\u3400-\u9fff]+", query or "")
+    terms: List[str] = []
+
+    for run in runs:
+        if len(run) < 2:
+            continue
+        terms.append(run)
+        if len(run) > 2:
+            terms.extend(run[i : i + 2] for i in range(len(run) - 1))
+
+    # stable de-dup
+    out: List[str] = []
+    seen = set()
+    for t in terms:
+        if t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+        if len(out) >= max_terms:
+            break
+    return out
+
+
+def _search_cjk_fallback(conn: sqlite3.Connection, query: str, limit: int) -> List[sqlite3.Row]:
+    terms = _cjk_terms(query)
+    if not terms:
+        return []
+
+    like_vals = [f"%{t}%" for t in terms]
+
+    # score = negative matched-term count (so more matches = smaller score = higher rank)
+    score_expr = " + ".join(["CASE WHEN o.summary LIKE ? THEN 1 ELSE 0 END" for _ in like_vals])
+    where_expr = " OR ".join(["o.summary LIKE ?" for _ in like_vals])
+
+    sql = f"""
+        SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
+               o.summary AS snippet,
+               o.summary_en AS snippet_en,
+               -1.0 * ({score_expr}) AS score
+        FROM observations o
+        WHERE {where_expr}
+        ORDER BY score ASC, o.id DESC
+        LIMIT ?;
+    """
+
+    params = [*like_vals, *like_vals, int(limit)]
+    return conn.execute(sql, params).fetchall()
+
+
 def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     q = args.query.strip()
     if not q:
@@ -338,6 +402,10 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         """,
         (q, args.limit),
     ).fetchall()
+
+    # Fallback for CJK keyword queries when FTS5 tokenizer cannot split terms well.
+    if not rows and _has_cjk(q):
+        rows = _search_cjk_fallback(conn, q, args.limit)
 
     out = [dict(r) for r in rows]
     _emit(out, args.json)
