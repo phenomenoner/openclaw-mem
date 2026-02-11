@@ -230,6 +230,7 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 - `QUICKSTART.md` — 5-minute setup
 - `docs/importance-grading.md` — importance grading schema + heuristic-v1 + tests
 - `docs/context-engineering-lessons.md` — local-first context engineering patterns (Manus-aligned)
+- `docs/roadmap.md` — engineering roadmap (epics + acceptance criteria)
 - `docs/auto-capture.md` — plugin setup + troubleshooting
 - `docs/deployment.md` — timers/permissions/rotation/monitoring
 - `docs/privacy-export-rules.md` — export safety rules
