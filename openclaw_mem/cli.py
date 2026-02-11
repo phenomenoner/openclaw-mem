@@ -187,6 +187,32 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any]) -> int:
     if extras:
         detail_obj.update(extras)
 
+    # Optional: auto-grade importance behind a feature flag (non-destructive).
+    #
+    # MVP rules:
+    # - default OFF
+    # - only populate missing `detail_json.importance`
+    # - fail-open on any grading error
+    scorer = (os.environ.get("OPENCLAW_MEM_IMPORTANCE_SCORER") or "").strip().lower()
+    if scorer == "heuristic-v1" and "importance" not in detail_obj:
+        try:
+            from openclaw_mem.heuristic_v1 import grade_observation
+
+            r = grade_observation(
+                {
+                    "ts": ts,
+                    "kind": kind,
+                    "summary": summary,
+                    "summary_en": summary_en,
+                    "lang": lang,
+                    "tool_name": tool_name,
+                    "detail": detail_obj,
+                }
+            )
+            detail_obj["importance"] = r.as_importance()
+        except Exception as e:
+            print(f"Warning: importance autograde failed: {e}", file=sys.stderr)
+
     detail_json = json.dumps(detail_obj, ensure_ascii=False)
 
     cur = conn.execute(
