@@ -72,7 +72,35 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         self.assertIsNotNone(row)
         return dict(row)
 
-    def test_ingest_autogrades_importance_when_missing(self):
+    def test_ingest_autogrades_importance_when_missing_via_cli_override(self):
+        jsonl_path = Path(self.tmpdir.name) / "obs.jsonl"
+        obs = {
+            "ts": "2026-02-11T08:00:00Z",
+            "kind": "tool",
+            "tool_name": "cron.add",
+            "summary": "Created cron job jobId=00000000-0000-0000-0000-000000000000 for importance grading; set OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1",
+            "detail": {"ok": True},
+        }
+        jsonl_path.write_text(json.dumps(obs, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        out = self._run_cli(
+            "ingest",
+            "--file",
+            str(jsonl_path),
+            "--importance-scorer",
+            "heuristic-v1",
+        )
+        self.assertEqual(out["inserted"], 1)
+
+        row = self._read_only_row()
+        detail = json.loads(row["detail_json"])
+        self.assertIn("importance", detail)
+        self.assertIsInstance(detail["importance"], dict)
+        self.assertEqual(detail["importance"].get("method"), "heuristic-v1")
+        self.assertEqual(int(detail["importance"].get("version")), 1)
+        self.assertIn(detail["importance"].get("label"), {"ignore", "nice_to_have", "must_remember"})
+
+    def test_ingest_env_fallback_still_autogrades_when_flag_absent(self):
         jsonl_path = Path(self.tmpdir.name) / "obs.jsonl"
         obs = {
             "ts": "2026-02-11T08:00:00Z",
@@ -94,12 +122,34 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         row = self._read_only_row()
         detail = json.loads(row["detail_json"])
         self.assertIn("importance", detail)
-        self.assertIsInstance(detail["importance"], dict)
         self.assertEqual(detail["importance"].get("method"), "heuristic-v1")
-        self.assertEqual(int(detail["importance"].get("version")), 1)
-        self.assertIn(detail["importance"].get("label"), {"ignore", "nice_to_have", "must_remember"})
 
-    def test_harvest_autogrades_importance_when_missing(self):
+    def test_ingest_cli_off_disables_autograde_even_if_env_set(self):
+        jsonl_path = Path(self.tmpdir.name) / "obs.jsonl"
+        obs = {
+            "ts": "2026-02-11T08:00:00Z",
+            "kind": "tool",
+            "tool_name": "cron.add",
+            "summary": "Created cron job jobId=00000000-0000-0000-0000-000000000000 for importance grading; set OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1",
+            "detail": {"ok": True},
+        }
+        jsonl_path.write_text(json.dumps(obs, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        out = self._run_cli(
+            "ingest",
+            "--file",
+            str(jsonl_path),
+            "--importance-scorer",
+            "off",
+            env={"OPENCLAW_MEM_IMPORTANCE_SCORER": "heuristic-v1"},
+        )
+        self.assertEqual(out["inserted"], 1)
+
+        row = self._read_only_row()
+        detail = json.loads(row["detail_json"])
+        self.assertNotIn("importance", detail)
+
+    def test_harvest_autogrades_importance_when_missing_via_cli_override(self):
         # Use harvest since it's the default "log ingestion" path.
         source = Path(self.tmpdir.name) / "openclaw-mem-observations.jsonl"
         archive_dir = Path(self.tmpdir.name) / "archive"
@@ -116,11 +166,12 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
             "harvest",
             "--source",
             str(source),
+            "--importance-scorer",
+            "heuristic-v1",
             "--archive-dir",
             str(archive_dir),
             "--no-embed",
             "--no-update-index",
-            env={"OPENCLAW_MEM_IMPORTANCE_SCORER": "heuristic-v1"},
         )
         self.assertTrue(out.get("ok"))
         self.assertEqual(out.get("ingested"), 1)

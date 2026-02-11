@@ -30,6 +30,37 @@ DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
 
 
+def _apply_importance_scorer_override(args: argparse.Namespace) -> None:
+    """Optionally override importance autograde scorer for this process.
+
+    Precedence:
+    - If the subcommand provides --importance-scorer, it wins.
+    - Otherwise the env var OPENCLAW_MEM_IMPORTANCE_SCORER is used (existing behavior).
+
+    Supported values:
+    - heuristic-v1: enable deterministic heuristic grading
+    - off|none: disable autograde even if env var is set
+
+    Notes:
+    - This is process-local (does not mutate any config files).
+    - _insert_observation reads OPENCLAW_MEM_IMPORTANCE_SCORER at insert time.
+    """
+
+    raw = getattr(args, "importance_scorer", None)
+    if raw is None:
+        return
+
+    v = str(raw).strip().lower()
+    if not v:
+        return
+
+    if v in {"off", "none", "disable", "disabled", "0"}:
+        os.environ.pop("OPENCLAW_MEM_IMPORTANCE_SCORER", None)
+        return
+
+    os.environ["OPENCLAW_MEM_IMPORTANCE_SCORER"] = v
+
+
 def _read_openclaw_config() -> Dict[str, Any]:
     """Read ~/.openclaw/openclaw.json (cached)."""
     global _CONFIG_CACHE
@@ -328,6 +359,8 @@ def cmd_backend(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 
 def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _apply_importance_scorer_override(args)
+
     if args.file:
         fp = open(args.file, "r", encoding="utf-8")
     else:
@@ -1678,6 +1711,7 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Auto-ingest and embed observations from log file."""
+    _apply_importance_scorer_override(args)
     # 1. Determine source
     default_source = os.path.expanduser("~/.openclaw/memory/openclaw-mem-observations.jsonl")
     source = Path(args.source or default_source)
@@ -1904,6 +1938,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)
     sp.add_argument("--file", help="JSONL file path (default: stdin)")
+    sp.add_argument(
+        "--importance-scorer",
+        dest="importance_scorer",
+        default=None,
+        help=(
+            "Override importance autograde scorer for this run (env fallback: OPENCLAW_MEM_IMPORTANCE_SCORER). "
+            "Use 'heuristic-v1' to enable, or 'off' to disable."
+        ),
+    )
     sp.set_defaults(func=cmd_ingest)
 
     sp = sub.add_parser("search", help="FTS search over observations")
@@ -2069,6 +2112,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("harvest", help="Auto-ingest and embed observations from log file")
     add_common(sp)
     sp.add_argument("--source", help="JSONL source file (default: ~/.openclaw/memory/openclaw-mem-observations.jsonl)")
+    sp.add_argument(
+        "--importance-scorer",
+        dest="importance_scorer",
+        default=None,
+        help=(
+            "Override importance autograde scorer for this run (env fallback: OPENCLAW_MEM_IMPORTANCE_SCORER). "
+            "Use 'heuristic-v1' to enable, or 'off' to disable."
+        ),
+    )
     sp.add_argument("--archive-dir", help="Directory to move processed files (default: delete)")
     sp.add_argument("--embed", action="store_true", default=True, help="Run embedding after ingest (default: True)")
     sp.add_argument("--no-embed", dest="embed", action="store_false", help="Skip embedding")
