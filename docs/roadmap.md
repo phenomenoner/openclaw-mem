@@ -86,5 +86,10 @@ Acceptance criteria:
 
 ## Thought links (design references)
 
+These are projects we referenced and **actually used** to shape features or architecture.
+
 - Daniel Miessler — *Personal AI Infrastructure (PAI)*: <https://github.com/danielmiessler/Personal_AI_Infrastructure>
-  - Useful as an architectural checklist (memory tiers, hooks, user/system separation, continuous improvement).
+  - Used as an architectural checklist (memory tiers, hooks, user/system separation, continuous improvement).
+
+- `thedotmack/claude-mem`: <https://github.com/thedotmack/claude-mem>
+  - Strong early inspiration for an agent memory layer design; we credit it explicitly (see `ACKNOWLEDGEMENTS.md`).
