@@ -66,6 +66,7 @@ Deliverables:
 - Standardized run summaries for ingest/harvest/triage
 - Drift detection for label distribution (e.g., `must_remember` suddenly spikes)
 - **Compaction receipts (future)**: capture `before_compaction/after_compaction` lifecycle events into the sidecar ledger so operators can audit “what got summarized” vs “what stayed hot”.
+- **Manual `/compact` flush hook (upstream, future)**: when an operator triggers `/compact`, run a pre-compaction memory flush *first* (configurable), then compact. This reduces “oops I compacted before writing durable notes”.
 
 Acceptance criteria:
 - Any automated path can be validated via logs + JSON summary.
