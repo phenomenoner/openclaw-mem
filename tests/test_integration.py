@@ -1,5 +1,7 @@
 import json
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,20 +56,33 @@ class TestE2EWorkflow(unittest.TestCase):
 
     def _run_cli(self, *args):
         """Run openclaw-mem CLI and return parsed JSON output."""
-        cmd = [
-            "uv",
-            "run",
-            "--python",
-            "3.13",
-            "--",
-            "python",
-            "-m",
-            "openclaw_mem",
-            "--db",
-            str(self.db_path),
-            "--json",
-            *args,
-        ]
+        uv = shutil.which("uv")
+        if uv:
+            cmd = [
+                uv,
+                "run",
+                "--python",
+                "3.13",
+                "--",
+                "python",
+                "-m",
+                "openclaw_mem",
+                "--db",
+                str(self.db_path),
+                "--json",
+                *args,
+            ]
+        else:
+            # Fallback for minimal environments (no uv). Uses the current interpreter.
+            cmd = [
+                sys.executable,
+                "-m",
+                "openclaw_mem",
+                "--db",
+                str(self.db_path),
+                "--json",
+                *args,
+            ]
         result = subprocess.run(
             cmd,
             capture_output=True,
