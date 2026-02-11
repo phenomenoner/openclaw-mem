@@ -34,6 +34,13 @@ Canonical object fields:
 - `score >= 0.50` → `nice_to_have`
 - else → `ignore`
 
+### Label semantics (operator intent)
+These labels are meant to be used as **triage / recall priorities**, not as “truth.”
+
+- `must_remember`: durable, high-signal items you would regret losing (decisions, stable preferences, key constraints, critical incidents).
+- `nice_to_have`: useful context, but not mission-critical (supporting notes, transient-but-helpful facts).
+- `ignore`: low-signal noise (routine logs, duplicate status, ephemeral chatter).
+
 ### Ungraded items
 If `detail_json.importance` is missing, treat it as **unknown**.
 By default, do **not** drop/filter ungraded items unless a caller explicitly requests filtering.
@@ -68,9 +75,13 @@ It produces the canonical object (`method=heuristic-v1`).
 A shared JSONL testcase corpus is stored under:
 - `tests/data/HEURISTIC_TESTCASES.jsonl`
 
-Run:
+Run the scorer regression tests:
 
 ```bash
+# Option A (recommended): run inside the project env
+uv run --python 3.13 -- python -m unittest -q tests/test_heuristic_v1.py
+
+# Option B: system python (no uv)
 python3 -m unittest -q tests/test_heuristic_v1.py
 ```
 
