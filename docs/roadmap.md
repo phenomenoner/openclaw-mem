@@ -65,6 +65,7 @@ Acceptance criteria:
 Deliverables:
 - Standardized run summaries for ingest/harvest/triage
 - Drift detection for label distribution (e.g., `must_remember` suddenly spikes)
+- **Compaction receipts (future)**: capture `before_compaction/after_compaction` lifecycle events into the sidecar ledger so operators can audit “what got summarized” vs “what stayed hot”.
 
 Acceptance criteria:
 - Any automated path can be validated via logs + JSON summary.
@@ -77,6 +78,20 @@ Deliverables:
 
 Acceptance criteria:
 - Operators can correct mistakes and see the system behave differently afterward.
+
+### 6) Pruning-safe capture profiles (future)
+
+Goal: make OpenClaw session pruning safer by ensuring important tool outputs remain retrievable locally.
+
+Deliverables:
+- Capture profiles that are safe by default:
+  - `metadata-only` (always safe)
+  - `summary-only` (current default)
+  - `head-tail` (bounded content)
+- Explicit allowlist/denylist support per tool, with redaction on.
+
+Acceptance criteria:
+- Operators can enable aggressive pruning without losing the ability to recover key tool outcomes from `openclaw-mem`.
 
 ## Later (optional, higher ambition)
 
