@@ -29,6 +29,7 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 ## Memory quality features
 
 - Importance grading (MVP v1): [Go →](importance-grading.md)
+- Context engineering lessons (local-first): [Go →](context-engineering-lessons.md)
 
 ## Minimal CLI taste
 
