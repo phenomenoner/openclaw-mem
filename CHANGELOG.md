@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - clarified token-overhead tradeoff between OS scheduler vs OpenClaw cron `agentTurn` wrappers.
   - removed Mermaid block from `docs/ecosystem-fit.md` due GitHub rich-render compatibility issues.
 
+### Added
+- Importance grading support (MVP v1):
+  - canonical `detail_json.importance` object helper + compatibility parser (`openclaw_mem.importance`)
+  - deterministic scorer `heuristic-v1` (`openclaw_mem.heuristic_v1`)
+  - new documentation: `docs/importance-grading.md`
+
+### Changed
+- `store` now writes canonical importance objects (method=`manual-via-cli`) instead of legacy numeric-only.
+- `triage --mode tasks` now understands canonical importance objects (still accepts legacy numeric values).
+
+### Testing
+- Added regression coverage for `heuristic-v1` using a shared JSONL testcase corpus.
+
 ## [0.5.9] - 2026-02-08
 
 ### Added

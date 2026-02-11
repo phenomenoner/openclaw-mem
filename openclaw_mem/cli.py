@@ -1470,9 +1470,9 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
         imp = 0.0
         try:
             dj = json.loads(r["detail_json"] or "{}")
-            imp_val = dj.get("importance")
-            if isinstance(imp_val, (int, float)):
-                imp = float(imp_val)
+            from openclaw_mem.importance import parse_importance_score
+
+            imp = parse_importance_score(dj.get("importance"))
         except Exception:
             imp = 0.0
 
@@ -1726,6 +1726,15 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     text_en = (getattr(args, "text_en", None) or "").strip() or None
     lang = (getattr(args, "lang", None) or "").strip() or None
 
+    from openclaw_mem.importance import make_importance
+
+    importance_obj = make_importance(
+        float(args.importance),
+        method="manual-via-cli",
+        rationale="Provided via openclaw-mem store --importance.",
+        version=1,
+    )
+
     # 1. Insert into SQLite
     obs = {
         "kind": args.category,  # e.g., 'fact', 'preference'
@@ -1733,7 +1742,7 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "summary_en": text_en,
         "lang": lang,
         "tool_name": "memory_store",
-        "detail": {"importance": args.importance}
+        "detail": {"importance": importance_obj},
     }
     rowid = _insert_observation(conn, obs)
 
@@ -1790,7 +1799,7 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     date_str = datetime.now().strftime("%Y-%m-%d")
     md_file = memory_dir / f"{date_str}.md"
     
-    md_entry = f"- [{args.category.upper()}] {text} (importance: {args.importance})\n"
+    md_entry = f"- [{args.category.upper()}] {text} (importance: {importance_obj['score']:.2f}, {importance_obj['label']})\n"
     
     try:
         _atomic_append_file(md_file, md_entry)

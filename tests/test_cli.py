@@ -328,6 +328,67 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_triage_tasks_parses_importance_object(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "task",
+                        "tool_name": "memory_store",
+                        "summary": "TODO: send invoice to vendor",
+                        "detail": {"importance": {"score": 0.9, "label": "must_remember"}},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "tasks",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["tasks"]["found_new"], 1)
+        self.assertAlmostEqual(out["tasks"]["matches"][0]["importance"], 0.9, places=5)
+
+        conn.close()
+
     def test_triage_cron_errors_reads_jobs_json(self):
         import tempfile
 
@@ -417,6 +478,43 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(row["summary"], "나는 커피를 좋아해")
         self.assertEqual(row["summary_en"], "I like coffee")
         self.assertEqual(row["lang"], "ko")
+        conn.close()
+
+    def test_store_emits_canonical_importance_object(self):
+        conn = _connect(":memory:")
+
+        args = type(
+            "Args",
+            (),
+            {
+                "text": "Prefer tabs over spaces",
+                "text_en": None,
+                "lang": "en",
+                "category": "preference",
+                "importance": 0.9,
+                "model": "test-model",
+                "base_url": "https://example.com/v1",
+                "workspace": None,
+                "json": True,
+            },
+        )()
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value=None):
+            with redirect_stdout(buf):
+                cmd_store(conn, args)
+
+        out = json.loads(buf.getvalue())
+        row = conn.execute("SELECT detail_json FROM observations WHERE id = ?", (out["id"],)).fetchone()
+        detail = json.loads(row["detail_json"])
+        self.assertIsInstance(detail.get("importance"), dict)
+        self.assertAlmostEqual(float(detail["importance"]["score"]), 0.9, places=5)
+        self.assertEqual(detail["importance"]["label"], "must_remember")
+        self.assertEqual(detail["importance"]["method"], "manual-via-cli")
+        self.assertIn("graded_at", detail["importance"])
+
         conn.close()
 
     def test_store_persists_english_embedding_when_text_en_present(self):

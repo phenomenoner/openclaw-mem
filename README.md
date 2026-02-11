@@ -53,6 +53,8 @@ Optional upgrades add embeddings + hybrid ranking, dual-language assist (zh/en, 
   - `cron-errors`
   - `tasks`
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
+- **Importance grading (MVP v1)**: canonical `detail_json.importance` objects + deterministic `heuristic-v1` scorer + regression tests.
+  - Notes: `docs/importance-grading.md`
 
 ---
 
@@ -226,6 +228,7 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 ## Documentation map
 
 - `QUICKSTART.md` — 5-minute setup
+- `docs/importance-grading.md` — importance grading schema + heuristic-v1 + tests
 - `docs/auto-capture.md` — plugin setup + troubleshooting
 - `docs/deployment.md` — timers/permissions/rotation/monitoring
 - `docs/privacy-export-rules.md` — export safety rules
