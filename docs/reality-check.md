@@ -47,7 +47,8 @@ uv run python -m openclaw_mem --db "$DB" --json get 2
   - `embeddings.count` and `embeddings.models`
 - `ingest` returns something like:
   - `{ "inserted": 2, "ids": [1,2] }`
-- `search` / `timeline` / `get` return JSON arrays of rows containing `id`, `ts`, `kind`, `summary`, and `detail_json`.
+- `search` returns a JSON array of compact rows containing at least: `id`, `ts`, `kind`, `summary`, plus `snippet` and `score` (it does **not** include `detail_json`).
+- `timeline` and `get` return JSON arrays of full rows containing at least: `id`, `ts`, `kind`, `summary`, and `detail_json`.
 
 ---
 
