@@ -54,6 +54,7 @@ Optional upgrades add embeddings + hybrid ranking, dual-language assist (zh/en, 
   - `tasks`
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
 - **Importance grading (MVP v1)**: canonical `detail_json.importance` objects + deterministic `heuristic-v1` scorer + regression tests.
+  - Enable autograde on `ingest`/`harvest`: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (or `--importance-scorer {heuristic-v1|off}`)
   - Notes: `docs/importance-grading.md`
 
 ---

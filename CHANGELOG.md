@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - canonical `detail_json.importance` object helper + compatibility parser (`openclaw_mem.importance`)
   - deterministic scorer `heuristic-v1` (`openclaw_mem.heuristic_v1`)
   - new documentation: `docs/importance-grading.md`
+- Feature-flagged importance autograde on import:
+  - enable via `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1`
+  - per-run override via `--importance-scorer {heuristic-v1|off}` for `ingest` / `harvest`
 
 ### Changed
 - `store` now writes canonical importance objects (method=`manual-via-cli`) instead of legacy numeric-only.

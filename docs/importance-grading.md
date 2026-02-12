@@ -85,6 +85,15 @@ uv run --python 3.13 -- python -m unittest -q tests/test_heuristic_v1.py
 python3 -m unittest -q tests/test_heuristic_v1.py
 ```
 
-## Roadmap (next)
-- Wire `heuristic-v1` into the capture/ingest path behind a **feature flag** (safe, reversible).
-- Evaluate before/after recall quality using a small benchmark set.
+## Autograde on ingest/harvest (feature-flagged)
+
+You can optionally have `ingest` / `harvest` run `heuristic-v1` and write `detail_json.importance` during import.
+
+- Enable via env var:
+  - `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1`
+- Or override per-run:
+  - `--importance-scorer {heuristic-v1|off}`
+
+Notes:
+- This is designed to be safe + reversible: set the env/flag to `off` to stop grading.
+- Existing `detail_json.importance` values are preserved unless a caller explicitly opts into re-grading.
