@@ -13,6 +13,7 @@ Status tags used here: **DONE / PARTIAL / ROADMAP**.
 - **Non-destructive writes**: never overwrite operator-authored fields; only fill missing values.
 - **Upgrade-safe**: user-owned data/config is stable across versions.
 - **Receipts over vibes**: every automation path should emit a measurable summary.
+- **Trust-aware by design**: treat skill/web/tool outputs as *untrusted by default* until promoted by an explicit policy; preserve provenance so packing/retrieval can make safer choices.
 
 ## Now (next milestones)
 
@@ -53,16 +54,32 @@ Acceptance criteria:
 
 ## Next (engineering epics)
 
-### 3) Context Packer (lean prompt build)
+### 3) Provenance + trust tiers (defense-in-depth)
+
+Goal: make retrieval and packing **trust-aware**, so “helpful but hostile” content doesn’t become durable state by accident.
+
+Deliverables:
+- A minimal provenance schema for each record (e.g., `source`, `producer`, optional `url`/`tool_name`, timestamps)
+- A simple trust tier field (e.g., `trusted | untrusted | quarantined`) with sane defaults:
+  - tool/web/skill captures start as `untrusted`
+  - operator-authored notes/promotions can mark `trusted`
+- Promotion/quarantine rules that are explicit and auditable (receipts)
+
+Acceptance criteria:
+- Default packing/retrieval can prefer `trusted` without breaking existing flows.
+- Operators can explain *why* a record was included (provenance + trust tier).
+
+### 4) Context Packer (lean prompt build)
 
 Goal: for each request, locally build a **small, high-signal context bundle** instead of shipping the whole session history.
 
 Deliverables:
-- A packing spec (inputs, budgets, citations, redaction rules)
+- A packing spec (inputs, budgets, citations, redaction rules) **including trust gating**
 - `pack` CLI (or equivalent) that outputs:
   - a short “relevant state” section
   - bounded summaries of the top-K relevant durable facts/tasks
   - citations back to record ids / URLs (no private paths)
+  - trust tier and provenance hints (enough for audits; not noisy)
 - A cheap retrieval baseline **without embeddings** (FTS + heuristics)
 - Optional: embedding-based rerank as an opt-in layer
 
@@ -70,7 +87,7 @@ Acceptance criteria:
 - For a sample of real requests, packing reduces prompt size materially while keeping answer quality stable.
 - Output is deterministic enough to debug (receipts + JSON summary).
 
-### 4) Graph semantic memory (idea → project matching)
+### 5) Graph semantic memory (idea → project matching)
 
 Goal: represent projects/decisions/concepts as typed entities + edges so we can recommend work with **path justification**.
 
@@ -86,7 +103,7 @@ Deliverables:
 Acceptance criteria:
 - Given an idea, we can point to 3–10 candidate projects/tasks with a human-readable justification path.
 
-### 5) User/System separation (upgrade-safe operator state)
+### 6) User/System separation (upgrade-safe operator state)
 
 Deliverables:
 - Clear boundary of **user-owned** vs **system-owned** files/config
@@ -96,7 +113,7 @@ Acceptance criteria:
 - Upgrades do not rewrite operator state.
 - Old DB/records remain readable.
 
-### 6) Observability & hooks (receipts everywhere)
+### 7) Observability & hooks (receipts everywhere)
 
 Deliverables:
 - Standardized run summaries for ingest/harvest/triage
@@ -107,7 +124,7 @@ Deliverables:
 Acceptance criteria:
 - Any automated path can be validated via logs + JSON summary.
 
-### 7) Feedback loop (operator corrections → better behavior)
+### 8) Feedback loop (operator corrections → better behavior)
 
 Deliverables:
 - Minimal manual override flow (mark/adjust importance)
@@ -116,7 +133,7 @@ Deliverables:
 Acceptance criteria:
 - Operators can correct mistakes and see the system behave differently afterward.
 
-### 8) Pruning-safe capture profiles (future)
+### 9) Pruning-safe capture profiles (future)
 
 Goal: make OpenClaw session pruning safer by ensuring important tool outputs remain retrievable locally.
 
@@ -142,6 +159,9 @@ These are projects we referenced and **actually used** to shape features or arch
 
 - Daniel Miessler — *Personal AI Infrastructure (PAI)*: <https://github.com/danielmiessler/Personal_AI_Infrastructure>
   - Used as an architectural checklist (memory tiers, hooks, user/system separation, continuous improvement).
+
+- 1Password — *From magic to malware: How OpenClaw's agent skills become an attack surface*: <https://1password.com/blog/from-magic-to-malware-how-openclaws-agent-skills-become-an-attack-surface>
+  - Used to motivate provenance + trust tiers and “trust-aware” context packing (helpful content can still be hostile).
 
 - `thedotmack/claude-mem`: <https://github.com/thedotmack/claude-mem>
   - Strong early inspiration for an agent memory layer design; we credit it explicitly (see `ACKNOWLEDGEMENTS.md`).
