@@ -10,6 +10,10 @@ It does **not** replace OpenClaw’s canonical memory slot/backends. Instead, it
 
 Status tags used below: **DONE / PARTIAL / ROADMAP**.
 
+## Philosophy (small, but non-negotiable)
+
+Agent “self/continuity” is largely a narrative constructed from memory. For systems, that continuity should be treated as a **designed interface**: allow narrative, but anchor it in **auditable evidence** (provenance + trust tiers + citations + receipts) so we don’t amplify confident self-deception or poisoned inputs.
+
 ## Non-goals
 
 - Becoming the global “memory core” for OpenClaw.
