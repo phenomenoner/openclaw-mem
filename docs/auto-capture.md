@@ -1,5 +1,7 @@
 # Auto-Capture Plugin (`openclaw-mem`)
 
+Status: **PARTIAL** (capture-only; sidecar by design).
+
 ## Overview
 
 The OpenClaw plugin in `extensions/openclaw-mem/` is **capture-only**:
@@ -145,21 +147,21 @@ tail -f ~/.openclaw/memory/openclaw-mem-observations.jsonl
 
 ```bash
 cd /path/to/openclaw-mem
-uv run openclaw-mem ingest \
+uv run python -m openclaw_mem ingest \
   --file ~/.openclaw/memory/openclaw-mem-observations.jsonl --json
 ```
 
 ### 3) Search
 
 ```bash
-uv run openclaw-mem search "web_search" --json
+uv run python -m openclaw_mem search "web_search" --json
 ```
 
 ### 4) Explicit memory write/read (CLI)
 
 ```bash
-uv run openclaw-mem store "Prefer dark theme" --category preference --importance 0.8 --json
-uv run openclaw-mem hybrid "theme preference" --limit 5 --json
+uv run python -m openclaw_mem store "Prefer dark theme" --category preference --importance 0.8 --json
+uv run python -m openclaw_mem hybrid "theme preference" --limit 5 --json
 ```
 
 ---

@@ -4,6 +4,8 @@ This roadmap translates design principles from *personal AI infrastructure* into
 
 Guiding stance: ship early, stay local-first, and keep every change **non-destructive**, **observable**, and **rollbackable**.
 
+Status tags used here: **DONE / PARTIAL / ROADMAP**.
+
 ## Principles (what we optimize for)
 
 - **Sidecar, not slot owner**: OpenClaw memory backends remain canonical; `openclaw-mem` provides capture + local-first recall + ops.
@@ -16,7 +18,7 @@ Guiding stance: ship early, stay local-first, and keep every change **non-destru
 
 ### 1) Importance grading rollout (MVP v1)
 
-Status: **in progress**.
+Status: **PARTIAL** (in progress).
 
 - [x] Canonical `detail_json.importance` object + thresholds
 - [x] Deterministic `heuristic-v1` + unit tests

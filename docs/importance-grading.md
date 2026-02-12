@@ -1,5 +1,7 @@
 # Importance grading (MVP v1)
 
+Status: **PARTIAL** (shipped and usable; rollout / reporting still evolving).
+
 ## What this is
 `openclaw-mem` supports **importance grading** so downstream workflows can:
 - prioritize what gets recalled,
@@ -59,7 +61,7 @@ See `openclaw_mem.importance.parse_importance_score()`.
 Example:
 
 ```bash
-uv run openclaw-mem store "Prefer tabs over spaces" \
+uv run python -m openclaw_mem store "Prefer tabs over spaces" \
   --category preference \
   --importance 0.9 \
   --json
