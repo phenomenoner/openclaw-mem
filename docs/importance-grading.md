@@ -99,3 +99,42 @@ You can optionally have `ingest` / `harvest` run `heuristic-v1` and write `detai
 Notes:
 - This is designed to be safe + reversible: set the env/flag to `off` to stop grading.
 - Existing `detail_json.importance` values are preserved unless a caller explicitly opts into re-grading.
+
+### Run summary output (ops receipt)
+
+When `--json` is enabled, `ingest` and `harvest` also emit a small run summary so cron/ops flows can trend label distribution over time.
+
+Fields:
+- `total_seen`: number of observations processed in this run
+- `graded_filled`: number of observations where autograde populated missing `detail_json.importance`
+- `skipped_existing`: observations that already had `detail_json.importance` (left untouched)
+- `skipped_disabled`: observations with missing importance when autograde is disabled
+- `scorer_errors`: autograde failures (ingest still succeeds; fail-open)
+- `label_counts`: aggregate label distribution for observations that had importance (existing + newly graded)
+
+Example:
+
+```bash
+uv run --python 3.13 -- python -m openclaw_mem ingest \
+  --file observations.jsonl \
+  --importance-scorer heuristic-v1 \
+  --json
+```
+
+Example JSON output:
+
+```json
+{
+  "inserted": 3,
+  "ids": [101, 102, 103],
+  "total_seen": 3,
+  "graded_filled": 3,
+  "skipped_existing": 0,
+  "skipped_disabled": 0,
+  "scorer_errors": 0,
+  "label_counts": {
+    "nice_to_have": 2,
+    "must_remember": 1
+  }
+}
+```

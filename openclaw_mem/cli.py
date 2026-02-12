@@ -17,6 +17,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Dict, Any, List, Optional, Tuple
@@ -61,6 +62,25 @@ DEFAULT_INDEX_PATH = os.path.join(STATE_DIR, "memory", "openclaw-mem", "observat
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class IngestRunSummary:
+    """Aggregate ingest/harvest stats for importance autograde.
+
+    These are intended for ops receipts and trend-friendly dashboards.
+    """
+
+    total_seen: int = 0
+    graded_filled: int = 0
+    skipped_existing: int = 0
+    skipped_disabled: int = 0
+    scorer_errors: int = 0
+    label_counts: Dict[str, int] = field(default_factory=dict)
+
+    def bump_label(self, label: str) -> None:
+        key = (label or "").strip().lower() or "unknown"
+        self.label_counts[key] = int(self.label_counts.get(key, 0)) + 1
 
 
 def _apply_importance_scorer_override(args: argparse.Namespace) -> None:
@@ -216,7 +236,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any]) -> int:
+def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summary: IngestRunSummary | None = None) -> int:
     ts = obs.get("ts") or datetime.utcnow().isoformat()
     kind = obs.get("kind")
     summary = obs.get("summary")
@@ -256,6 +276,24 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any]) -> int:
     if extras:
         detail_obj.update(extras)
 
+    if run_summary is not None:
+        run_summary.total_seen += 1
+
+    had_importance = "importance" in detail_obj
+    if run_summary is not None and had_importance:
+        run_summary.skipped_existing += 1
+        try:
+            from openclaw_mem.importance import parse_importance_score, label_from_score
+
+            existing = detail_obj.get("importance")
+            if isinstance(existing, dict) and isinstance(existing.get("label"), str) and existing.get("label").strip():
+                run_summary.bump_label(existing.get("label"))
+            else:
+                run_summary.bump_label(label_from_score(parse_importance_score(existing)))
+        except Exception:
+            # Never break ingestion for reporting.
+            run_summary.bump_label("unknown")
+
     # Optional: auto-grade importance behind a feature flag (non-destructive).
     #
     # MVP rules:
@@ -263,24 +301,40 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any]) -> int:
     # - only populate missing `detail_json.importance`
     # - fail-open on any grading error
     scorer = (os.environ.get("OPENCLAW_MEM_IMPORTANCE_SCORER") or "").strip().lower()
-    if scorer == "heuristic-v1" and "importance" not in detail_obj:
-        try:
-            from openclaw_mem.heuristic_v1 import grade_observation
 
-            r = grade_observation(
-                {
-                    "ts": ts,
-                    "kind": kind,
-                    "summary": summary,
-                    "summary_en": summary_en,
-                    "lang": lang,
-                    "tool_name": tool_name,
-                    "detail": detail_obj,
-                }
-            )
-            detail_obj["importance"] = r.as_importance()
-        except Exception as e:
-            print(f"Warning: importance autograde failed: {e}", file=sys.stderr)
+    if scorer == "heuristic-v1":
+        if not had_importance:
+            try:
+                # Test hook: force a grading failure to prove fail-open behavior.
+                if (os.environ.get("OPENCLAW_MEM_IMPORTANCE_TEST_RAISE") or "").strip() == "1":
+                    raise RuntimeError("forced importance autograde failure (test)")
+
+                from openclaw_mem.heuristic_v1 import grade_observation
+
+                r = grade_observation(
+                    {
+                        "ts": ts,
+                        "kind": kind,
+                        "summary": summary,
+                        "summary_en": summary_en,
+                        "lang": lang,
+                        "tool_name": tool_name,
+                        "detail": detail_obj,
+                    }
+                )
+                imp = r.as_importance()
+                detail_obj["importance"] = imp
+
+                if run_summary is not None:
+                    run_summary.graded_filled += 1
+                    run_summary.bump_label(str(imp.get("label") or "unknown"))
+            except Exception as e:
+                if run_summary is not None:
+                    run_summary.scorer_errors += 1
+                print(f"Warning: importance autograde failed: {e}", file=sys.stderr)
+    else:
+        if run_summary is not None and not had_importance:
+            run_summary.skipped_disabled += 1
 
     detail_json = json.dumps(detail_obj, ensure_ascii=False)
 
@@ -404,15 +458,29 @@ def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     else:
         fp = sys.stdin
 
+    summary = IngestRunSummary()
+
     inserted: List[int] = []
     for obs in _iter_jsonl(fp):
-        inserted.append(_insert_observation(conn, obs))
+        inserted.append(_insert_observation(conn, obs, summary))
 
     conn.commit()
     if args.file:
         fp.close()
 
-    _emit({"inserted": len(inserted), "ids": inserted[:50]}, args.json)
+    _emit(
+        {
+            "inserted": len(inserted),
+            "ids": inserted[:50],
+            "total_seen": summary.total_seen,
+            "graded_filled": summary.graded_filled,
+            "skipped_existing": summary.skipped_existing,
+            "skipped_disabled": summary.skipped_disabled,
+            "scorer_errors": summary.scorer_errors,
+            "label_counts": summary.label_counts,
+        },
+        args.json,
+    )
 
 
 def _has_cjk(text: str) -> bool:
@@ -1753,9 +1821,24 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     # 1. Determine source
     default_source = os.path.expanduser("~/.openclaw/memory/openclaw-mem-observations.jsonl")
     source = Path(args.source or default_source)
+    summary = IngestRunSummary()
 
     if not source.exists() or source.stat().st_size == 0:
-        _emit({"ok": True, "processed": 0, "reason": "source empty/missing"}, args.json)
+        _emit(
+            {
+                "ok": True,
+                "processed": 0,
+                "ingested": 0,
+                "reason": "source empty/missing",
+                "total_seen": summary.total_seen,
+                "graded_filled": summary.graded_filled,
+                "skipped_existing": summary.skipped_existing,
+                "skipped_disabled": summary.skipped_disabled,
+                "scorer_errors": summary.scorer_errors,
+                "label_counts": summary.label_counts,
+            },
+            args.json,
+        )
         return
 
     # 2. Rotate
@@ -1772,7 +1855,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
         with open(processing, "r", encoding="utf-8") as fp:
             for obs in _iter_jsonl(fp):
-                inserted_ids.append(_insert_observation(conn, obs))
+                inserted_ids.append(_insert_observation(conn, obs, summary))
         conn.commit()
     except Exception as e:
         _emit({"error": f"Ingest failed: {e}", "file": str(processing)}, args.json)
@@ -1793,6 +1876,12 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "ingested": len(inserted_ids),
             "source": str(source),
             "archive": str(args.archive_dir) if args.archive_dir else "deleted",
+            "total_seen": summary.total_seen,
+            "graded_filled": summary.graded_filled,
+            "skipped_existing": summary.skipped_existing,
+            "skipped_disabled": summary.skipped_disabled,
+            "scorer_errors": summary.scorer_errors,
+            "label_counts": summary.label_counts,
         },
         args.json,
     )

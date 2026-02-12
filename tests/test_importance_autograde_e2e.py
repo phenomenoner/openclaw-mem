@@ -91,6 +91,12 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
             "heuristic-v1",
         )
         self.assertEqual(out["inserted"], 1)
+        self.assertEqual(out["total_seen"], 1)
+        self.assertEqual(out["graded_filled"], 1)
+        self.assertEqual(out["skipped_existing"], 0)
+        self.assertEqual(out["skipped_disabled"], 0)
+        self.assertEqual(out["scorer_errors"], 0)
+        self.assertEqual(sum(out["label_counts"].values()), 1)
 
         row = self._read_only_row()
         detail = json.loads(row["detail_json"])
@@ -118,6 +124,9 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
             env={"OPENCLAW_MEM_IMPORTANCE_SCORER": "heuristic-v1"},
         )
         self.assertEqual(out["inserted"], 1)
+        self.assertEqual(out["total_seen"], 1)
+        self.assertEqual(out["graded_filled"], 1)
+        self.assertEqual(out["scorer_errors"], 0)
 
         row = self._read_only_row()
         detail = json.loads(row["detail_json"])
@@ -144,6 +153,42 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
             env={"OPENCLAW_MEM_IMPORTANCE_SCORER": "heuristic-v1"},
         )
         self.assertEqual(out["inserted"], 1)
+        self.assertEqual(out["total_seen"], 1)
+        self.assertEqual(out["graded_filled"], 0)
+        self.assertEqual(out["skipped_existing"], 0)
+        self.assertEqual(out["skipped_disabled"], 1)
+        self.assertEqual(out["scorer_errors"], 0)
+        self.assertEqual(out["label_counts"], {})
+
+        row = self._read_only_row()
+        detail = json.loads(row["detail_json"])
+        self.assertNotIn("importance", detail)
+
+    def test_ingest_fail_open_counts_scorer_errors_and_still_inserts(self):
+        jsonl_path = Path(self.tmpdir.name) / "obs.jsonl"
+        obs = {
+            "ts": "2026-02-11T08:02:00Z",
+            "kind": "tool",
+            "tool_name": "cron.add",
+            "summary": "Force a grader failure to validate fail-open behavior",
+            "detail": {"ok": True},
+        }
+        jsonl_path.write_text(json.dumps(obs, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        out = self._run_cli(
+            "ingest",
+            "--file",
+            str(jsonl_path),
+            "--importance-scorer",
+            "heuristic-v1",
+            env={"OPENCLAW_MEM_IMPORTANCE_TEST_RAISE": "1"},
+        )
+        self.assertEqual(out["inserted"], 1)
+        self.assertEqual(out["total_seen"], 1)
+        self.assertEqual(out["graded_filled"], 0)
+        self.assertEqual(out["skipped_existing"], 0)
+        self.assertEqual(out["skipped_disabled"], 0)
+        self.assertEqual(out["scorer_errors"], 1)
 
         row = self._read_only_row()
         detail = json.loads(row["detail_json"])
@@ -175,6 +220,9 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         )
         self.assertTrue(out.get("ok"))
         self.assertEqual(out.get("ingested"), 1)
+        self.assertEqual(out.get("total_seen"), 1)
+        self.assertEqual(out.get("graded_filled"), 1)
+        self.assertEqual(out.get("scorer_errors"), 0)
 
         row = self._read_only_row()
         detail = json.loads(row["detail_json"])
