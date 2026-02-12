@@ -2,7 +2,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import fs from "node:fs";
 import path from "node:path";
 
-const DEFAULT_OUTPUT = "~/.openclaw/memory/openclaw-mem-observations.jsonl";
+const DEFAULT_OUTPUT = "memory/openclaw-mem-observations.jsonl";
 const MAX_MESSAGE_LENGTH = 1000; // Truncate large messages to prevent bloat
 const DEFAULT_MEMORY_TOOLS = [
   "memory_search",
@@ -164,7 +164,31 @@ const plugin = {
 
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
-    const outputPath = api.resolvePath(cfg.outputPath ?? DEFAULT_OUTPUT);
+
+    const stateDir = api.runtime.state.resolveStateDir();
+
+    const resolveOutputPath = (input: string | undefined): string => {
+      const raw = (input ?? DEFAULT_OUTPUT).trim();
+
+      // Historical config default used "~/.openclaw/..." which can diverge from
+      // the gateway's effective state dir (e.g., OPENCLAW_STATE_DIR override).
+      // If the user specified ~/.openclaw explicitly, treat it as an alias for the
+      // resolved stateDir.
+      if (raw === "~/.openclaw" || raw.startsWith("~/.openclaw/") || raw.startsWith("~\\.openclaw\\")) {
+        const suffix = raw.replace(/^~[\\/]\.openclaw[\\/]?/, "");
+        return path.resolve(stateDir, suffix);
+      }
+
+      // If it's a relative path, resolve it under the OpenClaw state dir.
+      if (!raw.startsWith("~") && !path.isAbsolute(raw)) {
+        return path.resolve(stateDir, raw);
+      }
+
+      // Otherwise, fall back to standard user-path resolution.
+      return api.resolvePath(raw);
+    };
+
+    const outputPath = resolveOutputPath(cfg.outputPath);
     const captureMessage = cfg.captureMessage ?? false;
     const maxMessageLength = cfg.maxMessageLength ?? MAX_MESSAGE_LENGTH;
     const redactSensitive = cfg.redactSensitive ?? true;

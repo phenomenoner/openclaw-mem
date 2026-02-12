@@ -9,7 +9,7 @@
     "additionalProperties": false,
     "properties": {
       "enabled": { "type": "boolean", "default": true },
-      "outputPath": { "type": "string", "default": "~/.openclaw/memory/openclaw-mem-observations.jsonl" },
+      "outputPath": { "type": "string", "default": "memory/openclaw-mem-observations.jsonl" },
       "includeTools": {
         "type": "array",
         "items": { "type": "string" },
