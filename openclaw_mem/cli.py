@@ -23,9 +23,42 @@ from typing import Iterable, Dict, Any, List, Optional, Tuple
 
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 
-DEFAULT_INDEX_PATH = os.path.expanduser("~/.openclaw/memory/openclaw-mem/observations-index.md")
+def _resolve_home_dir() -> str:
+    """Best-effort OpenClaw-style home resolution.
 
-DEFAULT_DB = os.path.expanduser("~/.openclaw/memory/openclaw-mem.sqlite")
+    - OPENCLAW_HOME wins
+    - then OS/user home (~)
+    """
+
+    explicit = (os.getenv("OPENCLAW_HOME") or "").strip()
+    if explicit:
+        return os.path.abspath(os.path.expanduser(explicit))
+    return os.path.abspath(os.path.expanduser("~"))
+
+
+def _resolve_state_dir() -> str:
+    """Resolve OpenClaw state dir (best-effort).
+
+    If the user overrides OpenClaw with OPENCLAW_STATE_DIR, openclaw-mem should
+    follow it to avoid splitting state across directories.
+    """
+
+    override = (os.getenv("OPENCLAW_STATE_DIR") or os.getenv("CLAWDBOT_STATE_DIR") or "").strip()
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    return os.path.join(_resolve_home_dir(), ".openclaw")
+
+
+def _resolve_openclaw_config_path() -> str:
+    override = (os.getenv("OPENCLAW_CONFIG_PATH") or os.getenv("CLAWDBOT_CONFIG_PATH") or "").strip()
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    return os.path.join(_resolve_state_dir(), "openclaw.json")
+
+
+STATE_DIR = _resolve_state_dir()
+DEFAULT_INDEX_PATH = os.path.join(STATE_DIR, "memory", "openclaw-mem", "observations-index.md")
+DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
 
@@ -62,20 +95,25 @@ def _apply_importance_scorer_override(args: argparse.Namespace) -> None:
 
 
 def _read_openclaw_config() -> Dict[str, Any]:
-    """Read ~/.openclaw/openclaw.json (cached)."""
+    """Read OpenClaw config (cached).
+
+    Prefers OPENCLAW_CONFIG_PATH when set; otherwise reads from the resolved
+    OpenClaw state dir.
+    """
+
     global _CONFIG_CACHE
     if _CONFIG_CACHE is not None:
         return _CONFIG_CACHE
 
     try:
-        config_path = os.path.expanduser("~/.openclaw/openclaw.json")
+        config_path = _resolve_openclaw_config_path()
         if os.path.exists(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 _CONFIG_CACHE = json.load(f)
                 return _CONFIG_CACHE
     except Exception:
         pass
-    
+
     _CONFIG_CACHE = {}
     return _CONFIG_CACHE
 
