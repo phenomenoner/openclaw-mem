@@ -4,7 +4,11 @@ version = "0.5.9"
 description = "CLI-first memory store + search prototype for OpenClaw"
 requires-python = ">=3.10"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = { text = "MIT OR Apache-2.0" }
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "License :: OSI Approved :: Apache Software License",
+]
 
 [project.optional-dependencies]
 # Build the (free) GitHub Pages documentation site locally or in CI.

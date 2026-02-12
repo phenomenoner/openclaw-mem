@@ -14,6 +14,10 @@ Optional layers add embeddings + hybrid ranking, dual-language fields, gateway-a
 
 ---
 
+## License
+
+Dual-licensed: **MIT OR Apache-2.0**. See `LICENSE`, `LICENSE-MIT`, and `LICENSE-APACHE`.
+
 ## Reality check (verifiable)
 
 See: `docs/reality-check.md` (commands + expected JSON shapes).
