@@ -47,7 +47,7 @@ Goal: get value without risk.
 3. Export a small slice of observations into the vault:
 
 ```bash
-uv run openclaw-mem export \
+uv run python -m openclaw_mem export \
   --to ~/Obsidian/OpenClawVault/OpenClaw/observations.md \
   --limit 200 --yes --json
 ```

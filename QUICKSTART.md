@@ -1,6 +1,6 @@
 # Quickstart Guide
 
-Get openclaw-mem up and running in ~5 minutes.
+Get `openclaw-mem` up and running in ~5 minutes.
 
 ## Prerequisites
 
@@ -18,21 +18,33 @@ cd openclaw-mem
 uv sync --locked
 ```
 
----
-
-## Step 2: Quick Test
+**Invocation note (truthful):** from a source checkout, run the CLI as:
 
 ```bash
-# Creates/open DB and prints stats
-uv run openclaw-mem status --json
+uv run python -m openclaw_mem ...
+```
 
-# Inspect active OpenClaw memory backend + fallback posture
-uv run openclaw-mem backend --json
+If you have a packaged install that provides the console script, you can use:
+
+```bash
+openclaw-mem ...
 ```
 
 ---
 
-## Step 3: Ingest Sample Data
+## Step 2: Quick test
+
+```bash
+# Creates/opens a DB and prints stats
+uv run python -m openclaw_mem --json status
+
+# Inspect active OpenClaw memory backend + fallback posture
+uv run python -m openclaw_mem --json backend
+```
+
+---
+
+## Step 3: Ingest sample data
 
 ```bash
 cat > /tmp/sample.jsonl <<'EOF'
@@ -41,7 +53,7 @@ cat > /tmp/sample.jsonl <<'EOF'
 {"ts":"2026-02-05T10:02:00Z","kind":"tool","tool_name":"exec","summary":"ran git status","detail":{"exit_code":0}}
 EOF
 
-uv run openclaw-mem ingest --file /tmp/sample.jsonl --json
+uv run python -m openclaw_mem ingest --file /tmp/sample.jsonl --json
 ```
 
 ---
@@ -49,9 +61,9 @@ uv run openclaw-mem ingest --file /tmp/sample.jsonl --json
 ## Step 4: Progressive recall (search → timeline → get)
 
 ```bash
-uv run openclaw-mem search "OpenClaw" --limit 10 --json
-uv run openclaw-mem timeline 2 --window 2 --json
-uv run openclaw-mem get 1 --json
+uv run python -m openclaw_mem search "OpenClaw" --limit 10 --json
+uv run python -m openclaw_mem timeline 2 --window 2 --json
+uv run python -m openclaw_mem get 1 --json
 ```
 
 ---
@@ -59,11 +71,11 @@ uv run openclaw-mem get 1 --json
 ## Step 4.5: Dual-language memory (optional)
 
 ```bash
-uv run openclaw-mem store "偏好：发布前先跑集成测试" \
+uv run python -m openclaw_mem store "<original non-English text>" \
   --text-en "Preference: run integration tests before release" \
   --lang zh --category preference --importance 0.9 --json
 
-uv run openclaw-mem hybrid "发布前流程" \
+uv run python -m openclaw_mem hybrid "<original query>" \
   --query-en "pre-release process" \
   --limit 5 --json
 ```
@@ -82,7 +94,7 @@ Ownership model (important):
 - `memory-core` / `memory-lancedb` remain canonical memory backends
 - `openclaw-mem` is sidecar capture + local recall + triage
 
-For explicit memory writes/reads, use CLI commands (`openclaw-mem store` / `openclaw-mem hybrid`).
+For explicit memory writes/reads, use CLI commands (`store`, `hybrid`, etc.).
 
 ```bash
 # Symlink plugin into OpenClaw
@@ -122,7 +134,7 @@ tail -f ~/.openclaw/memory/openclaw-mem-observations.jsonl
 Ingest captured observations:
 
 ```bash
-uv run openclaw-mem ingest \
+uv run python -m openclaw_mem ingest \
   --file ~/.openclaw/memory/openclaw-mem-observations.jsonl --json
 ```
 
@@ -131,7 +143,7 @@ uv run openclaw-mem ingest \
 ## Step 6: Deterministic triage (optional)
 
 ```bash
-uv run openclaw-mem triage --mode heartbeat --json
+uv run python -m openclaw_mem triage --mode heartbeat --json
 ```
 
 ---
@@ -139,6 +151,7 @@ uv run openclaw-mem triage --mode heartbeat --json
 ## Next steps
 
 - Full docs: `README.md`
+- Reality check & status: `docs/reality-check.md`
 - Plugin details: `docs/auto-capture.md`
 - Deployment: `docs/deployment.md`
 - Ecosystem fit: `docs/ecosystem-fit.md`

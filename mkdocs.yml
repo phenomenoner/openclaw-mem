@@ -29,6 +29,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Reality check & status: reality-check.md
   - Quickstart: quickstart.md
   - Reference:
       - Ecosystem fit: ecosystem-fit.md

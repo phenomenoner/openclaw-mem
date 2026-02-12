@@ -8,13 +8,15 @@ It does **not** replace OpenClaw’s canonical memory slot/backends. Instead, it
 - adds governance (importance, receipts, redaction),
 - and (planned) provides **clean, minimal context bundles** for each request.
 
+Status tags used below: **DONE / PARTIAL / ROADMAP**.
+
 ## Non-goals
 
 - Becoming the global “memory core” for OpenClaw.
 - Auto-writing over operator-authored fields.
 - Forcing embeddings/LLM dependence (LLM-assisted features must be opt-in).
 
-## Data flow (today)
+## Data flow (today) — **DONE**
 
 ```text
 OpenClaw tool results
@@ -32,7 +34,7 @@ OpenClaw tool results
 
 ## Modules
 
-### 1) Capture
+### 1) Capture — **PARTIAL**
 
 - Source: OpenClaw tool results (and optionally message events).
 - Output: JSONL observations (append-only).
@@ -41,13 +43,13 @@ OpenClaw tool results
   - bounded payloads
   - stable schemas (upgrade-safe)
 
-### 2) Ingest / Harvest
+### 2) Ingest / Harvest — **DONE**
 
 - Converts JSONL observations into a queryable SQLite ledger.
 - Must be **fail-open**: a broken scorer or malformed record must not break ingest.
 - Must be **non-destructive**: never overwrite existing operator fields.
 
-### 3) Importance grading (MVP v1)
+### 3) Importance grading (MVP v1) — **PARTIAL**
 
 - Goal: governance, not “smart recall”.
 - Deterministic scorer (`heuristic-v1`) fills missing `detail_json.importance`.
@@ -57,7 +59,7 @@ OpenClaw tool results
   - else ignore
 - Unset/legacy importance is treated as **unknown** (do not auto-filter by default).
 
-### 4) Context Packer (planned)
+### 4) Context Packer — **ROADMAP**
 
 Problem: multi-project operation tends to send **too much irrelevant context** to the LLM.
 
@@ -83,7 +85,7 @@ Proposed interface (draft):
 
 This module is the bridge between “memory governance” and “prompt cleanliness”.
 
-### 5) Graph semantic memory (planned)
+### 5) Graph semantic memory — **ROADMAP**
 
 Goal: support **idea → project matching** and path-justified recommendations.
 

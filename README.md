@@ -1,20 +1,46 @@
 # openclaw-mem
 
-**Local-first long‑term memory layer for OpenClaw agents.**
+**Local-first memory sidecar for OpenClaw agents.**
 
 `openclaw-mem` captures useful observations (what tools ran, what happened, what mattered), stores them in a lightweight local SQLite database, and enables **cheap progressive recall** back into the agent:
 
 1) **Search** (compact hits) → 2) **Timeline** (nearby context) → 3) **Get** (full record)
 
-Optional upgrades add embeddings + hybrid ranking, dual-language assist (zh/en, etc.), gateway-assisted semantic recall, and deterministic triage for heartbeats.
+It does **not** replace OpenClaw’s canonical memory slot/backends; it complements them with capture, auditability, and operator workflows.
+
+Optional layers add embeddings + hybrid ranking, dual-language fields, gateway-assisted semantic recall, and heartbeat-safe triage.
 
 > Pitch (truthful): if your agent is already doing real work, `openclaw-mem` turns that work into a searchable, auditable memory trail—without requiring an external database.
 
 ---
 
+## Reality check (verifiable)
+
+See: `docs/reality-check.md` (commands + expected JSON shapes).
+
+```bash
+uv sync --locked
+DB=/tmp/openclaw-mem.sqlite
+
+uv run python -m openclaw_mem --db "$DB" --json status
+uv run python -m openclaw_mem --db "$DB" --json ingest --file /tmp/sample.jsonl
+uv run python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
+```
+
+Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_ts`, and `ingest` prints `{inserted, ids}`.
+
+## Status map (DONE / PARTIAL / ROADMAP)
+
+- **DONE**: local SQLite ledger + FTS5; `ingest/search/timeline/get`; deterministic `triage`.
+- **PARTIAL**: embeddings/hybrid/rerank; AI compression; dual-language fields.
+- **PARTIAL**: OpenClaw plugin capture + backend annotations; Route A semantic recall (`index`, `semantic`).
+- **ROADMAP**: package/console scripts; Context Packer (`pack`); graph semantic memory.
+
+---
+
 ## What you get (feature map)
 
-### Core (local, deterministic)
+### Core (local, deterministic) — **DONE**
 
 - **Observation store**: SQLite + FTS5
 - **Progressive disclosure recall**:
@@ -22,7 +48,7 @@ Optional upgrades add embeddings + hybrid ranking, dual-language assist (zh/en, 
 - **Export**: `export` (with safety confirmation)
 - **Auto-ingest helper**: `harvest` (ingest + optional embeddings)
 
-### Optional (higher recall quality)
+### Optional (higher recall quality) — **PARTIAL**
 
 - **Embeddings**: `embed`, `vsearch`
 - **Hybrid retrieval**: `hybrid` (FTS + vector, **RRF** fusion)
@@ -35,7 +61,7 @@ Optional upgrades add embeddings + hybrid ranking, dual-language assist (zh/en, 
   - dedicated EN embedding table (`observation_embeddings_en`)
   - optional EN assist query route in hybrid (`--query-en`)
 
-### Optional (OpenClaw integration)
+### Optional (OpenClaw integration) — **PARTIAL**
 
 - **Auto-capture plugin** (`extensions/openclaw-mem`): listens to `tool_result_persist` and writes JSONL for ingestion.
 - **Backend adapter annotations (v0.5.9)**:
@@ -46,14 +72,14 @@ Optional upgrades add embeddings + hybrid ranking, dual-language assist (zh/en, 
   - `index` (build markdown index)
   - `semantic` (use OpenClaw `memory_search` as a black-box semantic retriever)
 
-### Operational (heartbeat-safe)
+### Operational (heartbeat-safe) — **DONE/PARTIAL**
 
-- **Deterministic triage**: `triage` modes for:
+- **Deterministic triage (DONE)**: `triage` modes for:
   - `heartbeat`
   - `cron-errors`
   - `tasks`
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
-- **Importance grading (MVP v1)**: canonical `detail_json.importance` objects + deterministic `heuristic-v1` scorer + regression tests.
+- **Importance grading (PARTIAL, MVP v1)**: canonical `detail_json.importance` objects + deterministic `heuristic-v1` scorer + regression tests.
   - Enable autograde on `ingest`/`harvest`: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (or `--importance-scorer {heuristic-v1|off}`)
   - Notes: `docs/importance-grading.md`
 
@@ -67,9 +93,11 @@ cd openclaw-mem
 uv sync --locked
 ```
 
-After syncing, you can run either:
-- `uv run openclaw-mem ...` (recommended, always uses the project env)
-- or `openclaw-mem ...` if the script is on your PATH.
+After syncing, run from this source checkout with:
+- `uv run python -m openclaw_mem ...` (recommended)
+
+If you have a packaged install that provides a console script, you can also use:
+- `openclaw-mem ...`
 
 ---
 
@@ -77,32 +105,32 @@ After syncing, you can run either:
 
 ```bash
 # 1) Create/open DB and show counts
-uv run openclaw-mem status --json
+uv run python -m openclaw_mem status --json
 
 # 1.5) Check active OpenClaw memory backend + fallback posture
-uv run openclaw-mem backend --json
+uv run python -m openclaw_mem backend --json
 
 # 2) Ingest JSONL observations
-uv run openclaw-mem ingest --file observations.jsonl --json
+uv run python -m openclaw_mem ingest --file observations.jsonl --json
 
 # 3) Layer 1 recall (compact)
-uv run openclaw-mem search "gateway timeout" --limit 10 --json
+uv run python -m openclaw_mem search "gateway timeout" --limit 10 --json
 
 # 4) Layer 2 recall (nearby context)
-uv run openclaw-mem timeline 42 --window 3 --json
+uv run python -m openclaw_mem timeline 42 --window 3 --json
 
 # 5) Layer 3 recall (full rows)
-uv run openclaw-mem get 42 --json
+uv run python -m openclaw_mem get 42 --json
 ```
 
 ### Proactive memory (explicit “remember this”)
 
 ```bash
-uv run openclaw-mem store "Prefer tabs over spaces" \
+uv run python -m openclaw_mem store "Prefer tabs over spaces" \
   --category preference --importance 0.9 --json
 
-uv run openclaw-mem hybrid "tabs or spaces preference" --limit 5 --json
-uv run openclaw-mem hybrid "tabs or spaces preference" \
+uv run python -m openclaw_mem hybrid "tabs or spaces preference" --limit 5 --json
+uv run python -m openclaw_mem hybrid "tabs or spaces preference" \
   --rerank-provider jina --rerank-topn 20 --json
 ```
 
@@ -155,15 +183,15 @@ See detailed deployment patterns:
 
 ```bash
 # Store original text + optional English companion
-uv run openclaw-mem store "偏好：發布前先跑整合測試" \
+uv run python -m openclaw_mem store "<original non-English text>" \
   --text-en "Preference: run integration tests before release" \
   --lang zh --category preference --importance 0.9 --json
 
 # Build embeddings (original + English)
-uv run openclaw-mem embed --field both --limit 500 --json
+uv run python -m openclaw_mem embed --field both --limit 500 --json
 
 # Hybrid recall with optional EN assist query
-uv run openclaw-mem hybrid "發布前流程" \
+uv run python -m openclaw_mem hybrid "<original query>" \
   --query-en "pre-release process" \
   --limit 5 --json
 ```
@@ -213,7 +241,7 @@ More detail:
 
 ```bash
 # 0: no new issues, 10: attention needed
-uv run openclaw-mem triage --mode heartbeat --json
+uv run python -m openclaw_mem triage --mode heartbeat --json
 ```
 
 This is designed to be safe for heartbeat automation: fast, local, and deterministic.
@@ -229,6 +257,7 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 ## Documentation map
 
 - `QUICKSTART.md` — 5-minute setup
+- `docs/reality-check.md` — verifiable commands + feature status (DONE / PARTIAL / ROADMAP)
 - `docs/importance-grading.md` — importance grading schema + heuristic-v1 + tests
 - `docs/context-engineering-lessons.md` — local-first context engineering patterns (Manus-aligned)
 - `docs/roadmap.md` — engineering roadmap (epics + acceptance criteria)

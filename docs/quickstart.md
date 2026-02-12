@@ -5,6 +5,9 @@ This page is a GitHub Pages friendly entrypoint.
 Canonical quickstart lives here:
 - <https://github.com/phenomenoner/openclaw-mem/blob/main/QUICKSTART.md>
 
+Reality check & status:
+- [reality-check.md](reality-check.md)
+
 ## Minimal local run
 
 ```bash

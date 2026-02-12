@@ -4,6 +4,10 @@
 
 Turn your agent’s work into a durable, searchable memory trail—without taking over the canonical memory slot.
 
+## Reality check
+
+- Reality check & status (DONE / PARTIAL / ROADMAP): [Go →](reality-check.md)
+
 ## Why operators use it
 
 - **Always-fresh recall:** keep “what just happened?” searchable in minutes (or less).
@@ -37,10 +41,10 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 
 ```bash
 # Create/open DB and show counts
-uv run openclaw-mem status --json
+uv run python -m openclaw_mem --json status
 
 # Cheap recall
-uv run openclaw-mem search "gateway timeout" --limit 10 --json
+uv run python -m openclaw_mem --json search "gateway timeout" --limit 10
 ```
 
 ## Links
