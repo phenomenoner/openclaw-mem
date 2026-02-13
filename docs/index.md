@@ -39,6 +39,7 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 - Context engineering lessons (local-first): [Go →](context-engineering-lessons.md)
 - Roadmap (engineering): [Go →](roadmap.md)
 - Upgrade checklist (system upgrades): [Go →](upgrade-checklist.md)
+- Release checklist (repo rule): [Go →](release-checklist.md)
 
 ## Minimal CLI taste
 

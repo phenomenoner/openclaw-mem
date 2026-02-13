@@ -15,6 +15,9 @@ jobs:
           python-version: '3.13'
           enable-cache: true
 
+      - name: Lockfile freshness (repo rule)
+        run: uv lock --check
+
       - name: Sync (locked)
         run: uv sync --locked
 

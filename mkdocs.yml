@@ -38,3 +38,4 @@ nav:
       - Privacy/export rules: privacy-export-rules.md
       - Obsidian: obsidian.md
       - Adapter spec (v0.5.9): v0.5.9-adapter-spec.md
+      - Release checklist (repo rule): release-checklist.md
