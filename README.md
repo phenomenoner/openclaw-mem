@@ -76,15 +76,16 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
   - `index` (build markdown index)
   - `semantic` (use OpenClaw `memory_search` as a black-box semantic retriever)
 
-### Operational (heartbeat-safe) — **DONE/PARTIAL**
+### Operational (heartbeat-safe) — **DONE/PARTIAL (first-stable baseline reached)**
 
 - **Deterministic triage (DONE)**: `triage` modes for:
   - `heartbeat`
   - `cron-errors`
   - `tasks`
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
-- **Importance grading (PARTIAL, MVP v1)**: canonical `detail_json.importance` objects + deterministic `heuristic-v1` scorer + regression tests.
+- **Importance grading (MVP v1 baseline shipped)**: canonical `detail_json.importance` objects + deterministic `heuristic-v1` scorer + regression tests.
   - Enable autograde on `ingest`/`harvest`: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (or `--importance-scorer {heuristic-v1|off}`)
+  - Ingest/harvest JSON receipts include grading counters + `label_counts` for ops trend tracking.
   - Notes: `docs/importance-grading.md`
 
 ---
@@ -258,6 +259,16 @@ This is designed to be safe for heartbeat automation: fast, local, and determini
 If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, daily notes), Obsidian is a great human-facing UI on top of the artifacts `openclaw-mem` produces.
 
 - Guide: `docs/obsidian.md`
+
+## First-stable release baseline
+
+- **Phase 4 baseline is reached** in the playbook path (progressive recall + hybrid + proactive store + sidecar capture/ops loop).
+- Current grooming focus is release hygiene: align docs/changelog and keep benchmark/eval plans explicit before the first stable tag.
+- Benchmark pointers:
+  - `docs/thought-links.md` (design constraints from references)
+  - `docs/rerank-poc-plan.md` (A/B evaluation plan for retrieval quality)
+
+---
 
 ## Documentation map
 

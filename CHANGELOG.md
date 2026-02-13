@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Release readiness
+- Marked Phase 4 baseline as reached for first-stable release grooming (docs alignment pass).
+- Clarified importance grading MVP v1 rollout status: ingest/harvest JSON summaries are shipped (`total_seen`, `graded_filled`, `skipped_existing`, `skipped_disabled`, `scorer_errors`, `label_counts`).
+- Added explicit benchmark-plan pointers in docs (`docs/thought-links.md`, `docs/rerank-poc-plan.md`) to guide pre-stable quality checks.
+
 ### Docs
 - Added `docs/ecosystem-fit.md` to clarify ownership boundaries:
   - `memory-core` / `memory-lancedb` as canonical backend owners
