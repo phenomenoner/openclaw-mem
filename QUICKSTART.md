@@ -125,6 +125,9 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
 }
 ```
 
+Note:
+- If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), set `outputPath` and `tail -f` paths under that directory.
+
 Verify capture is working:
 
 ```bash

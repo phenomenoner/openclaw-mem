@@ -231,6 +231,7 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
 ```
 
 Notes (important):
+- If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), set `outputPath` under that directory (e.g. `/some/dir/memory/openclaw-mem-observations.jsonl`).
 - The capture hook listens to **tool results**, not raw inbound chat messages.
 - `openclaw-mem` plugin is a **sidecar adapter** (capture + annotations), not the canonical memory backend.
 - Canonical memory tools depend on your active memory slot backend (e.g., `memory-core` vs `memory-lancedb`).

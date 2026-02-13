@@ -94,12 +94,15 @@ Add to `~/.openclaw/openclaw.json`:
 }
 ```
 
+Note:
+- If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), set `outputPath` under that directory (e.g. `/some/dir/memory/openclaw-mem-observations.jsonl`).
+
 ### Config options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable/disable capture behavior inside the plugin |
-| `outputPath` | string | `~/.openclaw/memory/openclaw-mem-observations.jsonl` | JSONL output file |
+| `outputPath` | string | `~/.openclaw/memory/openclaw-mem-observations.jsonl` *(or under `OPENCLAW_STATE_DIR` if set)* | JSONL output file |
 | `captureMessage` | boolean | `false` | Include full tool message (truncated) |
 | `maxMessageLength` | number | `1000` | Max message length per content block |
 | `redactSensitive` | boolean | `true` | Redact common secret patterns before persisting |

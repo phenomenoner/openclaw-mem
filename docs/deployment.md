@@ -76,6 +76,9 @@ Add to `~/.openclaw/openclaw.json` (or `/etc/openclaw/openclaw.json` for system-
 }
 ```
 
+Note:
+- If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), set `outputPath` under that directory (e.g. `/some/dir/memory/openclaw-mem-observations.jsonl`).
+
 ### About `excludeTools` (and your concern about missing personalization)
 
 - This plugin listens to **`tool_result_persist`** events, so it captures **tool results**, not raw inbound user messages.
