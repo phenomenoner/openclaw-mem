@@ -3,7 +3,7 @@
   "name": "OpenClaw Mem",
   "description": "Capture tool results into JSONL for openclaw-mem ingestion",
   "kind": "utility",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

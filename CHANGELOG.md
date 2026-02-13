@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (empty)
 
+## [1.0.1] - 2026-02-13
+
+### CI / Docs
+- Added a repo release checklist and a lockfile freshness guard (`uv lock --check`) to prevent `uv sync --locked` failures.
+- Minor docs cleanup (de-emphasized archived v0.5.9 adapter spec; removed redundant note in ecosystem fit).
+
 ## [1.0.0] - 2026-02-13
 
 ### Release readiness

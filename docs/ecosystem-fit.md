@@ -165,5 +165,3 @@ Longer-term architecture direction (upstream):
 | report (tokens/cost/models)  |
 +------------------------------+
 ```
-
-(Mermaid diagram removed due GitHub renderer compatibility issues; ASCII diagram above is canonical.)
