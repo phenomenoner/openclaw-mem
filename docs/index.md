@@ -33,6 +33,7 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 ## Memory quality features
 
 - Architecture (design): [Go →](architecture.md)
+- Thought-links (why these design/benchmark choices): [Go →](thought-links.md)
 - Importance grading (MVP v1): [Go →](importance-grading.md)
 - Context engineering lessons (local-first): [Go →](context-engineering-lessons.md)
 - Roadmap (engineering): [Go →](roadmap.md)

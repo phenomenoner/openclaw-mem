@@ -32,8 +32,12 @@ OpenClaw tool results
 
 ### Key artifacts
 
-- **Observations JSONL**: append-only, “what just happened”.
-- **SQLite DB**: curated ledger for fast local lookup + filtering.
+- **Raw observations JSONL**: append-only “what just happened” events (tool outcomes).
+- **SQLite DB ledger**: curated, queryable memory with audit metadata.
+- **(Planned) Observational log**: a compact, timestamped *derived* layer (“observations about observations”) designed to be:
+  - stable-prefix / cache-friendly,
+  - importance-scored (log-levels),
+  - easy to diff + debug (text-first).
 - **Archive + index**: optional rotation + stable pointers for operators.
 
 ## Modules
@@ -86,6 +90,19 @@ Proposed output (to the LLM):
 
 Proposed interface (draft):
 - `openclaw-mem pack --query "..." --budget-tokens <n> --json`
+
+#### Observational-memory mode (derived, cache-friendly)
+
+A promising variant of Context Packer is to keep a *stable* two-block context window:
+
+1) **OBSERVATIONS**: a compact, timestamped, importance-scored observation log (text-first).
+2) **RAW BUFFER**: the most recent uncompressed turns.
+
+An “observer” process periodically compresses RAW BUFFER → OBSERVATIONS once the buffer crosses a size threshold; an infrequent “reflector” prunes low-value observations.
+
+This structure is designed to keep the prompt prefix stable (better caching) while still allowing continuous operation.
+
+See also: [Thought-links →](thought-links.md)
 
 This module is the bridge between “memory governance” and “prompt cleanliness”.
 
