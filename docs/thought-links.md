@@ -54,3 +54,23 @@ LongMemEval tests long-term interactive memory across categories that map well t
 - We do not claim SoTA LongMemEval scores.
 - We do not claim observational compression beats retrieval.
 - We only claim what we can reproduce with artifacts (manifests + receipts + compare reports).
+
+## 5) OpenClaw SuperMemory (SQLite FTS) → ops + safety takeaways
+
+Source (external, medium trust; small repo, concept clear):
+- `openclaw-supermemory`: <https://github.com/yedanyagamiai/openclaw-supermemory>
+
+**What we take:**
+- **Local-first lexical fallback**: SQLite + **FTS5/BM25** is a solid “zero-embedding / zero-provider” baseline for recall + debugging.
+- **Strict config contract**: `additionalProperties: false` in plugin schema reduces silent misconfig during cron/long-run ops.
+- **Anti-echo hygiene**: explicitly tag injected context blocks (e.g. `<supermemory-context>…</supermemory-context>`) and strip them during capture to avoid infinite self-ingest loops.
+- **Ops-first tools**: a `memory_profile`-style command (counts, categories, size, recent) is disproportionately useful for diagnosing drift.
+
+**What to watch:**
+- Pure FTS is weaker for multilingual/semantic recall (esp. Chinese) unless tokenization is addressed.
+- Auto-capture heuristics must be fail-open and deduped to prevent spammy memory growth.
+
+**Actionable roadmap hooks for openclaw-mem:**
+- Add a `profile`/stats surface (similar to our label-distribution receipts, but queryable on demand).
+- Add an explicit injected-context marker + ignore-list in capture/harvest.
+- Add an optional FTS5 lexical fallback lane for `--no-embed` runs.
