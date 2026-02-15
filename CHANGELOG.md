@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- (empty)
+### Changed
+- `pack --trace` now includes an `output` receipt block with:
+  - `includedCount`, `excludedCount`, `l2IncludedCount`, `citationsCount`
+  - `refreshedRecordRefs` (the exact `recordRef`s included in the final bundle for lifecycle/audit hooks)
+
+### Testing
+- Added regression coverage for `pack --trace` output receipts (shape + exclusion counting).
 
 ## [1.0.1] - 2026-02-13
 

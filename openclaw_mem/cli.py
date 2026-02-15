@@ -1516,6 +1516,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     if bool(args.trace):
         duration_ms = int((time.perf_counter() - started) * 1000)
+        included_refs = [item["recordRef"] for item in selected_items]
         payload["trace"] = {
             "kind": "openclaw-mem.pack.trace.v0",
             "query": {"text": query},
@@ -1546,6 +1547,13 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 },
             ],
             "candidates": candidate_trace,
+            "output": {
+                "includedCount": len(selected_items),
+                "excludedCount": max(0, len(candidate_trace) - len(selected_items)),
+                "l2IncludedCount": 0,
+                "citationsCount": len(citations),
+                "refreshedRecordRefs": included_refs,
+            },
             "timing": {"durationMs": duration_ms},
         }
 
