@@ -178,3 +178,17 @@ Source (external; concept clarity high):
   - `keywords`/`anti-keywords`
   - explicit `outputs` + receipt rules
 - Provide a small helper surface (CLI or adapter) that returns top-N card matches as JSON, then fetches the chosen manual on demand.
+
+## 10) Trait / interface-first (systems kernel mindset) → contracts over vibes
+
+Source (external; concept clarity high):
+- `theonlyhennygod/zeroclaw`: <https://github.com/theonlyhennygod/zeroclaw>
+
+**What we take (portable pattern):**
+- Treat core subsystems (provider/channel/memory/tools) as **interfaces** with explicit contracts.
+- Prefer **fail-fast** validation for configs and outputs (surface misconfig early).
+- Keep operator surfaces **machine-readable** (stable JSON) so cron/receipts don’t depend on prompt parsing.
+
+**How this maps to openclaw-mem:**
+- “Memory governance” is our control-plane; backends remain swappable behind adapters.
+- Roadmap candidates: strict config (`additionalProperties:false`), stable JSON schemas for receipts, and a `profile`/stats surface.

@@ -275,6 +275,28 @@ Deliverables:
 Acceptance criteria:
 - Operators can enable aggressive pruning without losing the ability to recover key tool outcomes from `openclaw-mem`.
 
+### 11) Contract hardening (interface-first) — stable schemas + fail-fast validation
+
+Goal: reduce “silent drift” by treating CLI outputs + configs as **interfaces** with explicit contracts.
+
+Deliverables:
+- **Stable JSON output schemas (v0)** for key operator surfaces:
+  - `harvest --json` summary (`total_seen`, `graded_filled`, `skipped_existing`, ...)
+  - `triage --json` (`needs_attention`, `found_new`, ...)
+  - `pack --trace` receipt (`openclaw-mem.pack.trace.v0`)
+- **Schema tests** (unit-level) that verify:
+  - required keys exist
+  - types are stable
+  - unknown keys are either rejected (strict) or explicitly tolerated (documented)
+- **Strict config contract** where feasible:
+  - plugin config schema uses `additionalProperties: false` (or equivalent) to surface misconfig early
+- `profile` / stats surface candidate:
+  - a cheap `--json profile` (counts, ranges, recent activity) for ops/debug, similar to what we already do with receipts
+
+Acceptance criteria:
+- A breaking shape change fails tests before release.
+- Cron/ops can rely on JSON outputs without regex-parsing or brittle prompt assumptions.
+
 ## Later (optional, higher ambition)
 
 - Hybrid improvements: rerank / eval harnesses
@@ -287,6 +309,9 @@ These are projects we referenced and **actually used** to shape features or arch
 
 - Daniel Miessler — *Personal AI Infrastructure (PAI)*: <https://github.com/danielmiessler/Personal_AI_Infrastructure>
   - Used as an architectural checklist (memory tiers, hooks, user/system separation, continuous improvement).
+
+- 好豪 — *MCP Tool Search：Claude Code 如何終結 Token 消耗大爆炸*: <https://haosquare.com/mcp-tool-search-claude-code/>
+  - Used to justify the “**card → manual**” split and dynamic discovery pattern for SOP/skills (context-size friendly).
 
 - `tobi/qmd`: <https://github.com/tobi/qmd>
   - Used to shape our hybrid retrieval direction (FTS5/BM25 + vectors + fusion + rerank) and the benchmarking plan for a “retrieval router” arm.
