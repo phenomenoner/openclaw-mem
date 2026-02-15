@@ -65,6 +65,12 @@ Think of each node as a “system test point”.
 - `/compact` still behaves; no duplicate replies.
 - cron delivery/wake behavior is stable (no duplicate notifications).
 
+**Receipt validity rule (operator policy):**
+- Node 5 receipts are valid for **7 days**, OR must be re-verified immediately after any:
+  - gateway/Telegram config change
+  - gateway restart
+  - observed duplicate/noisy deliveries
+
 ---
 
 ## Upgrade gates (when it’s “safe to upgrade”)
