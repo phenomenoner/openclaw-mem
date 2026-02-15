@@ -154,3 +154,27 @@ Trusted references:
 
 Untrusted inspiration (idea source; treat as a field note):
 - X thread (xiyu): <https://x.com/ohxiyu/status/2022924956594806821>
+
+## 9) MCP Tool Search (Claude Code) → dynamic discovery + “Skill Card / Manual” split
+
+Source (external; concept clarity high):
+- 好豪：*MCP Tool Search：Claude Code 如何終結 Token 消耗大爆炸* <https://haosquare.com/mcp-tool-search-claude-code/>
+
+**Core idea (portable pattern):**
+- Don’t preload the whole “tool dictionary” (all schemas) into context.
+- Keep a **small always-on core set**.
+- Everything else is **discover → inspect → execute** (search first; load details only when needed).
+
+**Why it matters to openclaw-mem (and our workflow design):**
+- SOP/skills behave like *tools*: when the library grows, “stuff all SOPs into prompt” becomes a self-inflicted context bomb.
+- This complements our layered-loading references (e.g., OpenViking L0/L1/L2):
+  - **Skill Card = L0/L1** (tiny, searchable): when to use, outputs, risks, keywords.
+  - **Skill Manual/Templates = L2** (heavy, deferred): step-by-step SOP, checklists, examples.
+
+**Actionable roadmap hooks (candidates):**
+- Add a **lexical index lane** (FTS5/BM25) for *skill cards / SOP cards* so agents can search first and only load the manual they need.
+- Add a minimal “skill discovery” contract:
+  - naming conventions (regex-friendly)
+  - `keywords`/`anti-keywords`
+  - explicit `outputs` + receipt rules
+- Provide a small helper surface (CLI or adapter) that returns top-N card matches as JSON, then fetches the chosen manual on demand.
