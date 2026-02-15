@@ -88,8 +88,32 @@ Proposed output (to the LLM):
 - up to N short summaries (not raw logs)
 - 1–3 citations (record IDs / URLs), **no private paths**
 
+### Layered context contract (L0/L1/L2) — design hook
+
+Borrow the *pattern* (not the implementation) of layered loading:
+
+- **L0 (abstract)**: 1 line, cheap filtering ("what is this?")
+- **L1 (overview)**: short summary + navigation hints ("what’s inside + where to look next")
+- **L2 (detail)**: raw record / full tool output / original artifact
+
+The packer should prefer:
+1) retrieve/filter by L0/L1,
+2) include mostly L1 in the bundle,
+3) only pull L2 when strictly necessary (and still bounded + redaction-safe).
+
+This keeps bundles small, reduces token noise, and makes results easier to debug.
+
+### Retrieval trajectory receipts (trace) — non-negotiable for ops
+
+Packing must be observable. Every `pack` run should be able to emit a trace that answers:
+- what lanes were searched (hot/warm/cold; and "resources/memory/skills" when applicable)
+- which candidates were considered
+- why each item was **included/excluded** (importance, trust tier, score, cap, recency, scope)
+
 Proposed interface (draft):
-- `openclaw-mem pack --query "..." --budget-tokens <n> --json`
+- `openclaw-mem pack --query "..." --budget-tokens <n> --json --trace`
+  - `--json` returns the bundle
+  - `--trace` returns a machine-readable receipt for audits/debugging
 
 #### Observational-memory mode (derived, cache-friendly)
 

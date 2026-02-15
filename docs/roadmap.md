@@ -81,6 +81,11 @@ Deliverables:
   - bounded summaries of the top-K relevant durable facts/tasks
   - citations back to record ids / URLs (no private paths)
   - trust tier and provenance hints (enough for audits; not noisy)
+- **Layer contract (L0/L1/L2)** for pack inputs/outputs:
+  - L0 abstract for fast filtering
+  - L1 overview as the default bundle payload
+  - L2 detail only on-demand + strictly bounded
+- **Retrieval trajectory receipts** (`--trace`): pack must be debuggable (why included/excluded).
 - A cheap retrieval baseline **without embeddings** (FTS + heuristics)
 - Optional: embedding-based rerank as an opt-in layer
 
@@ -179,3 +184,6 @@ These are projects we referenced and **actually used** to shape features or arch
 
 - `thedotmack/claude-mem`: <https://github.com/thedotmack/claude-mem>
   - Strong early inspiration for an agent memory layer design; we credit it explicitly (see `ACKNOWLEDGEMENTS.md`).
+
+- `volcengine/OpenViking`: <https://github.com/volcengine/OpenViking>
+  - Used as a design reference for layered context loading (L0/L1/L2) and retrieval observability (trajectory/trace). Thought-link only; not a backend commitment.
