@@ -86,8 +86,88 @@ Deliverables:
   - L1 overview as the default bundle payload
   - L2 detail only on-demand + strictly bounded
 - **Retrieval trajectory receipts** (`--trace`): pack must be debuggable (why included/excluded).
+  - Include a minimal JSON schema (v0) so we can diff behavior over time and compare arms in benchmarks.
 - A cheap retrieval baseline **without embeddings** (FTS + heuristics)
 - Optional: embedding-based rerank as an opt-in layer
+
+#### Trace receipt schema (v0, redaction-safe)
+
+When `openclaw-mem pack --trace` is used, it should be able to emit a JSON receipt like:
+
+```json
+{
+  "kind": "openclaw-mem.pack.trace.v0",
+  "ts": "2026-02-15T00:00:00Z",
+  "version": {
+    "openclaw_mem": "1.x",
+    "schema": "v0"
+  },
+  "query": {
+    "text": "…",
+    "scope": "(optional scope tag or project id)",
+    "intent": "(optional: lookup|plan|debug|write|research)"
+  },
+  "budgets": {
+    "budgetTokens": 1200,
+    "maxItems": 12,
+    "maxL2Items": 2,
+    "niceCap": 100
+  },
+  "lanes": [
+    {
+      "name": "hot",
+      "source": "session/recent",
+      "searched": true,
+      "notes": "recent turns only"
+    },
+    {
+      "name": "warm",
+      "source": "sqlite-ledger",
+      "searched": true,
+      "retrievers": [
+        { "kind": "fts5", "topK": 50 }
+      ]
+    },
+    {
+      "name": "cold",
+      "source": "curated-summaries",
+      "searched": false
+    }
+  ],
+  "candidates": [
+    {
+      "id": "rec:123",
+      "type": "memory|resource|skill|decision|digest",
+      "layer": "L0|L1|L2",
+      "importance": "must_remember|nice_to_have|ignore|unknown",
+      "trust": "trusted|untrusted|quarantined|unknown",
+      "scores": { "fts": 12.3, "semantic": null, "rrf": null },
+      "decision": {
+        "included": true,
+        "reason": ["high_score", "must_remember", "within_budget"],
+        "caps": { "niceCapHit": false, "l2CapHit": false }
+      },
+      "citations": {
+        "url": null,
+        "recordRef": "(stable ref; no private paths)"
+      }
+    }
+  ],
+  "output": {
+    "includedCount": 8,
+    "excludedCount": 42,
+    "l2IncludedCount": 1,
+    "citationsCount": 2
+  },
+  "timing": {
+    "durationMs": 83
+  }
+}
+```
+
+Notes:
+- **Do not** include raw content, absolute local paths, or secrets.
+- It must be stable enough to diff across versions and to support `openclaw-memory-bench` policy comparisons.
 
 Hybrid upgrade (quality-first, later within this epic):
 - Add a **retrieval router** that can combine multiple backends:

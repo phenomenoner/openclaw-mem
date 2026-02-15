@@ -113,7 +113,7 @@ Packing must be observable. Every `pack` run should be able to emit a trace that
 Proposed interface (draft):
 - `openclaw-mem pack --query "..." --budget-tokens <n> --json --trace`
   - `--json` returns the bundle
-  - `--trace` returns a machine-readable receipt for audits/debugging
+  - `--trace` returns a machine-readable receipt for audits/debugging (redaction-safe; no raw content)
 
 #### Observational-memory mode (derived, cache-friendly)
 
