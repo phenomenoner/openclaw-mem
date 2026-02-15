@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from openclaw_mem.cli import _connect, _build_index, _extract_obs_ids, _rank_obs_ids_from_snippet, _cjk_terms, _search_cjk_fallback
+from openclaw_mem.cli import _connect, _build_index, _extract_obs_ids, _rank_obs_ids_from_snippet, _cjk_terms, _search_cjk_fallback, _tokenize_query
 
 
 class TestRouteAIndex(unittest.TestCase):
@@ -15,6 +15,13 @@ class TestRouteAIndex(unittest.TestCase):
         ranked = _rank_obs_ids_from_snippet(snippet, query="obs#5")
         self.assertTrue(ranked)
         self.assertEqual(ranked[0][0], 5)
+
+    def test_tokenize_query_keeps_obs_id_and_filters_short_tokens(self):
+        tokens = _tokenize_query("Need obs#5 status + api timeout aa a b")
+        self.assertIn("obs#5", tokens)
+        self.assertIn("status", tokens)
+        self.assertNotIn("aa", tokens)
+        self.assertNotIn("a", tokens)
 
     def test_cjk_terms_extracts_full_run_and_bigrams(self):
         terms = _cjk_terms("測試測試", max_terms=16)
