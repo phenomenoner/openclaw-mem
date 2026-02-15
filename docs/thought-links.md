@@ -74,3 +74,35 @@ Source (external, medium trust; small repo, concept clear):
 - Add a `profile`/stats surface (similar to our label-distribution receipts, but queryable on demand).
 - Add an explicit injected-context marker + ignore-list in capture/harvest.
 - Add an optional FTS5 lexical fallback lane for `--no-embed` runs.
+
+## 6) QMD (hybrid local search engine) → retrieval router + benchmark hooks
+
+Source (external; high concept clarity):
+- `tobi/qmd`: <https://github.com/tobi/qmd>
+
+**What it is (in one line):**
+A local “docs-first” search engine for markdown/transcripts that does **FTS5/BM25 + vector + (optional) query expansion + LLM reranking**, with agent-friendly `--json/--files` outputs and an MCP surface.
+
+**How it relates to us:**
+- As a retrieval backend, QMD is best seen as an **alternative** to a pure vector store like `memory-lancedb`.
+- As a system component, it can be a **supplement** to `openclaw-mem` (we still need capture/governance/receipts/importance; QMD doesn’t replace that).
+
+**What we take (replicable modules):**
+- **Hybrid candidate generation**: lexical anchors first (FTS/BM25), then semantic recall.
+- **Fusion**: RRF-style merging is a pragmatic default.
+- **Budgeting**: keep a small candidate set (top-N) before reranking.
+- **Agent I/O contract**: stable JSON/file outputs + multi-get for “fetch the actual evidence”.
+
+**Quality-first hybrid design we adopt (for openclaw-mem + memory backends):**
+- Stage 1: QMD/FTS5 for exact anchors (names, APIs, error strings, dates)
+- Stage 2: LanceDB vector search for paraphrase recall
+- Stage 3: rerank **only when needed** (ambiguity/close scores) + cap budgets (`must` first, then `nice` with a cap)
+
+**Benchmarking hooks (where this lands):**
+- `openclaw-memory-bench`: add a QMD adapter and a “hybrid router” arm so we can compare:
+  - QMD-only vs LanceDB-only vs Hybrid (QMD→LanceDB fallback)
+  - metrics: hit/recall + p95 latency + must-coverage gate
+
+**What to watch (risks):**
+- Local GGUF model downloads + rerank latency can be heavy; quality-first is fine, but we need hard caps and a clear “disable rerank” path.
+- “Docs-first” indexing is great for markdown, but we must ensure redaction-safe exports when sourcing from private session transcripts.

@@ -84,6 +84,16 @@ Deliverables:
 - A cheap retrieval baseline **without embeddings** (FTS + heuristics)
 - Optional: embedding-based rerank as an opt-in layer
 
+Hybrid upgrade (quality-first, later within this epic):
+- Add a **retrieval router** that can combine multiple backends:
+  - Lexical (SQLite FTS5/BM25; QMD-style)
+  - Semantic (vector store; e.g. LanceDB)
+- Default policy (quality-first):
+  1) lexical anchors (fast + precise)
+  2) semantic fallback (paraphrase recall)
+  3) rerank only when needed + strict top-N candidate budgets
+- Keep outputs auditable: every packed fact must carry provenance + citations/ids.
+
 Acceptance criteria:
 - For a sample of real requests, packing reduces prompt size materially while keeping answer quality stable.
 - Output is deterministic enough to debug (receipts + JSON summary).
@@ -160,6 +170,9 @@ These are projects we referenced and **actually used** to shape features or arch
 
 - Daniel Miessler — *Personal AI Infrastructure (PAI)*: <https://github.com/danielmiessler/Personal_AI_Infrastructure>
   - Used as an architectural checklist (memory tiers, hooks, user/system separation, continuous improvement).
+
+- `tobi/qmd`: <https://github.com/tobi/qmd>
+  - Used to shape our hybrid retrieval direction (FTS5/BM25 + vectors + fusion + rerank) and the benchmarking plan for a “retrieval router” arm.
 
 - 1Password — *From magic to malware: How OpenClaw's agent skills become an attack surface*: <https://1password.com/blog/from-magic-to-malware-how-openclaws-agent-skills-become-an-attack-surface>
   - Used to motivate provenance + trust tiers and “trust-aware” context packing (helpful content can still be hostile).
