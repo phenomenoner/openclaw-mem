@@ -19,7 +19,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Dict, Any, List, Optional, Tuple
 
@@ -63,6 +63,12 @@ DEFAULT_INDEX_PATH = os.path.join(STATE_DIR, "memory", "openclaw-mem", "observat
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _utcnow_iso() -> str:
+    """Return UTC timestamp in ISO format with timezone info."""
+
+    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass
@@ -238,7 +244,7 @@ def _init_db(conn: sqlite3.Connection) -> None:
 
 
 def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summary: IngestRunSummary | None = None) -> int:
-    ts = obs.get("ts") or datetime.utcnow().isoformat()
+    ts = obs.get("ts") or _utcnow_iso()
     kind = obs.get("kind")
     summary = obs.get("summary")
     summary_en = obs.get("summary_en") or obs.get("text_en")
@@ -869,7 +875,7 @@ def cmd_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         rows = conn.execute("SELECT * FROM observations ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         rows = list(reversed(rows))
 
-    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     header = f"\n\n## Exported observations ({ts})\n"
 
     md = [header]
@@ -962,7 +968,7 @@ def cmd_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     per_field: Dict[str, Dict[str, Any]] = {}
     inserted_total = 0
     ids: List[int] = []
-    now = datetime.utcnow().isoformat()
+    now = _utcnow_iso()
 
     for target in _embed_targets(field):
         rows = conn.execute(
@@ -2059,7 +2065,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         return
 
     # 2. Rotate
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     processing = source.with_suffix(f".jsonl.{ts}.processing")
     try:
         source.rename(processing)
@@ -2155,7 +2161,7 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if api_key:
         try:
             client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
-            created_at = datetime.utcnow().isoformat()
+            created_at = _utcnow_iso()
 
             vec = client.embed([text], model=args.model)[0]
             blob = pack_f32(vec)
