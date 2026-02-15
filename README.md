@@ -38,7 +38,8 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **DONE**: local SQLite ledger + FTS5; `ingest/search/timeline/get`; deterministic `triage`.
 - **PARTIAL**: embeddings/hybrid/rerank; AI compression; dual-language fields.
 - **PARTIAL**: OpenClaw plugin capture + backend annotations; Route A semantic recall (`index`, `semantic`).
-- **ROADMAP**: package/console scripts; Context Packer (`pack`); graph semantic memory.
+- **PARTIAL (dev)**: Context Packer (`pack`) with redaction-safe `--trace` receipts.
+- **ROADMAP**: lifecycle manager (ref/last_used_at decay + archive-first); packaging/console scripts; graph semantic memory.
 
 ---
 
@@ -49,6 +50,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **Observation store**: SQLite + FTS5
 - **Progressive disclosure recall**:
   - `search` → `timeline` → `get`
+- **Context Packer (dev)**: `pack` builds a compact, cited bundle (summary-only) with optional `--trace` receipt.
 - **Export**: `export` (with safety confirmation)
 - **Auto-ingest helper**: `harvest` (ingest + optional embeddings)
 
@@ -88,6 +90,9 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
   - Ingest/harvest JSON receipts include grading counters + `label_counts` for ops trend tracking.
   - Notes: `docs/importance-grading.md`
 
+- **Lifecycle manager (ROADMAP)**: ref/last_used_at-based decay + archive-first retention.
+  - Notes: `docs/notes/lifecycle-ref-decay.md`
+
 ---
 
 ## Installation
@@ -126,6 +131,9 @@ uv run python -m openclaw_mem timeline 42 --window 3 --json
 
 # 5) Layer 3 recall (full rows)
 uv run python -m openclaw_mem get 42 --json
+
+# 6) (Dev) Build a compact, cited context bundle
+uv run python -m openclaw_mem pack --query "gateway timeout" --limit 12 --budget-tokens 1200 --trace --json
 ```
 
 ### Proactive memory (explicit “remember this”)
