@@ -106,3 +106,27 @@ A local “docs-first” search engine for markdown/transcripts that does **FTS5
 **What to watch (risks):**
 - Local GGUF model downloads + rerank latency can be heavy; quality-first is fine, but we need hard caps and a clear “disable rerank” path.
 - “Docs-first” indexing is great for markdown, but we must ensure redaction-safe exports when sourcing from private session transcripts.
+
+## 7) OpenViking (context database / filesystem paradigm) → observability + layered loading reference
+
+Source (external; concept clarity high):
+- `volcengine/OpenViking`: <https://github.com/volcengine/OpenViking>
+
+**What it is (in one line):**
+A “context database” for agents that models **resources + memory + skills** as a **virtual filesystem** (URI + directories), with **layered context loading (L0/L1/L2)** and **observable retrieval trajectories**.
+
+**What we take (design patterns, not adoption commitment):**
+- **Filesystem-as-context mental model**: context should be *browsable and targetable* (by scope/path), not just a flat embedding blob.
+- **Layer contract (L0/L1/L2)**:
+  - L0: ultra-short abstract for fast filtering
+  - L1: overview + navigation ("how to get details")
+  - L2: original detail, loaded only when necessary
+- **Retrieval observability**: a first-class “trajectory/trace” for *why* something was retrieved (debuggable receipts).
+- **Typed lanes**: distinguishing **Resource / Memory / Skill** as separate context types aligns with our governance goals.
+
+**How it relates to openclaw-mem:**
+- `openclaw-mem` remains the **governance/control-plane** (importance, trust tiers, redaction, receipts, packing policy).
+- OpenViking is a strong reference for how to make context **structured, layered, and observable**.
+
+**Scope note (CK decision):**
+- Treat OpenViking as **thought-link only** for now (we are not committing to it as a backend/adapter arm yet).
