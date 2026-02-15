@@ -6,6 +6,13 @@ Sources (trusted by CK):
 - Mastra — *Announcing Observational Memory*: <https://mastra.ai/blog/observational-memory>
 - LongMemEval (ICLR 2025): <https://github.com/xiaowu0162/LongMemEval>
 
+Additional trusted references (for lifecycle/decay):
+- Cepeda et al. (2006) — *Distributed Practice in Verbal Recall Tasks: A Review and Quantitative Synthesis* (Psychological Bulletin)
+  - <https://doi.org/10.1037/0033-2909.132.3.354>
+- Megiddo & Modha (2003) — *ARC: A Self-Tuning, Low Overhead Replacement Cache*
+  - <https://www.usenix.org/legacy/publications/library/proceedings/fast03/tech/full_papers/megiddo/megiddo.pdf>
+  (Used as an engineering analogy: retention should be driven by **recency + frequency**, not timestamps alone.)
+
 ## 1) Observational Memory → design constraints we adopt
 
 **What we take (pattern, not branding):**
@@ -130,3 +137,20 @@ A “context database” for agents that models **resources + memory + skills** 
 
 **Scope note (CK decision):**
 - Treat OpenViking as **thought-link only** for now (we are not committing to it as a backend/adapter arm yet).
+
+## 8) Reference-based decay ("forgetting curve") → lifecycle governance hook
+
+Key takeaway:
+- Retention should be governed by **use** (recency/frequency), not a fixed “delete after N days since write” rule.
+
+How this maps to openclaw-mem:
+- Track `last_used_at` (ref) for durable records.
+- Update ref only when a record is **actually used** (default: included in the final `pack` bundle with a citation), not when it’s merely preloaded.
+- Apply **archive-first** lifecycle management (soft delete) so mistakes are reversible.
+
+Trusted references:
+- Cepeda et al. (2006) distributed practice / spaced repetition: <https://doi.org/10.1037/0033-2909.132.3.354>
+- ARC cache replacement (engineering analogy: recency+frequency beats timestamps): <https://www.usenix.org/legacy/publications/library/proceedings/fast03/tech/full_papers/megiddo/megiddo.pdf>
+
+Untrusted inspiration (idea source; treat as a field note):
+- X thread (xiyu): <https://x.com/ohxiyu/status/2022924956594806821>

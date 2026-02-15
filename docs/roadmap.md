@@ -53,9 +53,41 @@ Acceptance criteria:
 - Operators can explain where a fact lives and how it got there.
 - Promotions are auditable and reversible.
 
+### 3) Memory lifecycle (reference-based decay + archive-first)
+
+Goal: keep memory **high-signal** over long horizons by applying *use-based* retention (recency/frequency), not “age-based deletion”.
+
+Core idea:
+- Track **reference events** for durable records (when a record actually influences packed context).
+- Apply **decay/archival** based on `last_used_at` (ref) and `priority` tiers.
+- Default to **soft archive**, not hard delete (fail-safe while recall is imperfect).
+
+Proposed fields (upgrade-safe; store in `detail_json.lifecycle` first):
+- `priority`: `P0|P1|P2`
+  - P0 = never auto-archive (identity/safety/operator invariants)
+  - P1 = long-lived preferences/decisions
+  - P2 = short-lived context
+- `last_used_at`: timestamp of last *real* use (see definition below)
+- `used_count`: optional, monotonic count of use events
+- (optional) `archived_at` / `state=archived`
+
+Definition: what counts as “used” (avoid gaming the signal)
+- **Does NOT count**: bulk preload / “always include these memories”.
+- **Counts (cheap default)**: a record is **selected into the final `pack` bundle** (has a citation like `obs:<id>`).
+- Optional later: track a weaker `last_retrieved_at` for candidates vs `last_included_at` for final bundle inclusion.
+
+Receipts (non-negotiable)
+- `pack --trace` should be able to list which `recordRef`s were “refreshed” this run.
+- Daily lifecycle job should emit an aggregate-only receipt (archived counts by tier/trust/importance).
+
+Acceptance criteria:
+- Ref updates are auditable (receipt + trace), and do not require guessing “importance at write time”.
+- Archive is reversible; no hard delete in MVP.
+- Trust tier remains independent: “used often” does **not** automatically become `trusted`.
+
 ## Next (engineering epics)
 
-### 3) Provenance + trust tiers (defense-in-depth)
+### 4) Provenance + trust tiers (defense-in-depth)
 
 Goal: make retrieval and packing **trust-aware**, so “helpful but hostile” content doesn’t become durable state by accident.
 
@@ -70,7 +102,7 @@ Acceptance criteria:
 - Default packing/retrieval can prefer `trusted` without breaking existing flows.
 - Operators can explain *why* a record was included (provenance + trust tier).
 
-### 4) Context Packer (lean prompt build)
+### 5) Context Packer (lean prompt build)
 
 Goal: for each request, locally build a **small, high-signal context bundle** instead of shipping the whole session history.
 
@@ -183,7 +215,7 @@ Acceptance criteria:
 - For a sample of real requests, packing reduces prompt size materially while keeping answer quality stable.
 - Output is deterministic enough to debug (receipts + JSON summary).
 
-### 5) Graph semantic memory (idea → project matching)
+### 6) Graph semantic memory (idea → project matching)
 
 Goal: represent projects/decisions/concepts as typed entities + edges so we can recommend work with **path justification**.
 
@@ -199,7 +231,7 @@ Deliverables:
 Acceptance criteria:
 - Given an idea, we can point to 3–10 candidate projects/tasks with a human-readable justification path.
 
-### 6) User/System separation (upgrade-safe operator state)
+### 7) User/System separation (upgrade-safe operator state)
 
 Deliverables:
 - Clear boundary of **user-owned** vs **system-owned** files/config
@@ -209,7 +241,7 @@ Acceptance criteria:
 - Upgrades do not rewrite operator state.
 - Old DB/records remain readable.
 
-### 7) Observability & hooks (receipts everywhere)
+### 8) Observability & hooks (receipts everywhere)
 
 Deliverables:
 - Standardized run summaries for ingest/harvest/triage
@@ -220,7 +252,7 @@ Deliverables:
 Acceptance criteria:
 - Any automated path can be validated via logs + JSON summary.
 
-### 8) Feedback loop (operator corrections → better behavior)
+### 9) Feedback loop (operator corrections → better behavior)
 
 Deliverables:
 - Minimal manual override flow (mark/adjust importance)
@@ -229,7 +261,7 @@ Deliverables:
 Acceptance criteria:
 - Operators can correct mistakes and see the system behave differently afterward.
 
-### 9) Pruning-safe capture profiles (future)
+### 10) Pruning-safe capture profiles (future)
 
 Goal: make OpenClaw session pruning safer by ensuring important tool outputs remain retrievable locally.
 
@@ -267,3 +299,8 @@ These are projects we referenced and **actually used** to shape features or arch
 
 - `volcengine/OpenViking`: <https://github.com/volcengine/OpenViking>
   - Used as a design reference for layered context loading (L0/L1/L2) and retrieval observability (trajectory/trace). Thought-link only; not a backend commitment.
+
+- Reference-based decay / archive-first lifecycle (trusted background + field note):
+  - Cepeda et al. (2006) distributed practice / spaced repetition: <https://doi.org/10.1037/0033-2909.132.3.354>
+  - ARC cache replacement (recency+frequency): <https://www.usenix.org/legacy/publications/library/proceedings/fast03/tech/full_papers/megiddo/megiddo.pdf>
+  - X thread (untrusted inspiration): <https://x.com/ohxiyu/status/2022924956594806821>

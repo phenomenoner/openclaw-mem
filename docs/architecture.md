@@ -67,7 +67,28 @@ OpenClaw tool results
   - else ignore
 - Unset/legacy importance is treated as **unknown** (do not auto-filter by default).
 
-### 4) Context Packer — **ROADMAP**
+### 4) Lifecycle manager (retain / decay / archive / revive) — **ROADMAP**
+
+Goal: keep memory **high-signal** over long horizons via *use-based* retention.
+
+Core mechanism:
+- Each durable record maintains a **reference timestamp** (`last_used_at`) updated only when the record is **actually used**.
+- Default “used” signal (cheap + auditable): the record is selected into the final Context Packer bundle (cited as `recordRef`).
+- A scheduled lifecycle job applies **soft archive** (reversible) instead of hard delete.
+
+Design notes:
+- Do **not** count bulk preload as “use” (otherwise everything stays forever).
+- Consider tracking two signals later:
+  - `last_retrieved_at` (candidate hit)
+  - `last_included_at` (final bundle inclusion; default)
+- Decay policy should be tiered (example): `P0` never auto-archive, `P1` 90d, `P2` 30d — but thresholds are tunable.
+- Trust is independent: frequent use does **not** promote `untrusted → trusted`.
+
+Receipts:
+- `pack --trace` should report which records were “refreshed” this run.
+- Lifecycle job should emit an aggregate-only summary (archived counts by tier/trust/importance + reasons).
+
+### 5) Context Packer — **ROADMAP**
 
 Problem: multi-project operation tends to send **too much irrelevant context** to the LLM.
 
@@ -130,7 +151,7 @@ See also: [Thought-links →](thought-links.md)
 
 This module is the bridge between “memory governance” and “prompt cleanliness”.
 
-### 5) Graph semantic memory — **ROADMAP**
+### 6) Graph semantic memory — **ROADMAP**
 
 Goal: support **idea → project matching** and path-justified recommendations.
 
