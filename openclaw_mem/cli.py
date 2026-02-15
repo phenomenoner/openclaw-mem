@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Dict, Any, List, Optional, Tuple
 
+from openclaw_mem import __version__
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 
 def _resolve_home_dir() -> str:
@@ -1418,6 +1419,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     limit = max(1, int(args.limit))
     budget_tokens = max(1, int(args.budget_tokens))
+    max_l2_items = 0
+    nice_cap = 100
 
     started = time.perf_counter()
 
@@ -1450,7 +1453,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     obs_map = state["obs_map"]
 
     selected_items: List[Dict[str, Any]] = []
-    citations: List[Dict[str, str]] = []
+    citations: List[Dict[str, Any]] = []
     candidate_trace: List[Dict[str, Any]] = []
 
     used_tokens = 0
@@ -1490,7 +1493,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                     "lang": row.get("lang"),
                 }
             )
-            citations.append({"recordRef": record_ref})
+            citations.append({"recordRef": record_ref, "url": None})
 
         candidate_trace.append(
             {
@@ -1506,8 +1509,12 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 "decision": {
                     "included": include,
                     "reason": reasons,
+                    "caps": {
+                        "niceCapHit": False,
+                        "l2CapHit": False,
+                    },
                 },
-                "citations": {"recordRef": record_ref},
+                "citations": {"url": None, "recordRef": record_ref},
             }
         )
 
@@ -1525,10 +1532,21 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         included_refs = [item["recordRef"] for item in selected_items]
         payload["trace"] = {
             "kind": "openclaw-mem.pack.trace.v0",
-            "query": {"text": query},
+            "ts": _utcnow_iso(),
+            "version": {
+                "openclaw_mem": __version__,
+                "schema": "v0",
+            },
+            "query": {
+                "text": query,
+                "scope": None,
+                "intent": None,
+            },
             "budgets": {
                 "budgetTokens": budget_tokens,
                 "maxItems": limit,
+                "maxL2Items": max_l2_items,
+                "niceCap": nice_cap,
             },
             "lanes": [
                 {
