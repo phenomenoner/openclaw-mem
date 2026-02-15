@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_backend
+from openclaw_mem.cli import _connect, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_backend
 
 
 class TestCliM0(unittest.TestCase):
@@ -783,6 +783,65 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out[0].get("rerank_provider"), "jina")
         self.assertNotIn("rank_stage", out[0])
         self.assertIn("rerank failed", err.getvalue())
+        conn.close()
+
+    def test_pack_trace_json_shape_and_redaction(self):
+        conn = _connect(":memory:")
+
+        sample = json.dumps(
+            {
+                "ts": "2026-02-04T13:00:00Z",
+                "kind": "fact",
+                "summary": "test pack summary",
+                "summary_en": "test pack summary en",
+                "tool_name": "memory_store",
+                "detail": {},
+            }
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "text-embedding-3-small", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = build_parser().parse_args(["pack", "--query", "test", "--trace", "--json"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertIn("bundle_text", out)
+        self.assertIn("items", out)
+        self.assertIn("citations", out)
+        self.assertIn("trace", out)
+        self.assertEqual(out["trace"]["kind"], "openclaw-mem.pack.trace.v0")
+        self.assertEqual(out["trace"]["query"]["text"], "test")
+
+        trace_dump = json.dumps(out["trace"], ensure_ascii=False)
+        self.assertNotIn("/root/", trace_dump)
         conn.close()
 
 

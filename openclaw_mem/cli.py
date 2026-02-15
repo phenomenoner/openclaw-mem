@@ -15,6 +15,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -1169,41 +1170,41 @@ def _call_rerank_provider(
     return out
 
 
-def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    """Hybrid search (FTS + Vector) using RRF.
-
-    Optional post-retrieval rerank (opt-in):
-    - provider: none|jina|cohere
-    - fail-open: rerank errors do not break search
-    """
-    model = args.model
-    limit = int(args.limit)
-    k = int(args.k)
-    query = args.query
+def _hybrid_retrieve(
+    conn: sqlite3.Connection,
+    args: argparse.Namespace,
+    *,
+    candidate_limit_override: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Shared Hybrid retrieval core (FTS + Vector + RRF + optional rerank)."""
+    model = str(getattr(args, "model", "text-embedding-3-small"))
+    limit = max(1, int(getattr(args, "limit", 20)))
+    k = int(getattr(args, "k", 60))
+    query = (getattr(args, "query", None) or "").strip()
     query_en = (getattr(args, "query_en", None) or "").strip() or None
 
     rerank_provider = str(getattr(args, "rerank_provider", "none") or "none").lower()
     rerank_enabled = rerank_provider != "none"
     rerank_topn = max(1, int(getattr(args, "rerank_topn", limit) or limit))
-    candidate_limit = limit * 2
+
+    candidate_limit = int(candidate_limit_override) if candidate_limit_override is not None else limit * 2
+    candidate_limit = max(1, candidate_limit)
     if rerank_enabled:
         # Keep a wider candidate pool before final rerank.
         candidate_limit = max(candidate_limit, rerank_topn * 3)
 
     api_key = _get_api_key()
     if not api_key:
-        _emit({"error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json"}, args.json)
-        sys.exit(1)
+        raise RuntimeError("OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json")
 
-    client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
+    client = OpenAIEmbeddingsClient(api_key=api_key, base_url=getattr(args, "base_url", "https://api.openai.com/v1"))
     try:
         embed_inputs = [query] + ([query_en] if query_en else [])
         embed_vecs = client.embed(embed_inputs, model=model)
         query_vec = embed_vecs[0]
         query_en_vec = embed_vecs[1] if query_en else None
     except Exception as e:
-        _emit({"error": str(e)}, args.json)
-        sys.exit(1)
+        raise RuntimeError(str(e)) from e
 
     vec_rows = conn.execute(
         "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ?",
@@ -1252,8 +1253,19 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     rrf_ranking = rank_rrf(ranked_lists, k=k, limit=candidate_limit)
     if not rrf_ranking:
-        _emit([], args.json)
-        return
+        return {
+            "ordered_ids": [],
+            "obs_map": {},
+            "rrf_scores": {},
+            "fts_ids": fts_ids,
+            "vec_ids": vec_ids,
+            "vec_en_ids": vec_en_ids,
+            "rerank_scores": {},
+            "rerank_applied": False,
+            "rerank_provider": rerank_provider,
+            "rerank_enabled": rerank_enabled,
+            "candidate_limit": candidate_limit,
+        }
 
     rrf_scores = {rid: score for rid, score in rrf_ranking}
     ordered_ids = [rid for rid, _ in rrf_ranking]
@@ -1320,31 +1332,228 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                         file=sys.stderr,
                     )
 
+    return {
+        "ordered_ids": ordered_ids,
+        "obs_map": obs_map,
+        "rrf_scores": rrf_scores,
+        "fts_ids": fts_ids,
+        "vec_ids": vec_ids,
+        "vec_en_ids": vec_en_ids,
+        "rerank_scores": rerank_scores,
+        "rerank_applied": rerank_applied,
+        "rerank_provider": rerank_provider,
+        "rerank_enabled": rerank_enabled,
+        "candidate_limit": candidate_limit,
+    }
+
+
+def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Hybrid search (FTS + Vector) using RRF.
+
+    Optional post-retrieval rerank (opt-in):
+    - provider: none|jina|cohere
+    - fail-open: rerank errors do not break search
+    """
+    limit = int(args.limit)
+
+    try:
+        state = _hybrid_retrieve(conn, args)
+    except RuntimeError as e:
+        _emit({"error": str(e)}, args.json)
+        sys.exit(1)
+
+    ordered_ids = state["ordered_ids"]
+    if not ordered_ids:
+        _emit([], args.json)
+        return
+
     out = []
     for rid in ordered_ids[:limit]:
-        r = obs_map.get(rid)
+        r = state["obs_map"].get(rid)
         if not r:
             continue
 
-        r["rrf_score"] = float(rrf_scores.get(rid, 0.0))
+        r["rrf_score"] = float(state["rrf_scores"].get(rid, 0.0))
         r["match"] = []
-        if rid in fts_ids:
+        if rid in state["fts_ids"]:
             r["match"].append("text")
-        if rid in vec_ids:
+        if rid in state["vec_ids"]:
             r["match"].append("vector")
-        if rid in vec_en_ids:
+        if rid in state["vec_en_ids"]:
             r["match"].append("vector_en")
 
-        if rerank_enabled:
-            r["rerank_provider"] = rerank_provider
-            if rid in rerank_scores:
-                r["rerank_score"] = float(rerank_scores[rid])
-            if rerank_applied:
-                r["rank_stage"] = "rerank" if rid in rerank_scores else "rrf-fallback"
+        if state["rerank_enabled"]:
+            r["rerank_provider"] = state["rerank_provider"]
+            if rid in state["rerank_scores"]:
+                r["rerank_score"] = float(state["rerank_scores"][rid])
+            if state["rerank_applied"]:
+                r["rank_stage"] = "rerank" if rid in state["rerank_scores"] else "rrf-fallback"
 
         out.append(r)
 
     _emit(out, args.json)
+
+
+def _pack_item_text(row: Dict[str, Any]) -> str:
+    return ((row.get("summary_en") or row.get("summary") or "").replace("\n", " ").strip())
+
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, (len(text) + 3) // 4)
+
+
+def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Build a compact, cited L1-style bundle from hybrid retrieval."""
+    query = (args.query or "").strip()
+    if not query:
+        _emit({"error": "empty query"}, True)
+        sys.exit(2)
+
+    limit = max(1, int(args.limit))
+    budget_tokens = max(1, int(args.budget_tokens))
+
+    started = time.perf_counter()
+
+    retrieval_args = argparse.Namespace(
+        query=query,
+        query_en=None,
+        limit=limit,
+        k=60,
+        model="text-embedding-3-small",
+        base_url="https://api.openai.com/v1",
+        rerank_provider="none",
+        rerank_topn=limit,
+        rerank_model="jina-reranker-v2-base-multilingual",
+        rerank_api_key=None,
+        rerank_base_url=None,
+        rerank_timeout_sec=15,
+    )
+
+    try:
+        state = _hybrid_retrieve(
+            conn,
+            retrieval_args,
+            candidate_limit_override=max(limit * 3, limit + 8),
+        )
+    except RuntimeError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+
+    ordered_ids = state["ordered_ids"]
+    obs_map = state["obs_map"]
+
+    selected_items: List[Dict[str, Any]] = []
+    citations: List[Dict[str, str]] = []
+    candidate_trace: List[Dict[str, Any]] = []
+
+    used_tokens = 0
+    for rid in ordered_ids:
+        row = obs_map.get(rid)
+        record_ref = f"obs:{rid}"
+        text = _pack_item_text(row or {})
+        token_estimate = _estimate_tokens(text) if text else 0
+
+        include = False
+        reasons: List[str] = []
+
+        if row is None:
+            reasons.append("missing_row")
+        elif not text:
+            reasons.append("missing_summary")
+        elif len(selected_items) >= limit:
+            reasons.append("max_items_reached")
+        elif used_tokens + token_estimate > budget_tokens:
+            reasons.append("budget_tokens_exceeded")
+        else:
+            include = True
+            used_tokens += token_estimate
+            reasons.extend(["within_item_limit", "within_budget"])
+            if rid in state["fts_ids"]:
+                reasons.append("matched_fts")
+            if rid in state["vec_ids"] or rid in state["vec_en_ids"]:
+                reasons.append("matched_vector")
+
+            selected_items.append(
+                {
+                    "recordRef": record_ref,
+                    "layer": "L1",
+                    "id": rid,
+                    "summary": text,
+                    "kind": row.get("kind"),
+                    "lang": row.get("lang"),
+                }
+            )
+            citations.append({"recordRef": record_ref})
+
+        candidate_trace.append(
+            {
+                "id": record_ref,
+                "layer": "L1",
+                "importance": "unknown",
+                "trust": "unknown",
+                "scores": {
+                    "rrf": float(state["rrf_scores"].get(rid, 0.0)),
+                    "fts": float(1.0 if rid in state["fts_ids"] else 0.0),
+                    "semantic": float(1.0 if (rid in state["vec_ids"] or rid in state["vec_en_ids"]) else 0.0),
+                },
+                "decision": {
+                    "included": include,
+                    "reason": reasons,
+                },
+                "citations": {"recordRef": record_ref},
+            }
+        )
+
+    bundle_lines = [f"- [{item['recordRef']}] {item['summary']}" for item in selected_items]
+    bundle_text = "\n".join(bundle_lines)
+
+    payload: Dict[str, Any] = {
+        "bundle_text": bundle_text,
+        "items": selected_items,
+        "citations": citations,
+    }
+
+    if bool(args.trace):
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        payload["trace"] = {
+            "kind": "openclaw-mem.pack.trace.v0",
+            "query": {"text": query},
+            "budgets": {
+                "budgetTokens": budget_tokens,
+                "maxItems": limit,
+            },
+            "lanes": [
+                {
+                    "name": "hot",
+                    "source": "session/recent",
+                    "searched": False,
+                },
+                {
+                    "name": "warm",
+                    "source": "sqlite-observations",
+                    "searched": True,
+                    "retrievers": [
+                        {"kind": "fts5", "topK": int(state["candidate_limit"])},
+                        {"kind": "vector", "topK": int(state["candidate_limit"])},
+                        {"kind": "rrf", "k": 60},
+                    ],
+                },
+                {
+                    "name": "cold",
+                    "source": "curated/durable",
+                    "searched": False,
+                },
+            ],
+            "candidates": candidate_trace,
+            "timing": {"durationMs": duration_ms},
+        }
+
+    if bool(args.json):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(bundle_text)
+
 
 
 def _atomic_write(path_: Path, content: str) -> None:
@@ -2166,6 +2375,21 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--rerank-base-url", help="Optional reranker endpoint override")
     sp.add_argument("--rerank-timeout-sec", type=int, default=15, help="Reranker HTTP timeout in seconds")
     sp.set_defaults(func=cmd_hybrid)
+
+    sp = sub.add_parser("pack", help="Build a compact, cited bundle from hybrid retrieval")
+    sp.add_argument("--db", default=None, help="SQLite DB path")
+    sp.add_argument(
+        "--json",
+        dest="json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true). Use --no-json for bundle_text only.",
+    )
+    sp.add_argument("--query", required=True, help="Pack query text")
+    sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
+    sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
+    sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace")
+    sp.set_defaults(func=cmd_pack)
 
     sp = sub.add_parser("store", help="Proactively store a memory")
     add_common(sp)
