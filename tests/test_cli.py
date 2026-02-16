@@ -998,6 +998,118 @@ class TestCliM0(unittest.TestCase):
         self.assertNotIn("/root/", trace_dump)
         conn.close()
 
+    def test_pack_trace_candidate_uses_importance_and_trust_from_detail_json(self):
+        conn = _connect(":memory:")
+
+        sample = json.dumps(
+            {
+                "ts": "2026-02-04T13:00:00Z",
+                "kind": "fact",
+                "summary": "trust aware memory item",
+                "summary_en": "trust aware memory item",
+                "tool_name": "memory_store",
+                "detail": {
+                    "importance": {"label": "must_remember", "score": 0.91},
+                    "trust_tier": "quarantine",
+                },
+            }
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "text-embedding-3-small", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = build_parser().parse_args(["pack", "--query", "trust", "--trace", "--json"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        candidate = out["trace"]["candidates"][0]
+        self.assertEqual(candidate["importance"], "must_remember")
+        self.assertEqual(candidate["trust"], "quarantined")
+        conn.close()
+
+    def test_pack_trace_candidate_uses_unknown_when_detail_labels_are_invalid(self):
+        conn = _connect(":memory:")
+
+        sample = json.dumps(
+            {
+                "ts": "2026-02-04T13:00:00Z",
+                "kind": "fact",
+                "summary": "unknown label sample",
+                "summary_en": "unknown label sample",
+                "tool_name": "memory_store",
+                "detail": {
+                    "importance": {"label": "someday_maybe"},
+                    "provenance": {"trust": "semi_trusted"},
+                },
+            }
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "text-embedding-3-small", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = build_parser().parse_args(["pack", "--query", "unknown", "--trace", "--json"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        candidate = out["trace"]["candidates"][0]
+        self.assertEqual(candidate["importance"], "unknown")
+        self.assertEqual(candidate["trust"], "unknown")
+        conn.close()
+
     def test_pack_trace_output_counts_with_exclusions(self):
         conn = _connect(":memory:")
 

@@ -1534,6 +1534,112 @@ def _pack_item_text(row: Dict[str, Any]) -> str:
     return ((row.get("summary_en") or row.get("summary") or "").replace("\n", " ").strip())
 
 
+def _pack_parse_detail_json(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _normalize_importance_label(raw: Any) -> Optional[str]:
+    if not isinstance(raw, str):
+        return None
+
+    key = raw.strip().lower()
+    if not key:
+        return None
+
+    aliases = {
+        "must remember": "must_remember",
+        "must-remember": "must_remember",
+        "nice to have": "nice_to_have",
+        "nice-to-have": "nice_to_have",
+        "low": "ignore",
+        "medium": "nice_to_have",
+        "high": "must_remember",
+    }
+    key = aliases.get(key, key)
+    key = key.replace("-", "_").replace(" ", "_")
+
+    if key in {"must_remember", "nice_to_have", "ignore"}:
+        return key
+    return None
+
+
+def _pack_importance_label(detail_obj: Dict[str, Any]) -> str:
+    if not isinstance(detail_obj, dict) or "importance" not in detail_obj:
+        return "unknown"
+
+    importance = detail_obj.get("importance")
+    normalized_label = None
+
+    if isinstance(importance, dict):
+        normalized_label = _normalize_importance_label(importance.get("label"))
+        if normalized_label:
+            return normalized_label
+
+        score = importance.get("score")
+        if isinstance(score, (int, float)) and not isinstance(score, bool):
+            from openclaw_mem.importance import label_from_score
+
+            return label_from_score(float(score))
+        return "unknown"
+
+    if isinstance(importance, (int, float)) and not isinstance(importance, bool):
+        from openclaw_mem.importance import label_from_score
+
+        return label_from_score(float(importance))
+
+    return "unknown"
+
+
+def _normalize_trust_tier(raw: Any) -> Optional[str]:
+    if not isinstance(raw, str):
+        return None
+
+    key = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "quarantine": "quarantined",
+    }
+    key = aliases.get(key, key)
+
+    if key in {"trusted", "untrusted", "quarantined"}:
+        return key
+    return None
+
+
+def _pack_trust_tier(detail_obj: Dict[str, Any]) -> str:
+    if not isinstance(detail_obj, dict):
+        return "unknown"
+
+    candidates: List[Any] = [
+        detail_obj.get("trust"),
+        detail_obj.get("trust_tier"),
+        detail_obj.get("trustTier"),
+    ]
+
+    provenance = detail_obj.get("provenance")
+    if isinstance(provenance, dict):
+        candidates.extend(
+            [
+                provenance.get("trust"),
+                provenance.get("trust_tier"),
+                provenance.get("trustTier"),
+            ]
+        )
+
+    for value in candidates:
+        normalized = _normalize_trust_tier(value)
+        if normalized:
+            return normalized
+
+    return "unknown"
+
 
 def _estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
@@ -1581,6 +1687,12 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     ordered_ids = state["ordered_ids"]
     obs_map = state["obs_map"]
 
+    detail_map: Dict[int, Dict[str, Any]] = {}
+    if ordered_ids:
+        q_detail = f"SELECT id, detail_json FROM observations WHERE id IN ({','.join(['?']*len(ordered_ids))})"
+        detail_rows = conn.execute(q_detail, ordered_ids).fetchall()
+        detail_map = {int(r["id"]): _pack_parse_detail_json(r["detail_json"]) for r in detail_rows}
+
     selected_items: List[Dict[str, Any]] = []
     citations: List[Dict[str, Any]] = []
     candidate_trace: List[Dict[str, Any]] = []
@@ -1588,6 +1700,10 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     used_tokens = 0
     for rid in ordered_ids:
         row = obs_map.get(rid)
+        detail_obj = detail_map.get(rid, {})
+        importance_label = _pack_importance_label(detail_obj)
+        trust_tier = _pack_trust_tier(detail_obj)
+
         record_ref = f"obs:{rid}"
         text = _pack_item_text(row or {})
         token_estimate = _estimate_tokens(text) if text else 0
@@ -1628,8 +1744,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             {
                 "id": record_ref,
                 "layer": "L1",
-                "importance": "unknown",
-                "trust": "unknown",
+                "importance": importance_label,
+                "trust": trust_tier,
                 "scores": {
                     "rrf": float(state["rrf_scores"].get(rid, 0.0)),
                     "fts": float(1.0 if rid in state["fts_ids"] else 0.0),
