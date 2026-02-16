@@ -2085,6 +2085,36 @@ def _triage_cron_errors(*, since_ms: int, cron_jobs_path: str, limit: int) -> Li
     return bad[:limit]
 
 
+def _summary_has_task_marker(summary: str) -> bool:
+    """Return True when summary begins with a task marker.
+
+    Accepted prefixes (case-insensitive): TODO, TASK, REMINDER.
+    A marker is considered valid when followed by:
+    - ':' (including full-width '：')
+    - whitespace
+    - '-' / '—'
+    - end-of-string
+    """
+
+    s = (summary or "").lstrip()
+    if not s:
+        return False
+
+    up = s.upper()
+    for marker in ("TODO", "TASK", "REMINDER"):
+        if not up.startswith(marker):
+            continue
+
+        if len(up) == len(marker):
+            return True
+
+        nxt = up[len(marker)]
+        if nxt in {":", "：", " ", "\t", "-", "—"}:
+            return True
+
+    return False
+
+
 def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: float, limit: int) -> List[Dict[str, Any]]:
     """Scan proactively stored items (tool_name=memory_store) for tasks.
 
@@ -2092,7 +2122,8 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
 
     Matching rules:
     - kind == 'task' OR
-    - summary starts with TODO:/TASK:/REMINDER:
+    - summary starts with TODO/TASK/REMINDER marker
+      (case-insensitive; accepts ':', whitespace, '-', '—', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
     """
@@ -2114,7 +2145,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
         if not summary:
             continue
 
-        is_task = kind == "task" or summary.upper().startswith(("TODO:", "TASK:", "REMINDER:"))
+        is_task = kind == "task" or _summary_has_task_marker(summary)
         if not is_task:
             continue
 
