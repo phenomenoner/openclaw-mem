@@ -2704,7 +2704,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--query", required=True, help="Pack query text")
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
-    sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace")
+    sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v0`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)
 
     sp = sub.add_parser("store", help="Proactively store a memory")
