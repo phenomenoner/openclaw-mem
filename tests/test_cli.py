@@ -979,6 +979,38 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(buf.getvalue(), "- [obs:1] plain summary\n")
         conn.close()
 
+    def test_pack_budget_tokens_clamped_to_minimum_one(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "a",
+                    "summary_en": "a",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "x", "--no-json", "--limit", "3", "--budget-tokens", "-5"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        self.assertEqual(buf.getvalue(), "- [obs:1] a\n")
+        conn.close()
+
     def test_pack_trace_empty_candidates_returns_zero_counts(self):
         conn = _connect(":memory:")
 
