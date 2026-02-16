@@ -947,6 +947,48 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["error"], "empty query")
         conn.close()
 
+    def test_pack_accepts_query_en_for_hybrid_retrieval(self):
+        conn = _connect(":memory:")
+
+        captured = {}
+
+        def fake_retrieve(conn_, args_, candidate_limit_override=None):
+            captured["query_en"] = args_.query_en
+            captured["candidate_limit_override"] = candidate_limit_override
+            return {
+                "ordered_ids": [1],
+                "fts_ids": {1},
+                "vec_ids": set(),
+                "vec_en_ids": set(),
+                "rrf_scores": {1: 0.77},
+                "obs_map": {
+                    1: {
+                        "summary": "plain summary",
+                        "summary_en": "plain summary",
+                        "kind": "fact",
+                        "lang": "en",
+                    }
+                },
+                "candidate_limit": 12,
+            }
+
+        args = build_parser().parse_args(["pack", "--query", "테스트", "--query-en", "test", "--json", "--limit", "4"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", side_effect=fake_retrieve):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        self.assertEqual(captured.get("query_en"), "test")
+        self.assertEqual(captured.get("candidate_limit_override"), 12)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(len(out["items"]), 1)
+        self.assertEqual(out["items"][0]["recordRef"], "obs:1")
+        conn.close()
+
     def test_pack_no_json_outputs_plain_bundle_text(self):
         conn = _connect(":memory:")
 

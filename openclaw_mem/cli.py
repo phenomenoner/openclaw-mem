@@ -1661,7 +1661,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     retrieval_args = argparse.Namespace(
         query=query,
-        query_en=None,
+        query_en=getattr(args, "query_en", None),
         limit=limit,
         k=60,
         model="text-embedding-3-small",
@@ -2702,6 +2702,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Structured JSON output (default: true). Use --no-json for bundle_text only.",
     )
     sp.add_argument("--query", required=True, help="Pack query text")
+    sp.add_argument("--query-en", help="Optional English query for bilingual retrieval")
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v0`) with include/exclude decisions")
