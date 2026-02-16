@@ -135,6 +135,7 @@ Proposed interface (draft):
 - `openclaw-mem pack --query "..." --budget-tokens <n> --json --trace`
   - `--json` returns the bundle
   - `--trace` returns a machine-readable receipt for audits/debugging (redaction-safe; no raw content)
+  - Receipt should include per-candidate include/exclude rationale and a stable `recordRef` (e.g. `obs:123`) citation trail.
 
 #### Observational-memory mode (derived, cache-friendly)
 
