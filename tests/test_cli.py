@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_backend
+from openclaw_mem.cli import _connect, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend
 
 
 class TestCliM0(unittest.TestCase):
@@ -25,6 +25,92 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertIn("embeddings_en", out)
         self.assertEqual(out["embeddings_en"]["count"], 0)
+        conn.close()
+
+    def test_profile_reports_counts_labels_and_recent(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "decision",
+                        "tool_name": "memory_store",
+                        "summary": "Pin model for dev lane",
+                        "detail": {"importance": {"score": 0.92, "label": "must_remember"}},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "task",
+                        "tool_name": "memory_store",
+                        "summary": "TODO: run benchmark",
+                        "detail": {"importance": 0.65},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:02:00Z",
+                        "kind": "tool",
+                        "tool_name": "exec",
+                        "summary": "lint passed",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "text-embedding-3-small", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO observation_embeddings_en (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (2, "text-embedding-3-small", 2, pack_f32([0.0, 1.0]), l2_norm([0.0, 1.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.commit()
+
+        args = type(
+            "Args",
+            (),
+            {
+                "db": ":memory:",
+                "json": True,
+                "recent_limit": 2,
+                "tool_limit": 5,
+                "kind_limit": 5,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_profile(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["observations"]["count"], 3)
+        self.assertEqual(out["importance"]["present"], 2)
+        self.assertEqual(out["importance"]["missing"], 1)
+        self.assertEqual(out["importance"]["label_counts"]["must_remember"], 1)
+        self.assertEqual(out["importance"]["label_counts"]["nice_to_have"], 1)
+        self.assertEqual(out["importance"]["label_counts"]["unknown"], 1)
+        self.assertEqual(out["embeddings"]["original"]["count"], 1)
+        self.assertEqual(out["embeddings"]["english"]["count"], 1)
+        self.assertLessEqual(len(out["recent"]), 2)
+        self.assertEqual(out["recent"][0]["id"], 3)
+
         conn.close()
 
     def test_backend_reports_slot_and_readiness(self):

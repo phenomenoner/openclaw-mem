@@ -85,6 +85,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
   - `cron-errors`
   - `tasks`
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
+- **Ops profile surface (DONE)**: `profile --json` for quick state snapshots (counts, importance labels, top tools/kinds, recent rows, embedding stats).
 - **Importance grading (MVP v1 baseline shipped)**: canonical `detail_json.importance` objects + deterministic `heuristic-v1` scorer + regression tests.
   - Enable autograde on `ingest`/`harvest`: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (or `--importance-scorer {heuristic-v1|off}`)
   - Ingest/harvest JSON receipts include grading counters + `label_counts` for ops trend tracking.
@@ -117,7 +118,10 @@ If you have a packaged install that provides a console script, you can also use:
 # 1) Create/open DB and show counts
 uv run python -m openclaw_mem status --json
 
-# 1.5) Check active OpenClaw memory backend + fallback posture
+# 1.5) Snapshot ops profile (counts, importance labels, top tools, recent rows)
+uv run python -m openclaw_mem profile --json --recent-limit 15
+
+# 1.6) Check active OpenClaw memory backend + fallback posture
 uv run python -m openclaw_mem backend --json
 
 # 2) Ingest JSONL observations

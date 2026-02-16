@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Added `profile` CLI command for deterministic ops snapshots (`counts`, `importance` label distribution, top tools/kinds, recent rows, embeddings model stats).
 - `pack --trace` now includes an `output` receipt block with:
   - `includedCount`, `excludedCount`, `l2IncludedCount`, `citationsCount`
   - `refreshedRecordRefs` (the exact `recordRef`s included in the final bundle for lifecycle/audit hooks)
@@ -19,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Testing
 - Added regression coverage for `pack --trace` output receipts (shape + exclusion counting).
 - Added schema checks for trace metadata (`ts`/`version`/budget caps) and candidate decision/citation fields.
+- Added coverage for `profile --json` (importance distribution + embeddings counters + recent rows).
 
 ## [1.0.1] - 2026-02-13
 

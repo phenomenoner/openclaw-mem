@@ -394,6 +394,124 @@ def cmd_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(data, args.json)
 
 
+def cmd_profile(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Ops-friendly profile surface (counts, ranges, labels, recent rows).
+
+    This stays deterministic/local-first and does not call remote services.
+    """
+
+    recent_limit = max(1, min(200, int(getattr(args, "recent_limit", 10) or 10)))
+    tool_limit = max(1, min(200, int(getattr(args, "tool_limit", 10) or 10)))
+    kind_limit = max(1, min(200, int(getattr(args, "kind_limit", 10) or 10)))
+
+    row = conn.execute("SELECT COUNT(*) AS n, MIN(ts) AS min_ts, MAX(ts) AS max_ts FROM observations").fetchone()
+
+    kinds = conn.execute(
+        """
+        SELECT coalesce(kind, '') AS kind, COUNT(*) AS n
+        FROM observations
+        GROUP BY kind
+        ORDER BY n DESC, kind ASC
+        LIMIT ?
+        """,
+        (kind_limit,),
+    ).fetchall()
+
+    tools = conn.execute(
+        """
+        SELECT coalesce(tool_name, '') AS tool_name, COUNT(*) AS n
+        FROM observations
+        GROUP BY tool_name
+        ORDER BY n DESC, tool_name ASC
+        LIMIT ?
+        """,
+        (tool_limit,),
+    ).fetchall()
+
+    recent_rows = conn.execute(
+        """
+        SELECT id, ts, kind, tool_name, summary
+        FROM observations
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (recent_limit,),
+    ).fetchall()
+
+    emb_row = conn.execute("SELECT COUNT(*) AS n FROM observation_embeddings").fetchone()
+    emb_models = conn.execute(
+        "SELECT model, COUNT(*) AS n FROM observation_embeddings GROUP BY model ORDER BY n DESC"
+    ).fetchall()
+
+    emb_en_row = conn.execute("SELECT COUNT(*) AS n FROM observation_embeddings_en").fetchone()
+    emb_en_models = conn.execute(
+        "SELECT model, COUNT(*) AS n FROM observation_embeddings_en GROUP BY model ORDER BY n DESC"
+    ).fetchall()
+
+    from openclaw_mem.importance import parse_importance_score, label_from_score
+
+    label_counts: Dict[str, int] = {
+        "must_remember": 0,
+        "nice_to_have": 0,
+        "ignore": 0,
+        "unknown": 0,
+    }
+    importance_present = 0
+    score_total = 0.0
+
+    for r in conn.execute("SELECT detail_json FROM observations"):
+        raw = r["detail_json"]
+        try:
+            detail_obj = json.loads(raw or "{}")
+        except Exception:
+            label_counts["unknown"] += 1
+            continue
+
+        if not isinstance(detail_obj, dict) or "importance" not in detail_obj:
+            label_counts["unknown"] += 1
+            continue
+
+        importance_present += 1
+
+        score = parse_importance_score(detail_obj.get("importance"))
+        label = label_from_score(score)
+        label_counts[label] = int(label_counts.get(label, 0)) + 1
+        score_total += float(score)
+
+    scored_count = int(label_counts["must_remember"] + label_counts["nice_to_have"] + label_counts["ignore"])
+    total_count = int(row["n"] or 0)
+
+    data = {
+        "db": args.db,
+        "observations": {
+            "count": total_count,
+            "min_ts": row["min_ts"],
+            "max_ts": row["max_ts"],
+            "kinds": [{"kind": r["kind"], "count": int(r["n"])} for r in kinds],
+            "tools": [{"tool_name": r["tool_name"], "count": int(r["n"])} for r in tools],
+        },
+        "importance": {
+            "present": importance_present,
+            "missing": max(0, total_count - importance_present),
+            "label_counts": label_counts,
+            "avg_score": (score_total / scored_count) if scored_count else None,
+        },
+        "embeddings": {
+            "original": {
+                "count": int(emb_row["n"] or 0),
+                "models": [{"model": r["model"], "count": int(r["n"])} for r in emb_models],
+            },
+            "english": {
+                "count": int(emb_en_row["n"] or 0),
+                "models": [{"model": r["model"], "count": int(r["n"])} for r in emb_en_models],
+            },
+        },
+        "recent": [dict(r) for r in recent_rows],
+    }
+
+    _emit(data, args.json)
+
+
 def _resolve_memory_slot(config: Dict[str, Any]) -> str:
     slot = config.get("plugins", {}).get("slots", {}).get("memory")
     if isinstance(slot, str) and slot:
@@ -2243,6 +2361,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Examples:\n"
         "  # Observation store\n"
         "  openclaw-mem status --json\n"
+        "  openclaw-mem profile --json --recent-limit 15\n"
         "  openclaw-mem backend --json\n"
         "  openclaw-mem ingest --file observations.jsonl --json\n"
         "\n"
@@ -2298,6 +2417,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("status", help="Show store stats")
     add_common(sp)
     sp.set_defaults(func=cmd_status)
+
+    sp = sub.add_parser("profile", help="Show ops profile (counts/ranges/labels/recent)")
+    add_common(sp)
+    sp.add_argument("--recent-limit", type=int, default=10, help="Number of recent rows to include (default: 10)")
+    sp.add_argument("--tool-limit", type=int, default=10, help="Max top tools to include (default: 10)")
+    sp.add_argument("--kind-limit", type=int, default=10, help="Max top kinds to include (default: 10)")
+    sp.set_defaults(func=cmd_profile)
 
     sp = sub.add_parser("backend", help="Inspect active OpenClaw memory backend + fallback posture")
     add_common(sp)
