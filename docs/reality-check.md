@@ -19,8 +19,8 @@ uv sync --locked
 uv run python -m openclaw_mem --help
 ```
 
-> Note on invocation: as of **v0.5.9**, this repo is **not packaged** for uv/pip entry points yet, so `uv run openclaw-mem ...` may not exist.
-> Use `uv run python -m openclaw_mem ...` (or `python -m openclaw_mem ...` inside an activated env).
+> Note: this repo defines the `openclaw-mem` console entrypoint, so `uv run openclaw-mem ...` is supported after dependency install (`uv sync --locked`).
+> `uv run python -m openclaw_mem ...` remains a reliable fallback while troubleshooting entrypoint resolution.
 
 ### 2) Local DB smoke test (no OpenClaw required)
 
