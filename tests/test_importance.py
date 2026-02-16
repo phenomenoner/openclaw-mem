@@ -24,6 +24,12 @@ class TestImportance(unittest.TestCase):
         self.assertEqual(parse_importance_score({"label": "nice_to_have"}), 0.5)
         self.assertEqual(parse_importance_score({"label": "ignore"}), 0.0)
 
+    def test_parse_importance_score_supports_label_aliases(self):
+        self.assertEqual(parse_importance_score({"label": "must remember"}), 0.8)
+        self.assertEqual(parse_importance_score({"label": "nice-to-have"}), 0.5)
+        self.assertEqual(parse_importance_score({"label": "medium"}), 0.5)
+        self.assertEqual(parse_importance_score({"label": "high"}), 0.8)
+
     def test_parse_importance_score_invalid_returns_zero(self):
         self.assertEqual(parse_importance_score(None), 0.0)
         self.assertEqual(parse_importance_score({"score": "high"}), 0.0)

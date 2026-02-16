@@ -20,6 +20,17 @@ _LABEL_TO_SCORE = {
     "must_remember": 0.8,
 }
 
+# Backward-compatible aliases used by older/inconsistently-normalized payloads.
+_LABEL_ALIAS_TO_CANONICAL = {
+    "must remember": "must_remember",
+    "must-remember": "must_remember",
+    "nice to have": "nice_to_have",
+    "nice-to-have": "nice_to_have",
+    "low": "ignore",
+    "medium": "nice_to_have",
+    "high": "must_remember",
+}
+
 
 def label_from_score(score: float) -> str:
     s = _clamp01(float(score))
@@ -87,6 +98,7 @@ def parse_importance_score(value: Any) -> float:
         label = value.get("label")
         if isinstance(label, str):
             key = label.strip().lower()
+            key = _LABEL_ALIAS_TO_CANONICAL.get(key, key)
             if key in _LABEL_TO_SCORE:
                 return _LABEL_TO_SCORE[key]
 
