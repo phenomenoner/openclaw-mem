@@ -139,6 +139,7 @@ uv run python -m openclaw_mem get 42 --json
 # 6) (Dev) Build a compact, cited context bundle
 uv run python -m openclaw_mem pack --query "gateway timeout" --limit 12 --budget-tokens 1200 --trace --json
 # With --trace, this returns a redaction-safe `openclaw-mem.pack.trace.v0` receipt plus the packed `bundle_text` and citations.
+# `--query-en` can be used when you want an English retrieval lane in addition to the main query.
 
 # 6a) Optional: skip JSON wrapper for pure L1 text payload
 uv run python -m openclaw_mem pack --query "gateway timeout" --no-json
