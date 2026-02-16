@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any, Dict
 
 
 def _clamp01(x: float) -> float:
+    if not math.isfinite(x):
+        return 0.0
     if x < 0.0:
         return 0.0
     if x > 1.0:
@@ -87,6 +90,8 @@ def parse_importance_score(value: Any) -> float:
     Returns:
       float score clamped to [0,1]. Missing/invalid returns 0.0.
     """
+    if isinstance(value, bool):
+        return 0.0
     if isinstance(value, (int, float)):
         return _clamp01(float(value))
 

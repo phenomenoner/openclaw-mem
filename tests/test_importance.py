@@ -19,6 +19,12 @@ class TestImportance(unittest.TestCase):
         self.assertEqual(parse_importance_score(0), 0.0)
         self.assertEqual(parse_importance_score(0.42), 0.42)
 
+    def test_parse_importance_score_rejects_non_finite_and_bool(self):
+        self.assertEqual(parse_importance_score(float("nan")), 0.0)
+        self.assertEqual(parse_importance_score(float("inf")), 0.0)
+        self.assertEqual(parse_importance_score(True), 0.0)
+        self.assertEqual(parse_importance_score(False), 0.0)
+
     def test_parse_importance_score_supports_label_fallback(self):
         self.assertEqual(parse_importance_score({"label": " must_remember "}), 0.8)
         self.assertEqual(parse_importance_score({"label": "nice_to_have"}), 0.5)
