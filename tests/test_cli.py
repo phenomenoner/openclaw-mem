@@ -871,6 +871,21 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("rerank failed", err.getvalue())
         conn.close()
 
+    def test_pack_rejects_blank_query(self):
+        conn = _connect(":memory:")
+
+        args = build_parser().parse_args(["pack", "--query", "   ", "--json"])
+
+        buf = io.StringIO()
+        with self.assertRaises(SystemExit) as cm:
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        self.assertEqual(cm.exception.code, 2)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["error"], "empty query")
+        conn.close()
+
     def test_pack_trace_json_shape_and_redaction(self):
         conn = _connect(":memory:")
 
