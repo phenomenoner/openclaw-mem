@@ -121,6 +121,11 @@ uv run python -m openclaw_mem triage \
   --json
 ```
 
+Task extraction is deterministic and picks rows when either:
+- `kind == "task"`, or
+- `summary` starts with `TODO:`, `TASK:`, or `REMINDER:` (case-insensitive).
+
+
 ### 3) Retrieval smoke test
 ```bash
 uv run python -m openclaw_mem --db ~/.openclaw/memory/openclaw-mem.sqlite --json search "timeout" --limit 5
