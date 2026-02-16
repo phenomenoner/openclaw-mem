@@ -50,7 +50,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **Observation store**: SQLite + FTS5
 - **Progressive disclosure recall**:
   - `search` → `timeline` → `get`
-- **Context Packer (dev)**: `pack` builds a compact, cited bundle (summary-only) with optional `--trace` receipt (`openclaw-mem.pack.trace.v0`) showing which `recordRef`s were refreshed.
+- **Context Packer (dev)**: `pack` builds a compact, cited bundle (summary-only). Use `--no-json` for plain-text payloads, or `--trace --json` for redaction-safe `openclaw-mem.pack.trace.v0` receipts that list refreshed `recordRef`s.
 - **Export**: `export` (with safety confirmation)
 - **Auto-ingest helper**: `harvest` (ingest + optional embeddings)
 
