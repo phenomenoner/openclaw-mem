@@ -886,6 +886,41 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["error"], "empty query")
         conn.close()
 
+    def test_pack_trace_empty_candidates_returns_zero_counts(self):
+        conn = _connect(":memory:")
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = build_parser().parse_args(["pack", "--query", "nothing-matches", "--trace", "--json", "--limit", "5", "--budget-tokens", "1200"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertIn("bundle_text", out)
+        self.assertEqual(out["bundle_text"], "")
+        self.assertEqual(out["items"], [])
+        self.assertEqual(out["citations"], [])
+
+        trace = out["trace"]
+        self.assertEqual(trace["query"]["text"], "nothing-matches")
+        self.assertEqual(trace["output"]["includedCount"], 0)
+        self.assertEqual(trace["output"]["excludedCount"], 0)
+        self.assertEqual(trace["output"]["citationsCount"], 0)
+        self.assertEqual(trace["output"]["refreshedRecordRefs"], [])
+        self.assertEqual(trace["candidates"], [])
+
+        conn.close()
+
     def test_pack_trace_json_shape_and_redaction(self):
         conn = _connect(":memory:")
 

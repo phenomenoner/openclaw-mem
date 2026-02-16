@@ -1360,16 +1360,27 @@ def _hybrid_retrieve(
         )
         vec_en_ids = [rid for rid, _ in vec_en_ranked]
 
-    fts_rows = conn.execute(
-        """
-        SELECT rowid
-        FROM observations_fts
-        WHERE observations_fts MATCH ?
-        ORDER BY bm25(observations_fts) ASC
-        LIMIT ?;
-        """,
-        (query, candidate_limit),
-    ).fetchall()
+    fts_rows = []
+    try:
+        fts_rows = conn.execute(
+            """
+            SELECT rowid
+            FROM observations_fts
+            WHERE observations_fts MATCH ?
+            ORDER BY bm25(observations_fts) ASC
+            LIMIT ?;
+            """,
+            (query, candidate_limit),
+        ).fetchall()
+    except sqlite3.OperationalError as e:
+        # FTS syntax can fail for edge-case query strings (e.g. hyphens/operators).
+        if "no such column: matches" in str(e):
+            print(
+                f"[openclaw-mem] FTS query parse failed; skipping FTS lane (query={query!r}).",
+                file=sys.stderr,
+            )
+        else:
+            raise
     fts_ids = [int(r["rowid"]) for r in fts_rows]
 
     ranked_lists = [fts_ids, vec_ids]
