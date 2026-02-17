@@ -18,12 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - added top-level `ts` and `version` (`openclaw_mem`, `schema`)
   - expanded `budgets` with `maxL2Items` and `niceCap`
   - candidate `decision.caps` + candidate citation `url` key (nullable, redaction-safe)
+- `triage --mode tasks` task-marker parsing now also accepts en dash (`–`) separators after `TODO`/`TASK`/`REMINDER`.
 
 ### Testing
 - Added regression coverage for `pack --trace` output receipts (shape + exclusion counting).
 - Added schema checks for trace metadata (`ts`/`version`/budget caps) and candidate decision/citation fields.
 - Added `pack --trace` tests for candidate importance/trust extraction from `detail_json`, including invalid-label fallback to `unknown`.
 - Added coverage for `profile --json` (importance distribution + embeddings counters + recent rows).
+- Added triage regression coverage for en dash (`–`) task-marker separators.
 
 ## [1.0.1] - 2026-02-13
 

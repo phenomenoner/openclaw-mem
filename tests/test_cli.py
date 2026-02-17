@@ -27,8 +27,9 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["embeddings_en"]["count"], 0)
         conn.close()
 
-    def test_summary_has_task_marker_accepts_full_width_colon_and_em_dash(self):
+    def test_summary_has_task_marker_accepts_full_width_colon_and_unicode_dashes(self):
         self.assertTrue(_summary_has_task_marker("reminder：pay rent"))
+        self.assertTrue(_summary_has_task_marker("Task–follow up on release checklist"))
         self.assertTrue(_summary_has_task_marker("Task—follow up on release checklist"))
 
     def test_summary_has_task_marker_accepts_lowercase_marker_with_separator(self):
@@ -500,6 +501,67 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["tasks"]["found_new"], 1)
         self.assertEqual(out["tasks"]["matches"][0]["summary"], "TODO buy coffee this afternoon")
+
+        conn.close()
+
+    def test_triage_tasks_accepts_task_marker_with_en_dash_separator(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "REMINDER–renew domain this week",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "tasks",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["tasks"]["found_new"], 1)
+        self.assertEqual(out["tasks"]["matches"][0]["summary"], "REMINDER–renew domain this week")
 
         conn.close()
 
