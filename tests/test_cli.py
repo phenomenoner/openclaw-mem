@@ -37,6 +37,7 @@ class TestCliM0(unittest.TestCase):
     def test_summary_has_task_marker_accepts_lowercase_marker_with_separator(self):
         self.assertTrue(_summary_has_task_marker("todo buy milk"))
         self.assertTrue(_summary_has_task_marker("task - clean desk"))
+        self.assertTrue(_summary_has_task_marker("task\tclean desk"))
 
     def test_summary_has_task_marker_rejects_non_marker_prefixes(self):
         self.assertFalse(_summary_has_task_marker("TODOLIST clean old notes"))
