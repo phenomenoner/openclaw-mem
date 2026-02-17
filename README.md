@@ -318,7 +318,3 @@ We did **not** borrow code from that project, but we want to properly credit the
 - See: `ACKNOWLEDGEMENTS.md`
 
 ---
-
-## License
-
-Apache-2.0 (`LICENSE`).
