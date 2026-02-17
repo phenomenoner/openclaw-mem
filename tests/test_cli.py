@@ -1426,6 +1426,55 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("within_budget", out["trace"]["candidates"][0]["decision"]["reason"])
         conn.close()
 
+    def test_pack_trace_records_max_items_reached_reason(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1, 2],
+            "fts_ids": {1, 2},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.9, 2: 0.8},
+            "obs_map": {
+                1: {
+                    "summary": "first short summary",
+                    "summary_en": "first short summary",
+                    "kind": "fact",
+                    "lang": "en",
+                },
+                2: {
+                    "summary": "second short summary",
+                    "summary_en": "second short summary",
+                    "kind": "fact",
+                    "lang": "en",
+                },
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "short", "--trace", "--json", "--limit", "1"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(len(out["items"]), 1)
+        self.assertEqual(out["items"][0]["recordRef"], "obs:1")
+
+        candidates = out["trace"]["candidates"]
+        self.assertEqual(len(candidates), 2)
+        self.assertTrue(candidates[0]["decision"]["included"])
+        self.assertIn("within_item_limit", candidates[0]["decision"]["reason"])
+        self.assertFalse(candidates[1]["decision"]["included"])
+        self.assertEqual(candidates[1]["decision"]["reason"], ["max_items_reached"])
+        self.assertEqual(out["trace"]["output"]["includedCount"], 1)
+        self.assertEqual(out["trace"]["output"]["excludedCount"], 1)
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()
