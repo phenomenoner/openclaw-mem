@@ -290,8 +290,8 @@ Deliverables:
   - unknown keys are either rejected (strict) or explicitly tolerated (documented)
 - **Strict config contract** where feasible:
   - plugin config schema uses `additionalProperties: false` (or equivalent) to surface misconfig early
-- `profile` / stats surface candidate:
-  - a cheap `--json profile` (counts, ranges, recent activity) for ops/debug, similar to what we already do with receipts
+- `profile` / stats surface (**DONE**):
+  - `openclaw-mem profile --json` for deterministic ops snapshots (counts, importance distribution, recent rows, embedding stats)
 
 Acceptance criteria:
 - A breaking shape change fails tests before release.
