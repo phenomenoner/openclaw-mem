@@ -68,6 +68,23 @@ class TestImportance(unittest.TestCase):
         self.assertIsInstance(obj["graded_at"], str)
         self.assertTrue(re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", obj["graded_at"]))
 
+    def test_make_importance_normalizes_aliases_and_falls_back_to_score_label(self):
+        alias_obj = make_importance(
+            score=0.2,
+            method="heuristic-v1",
+            rationale="alias normalization",
+            label="must remember",
+        )
+        self.assertEqual(alias_obj["label"], "must_remember")
+
+        invalid_obj = make_importance(
+            score=0.2,
+            method="heuristic-v1",
+            rationale="invalid label fallback",
+            label="urgent",
+        )
+        self.assertEqual(invalid_obj["label"], "ignore")
+
 
 if __name__ == "__main__":
     unittest.main()

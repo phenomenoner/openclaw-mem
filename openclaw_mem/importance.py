@@ -89,7 +89,8 @@ def make_importance(
     CLI/tooling writes consistent and reversible.
     """
     s = _clamp01(float(score))
-    lab = (label or label_from_score(s)).strip().lower()
+    normalized = _normalize_label(label)
+    lab = normalized if normalized is not None else label_from_score(s)
 
     ts = graded_at
     if not ts:

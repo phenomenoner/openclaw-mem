@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `triage --mode tasks` task-marker detection now normalizes width via NFKC, so full-width prefixes like `ＴＯＤＯ`/`ＴＡＳＫ`/`ＲＥＭＩＮＤＥＲ` are recognized.
 - `profile --json` now classifies malformed `detail_json.importance` payloads as `unknown` (instead of coercing to `ignore`) and keeps `avg_score` based on parseable importance only.
 - `parse_importance_score` now rejects boolean `importance.score` values inside object payloads (`{"score": true|false}`), matching top-level bool handling.
+- `make_importance` now enforces canonical labels (`ignore`/`nice_to_have`/`must_remember`) by normalizing known aliases and falling back to score-derived labels for unknown overrides.
 
 ### Docs
 - Removed a contradictory duplicate license footer from `README.md` so the dual-license statement (`MIT OR Apache-2.0`) is defined once and consistently.
@@ -35,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added triage regression coverage for full-width hyphen (`－`), en dash (`–`), and em dash (`—`) task-marker separators.
 - Added task-marker regression coverage for full-width marker prefixes (for example `ＴＯＤＯ` / `ＴＡＳＫ`) in both parser-level and triage flows.
 - Added regression coverage for malformed importance parsing in `profile --json` and for bool-rejection in `parse_importance_score`.
+- Added regression coverage for `make_importance` label canonicalization (alias normalization + invalid-label fallback).
 
 ## [1.0.1] - 2026-02-13
 
