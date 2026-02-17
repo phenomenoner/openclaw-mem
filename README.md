@@ -36,7 +36,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 ## Status map (DONE / PARTIAL / ROADMAP)
 
 - **DONE**: local SQLite ledger + FTS5; `ingest/search/timeline/get`; deterministic `triage`.
-- **PARTIAL**: embeddings/hybrid/rerank; AI compression; dual-language fields.
+- **PARTIAL**: embeddings/hybrid/rerank; AI compression (LLM-assisted, hard caps + rollback; see `docs/ai-compression.md`); dual-language fields.
 - **PARTIAL**: OpenClaw plugin capture + backend annotations; Route A semantic recall (`index`, `semantic`).
 - **PARTIAL (dev)**: Context Packer (`pack`) with redaction-safe `--trace` receipts.
 - **ROADMAP**: lifecycle manager (ref/last_used_at decay + archive-first); packaging/console scripts; graph semantic memory.
