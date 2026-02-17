@@ -123,7 +123,8 @@ uv run python -m openclaw_mem triage \
 
 Task extraction is deterministic and picks rows when either:
 - `kind == "task"`, or
-- `summary` starts with `TODO`, `TASK`, or `REMINDER` (case-insensitive), followed by `:`, whitespace, `-`, or end-of-string.
+- `summary` starts with `TODO`, `TASK`, or `REMINDER` (case-insensitive), followed by:
+  - `:`, `：`, whitespace, `-`, `—`, or end-of-string.
 
 
 ### 3) Retrieval smoke test
