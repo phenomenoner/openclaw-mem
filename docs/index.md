@@ -49,6 +49,9 @@ uv run python -m openclaw_mem --json status
 
 # Cheap recall
 uv run python -m openclaw_mem --json search "gateway timeout" --limit 10
+
+# Build a compact recall bundle
+uv run python -m openclaw_mem pack --query "gateway timeout" --limit 8 --trace --json
 ```
 
 ## Links
