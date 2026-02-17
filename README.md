@@ -38,7 +38,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **DONE**: local SQLite ledger + FTS5; `ingest/search/timeline/get`; deterministic `triage`.
 - **PARTIAL**: embeddings/hybrid/rerank; AI compression (LLM-assisted, hard caps + rollback; see `docs/ai-compression.md`); dual-language fields.
 - **PARTIAL**: OpenClaw plugin capture + backend annotations; Route A semantic recall (`index`, `semantic`).
-- **PARTIAL (dev)**: Context Packer (`pack`) with redaction-safe `--trace` receipts.
+- **PARTIAL (dev)**: Context Packer (`pack`) with redaction-safe `--trace` receipts (exists, not yet auto-wired; see `docs/automation-status.md`).
 - **ROADMAP**: lifecycle manager (ref/last_used_at decay + archive-first); packaging/console scripts; graph semantic memory.
 
 ---
@@ -79,6 +79,9 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
   - `semantic` (use OpenClaw `memory_search` as a black-box semantic retriever)
 
 ### Operational (heartbeat-safe) — **DONE/PARTIAL (first-stable baseline reached)**
+
+Automation truth (dev):
+- See `docs/automation-status.md` (what is automatic vs cron vs not yet wired).
 
 - **Deterministic triage (DONE)**: `triage` modes for:
   - `heartbeat`
