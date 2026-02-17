@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend
+from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend
 
 
 class TestCliM0(unittest.TestCase):
@@ -26,6 +26,14 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("embeddings_en", out)
         self.assertEqual(out["embeddings_en"]["count"], 0)
         conn.close()
+
+    def test_summary_has_task_marker_accepts_full_width_colon_and_em_dash(self):
+        self.assertTrue(_summary_has_task_marker("reminder：pay rent"))
+        self.assertTrue(_summary_has_task_marker("Task—follow up on release checklist"))
+
+    def test_summary_has_task_marker_rejects_non_marker_prefixes(self):
+        self.assertFalse(_summary_has_task_marker("TODOLIST clean old notes"))
+        self.assertFalse(_summary_has_task_marker("taskforce sync tomorrow"))
 
     def test_profile_reports_counts_labels_and_recent(self):
         conn = _connect(":memory:")
