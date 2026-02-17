@@ -2108,8 +2108,8 @@ def _summary_has_task_marker(summary: str) -> bool:
         if len(up) == len(marker):
             return True
 
-        nxt = up[len(marker)]
-        if nxt in {":", "：", " ", "\t", "-", "—"}:
+        nxt = s[len(marker)]
+        if nxt in {":", "：", "-", "—"} or nxt.isspace():
             return True
 
     return False
