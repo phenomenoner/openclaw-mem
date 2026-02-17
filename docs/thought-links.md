@@ -74,3 +74,21 @@ Source (external, medium trust; small repo, concept clear):
 - Add a `profile`/stats surface (similar to our label-distribution receipts, but queryable on demand).
 - Add an explicit injected-context marker + ignore-list in capture/harvest.
 - Add an optional FTS5 lexical fallback lane for `--no-embed` runs.
+
+## 6) Zvec (Alibaba Proxima) → embedded vector engine candidate (future watch)
+
+Source (external, medium trust):
+- `alibaba/zvec`: <https://github.com/alibaba/zvec>
+
+**Why it’s interesting:**
+- **In-process vector DB** (no separate server) matches our local-first, owner-operated bias.
+- Mentions **dense + sparse + hybrid search + filters**, which lines up with our “hybrid retrieval” direction.
+- Apache-2.0.
+
+**Caveats / why it’s not an immediate dependency:**
+- Python support is advertised as **3.10–3.12**; our stack is moving on **Python 3.13 + uv**, so we’d need either a compatibility plan or isolate it behind an adapter.
+- Platform/packaging constraints likely matter more than raw speed for our use.
+
+**How we might use it later (if at all):**
+- As an optional backend behind a stable adapter interface (so swapping engines is cheap).
+- As a performance baseline to compare against LanceDB/FAISS/etc. in `openclaw-memory-bench`.
