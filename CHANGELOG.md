@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - expanded `budgets` with `maxL2Items` and `niceCap`
   - candidate `decision.caps` + candidate citation `url` key (nullable, redaction-safe)
 - `triage --mode tasks` task-marker parsing now also accepts full-width hyphen (`－`) and en dash (`–`) separators after `TODO`/`TASK`/`REMINDER`.
+- `triage --mode tasks` task-marker detection now normalizes width via NFKC, so full-width prefixes like `ＴＯＤＯ`/`ＴＡＳＫ`/`ＲＥＭＩＮＤＥＲ` are recognized.
 - `profile --json` now classifies malformed `detail_json.importance` payloads as `unknown` (instead of coercing to `ignore`) and keeps `avg_score` based on parseable importance only.
 - `parse_importance_score` now rejects boolean `importance.score` values inside object payloads (`{"score": true|false}`), matching top-level bool handling.
 
@@ -28,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `pack --trace` tests for candidate importance/trust extraction from `detail_json`, including invalid-label fallback to `unknown`.
 - Added coverage for `profile --json` (importance distribution + embeddings counters + recent rows).
 - Added triage regression coverage for full-width hyphen (`－`) and en dash (`–`) task-marker separators.
+- Added task-marker regression coverage for full-width marker prefixes (for example `ＴＯＤＯ` / `ＴＡＳＫ`) in both parser-level and triage flows.
 - Added regression coverage for malformed importance parsing in `profile --json` and for bool-rejection in `parse_importance_score`.
 
 ## [1.0.1] - 2026-02-13

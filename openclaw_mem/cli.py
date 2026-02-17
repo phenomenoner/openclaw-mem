@@ -16,6 +16,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -2094,6 +2095,10 @@ def _summary_has_task_marker(summary: str) -> bool:
     """Return True when summary begins with a task marker.
 
     Accepted prefixes (case-insensitive): TODO, TASK, REMINDER.
+
+    Matching is width-normalized (NFKC) first, so full-width variants like
+    `ＴＯＤＯ` / `ＴＡＳＫ` / `ＲＥＭＩＮＤＥＲ` are accepted.
+
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
     - whitespace
@@ -2101,7 +2106,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     - end-of-string
     """
 
-    s = (summary or "").lstrip()
+    s = unicodedata.normalize("NFKC", (summary or "")).lstrip()
     if not s:
         return False
 
@@ -2128,7 +2133,8 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     Matching rules:
     - kind == 'task' OR
     - summary starts with TODO/TASK/REMINDER marker
-      (case-insensitive; accepts ':', whitespace, '-', '－', '–', '—', or marker-only)
+      (case-insensitive; width-normalized via NFKC; accepts ':', whitespace,
+      '-', '－', '–', '—', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
     """
