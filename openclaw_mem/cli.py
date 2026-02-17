@@ -448,7 +448,7 @@ def cmd_profile(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "SELECT model, COUNT(*) AS n FROM observation_embeddings_en GROUP BY model ORDER BY n DESC"
     ).fetchall()
 
-    from openclaw_mem.importance import parse_importance_score, label_from_score
+    from openclaw_mem.importance import is_parseable_importance, parse_importance_score, label_from_score
 
     label_counts: Dict[str, int] = {
         "must_remember": 0,
@@ -473,7 +473,12 @@ def cmd_profile(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
         importance_present += 1
 
-        score = parse_importance_score(detail_obj.get("importance"))
+        importance_value = detail_obj.get("importance")
+        if not is_parseable_importance(importance_value):
+            label_counts["unknown"] += 1
+            continue
+
+        score = parse_importance_score(importance_value)
         label = label_from_score(score)
         label_counts[label] = int(label_counts.get(label, 0)) + 1
         score_total += float(score)

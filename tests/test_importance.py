@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import unittest
 
-from openclaw_mem.importance import label_from_score, make_importance, parse_importance_score
+from openclaw_mem.importance import is_parseable_importance, label_from_score, make_importance, parse_importance_score
 
 
 class TestImportance(unittest.TestCase):
@@ -40,6 +40,18 @@ class TestImportance(unittest.TestCase):
         self.assertEqual(parse_importance_score(None), 0.0)
         self.assertEqual(parse_importance_score({"score": "high"}), 0.0)
         self.assertEqual(parse_importance_score({"label": "UNKNOWN"}), 0.0)
+
+    def test_parse_importance_score_rejects_bool_score_inside_object(self):
+        self.assertEqual(parse_importance_score({"score": True}), 0.0)
+        self.assertEqual(parse_importance_score({"score": False}), 0.0)
+
+    def test_is_parseable_importance_detects_supported_shapes(self):
+        self.assertTrue(is_parseable_importance(0.7))
+        self.assertTrue(is_parseable_importance({"score": 0.7}))
+        self.assertTrue(is_parseable_importance({"label": "must remember"}))
+        self.assertFalse(is_parseable_importance({"score": True}))
+        self.assertFalse(is_parseable_importance({"label": "UNKNOWN"}))
+        self.assertFalse(is_parseable_importance(None))
 
     def test_make_importance_normalizes_label_and_adds_timestamp(self):
         obj = make_importance(

@@ -44,6 +44,36 @@ def label_from_score(score: float) -> str:
     return "ignore"
 
 
+def _normalize_label(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    key = value.strip().lower()
+    key = _LABEL_ALIAS_TO_CANONICAL.get(key, key)
+    if key in _LABEL_TO_SCORE:
+        return key
+    return None
+
+
+def is_parseable_importance(value: Any) -> bool:
+    """Return whether `detail_json.importance` carries parseable signal."""
+    if isinstance(value, bool):
+        return False
+
+    if isinstance(value, (int, float)):
+        return math.isfinite(float(value))
+
+    if isinstance(value, dict):
+        score = value.get("score")
+        if isinstance(score, bool):
+            score = None
+        if isinstance(score, (int, float)):
+            return math.isfinite(float(score))
+
+        return _normalize_label(value.get("label")) is not None
+
+    return False
+
+
 def make_importance(
     score: float,
     *,
@@ -97,14 +127,13 @@ def parse_importance_score(value: Any) -> float:
 
     if isinstance(value, dict):
         score = value.get("score")
+        if isinstance(score, bool):
+            score = None
         if isinstance(score, (int, float)):
             return _clamp01(float(score))
 
-        label = value.get("label")
-        if isinstance(label, str):
-            key = label.strip().lower()
-            key = _LABEL_ALIAS_TO_CANONICAL.get(key, key)
-            if key in _LABEL_TO_SCORE:
-                return _LABEL_TO_SCORE[key]
+        key = _normalize_label(value.get("label"))
+        if key is not None:
+            return _LABEL_TO_SCORE[key]
 
     return 0.0

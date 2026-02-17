@@ -142,6 +142,67 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_profile_counts_malformed_importance_as_unknown(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "decision",
+                        "tool_name": "memory_store",
+                        "summary": "Persist critical decision",
+                        "detail": {"importance": {"label": "must remember"}},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "Malformed importance payload",
+                        "detail": {"importance": {"score": "high"}},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        args = type(
+            "Args",
+            (),
+            {
+                "db": ":memory:",
+                "json": True,
+                "recent_limit": 5,
+                "tool_limit": 5,
+                "kind_limit": 5,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_profile(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["importance"]["present"], 2)
+        self.assertEqual(out["importance"]["missing"], 0)
+        self.assertEqual(out["importance"]["label_counts"]["must_remember"], 1)
+        self.assertEqual(out["importance"]["label_counts"]["ignore"], 0)
+        self.assertEqual(out["importance"]["label_counts"]["unknown"], 1)
+        self.assertEqual(out["importance"]["avg_score"], 0.8)
+
+        conn.close()
+
     def test_backend_reports_slot_and_readiness(self):
         conn = _connect(":memory:")
 
