@@ -39,6 +39,22 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("TODOLIST clean old notes"))
         self.assertFalse(_summary_has_task_marker("taskforce sync tomorrow"))
 
+    def test_parser_merges_global_and_command_json_flags(self):
+        before_args = build_parser().parse_args(["--json", "status"])
+        after_args = build_parser().parse_args(["status", "--json"])
+
+        self.assertTrue(before_args.json_global)
+        self.assertFalse(before_args.json)
+
+        self.assertTrue(after_args.json)
+        self.assertFalse(after_args.json_global)
+
+        merged_before = bool(before_args.json or before_args.json_global)
+        merged_after = bool(after_args.json or after_args.json_global)
+
+        self.assertTrue(merged_before)
+        self.assertTrue(merged_after)
+
     def test_profile_reports_counts_labels_and_recent(self):
         conn = _connect(":memory:")
 
