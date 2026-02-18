@@ -2218,6 +2218,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     Optional leading list/checklist wrappers are tolerated before markers:
     - list bullets: `-`, `*`, `•`, `‣`, `∙`, `·` (when followed by whitespace)
     - markdown checkboxes: `[ ]` / `[x]` (when followed by whitespace)
+    - ordered-list prefixes: `1.` / `1)` (when followed by whitespace)
 
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
@@ -2273,11 +2274,36 @@ def _summary_has_task_marker(summary: str) -> bool:
     def _strip_list_prefix(text: str) -> str:
         t = text
 
-        if len(t) >= 2 and t[0] in bullet_prefixes and t[1].isspace():
-            t = t[1:].lstrip()
+        def _strip_ordered_prefix(value: str) -> str:
+            i = 0
+            while i < len(value) and value[i].isdigit():
+                i += 1
+            if i == 0:
+                return value
+            if i + 1 >= len(value):
+                return value
+            if value[i] not in {".", ")"}:
+                return value
+            if not value[i + 1].isspace():
+                return value
+            return value[i + 1 :].lstrip()
 
-        if len(t) >= 4 and t[0] == "[" and t[2] == "]" and t[1] in {" ", "x", "X"} and t[3].isspace():
-            t = t[3:].lstrip()
+        changed = True
+        while changed:
+            changed = False
+
+            if len(t) >= 2 and t[0] in bullet_prefixes and t[1].isspace():
+                t = t[1:].lstrip()
+                changed = True
+
+            if len(t) >= 4 and t[0] == "[" and t[2] == "]" and t[1] in {" ", "x", "X"} and t[3].isspace():
+                t = t[3:].lstrip()
+                changed = True
+
+            stripped_ordered = _strip_ordered_prefix(t)
+            if stripped_ordered != t:
+                t = stripped_ordered
+                changed = True
 
         return t
 
@@ -2303,7 +2329,8 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; supports plain or
       bracketed forms like `[TODO]`/`(TASK)`, plus optional leading
-      list/checklist prefixes like `-`/`*`/`•` and `[ ]`/`[x]`;
+      list/checklist prefixes like `-`/`*`/`•`, `[ ]`/`[x]`, and
+      ordered-list prefixes like `1.`/`1)`;
       accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.

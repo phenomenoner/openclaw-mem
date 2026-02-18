@@ -148,7 +148,7 @@ uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --j
 
 Task matching rules in `--mode tasks` are deterministic:
 - `kind == "task"`, or
-- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`), with optional leading markdown list/checklist wrappers (`-` / `*` / `•`, then optional `[ ]` / `[x]`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
+- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`), with optional leading markdown list/checklist wrappers (`-` / `*` / `•`, then optional `[ ]` / `[x]`) and optional ordered-list prefixes (`1.` / `1)`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
 
 ---
 
