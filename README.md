@@ -112,6 +112,16 @@ Automation truth (dev):
 - **Lifecycle manager (ROADMAP)**: ref/last_used_at-based decay + archive-first retention.
   - Notes: `docs/notes/lifecycle-ref-decay.md`
 
+### Model/config defaults (centralized; env overrides)
+To avoid scattered hardcodes, model/base URL defaults are centralized and can be overridden via env:
+- `OPENCLAW_MEM_OPENAI_BASE_URL` (default: `https://api.openai.com/v1`)
+- `OPENCLAW_MEM_EMBED_MODEL` (default: `text-embedding-3-small`)
+- `OPENCLAW_MEM_SUMMARY_MODEL` (default: `gpt-5.2`)
+- `OPENCLAW_MEM_RERANK_MODEL` (default: `jina-reranker-v2-base-multilingual`)
+
+Notes:
+- If you switch embedding models, `vsearch` will warn when the requested model has no stored embeddings and will show available model names.
+
 ---
 
 ## Installation

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Iterable, Dict, Any, List, Optional, Tuple
 
 from openclaw_mem import __version__
+from openclaw_mem import defaults
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 
 def _resolve_home_dir() -> str:
@@ -886,9 +887,9 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     use_gateway = bool(getattr(args, "gateway", False) or os.environ.get("OPENCLAW_MEM_USE_GATEWAY") == "1")
     
     api_key: Optional[str] = None
-    base_url: str = "https://api.openai.com/v1"
+    base_url: str = defaults.openai_base_url()
     extra_headers: Dict[str, str] = {}
-    model = args.model if hasattr(args, "model") else "gpt-5.2"
+    model = args.model if hasattr(args, "model") else defaults.summary_model()
 
     if use_gateway:
         gw_conf = _get_gateway_config(args)
@@ -897,8 +898,8 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         extra_headers["x-openclaw-agent-id"] = gw_conf["agent_id"]
         
         # Switch default model if user didn't override it (heuristic: check against default)
-        # We assume if it's "gpt-5.2" (the parser default), we can switch to "openclaw:<agent>"
-        if model == "gpt-5.2":
+        # If model is the configured default, we can switch to "openclaw:<agent>".
+        if model == defaults.summary_model():
              model = f"openclaw:{gw_conf['agent_id']}"
              
         if not api_key:
@@ -910,7 +911,7 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         if not api_key:
             _emit({"error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json"}, args.json)
             sys.exit(1)
-        base_url = args.base_url if hasattr(args, "base_url") else "https://api.openai.com/v1"
+        base_url = args.base_url if hasattr(args, "base_url") else defaults.openai_base_url()
 
     # Determine workspace
     workspace = Path(args.workspace) if hasattr(args, "workspace") and args.workspace else DEFAULT_WORKSPACE
@@ -1030,9 +1031,9 @@ def cmd_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 
 class OpenAIEmbeddingsClient:
-    def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1"):
+    def __init__(self, api_key: str, base_url: Optional[str] = None):
         self.api_key = api_key
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or defaults.openai_base_url()).rstrip("/")
 
     def embed(self, texts: List[str], model: str) -> List[List[float]]:
         url = self.base_url + "/embeddings"
@@ -1096,6 +1097,13 @@ def cmd_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     now = _utcnow_iso()
 
     for target in _embed_targets(field):
+        _warn_embedding_model_mismatch(
+            conn,
+            table=target["table"],
+            requested_model=model,
+            label=target["name"],
+        )
+
         rows = conn.execute(
             f"""
             SELECT id, tool_name, {target['text_col']} AS text_value
@@ -1165,10 +1173,85 @@ def cmd_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     )
 
 
+def _warn_embedding_model_availability(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    requested_model: str,
+    label: str,
+) -> None:
+    try:
+        rows = conn.execute(
+            f"SELECT model, COUNT(*) AS n FROM {table} GROUP BY model ORDER BY n DESC"
+        ).fetchall()
+    except Exception:
+        return
+
+    if not rows:
+        return
+
+    available = {str(r[0]): int(r[1]) for r in rows}
+    if requested_model in available:
+        return
+
+    preview = ", ".join([f"{m}({n})" for m, n in list(available.items())[:5]])
+    print(
+        f"[openclaw-mem] Warning: requested {label} embedding model '{requested_model}' not found; "
+        f"available: {preview}",
+        file=sys.stderr,
+    )
+
+
+def _warn_embedding_model_mismatch(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    requested_model: str,
+    label: str,
+) -> None:
+    """Warn when multiple embedding models exist in the same table.
+
+    This is not an error, but it is a common source of silent quality drift:
+    operators change the default model and later wonder why recall differs.
+    """
+
+    try:
+        rows = conn.execute(
+            f"SELECT model, COUNT(*) AS n FROM {table} GROUP BY model ORDER BY n DESC"
+        ).fetchall()
+    except Exception:
+        return
+
+    if not rows:
+        return
+
+    available = {str(r[0]): int(r[1]) for r in rows}
+    if requested_model not in available:
+        return
+
+    others = {m: n for m, n in available.items() if m != requested_model and n > 0}
+    if not others:
+        return
+
+    preview = ", ".join([f"{m}({n})" for m, n in list(others.items())[:5]])
+    print(
+        f"[openclaw-mem] Warning: {label} embeddings include multiple models. "
+        f"Using '{requested_model}', but also saw: {preview}",
+        file=sys.stderr,
+    )
+
+
 def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Vector search over stored embeddings (cosine similarity)."""
     model = args.model
     limit = int(args.limit)
+
+    _warn_embedding_model_availability(
+        conn,
+        table="observation_embeddings",
+        requested_model=model,
+        label="original",
+    )
 
     # Get query vector from file/json or via OpenAI API
     query_vec: Optional[List[float]] = None
@@ -1308,7 +1391,7 @@ def _hybrid_retrieve(
     candidate_limit_override: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Shared Hybrid retrieval core (FTS + Vector + RRF + optional rerank)."""
-    model = str(getattr(args, "model", "text-embedding-3-small"))
+    model = str(getattr(args, "model", defaults.embed_model()))
     limit = max(1, int(getattr(args, "limit", 20)))
     k = int(getattr(args, "k", 60))
     query = (getattr(args, "query", None) or "").strip()
@@ -1316,6 +1399,32 @@ def _hybrid_retrieve(
 
     rerank_provider = str(getattr(args, "rerank_provider", "none") or "none").lower()
     rerank_enabled = rerank_provider != "none"
+
+    _warn_embedding_model_availability(
+        conn,
+        table="observation_embeddings",
+        requested_model=model,
+        label="original",
+    )
+    _warn_embedding_model_mismatch(
+        conn,
+        table="observation_embeddings",
+        requested_model=model,
+        label="original",
+    )
+    if query_en:
+        _warn_embedding_model_availability(
+            conn,
+            table="observation_embeddings_en",
+            requested_model=model,
+            label="english",
+        )
+        _warn_embedding_model_mismatch(
+            conn,
+            table="observation_embeddings_en",
+            requested_model=model,
+            label="english",
+        )
     rerank_topn = max(1, int(getattr(args, "rerank_topn", limit) or limit))
 
     candidate_limit = int(candidate_limit_override) if candidate_limit_override is not None else limit * 2
@@ -1328,7 +1437,10 @@ def _hybrid_retrieve(
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json")
 
-    client = OpenAIEmbeddingsClient(api_key=api_key, base_url=getattr(args, "base_url", "https://api.openai.com/v1"))
+    client = OpenAIEmbeddingsClient(
+        api_key=api_key,
+        base_url=getattr(args, "base_url", defaults.openai_base_url()),
+    )
     try:
         embed_inputs = [query] + ([query_en] if query_en else [])
         embed_vecs = client.embed(embed_inputs, model=model)
@@ -1442,7 +1554,7 @@ def _hybrid_retrieve(
                         provider=rerank_provider,
                         query=query_en or query,
                         documents=docs,
-                        model=str(getattr(args, "rerank_model", "jina-reranker-v2-base-multilingual")),
+                        model=str(getattr(args, "rerank_model", defaults.rerank_model())),
                         top_n=min(rerank_topn, len(docs)),
                         api_key=rerank_api_key,
                         base_url=getattr(args, "rerank_base_url", None),
@@ -1670,11 +1782,11 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         query_en=getattr(args, "query_en", None),
         limit=limit,
         k=60,
-        model="text-embedding-3-small",
-        base_url="https://api.openai.com/v1",
+        model=defaults.embed_model(),
+        base_url=defaults.openai_base_url(),
         rerank_provider="none",
         rerank_topn=limit,
-        rerank_model="jina-reranker-v2-base-multilingual",
+        rerank_model=defaults.rerank_model(),
         rerank_api_key=None,
         rerank_base_url=None,
         rerank_timeout_sec=15,
@@ -2488,6 +2600,13 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 now = _utcnow_iso()
 
                 target = _embed_targets("original")[0]
+                _warn_embedding_model_mismatch(
+                    conn,
+                    table=target["table"],
+                    requested_model=model,
+                    label=target["name"],
+                )
+
                 rows = conn.execute(
                     f"""
                     SELECT id, tool_name, {target['text_col']} AS text_value
@@ -2775,8 +2894,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.add_argument("date", nargs="?", help="Date to compress (YYYY-MM-DD, default: yesterday)")
     sp.add_argument("--workspace", type=Path, help="Workspace root (default: cwd)")
-    sp.add_argument("--model", default="gpt-5.2", help="OpenAI model")
-    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument("--model", default=defaults.summary_model(), help="OpenAI model (env: OPENCLAW_MEM_SUMMARY_MODEL)")
+    sp.add_argument(
+        "--base-url",
+        default=defaults.openai_base_url(),
+        help="OpenAI API base URL (env: OPENCLAW_MEM_OPENAI_BASE_URL)",
+    )
     sp.add_argument("--max-tokens", type=int, default=700, help="Max output tokens")
     sp.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature")
     sp.add_argument("--dry-run", action="store_true", help="Preview without writing")
@@ -2798,8 +2921,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("embed", help="Compute/store embeddings for observations (requires API key)")
     add_common(sp)
-    sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
-    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument(
+        "--model",
+        default=defaults.embed_model(),
+        help="Embedding model (env: OPENCLAW_MEM_EMBED_MODEL)",
+    )
+    sp.add_argument(
+        "--base-url",
+        default=defaults.openai_base_url(),
+        help="OpenAI API base URL (env: OPENCLAW_MEM_OPENAI_BASE_URL)",
+    )
     sp.add_argument("--limit", type=int, default=500, help="Max observations to embed (default: 500)")
     sp.add_argument("--batch", type=int, default=64, help="Batch size per API call (default: 64)")
     sp.add_argument("--field", choices=["original", "english", "both"], default="original", help="Embedding source field (default: original)")
@@ -2808,8 +2939,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("vsearch", help="Vector search over embeddings (cosine similarity)")
     add_common(sp)
     sp.add_argument("query", help="Query text")
-    sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
-    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument(
+        "--model",
+        default=defaults.embed_model(),
+        help="Embedding model (env: OPENCLAW_MEM_EMBED_MODEL)",
+    )
+    sp.add_argument(
+        "--base-url",
+        default=defaults.openai_base_url(),
+        help="OpenAI API base URL (env: OPENCLAW_MEM_OPENAI_BASE_URL)",
+    )
     sp.add_argument("--limit", type=int, default=20)
     sp.add_argument("--query-vector-json", help="Provide query vector as JSON array (testing/offline)")
     sp.add_argument("--query-vector-file", help="Provide query vector from JSON file (testing/offline)")
@@ -2821,8 +2960,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--query-en", help="Optional English query for additional vector route")
     sp.add_argument("--limit", type=int, default=20)
     sp.add_argument("--k", type=int, default=60, help="RRF constant (default: 60)")
-    sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
-    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument(
+        "--model",
+        default=defaults.embed_model(),
+        help="Embedding model (env: OPENCLAW_MEM_EMBED_MODEL)",
+    )
+    sp.add_argument(
+        "--base-url",
+        default=defaults.openai_base_url(),
+        help="OpenAI API base URL (env: OPENCLAW_MEM_OPENAI_BASE_URL)",
+    )
     sp.add_argument(
         "--rerank-provider",
         choices=["none", "jina", "cohere"],
@@ -2831,8 +2978,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument(
         "--rerank-model",
-        default="jina-reranker-v2-base-multilingual",
-        help="Reranker model name (provider-specific)",
+        default=defaults.rerank_model(),
+        help="Reranker model name (provider-specific) (env: OPENCLAW_MEM_RERANK_MODEL)",
     )
     sp.add_argument(
         "--rerank-topn",
@@ -2868,8 +3015,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--lang", help="Original text language code (e.g., ko, ja, es)")
     sp.add_argument("--category", default="fact", choices=["fact", "preference", "decision", "entity", "task", "other"])
     sp.add_argument("--importance", type=float, default=0.7)
-    sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
-    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument(
+        "--model",
+        default=defaults.embed_model(),
+        help="Embedding model (env: OPENCLAW_MEM_EMBED_MODEL)",
+    )
+    sp.add_argument(
+        "--base-url",
+        default=defaults.openai_base_url(),
+        help="OpenAI API base URL (env: OPENCLAW_MEM_OPENAI_BASE_URL)",
+    )
     sp.add_argument("--workspace", type=Path, help="Workspace root (default: cwd)")
     sp.set_defaults(func=cmd_store)
 
@@ -2945,8 +3100,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--archive-dir", help="Directory to move processed files (default: delete)")
     sp.add_argument("--embed", action="store_true", default=True, help="Run embedding after ingest (default: True)")
     sp.add_argument("--no-embed", dest="embed", action="store_false", help="Skip embedding")
-    sp.add_argument("--model", default="text-embedding-3-small", help="Embedding model")
-    sp.add_argument("--base-url", default="https://api.openai.com/v1", help="OpenAI API base URL")
+    sp.add_argument(
+        "--model",
+        default=defaults.embed_model(),
+        help="Embedding model (env: OPENCLAW_MEM_EMBED_MODEL)",
+    )
+    sp.add_argument(
+        "--base-url",
+        default=defaults.openai_base_url(),
+        help="OpenAI API base URL (env: OPENCLAW_MEM_OPENAI_BASE_URL)",
+    )
     sp.add_argument("--update-index", action="store_true", default=True, help="Update Route A index file after ingest (default: True)")
     sp.add_argument("--no-update-index", dest="update_index", action="store_false", help="Skip index update")
     sp.add_argument("--index-to", default=None, help=f"Index output path (default: {DEFAULT_INDEX_PATH})")
