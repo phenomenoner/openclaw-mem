@@ -246,13 +246,61 @@ def _init_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+_SURROGATE_MIN = 0xD800
+_SURROGATE_MAX = 0xDFFF
+
+
+def _sanitize_str_surrogates(s: str) -> str:
+    """Replace any lone surrogate codepoints to keep SQLite bindings UTF-8 safe.
+
+    Python's json decoder can legally produce unpaired surrogate codepoints when
+    the input contains an invalid unicode escape (e.g. "\\ud83d"). Those values
+    cannot be encoded to UTF-8 for SQLite, so we replace them with U+FFFD.
+    """
+
+    if not s:
+        return s
+    # Fast path
+    for ch in s:
+        o = ord(ch)
+        if _SURROGATE_MIN <= o <= _SURROGATE_MAX:
+            return "".join(
+                ("\ufffd" if _SURROGATE_MIN <= ord(c) <= _SURROGATE_MAX else c) for c in s
+            )
+    return s
+
+
+def _sanitize_jsonable_surrogates(x: Any) -> Any:
+    if isinstance(x, str):
+        return _sanitize_str_surrogates(x)
+    if isinstance(x, dict):
+        out: Dict[Any, Any] = {}
+        for k, v in x.items():
+            kk = _sanitize_str_surrogates(k) if isinstance(k, str) else k
+            out[kk] = _sanitize_jsonable_surrogates(v)
+        return out
+    if isinstance(x, list):
+        return [_sanitize_jsonable_surrogates(v) for v in x]
+    return x
+
+
 def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summary: IngestRunSummary | None = None) -> int:
     ts = obs.get("ts") or _utcnow_iso()
+
     kind = obs.get("kind")
+    kind = _sanitize_str_surrogates(str(kind)) if kind is not None else None
+
     summary = obs.get("summary")
+    summary = _sanitize_str_surrogates(str(summary)) if summary is not None else None
+
     summary_en = obs.get("summary_en") or obs.get("text_en")
+    summary_en = _sanitize_str_surrogates(str(summary_en)) if summary_en is not None else None
+
     lang = obs.get("lang")
+    lang = _sanitize_str_surrogates(str(lang)) if lang is not None else None
+
     tool_name = obs.get("tool_name") or obs.get("tool")
+    tool_name = _sanitize_str_surrogates(str(tool_name)) if tool_name is not None else None
 
     base_detail = obs.get("detail")
     if base_detail is None:
@@ -285,6 +333,9 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summa
     extras = {k: v for k, v in obs.items() if k not in known_keys}
     if extras:
         detail_obj.update(extras)
+
+    # Sanitize any invalid unicode surrogate codepoints before binding to SQLite.
+    detail_obj = _sanitize_jsonable_surrogates(detail_obj)
 
     if run_summary is not None:
         run_summary.total_seen += 1
