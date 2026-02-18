@@ -55,11 +55,15 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("(3) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("a) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("B. [ ] TASK: clean desk"))
+        self.assertTrue(_summary_has_task_marker("iv) TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("IX. [ ] TASK: clean desk"))
+        self.assertTrue(_summary_has_task_marker("(iv) TODO buy milk"))
 
     def test_summary_has_task_marker_accepts_nested_prefix_combinations(self):
         self.assertTrue(_summary_has_task_marker("* (1) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker("• （２） [x] [TASK] rotate notes"))
         self.assertTrue(_summary_has_task_marker("- a) [ ] TODO: clean desk"))
+        self.assertTrue(_summary_has_task_marker("- (iv) [ ] TODO: clean desk"))
 
     def test_summary_has_task_marker_rejects_non_marker_prefixes(self):
         self.assertFalse(_summary_has_task_marker("TODOLIST clean old notes"))
@@ -74,6 +78,7 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("(1)TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("a)TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("ab) TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker("in) TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("* (1)TODO clean old notes"))
 
     def test_parser_merges_global_and_command_json_flags(self):
@@ -903,6 +908,67 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["tasks"]["found_new"], 1)
         self.assertEqual(out["tasks"]["matches"][0]["summary"], "a) [ ] TODO: rotate on-call notes")
+
+        conn.close()
+
+    def test_triage_tasks_accepts_roman_ordered_prefix_task_marker(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "iv) [ ] TODO: rotate on-call notes",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "tasks",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["tasks"]["found_new"], 1)
+        self.assertEqual(out["tasks"]["matches"][0]["summary"], "iv) [ ] TODO: rotate on-call notes")
 
         conn.close()
 
