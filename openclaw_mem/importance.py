@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import math
 from typing import Any, Dict
+import unicodedata
 
 
 def _clamp01(x: float) -> float:
@@ -47,7 +48,10 @@ def label_from_score(score: float) -> str:
 def _normalize_label(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
-    key = value.strip().lower()
+
+    # Width-normalize first so full-width variants like
+    # `ＭＵＳＴ＿ＲＥＭＥＭＢＥＲ` / `ＮＩＣＥ－ＴＯ－ＨＡＶＥ` are accepted.
+    key = unicodedata.normalize("NFKC", value).strip().lower()
     key = _LABEL_ALIAS_TO_CANONICAL.get(key, key)
     if key in _LABEL_TO_SCORE:
         return key

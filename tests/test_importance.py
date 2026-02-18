@@ -36,6 +36,11 @@ class TestImportance(unittest.TestCase):
         self.assertEqual(parse_importance_score({"label": "medium"}), 0.5)
         self.assertEqual(parse_importance_score({"label": "high"}), 0.8)
 
+    def test_parse_importance_score_supports_full_width_labels(self):
+        self.assertEqual(parse_importance_score({"label": "ＭＵＳＴ＿ＲＥＭＥＭＢＥＲ"}), 0.8)
+        self.assertEqual(parse_importance_score({"label": "ＮＩＣＥ－ＴＯ－ＨＡＶＥ"}), 0.5)
+        self.assertEqual(parse_importance_score({"label": "ＨＩＧＨ"}), 0.8)
+
     def test_parse_importance_score_invalid_returns_zero(self):
         self.assertEqual(parse_importance_score(None), 0.0)
         self.assertEqual(parse_importance_score({"score": "high"}), 0.0)
@@ -49,6 +54,7 @@ class TestImportance(unittest.TestCase):
         self.assertTrue(is_parseable_importance(0.7))
         self.assertTrue(is_parseable_importance({"score": 0.7}))
         self.assertTrue(is_parseable_importance({"label": "must remember"}))
+        self.assertTrue(is_parseable_importance({"label": "ＭＵＳＴ＿ＲＥＭＥＭＢＥＲ"}))
         self.assertFalse(is_parseable_importance({"score": True}))
         self.assertFalse(is_parseable_importance({"label": "UNKNOWN"}))
         self.assertFalse(is_parseable_importance(None))
@@ -76,6 +82,14 @@ class TestImportance(unittest.TestCase):
             label="must remember",
         )
         self.assertEqual(alias_obj["label"], "must_remember")
+
+        full_width_alias_obj = make_importance(
+            score=0.2,
+            method="heuristic-v1",
+            rationale="width-normalized alias normalization",
+            label="ＮＩＣＥ－ＴＯ－ＨＡＶＥ",
+        )
+        self.assertEqual(full_width_alias_obj["label"], "nice_to_have")
 
         invalid_obj = make_importance(
             score=0.2,
