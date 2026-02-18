@@ -2402,18 +2402,43 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 
 def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    """Auto-ingest and embed observations from log file."""
+    """Auto-ingest and embed observations from log file.
+
+    Hardening goals:
+    - Recover orphaned `*.processing` files after crashes.
+    - Emit exactly ONE JSON payload when `--json` is used.
+    - Keep fail-open semantics: missing API key should not block ingest/archival.
+    """
+
     _apply_importance_scorer_override(args)
-    # 1. Determine source
+
     default_source = os.path.expanduser("~/.openclaw/memory/openclaw-mem-observations.jsonl")
     source = Path(args.source or default_source)
     summary = IngestRunSummary()
 
-    if not source.exists() or source.stat().st_size == 0:
+    # 1) Collect any orphaned processing files first (crash recovery).
+    processing_files = sorted(source.parent.glob(f"{source.name}.*.processing"))
+    recovered = bool(processing_files)
+
+    # 2) Rotate current source (if present) into a new processing file.
+    rotated = False
+    if source.exists() and source.stat().st_size > 0:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        processing = source.with_suffix(f".jsonl.{ts}.processing")
+        try:
+            source.rename(processing)
+            processing_files.append(processing)
+            processing_files.sort()
+            rotated = True
+        except OSError as e:
+            _emit({"error": f"Failed to rotate log: {e}"}, args.json)
+            sys.exit(1)
+
+    if not processing_files:
         _emit(
             {
                 "ok": True,
-                "processed": 0,
+                "processed_files": 0,
                 "ingested": 0,
                 "reason": "source empty/missing",
                 "total_seen": summary.total_seen,
@@ -2427,27 +2452,19 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         )
         return
 
-    # 2. Rotate
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    processing = source.with_suffix(f".jsonl.{ts}.processing")
-    try:
-        source.rename(processing)
-    except OSError as e:
-        _emit({"error": f"Failed to rotate log: {e}"}, args.json)
-        sys.exit(1)
+    # 3) Ingest all processing files (oldest first).
+    inserted_ids: List[int] = []
+    for processing in processing_files:
+        try:
+            with open(processing, "r", encoding="utf-8") as fp:
+                for obs in _iter_jsonl(fp):
+                    inserted_ids.append(_insert_observation(conn, obs, summary))
+            conn.commit()
+        except Exception as e:
+            _emit({"error": f"Ingest failed: {e}", "file": str(processing)}, args.json)
+            sys.exit(1)
 
-    # 3. Ingest
-    inserted_ids = []
-    try:
-        with open(processing, "r", encoding="utf-8") as fp:
-            for obs in _iter_jsonl(fp):
-                inserted_ids.append(_insert_observation(conn, obs, summary))
-        conn.commit()
-    except Exception as e:
-        _emit({"error": f"Ingest failed: {e}", "file": str(processing)}, args.json)
-        sys.exit(1)
-
-    # 4. Update index (Route A)
+    # 4) Update index (Route A) (best-effort).
     if getattr(args, "update_index", True):
         try:
             out_path = Path(getattr(args, "index_to", None) or DEFAULT_INDEX_PATH)
@@ -2455,38 +2472,105 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         except Exception as e:
             print(f"Warning: failed to update index: {e}", file=sys.stderr)
 
-    # Emit ingest result
-    _emit(
-        {
-            "ok": True,
-            "ingested": len(inserted_ids),
-            "source": str(source),
-            "archive": str(args.archive_dir) if args.archive_dir else "deleted",
-            "total_seen": summary.total_seen,
-            "graded_filled": summary.graded_filled,
-            "skipped_existing": summary.skipped_existing,
-            "skipped_disabled": summary.skipped_disabled,
-            "scorer_errors": summary.scorer_errors,
-            "label_counts": summary.label_counts,
-        },
-        args.json,
-    )
-
-    # 5. Embed (Optional)
+    # 5) Embed (Optional, best-effort, quiet).
+    embedded = 0
+    embed_error: Optional[str] = None
     if args.embed:
-        embed_args = argparse.Namespace(**vars(args))
-        embed_args.limit = 500
-        embed_args.batch = 64
-        cmd_embed(conn, embed_args)
+        api_key = _get_api_key()
+        if not api_key:
+            embed_error = "missing_api_key"
+        else:
+            try:
+                client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
+                model = args.model
+                limit = 500
+                batch = 64
+                now = _utcnow_iso()
 
-    # 6. Archive or Delete
-    if args.archive_dir:
-        archive_dir = Path(args.archive_dir)
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        dest = archive_dir / processing.name
-        processing.rename(dest)
-    else:
-        processing.unlink()
+                target = _embed_targets("original")[0]
+                rows = conn.execute(
+                    f"""
+                    SELECT id, tool_name, {target['text_col']} AS text_value
+                    FROM observations
+                    WHERE id NOT IN (
+                        SELECT observation_id FROM {target['table']} WHERE model = ?
+                    )
+                    AND trim(coalesce({target['text_col']}, '')) <> ''
+                    ORDER BY id
+                    LIMIT ?
+                    """,
+                    (model, limit),
+                ).fetchall()
+
+                todo = [dict(r) for r in rows]
+                for i in range(0, len(todo), batch):
+                    chunk = todo[i : i + batch]
+                    texts = []
+                    chunk_ids = []
+                    for r in chunk:
+                        tid = int(r["id"])
+                        tool = (r.get("tool_name") or "").strip()
+                        summary_text = (r.get("text_value") or "").strip()
+                        text = f"{tool}: {summary_text}".strip(": ")
+                        texts.append(text)
+                        chunk_ids.append(tid)
+
+                    vecs = client.embed(texts, model=model)
+                    for tid, vec in zip(chunk_ids, vecs):
+                        blob = pack_f32(vec)
+                        norm = l2_norm(vec)
+                        dim = len(vec)
+                        conn.execute(
+                            f"""
+                            INSERT OR REPLACE INTO {target['table']}
+                            (observation_id, model, dim, vector, norm, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            (tid, model, dim, blob, norm, now),
+                        )
+                        embedded += 1
+
+                    conn.commit()
+            except Exception as e:
+                embed_error = str(e)
+
+    # 6) Archive or delete processed files.
+    try:
+        if args.archive_dir:
+            archive_dir = Path(args.archive_dir)
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            for processing in processing_files:
+                dest = archive_dir / processing.name
+                processing.rename(dest)
+        else:
+            for processing in processing_files:
+                processing.unlink()
+    except Exception as e:
+        _emit({"error": f"Failed to archive/delete processing files: {e}"}, args.json)
+        sys.exit(1)
+
+    # Emit ONE harvest result payload.
+    out: Dict[str, Any] = {
+        "ok": True,
+        "ingested": len(inserted_ids),
+        "processed_files": len(processing_files),
+        "files": [p.name for p in processing_files[:20]],
+        "recovered": recovered,
+        "rotated": rotated,
+        "source": str(source),
+        "archive": str(args.archive_dir) if args.archive_dir else "deleted",
+        "total_seen": summary.total_seen,
+        "graded_filled": summary.graded_filled,
+        "skipped_existing": summary.skipped_existing,
+        "skipped_disabled": summary.skipped_disabled,
+        "scorer_errors": summary.scorer_errors,
+        "label_counts": summary.label_counts,
+        "embedded": embedded,
+    }
+    if embed_error:
+        out["embed_error"] = embed_error
+
+    _emit(out, args.json)
 
 
 def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
