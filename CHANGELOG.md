@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added triage regression coverage for full-width hyphen (`－`), en dash (`–`), em dash (`—`), and unicode minus (`−`) task-marker separators.
 - Added task-marker regression coverage for full-width marker prefixes (for example `ＴＯＤＯ` / `ＴＡＳＫ`) in both parser-level and triage flows.
 - Added regression coverage for bracket-wrapped task markers (`[TODO] ...`, `(TASK) ...`) in parser-level and triage flows, including rejection cases for malformed/non-marker bracket prefixes.
-- Added regression coverage for markdown list/checklist-prefixed task markers (including `+` bullets) and ordered-list prefixes (including `(1)` form) in parser-level and triage flows.
+- Added regression coverage for markdown list/checklist-prefixed task markers (including `+` bullets), nested prefix chains, and ordered-list prefixes (including `(1)` and full-width `（１）` forms) in parser-level and triage flows.
 - Added regression coverage for malformed importance parsing in `profile --json` and for bool-rejection in `parse_importance_score`.
 - Added regression coverage for `make_importance` label canonicalization (alias normalization + invalid-label fallback).
 - Added regression coverage for full-width importance labels across parsing, parseability checks, and `make_importance` normalization.
