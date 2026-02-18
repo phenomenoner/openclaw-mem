@@ -92,3 +92,20 @@ Source (external, medium trust):
 **How we might use it later (if at all):**
 - As an optional backend behind a stable adapter interface (so swapping engines is cheap).
 - As a performance baseline to compare against LanceDB/FAISS/etc. in `openclaw-memory-bench`.
+
+## 7) “Skill as a book” (progressive disclosure) → pilot surface: Diary/Meeting Refinery
+
+Source (external, high-level idea): CabLate Agent Skill talk notes (skills as 3 layers).
+
+**What we take:**
+- Skills should be designed as **progressive disclosure**:
+  1) router metadata (name/description)
+  2) workflow body (principles + stable steps)
+  3) appendices/tools (scripts/templates)
+- This keeps the **default context lean**, while allowing deterministic reliability via scripts when needed.
+
+**Where this lands (current pilot):**
+- Decision: `lyria-working-ledger/DECISIONS/2026-02-18.md`
+- Pilot contract: `openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-02-18_refinery_pilot_diary_meeting_extraction.md`
+
+**Why we pilot on diary/meeting notes:** high value density (decisions/people/money/tasks), stable schema, and measurable noise reduction without risky always-on capture.
