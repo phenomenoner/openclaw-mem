@@ -2269,7 +2269,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     Optional leading list/checklist wrappers are tolerated before markers:
     - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (when followed by whitespace)
     - markdown checkboxes: `[ ]` / `[x]` (when followed by whitespace)
-    - ordered-list prefixes: `1.` / `1)` / `(1)` (when followed by whitespace)
+    - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` (when followed by whitespace)
 
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
@@ -2336,15 +2336,19 @@ def _summary_has_task_marker(summary: str) -> bool:
             i = 0
             while i < len(value) and value[i].isdigit():
                 i += 1
-            if i == 0:
-                return value
-            if i + 1 >= len(value):
-                return value
-            if value[i] not in {".", ")"}:
-                return value
-            if not value[i + 1].isspace():
-                return value
-            return value[i + 1 :].lstrip()
+            if i > 0:
+                if i + 1 >= len(value):
+                    return value
+                if value[i] not in {".", ")"}:
+                    return value
+                if not value[i + 1].isspace():
+                    return value
+                return value[i + 1 :].lstrip()
+
+            if len(value) >= 3 and value[0].isalpha() and value[1] in {".", ")"} and value[2].isspace():
+                return value[2:].lstrip()
+
+            return value
 
         changed = True
         while changed:
@@ -2388,7 +2392,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
       (case-insensitive; width-normalized via NFKC; supports plain or
       bracketed forms like `[TODO]`/`(TASK)`, plus optional leading
       list/checklist prefixes like `-`/`*`/`+`/`•`, `[ ]`/`[x]`, and
-      ordered-list prefixes like `1.`/`1)`/`(1)`;
+      ordered-list prefixes like `1.`/`1)`/`(1)`/`a.`/`a)`;
       accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
