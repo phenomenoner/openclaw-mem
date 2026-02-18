@@ -2269,7 +2269,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     Optional leading list/checklist wrappers are tolerated before markers:
     - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (when followed by whitespace)
     - markdown checkboxes: `[ ]` / `[x]` (when followed by whitespace)
-    - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` (when followed by whitespace)
+    - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `iv.` / `iv)` / `(iv)` (when followed by whitespace)
 
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
@@ -2326,12 +2326,27 @@ def _summary_has_task_marker(summary: str) -> bool:
         t = text
 
         def _strip_ordered_prefix(value: str) -> str:
+            def _is_roman_token(token: str) -> bool:
+                if not token:
+                    return False
+                if len(token) > 6:
+                    return False
+                return all(ch in "IVXLCDMivxlcdm" for ch in token)
+
             if len(value) >= 4 and value[0] == "(":
                 j = 1
                 while j < len(value) and value[j].isdigit():
                     j += 1
                 if j > 1 and j + 1 < len(value) and value[j] == ")" and value[j + 1].isspace():
                     return value[j + 1 :].lstrip()
+
+                k = 1
+                while k < len(value) and value[k].isalpha():
+                    k += 1
+                if k > 1 and k + 1 < len(value) and value[k] == ")" and value[k + 1].isspace():
+                    token = value[1:k]
+                    if _is_roman_token(token):
+                        return value[k + 1 :].lstrip()
 
             i = 0
             while i < len(value) and value[i].isdigit():
@@ -2345,8 +2360,13 @@ def _summary_has_task_marker(summary: str) -> bool:
                     return value
                 return value[i + 1 :].lstrip()
 
-            if len(value) >= 3 and value[0].isalpha() and value[1] in {".", ")"} and value[2].isspace():
-                return value[2:].lstrip()
+            j = 0
+            while j < len(value) and value[j].isalpha():
+                j += 1
+            if j > 0 and j + 1 < len(value) and value[j] in {".", ")"} and value[j + 1].isspace():
+                token = value[:j]
+                if len(token) == 1 or _is_roman_token(token):
+                    return value[j + 1 :].lstrip()
 
             return value
 
@@ -2392,7 +2412,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
       (case-insensitive; width-normalized via NFKC; supports plain or
       bracketed forms like `[TODO]`/`(TASK)`, plus optional leading
       list/checklist prefixes like `-`/`*`/`+`/`•`, `[ ]`/`[x]`, and
-      ordered-list prefixes like `1.`/`1)`/`(1)`/`a.`/`a)`;
+      ordered-list prefixes like `1.`/`1)`/`(1)`/`a.`/`a)`/`iv.`/`iv)`/`(iv)`;
       accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
