@@ -94,6 +94,18 @@ Automation truth (dev):
   - Ingest/harvest JSON receipts include grading counters + `label_counts` for ops trend tracking.
   - Notes: `docs/importance-grading.md`
 
+- **Autograde switch (copy/paste)**:
+  ```bash
+  # Enable heuristic autograde for ingest/harvest
+  OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+
+  # Run a one-off no-autograde harvest (kill-switch)
+  OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+
+  # Force CLI-only kill switch (per command)
+  uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
+  ```
+
 - **Lifecycle manager (ROADMAP)**: ref/last_used_at-based decay + archive-first retention.
   - Notes: `docs/notes/lifecycle-ref-decay.md`
 
