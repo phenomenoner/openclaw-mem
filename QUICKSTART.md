@@ -143,7 +143,12 @@ uv run python -m openclaw_mem ingest \
 
 ```bash
 uv run python -m openclaw_mem triage --mode heartbeat --json
+uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --json
 ```
+
+Task matching rules in `--mode tasks` are deterministic:
+- `kind == "task"`, or
+- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
 
 ---
 
