@@ -2102,7 +2102,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
     - whitespace
-    - '-' / '－' / '–' / '—'
+    - '-' / '－' / '–' / '—' / '−'
     - end-of-string
     """
 
@@ -2119,7 +2119,7 @@ def _summary_has_task_marker(summary: str) -> bool:
             return True
 
         nxt = s[len(marker)]
-        if nxt in {":", "：", "-", "－", "–", "—"} or nxt.isspace():
+        if nxt in {":", "：", "-", "－", "–", "—", "−"} or nxt.isspace():
             return True
 
     return False
@@ -2134,7 +2134,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - kind == 'task' OR
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; accepts ':', whitespace,
-      '-', '－', '–', '—', or marker-only)
+      '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
     """
