@@ -2099,6 +2099,10 @@ def _summary_has_task_marker(summary: str) -> bool:
     Matching is width-normalized (NFKC) first, so full-width variants like
     `ＴＯＤＯ` / `ＴＡＳＫ` / `ＲＥＭＩＮＤＥＲ` are accepted.
 
+    Accepted forms:
+    - plain marker: `TODO ...`
+    - bracketed marker: `[TODO] ...` or `(TODO) ...`
+
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
     - whitespace
@@ -2110,16 +2114,37 @@ def _summary_has_task_marker(summary: str) -> bool:
     if not s:
         return False
 
+    markers = ("TODO", "TASK", "REMINDER")
+    separators = {":", "：", "-", "－", "–", "—", "−"}
+
+    def _has_valid_suffix(text: str, idx: int) -> bool:
+        if len(text) == idx:
+            return True
+        nxt = text[idx]
+        return nxt in separators or nxt.isspace()
+
     up = s.upper()
-    for marker in ("TODO", "TASK", "REMINDER"):
+    for marker in markers:
         if not up.startswith(marker):
             continue
-
-        if len(up) == len(marker):
+        if _has_valid_suffix(s, len(marker)):
             return True
 
-        nxt = s[len(marker)]
-        if nxt in {":", "：", "-", "－", "–", "—", "−"} or nxt.isspace():
+    close_by_open = {"[": "]", "(": ")", "【": "】", "（": "）"}
+    close = close_by_open.get(s[0])
+    if close is None:
+        return False
+
+    rest_up = s[1:].upper()
+    for marker in markers:
+        if not rest_up.startswith(marker):
+            continue
+
+        close_idx = 1 + len(marker)
+        if close_idx >= len(s) or s[close_idx] != close:
+            continue
+
+        if _has_valid_suffix(s, close_idx + 1):
             return True
 
     return False
@@ -2133,7 +2158,8 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     Matching rules:
     - kind == 'task' OR
     - summary starts with TODO/TASK/REMINDER marker
-      (case-insensitive; width-normalized via NFKC; accepts ':', whitespace,
+      (case-insensitive; width-normalized via NFKC; supports plain or
+      bracketed forms like `[TODO]`/`(TASK)`; accepts ':', whitespace,
       '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
