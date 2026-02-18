@@ -23,3 +23,6 @@ jobs:
 
       - name: Unit tests
         run: uv run -- python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Build (packaging)
+        run: uv run --with build -- python -m build
