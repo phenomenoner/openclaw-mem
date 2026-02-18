@@ -2103,6 +2103,10 @@ def _summary_has_task_marker(summary: str) -> bool:
     - plain marker: `TODO ...`
     - bracketed marker: `[TODO] ...` or `(TODO) ...`
 
+    Optional leading list/checklist wrappers are tolerated before markers:
+    - list bullets: `-`, `*`, `•`, `‣`, `∙`, `·` (when followed by whitespace)
+    - markdown checkboxes: `[ ]` / `[x]` (when followed by whitespace)
+
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
     - whitespace
@@ -2116,6 +2120,7 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     markers = ("TODO", "TASK", "REMINDER")
     separators = {":", "：", "-", "－", "–", "—", "−"}
+    bullet_prefixes = {"-", "*", "•", "‣", "∙", "·"}
 
     def _has_valid_suffix(text: str, idx: int) -> bool:
         if len(text) == idx:
@@ -2123,28 +2128,54 @@ def _summary_has_task_marker(summary: str) -> bool:
         nxt = text[idx]
         return nxt in separators or nxt.isspace()
 
-    up = s.upper()
-    for marker in markers:
-        if not up.startswith(marker):
-            continue
-        if _has_valid_suffix(s, len(marker)):
-            return True
+    def _matches_marker_prefix(text: str) -> bool:
+        up = text.upper()
+        for marker in markers:
+            if not up.startswith(marker):
+                continue
+            if _has_valid_suffix(text, len(marker)):
+                return True
 
-    close_by_open = {"[": "]", "(": ")", "【": "】", "（": "）"}
-    close = close_by_open.get(s[0])
-    if close is None:
+        if not text:
+            return False
+
+        close_by_open = {"[": "]", "(": ")"}
+        close = close_by_open.get(text[0])
+        if close is None:
+            return False
+
+        rest_up = text[1:].upper()
+        for marker in markers:
+            if not rest_up.startswith(marker):
+                continue
+
+            close_idx = 1 + len(marker)
+            if close_idx >= len(text) or text[close_idx] != close:
+                continue
+
+            if _has_valid_suffix(text, close_idx + 1):
+                return True
+
         return False
 
-    rest_up = s[1:].upper()
-    for marker in markers:
-        if not rest_up.startswith(marker):
-            continue
+    def _strip_list_prefix(text: str) -> str:
+        t = text
 
-        close_idx = 1 + len(marker)
-        if close_idx >= len(s) or s[close_idx] != close:
-            continue
+        if len(t) >= 2 and t[0] in bullet_prefixes and t[1].isspace():
+            t = t[1:].lstrip()
 
-        if _has_valid_suffix(s, close_idx + 1):
+        if len(t) >= 4 and t[0] == "[" and t[2] == "]" and t[1] in {" ", "x", "X"} and t[3].isspace():
+            t = t[3:].lstrip()
+
+        return t
+
+    candidates = [s]
+    stripped = _strip_list_prefix(s)
+    if stripped and stripped != s:
+        candidates.append(stripped)
+
+    for cand in candidates:
+        if _matches_marker_prefix(cand):
             return True
 
     return False
@@ -2159,8 +2190,9 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - kind == 'task' OR
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; supports plain or
-      bracketed forms like `[TODO]`/`(TASK)`; accepts ':', whitespace,
-      '-', '－', '–', '—', '−', or marker-only)
+      bracketed forms like `[TODO]`/`(TASK)`, plus optional leading
+      list/checklist prefixes like `-`/`*`/`•` and `[ ]`/`[x]`;
+      accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
     """
