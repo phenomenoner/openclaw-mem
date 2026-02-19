@@ -192,3 +192,30 @@ Source (external; concept clarity high):
 **How this maps to openclaw-mem:**
 - “Memory governance” is our control-plane; backends remain swappable behind adapters.
 - Roadmap candidates: strict config (`additionalProperties:false`), stable JSON schemas for receipts, and a `profile`/stats surface.
+
+## 11) PAI (continuous learning + self-upgrade loop) → "learning records" as a first-class memory type
+
+Source (external; concept clarity high):
+- Daniel Miessler — *Personal AI Infrastructure (PAI)*: <https://github.com/danielmiessler/Personal_AI_Infrastructure>
+  - v3.0 notes (self-upgrade loop, constraint extraction, drift prevention):
+    <https://raw.githubusercontent.com/danielmiessler/Personal_AI_Infrastructure/main/Releases/v3.0/README.md>
+
+**What we take (portable patterns, not code):**
+- **Structured reflections** (not just free-form notes): mistakes → fixes → recurring themes.
+- **Mining the loop outputs**: cluster repeated failure modes and turn them into targeted upgrades.
+- **Constraint extraction + drift prevention**: treat “rules” as extractable artifacts and re-check them before/after producing outputs.
+
+**How we go beyond it (openclaw-mem flavor):**
+- **Governance-first**: every learning record gets provenance + trust tier + redaction rules by default.
+- **Importance-aware learnings**: learning records can be auto-labeled (`must_remember`/`nice_to_have`/`ignore`) using our importance pipeline.
+- **Receipts**: the learning loop must emit aggregate, diffable receipts (counts, top recurring error patterns, and what changed).
+
+**Concrete integration plan (scope-safe):**
+- Keep runtime hooks/handlers (e.g. `.learnings/` writing) *outside* openclaw-mem core.
+- Add a **learning-record ingestion + query surface** inside openclaw-mem:
+  - ingest `.learnings/{LEARNINGS,ERRORS,FEATURE_REQUESTS}.md` (or JSONL) into the warm SQLite ledger
+  - make them searchable + packable with citations
+
+**Risk to watch (and mitigation):**
+- Infinite self-ingest loops (context blocks re-captured as learnings).
+  - Mitigate with explicit injected-context markers + ignore-lists (see SuperMemory takeaways above).
