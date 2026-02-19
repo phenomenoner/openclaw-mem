@@ -200,3 +200,4 @@ uv run python -m openclaw_mem hybrid "theme preference" --limit 5 --json
 
 - Deployment patterns: `docs/deployment.md`
 - Privacy/export rules: `docs/privacy-export-rules.md`
+- Learning loop (PAI-inspired, openclaw-mem-governed): `docs/thought-links.md` (section 11) + `docs/roadmap.md` (Feedback loop)

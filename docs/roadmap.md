@@ -258,8 +258,22 @@ Deliverables:
 - Minimal manual override flow (mark/adjust importance)
 - Track correction counts + scorer error counts
 
+- **Learning records (self-improvement loop; PAI-inspired, openclaw-mem-governed)**:
+  - A structured record type (warm tier) that can store:
+    - mistakes / incidents (what happened)
+    - resolution / mitigation (what to do next time)
+    - tags (tool/provider/project)
+    - provenance + trust tier + redaction posture
+  - Ingestion path (local-first, idempotent):
+    - import from `.learnings/` markdown templates (or a JSONL variant)
+    - emit a receipt: total imported, new vs duplicate, top recurring patterns
+  - Retrieval path:
+    - allow `pack` to include the top-N relevant learning records when the query matches an error/tool/workflow
+
 Acceptance criteria:
 - Operators can correct mistakes and see the system behave differently afterward.
+- Import is **idempotent** (re-running doesn’t spam duplicates).
+- Learning-record outputs are redaction-safe by default (aggregate receipts; content only on explicit request).
 
 ### 10) Pruning-safe capture profiles (future)
 
