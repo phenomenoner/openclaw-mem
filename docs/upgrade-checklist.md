@@ -123,7 +123,7 @@ uv run python -m openclaw_mem triage \
 
 Task extraction is deterministic and picks rows when either:
 - `kind == "task"`, or
-- `summary` starts with `TODO`, `TASK`, or `REMINDER` (case-insensitive; width-normalized via NFKC, so `ＴＯＤＯ`/`ＴＡＳＫ`/`ＲＥＭＩＮＤＥＲ` are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`), with optional leading markdown list/checklist wrappers (`-` / `*` / `+` / `•`, then optional `[ ]` / `[x]`) and optional ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`), followed by:
+- `summary` starts with `TODO`, `TASK`, or `REMINDER` (case-insensitive; width-normalized via NFKC, so `ＴＯＤＯ`/`ＴＡＳＫ`/`ＲＥＭＩＮＤＥＲ` are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`), with optional leading markdown list/checklist wrappers (`-` / `*` / `+` / `•`, then optional `[ ]` / `[x]`) and optional ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical), followed by:
   - `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
 
 
