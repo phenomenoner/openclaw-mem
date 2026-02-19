@@ -89,7 +89,7 @@ Automation truth (dev):
   - `tasks`
 - `triage --mode tasks` extraction is deterministic:
   - matches `kind == "task"`, or
-  - `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`), with optional leading markdown list/checklist wrappers (`-` / `*` / `+` / `•`, then optional `[ ]` / `[x]`) and optional ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `iv.` / `iv)` / `(iv)`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
+  - `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`), with optional leading markdown list/checklist wrappers (`-` / `*` / `+` / `•`, then optional `[ ]` / `[x]`) and optional ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
 - **Ops profile surface (DONE)**: `profile --json` for quick state snapshots (counts, importance labels, top tools/kinds, recent rows, embedding stats).
 - **Importance grading (MVP v1 baseline shipped)**: canonical `detail_json.importance` objects + deterministic `heuristic-v1` scorer + regression tests.
