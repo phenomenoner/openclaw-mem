@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -2329,9 +2330,13 @@ def _summary_has_task_marker(summary: str) -> bool:
             def _is_roman_token(token: str) -> bool:
                 if not token:
                     return False
-                if len(token) > 6:
-                    return False
-                return all(ch in "IVXLCDMivxlcdm" for ch in token)
+
+                # Canonical Roman numerals (1-3999): reject permissive false
+                # positives such as `IC`/`IIV` while still accepting `iv`/`IX`.
+                return re.fullmatch(
+                    r"M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})",
+                    token.upper(),
+                ) is not None
 
             if len(value) >= 4 and value[0] == "(":
                 j = 1
