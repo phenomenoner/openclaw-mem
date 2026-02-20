@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `triage --mode tasks` task-marker detection now normalizes width via NFKC, so full-width prefixes like `ＴＯＤＯ`/`ＴＡＳＫ`/`ＲＥＭＩＮＤＥＲ` are recognized.
 - `triage --mode tasks` now also accepts bracket-wrapped task markers (`[TODO] ...`, `(TASK) ...`) using the same deterministic separator rules as plain markers.
 - `triage --mode tasks` now accepts markdown list/checklist-prefixed markers (for example `- TODO ...`, `* [ ] TASK: ...`, `+ TODO ...`, `• [x] [REMINDER] ...`) and ordered-list prefixes (`1. ...`, `1) ...`, `(1) ...`, `a. ...`, `a) ...`, `(a) ...`, `iv. ...`, `iv) ...`, `(iv) ...`) while keeping deterministic separator checks.
+- `triage --mode tasks` checklist-prefix parsing now also accepts unicode checked boxes (`[✓]`, `[✔]`) in addition to `[ ]` / `[x]`.
 - Roman ordered-list prefixes now require canonical Roman numerals (for example `iv`, `IX`), reducing permissive false positives such as `ic`/`iiv`.
 - `profile --json` now classifies malformed `detail_json.importance` payloads as `unknown` (instead of coercing to `ignore`) and keeps `avg_score` based on parseable importance only.
 - `parse_importance_score` now rejects boolean `importance.score` values inside object payloads (`{"score": true|false}`), matching top-level bool handling.
@@ -33,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Quickstart sample-ingest step now uses a deterministic `python -c` JSONL writer instead of a heredoc, reducing shell quoting/EOF pitfalls in automation contexts.
 - Documented deterministic `triage --mode tasks` marker grammar updates (plain + bracketed markers, optional markdown list/checklist + ordered-list prefixes, accepted separators) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 - Clarified task-marker docs to explicitly include additional markdown bullets (`‣`, `∙`, `·`) alongside `-`, `*`, `+`, and `•`.
+- Documented unicode checklist marker support (`[✓]`, `[✔]`) for deterministic `triage --mode tasks` extraction in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 
 ### Testing
 - Added regression coverage for `pack --trace` output receipts (shape + exclusion counting).
@@ -43,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added task-marker regression coverage for full-width marker prefixes (for example `ＴＯＤＯ` / `ＴＡＳＫ`) in both parser-level and triage flows.
 - Added regression coverage for bracket-wrapped task markers (`[TODO] ...`, `(TASK) ...`) in parser-level and triage flows, including rejection cases for malformed/non-marker bracket prefixes.
 - Added regression coverage for markdown list/checklist-prefixed task markers (including `+`, `‣`, `∙`, and `·` bullets), nested prefix chains, and ordered-list prefixes (including `(1)`, full-width `（１）`, alpha forms like `a)`/`(a)`/`B.`, and Roman forms like `iv)`/`(iv)`), plus invalid Roman rejection cases, in parser-level and triage flows.
+- Added regression coverage for unicode checklist prefixes (`[✓]`, `[✔]`) in task-marker detection, including no-whitespace rejection after checklist wrappers.
 - Added regression coverage for malformed importance parsing in `profile --json` and for bool-rejection in `parse_importance_score`.
 - Added regression coverage for `make_importance` label canonicalization (alias normalization + invalid-label fallback).
 - Added regression coverage for full-width importance labels across parsing, parseability checks, and `make_importance` normalization.
