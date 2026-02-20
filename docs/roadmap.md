@@ -15,6 +15,25 @@ Status tags used here: **DONE / PARTIAL / ROADMAP**.
 - **Receipts over vibes**: every automation path should emit a measurable summary.
 - **Trust-aware by design**: treat skill/web/tool outputs as *untrusted by default* until promoted by an explicit policy; preserve provenance so packing/retrieval can make safer choices.
 
+## 2026-02 Pilot execution order (two pillars, incremental)
+
+To keep scope controlled for the current pilot:
+
+### Pillar A — build now (implementation + receipts)
+- Harden `pack --trace` into an explicit contract (`openclaw-mem.pack.trace.v1`) with schema tests.
+- Enforce citation/rationale coverage for included items (must stay at zero-missing).
+- Keep budget policy minimal (single `budgetTokens` cap); track budget-driven exclusions.
+- Run counterfactual benchmark arm `A0` (baseline pack behavior) vs `A1` (contract enforcement) in `openclaw-memory-bench`.
+- Promotion gate to default behavior requires: schema pass, determinism pass, and reviewed real-run receipts.
+
+### Pillar B — spec now, implement later
+- Define learning-record schema, lifecycle states, and benchmark preregistration only.
+- No runtime rollout before Pillar A promotion gate + soak evidence.
+
+### Change-control guardrail
+- This pilot step updates docs/specs and benchmark plans only.
+- No live OpenClaw config or cron schedule changes are included in this step.
+
 ## Now (next milestones)
 
 ### 1) Importance grading rollout (MVP v1)

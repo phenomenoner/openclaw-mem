@@ -2277,6 +2277,12 @@ def _summary_has_task_marker(summary: str) -> bool:
     - whitespace
     - '-' / '－' / '–' / '—' / '−'
     - end-of-string
+
+    Example formats:
+    - TODO: rotate runbook
+    - task- check alerts
+    - (TASK): review PR
+    - - [ ] TODO file patch
     """
 
     s = unicodedata.normalize("NFKC", (summary or "")).lstrip()
