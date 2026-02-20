@@ -40,6 +40,12 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("task - clean desk"))
         self.assertTrue(_summary_has_task_marker("task\tclean desk"))
 
+    def test_summary_has_task_marker_accepts_example_formats(self):
+        self.assertTrue(_summary_has_task_marker("TODO: rotate runbook"))
+        self.assertTrue(_summary_has_task_marker("task- check alerts"))
+        self.assertTrue(_summary_has_task_marker("(TASK): review PR"))
+        self.assertTrue(_summary_has_task_marker("- [ ] TODO file patch"))
+
     def test_summary_has_task_marker_accepts_bracket_wrapped_marker(self):
         self.assertTrue(_summary_has_task_marker("[TODO] buy milk"))
         self.assertTrue(_summary_has_task_marker("(task): clean desk"))
