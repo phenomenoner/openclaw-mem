@@ -2330,11 +2330,11 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("items", out)
         self.assertIn("citations", out)
         self.assertIn("trace", out)
-        self.assertEqual(out["trace"]["kind"], "openclaw-mem.pack.trace.v0")
+        self.assertEqual(out["trace"]["kind"], "openclaw-mem.pack.trace.v1")
         self.assertIn("ts", out["trace"])
         self.assertIn("T", out["trace"]["ts"])
         self.assertTrue(out["trace"]["ts"].endswith("+00:00"))
-        self.assertEqual(out["trace"]["version"]["schema"], "v0")
+        self.assertEqual(out["trace"]["version"]["schema"], "v1")
         self.assertRegex(out["trace"]["version"]["openclaw_mem"], r"^\d+\.\d+\.\d+")
         self.assertEqual(out["trace"]["query"]["text"], "test")
         self.assertIn("output", out["trace"])
@@ -2351,8 +2351,36 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(candidate["decision"]["caps"]["l2CapHit"])
         self.assertIsNone(candidate["citations"]["url"])
 
+        self.assertEqual(
+            set(out["trace"].keys()),
+            {
+                "kind",
+                "ts",
+                "version",
+                "query",
+                "budgets",
+                "lanes",
+                "candidates",
+                "output",
+                "timing",
+            },
+        )
+
+        for lane in out["trace"]["lanes"]:
+            self.assertIn("retrievers", lane)
+            self.assertIsInstance(lane["retrievers"], list)
+
+        self.assertIn("reason", candidate["decision"])
+        self.assertIsInstance(candidate["decision"]["reason"], list)
+        self.assertGreater(len(candidate["decision"]["reason"]), 0)
+
         trace_dump = json.dumps(out["trace"], ensure_ascii=False)
+        # Trace should be redaction-safe (no raw memory text or local absolute paths).
+        self.assertNotIn("test pack summary", trace_dump)
         self.assertNotIn("/root/", trace_dump)
+        self.assertNotIn("/home/", trace_dump)
+        self.assertNotIn("/Users/", trace_dump)
+        self.assertNotRegex(trace_dump, r"[A-Za-z]:\\\\")
         conn.close()
 
     def test_pack_trace_candidate_uses_importance_and_trust_from_detail_json(self):

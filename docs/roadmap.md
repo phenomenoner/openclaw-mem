@@ -141,17 +141,17 @@ Deliverables:
 - A cheap retrieval baseline **without embeddings** (FTS + heuristics)
 - Optional: embedding-based rerank as an opt-in layer
 
-#### Trace receipt schema (v0, redaction-safe)
+#### Trace receipt schema (v1, redaction-safe)
 
 When `openclaw-mem pack --trace` is used, it should be able to emit a JSON receipt like:
 
 ```json
 {
-  "kind": "openclaw-mem.pack.trace.v0",
+  "kind": "openclaw-mem.pack.trace.v1",
   "ts": "2026-02-15T00:00:00Z",
   "version": {
     "openclaw_mem": "1.x",
-    "schema": "v0"
+    "schema": "v1"
   },
   "query": {
     "text": "…",
@@ -316,7 +316,7 @@ Deliverables:
 - **Stable JSON output schemas (v0)** for key operator surfaces:
   - `harvest --json` summary (`total_seen`, `graded_filled`, `skipped_existing`, ...)
   - `triage --json` (`needs_attention`, `found_new`, ...)
-  - `pack --trace` receipt (`openclaw-mem.pack.trace.v0`)
+  - `pack --trace` receipt (`openclaw-mem.pack.trace.v1`)
 - **Schema tests** (unit-level) that verify:
   - required keys exist
   - types are stable

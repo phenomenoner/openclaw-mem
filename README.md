@@ -50,7 +50,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **Observation store**: SQLite + FTS5
 - **Progressive disclosure recall**:
   - `search` → `timeline` → `get`
-- **Context Packer (dev)**: `pack` builds a compact, cited bundle (summary-only). Use `--no-json` for plain-text payloads, or `--trace --json` for redaction-safe `openclaw-mem.pack.trace.v0` receipts that list refreshed `recordRef`s.
+- **Context Packer (dev)**: `pack` builds a compact, cited bundle (summary-only). Use `--no-json` for plain-text payloads, or `--trace --json` for redaction-safe `openclaw-mem.pack.trace.v1` receipts that list refreshed `recordRef`s.
 - **Export**: `export` (with safety confirmation)
 - **Auto-ingest helper**: `harvest` (ingest + optional embeddings)
 
@@ -172,7 +172,7 @@ uv run python -m openclaw_mem get 42 --json
 
 # 6) (Dev) Build a compact, cited context bundle
 uv run python -m openclaw_mem pack --query "gateway timeout" --limit 12 --budget-tokens 1200 --trace --json
-# With --trace, this returns a redaction-safe `openclaw-mem.pack.trace.v0` receipt plus the packed `bundle_text` and citations.
+# With --trace, this returns a redaction-safe `openclaw-mem.pack.trace.v1` receipt plus the packed `bundle_text` and citations.
 # `--query-en` can be used when you want an English retrieval lane in addition to the main query.
 
 # 6a) Optional: skip JSON wrapper for pure L1 text payload
