@@ -51,6 +51,11 @@ Why not wired yet:
 - We want a clear promotion gate (dev → main) and a burn-in window.
 - We need confidence on determinism, privacy/redaction, and operator debuggability.
 
+Current pilot sequencing (2026-02):
+- **Pillar A (build now):** contract hardening + citation/rationale coverage + benchmark receipts.
+- **Pillar B (spec now):** learning-record lifecycle/bench specs only, no runtime rollout yet.
+- Any scheduler adjustments remain spec-only in this phase (no live cron mutations here).
+
 ### Promotion of compression output into durable memory
 - Not enabled.
 - Promotion (if any) must be explicit + reviewed + reversible.
