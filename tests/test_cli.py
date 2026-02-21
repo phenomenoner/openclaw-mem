@@ -2540,6 +2540,102 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(trace["output"]["refreshedRecordRefs"], [out["items"][0]["recordRef"]])
         conn.close()
 
+    def test_pack_trace_reason_keys_are_known(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "fact",
+                        "summary": "trace reason sample one",
+                        "summary_en": "trace reason sample one",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "fact",
+                        "summary": "",
+                        "summary_en": "",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:02:00Z",
+                        "kind": "fact",
+                        "summary": "trace reason sample three",
+                        "summary_en": "trace reason sample three",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        for obs_id in (1, 2, 3):
+            conn.execute(
+                "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (obs_id, "text-embedding-3-small", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+            )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = build_parser().parse_args(["pack", "--query", "trace", "--trace", "--json", "--limit", "1"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        allowed = {
+            "missing_row",
+            "missing_summary",
+            "max_items_reached",
+            "budget_tokens_exceeded",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts",
+            "matched_vector",
+        }
+        observed_reasons = set()
+        for candidate in out["trace"]["candidates"]:
+            reasons = candidate["decision"].get("reason", [])
+            reason_set = set(reasons)
+            self.assertTrue(reasons, f"candidate {candidate.get('id')} has no decision reasons")
+            self.assertLessEqual(reason_set - allowed, set())
+            observed_reasons |= reason_set
+
+        self.assertIn("missing_summary", observed_reasons)
+        self.assertIn("within_budget", observed_reasons)
+        self.assertIn("within_item_limit", observed_reasons)
+        conn.close()
+
     def test_pack_respects_budget_tokens(self):
         conn = _connect(":memory:")
 
