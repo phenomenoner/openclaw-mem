@@ -3373,7 +3373,7 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["trace"]["output"]["refreshedRecordRefs"], ["obs:2"])
         conn.close()
 
-    def test_pack_trace_missing_row_reason_is_reported(self):
+    def test_pack_trace_missing_row_reason_is_reported_for_gap_id(self):
         conn = _connect(":memory:")
 
         pack_state = {
