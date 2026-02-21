@@ -2281,6 +2281,36 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["trace"] if "trace" in out else None, None)
         conn.close()
 
+    def test_pack_without_trace_does_not_include_trace_payload_when_json_output_and_no_results(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [],
+            "fts_ids": set(),
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {},
+            "obs_map": {},
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "no-trace-empty", "--json", "--limit", "3"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["items"], [])
+        self.assertEqual(out["citations"], [])
+        self.assertNotIn("trace", out)
+        self.assertNotIn("trace", out)
+        self.assertEqual(out["bundle_text"], "")
+        conn.close()
+
     def test_pack_trace_empty_candidates_returns_zero_counts(self):
         conn = _connect(":memory:")
 
