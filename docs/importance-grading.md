@@ -138,3 +138,37 @@ Example JSON output:
   }
 }
 ```
+
+### Minimal run summary contract (v0)
+
+To keep scheduled receipts deterministic and redaction-safe, treat `ingest`/`harvest` JSON output as an aggregate-only contract.
+
+Recommended text form (for logs/channels):
+
+```text
+harvest-receipt: total_seen=<int>, graded_filled=<int>, skipped_existing=<int>, skipped_disabled=<int>, scorer_errors=<int>, labels=<json>, optional_embedded=<int>
+```
+
+Recommended JSON skeleton (subset that should remain stable):
+
+```json
+{
+  "total_seen": 0,
+  "graded_filled": 0,
+  "skipped_existing": 0,
+  "skipped_disabled": 0,
+  "scorer_errors": 0,
+  "label_counts": {
+    "must_remember": 0,
+    "nice_to_have": 0,
+    "ignore": 0,
+    "unknown": 0
+  }
+}
+```
+
+Keep receipts to counts/ratios only:
+- no raw observation content
+- no full file paths (prefer labels like `source=harvest-dir` when sharing)
+- no raw payload snippets or user traces
+
