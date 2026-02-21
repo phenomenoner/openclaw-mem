@@ -102,6 +102,7 @@ Automation truth (dev):
   - Enable autograde on `ingest`/`harvest`: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (or `--importance-scorer {heuristic-v1|off}`)
   - Ingest/harvest JSON receipts include grading counters + `label_counts` for ops trend tracking.
   - Notes: `docs/importance-grading.md`
+  - Canonical ingest/harvest receipt contract (aggregate-only): `docs/importance-grading.md`
 
 - **Autograde switch (copy/paste)**:
   ```bash
