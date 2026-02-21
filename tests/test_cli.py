@@ -2735,6 +2735,86 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("within_item_limit", observed_reasons)
         conn.close()
 
+    def test_pack_trace_timing_and_counts_contract(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "fact",
+                        "summary": "timing contract sample",
+                        "summary_en": "timing contract sample",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "fact",
+                        "summary": "timing contract sample two",
+                        "summary_en": "timing contract sample two",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "text-embedding-3-small", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (2, "text-embedding-3-small", 2, pack_f32([0.0, 1.0]), l2_norm([0.0, 1.0]), "2026-02-05T00:00:00Z"),
+        )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = build_parser().parse_args(["pack", "--query", "timing", "--trace", "--json", "--limit", "2", "--budget-tokens", "1200"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        trace = out["trace"]
+
+        self.assertIn("timing", trace)
+        self.assertIsInstance(trace["timing"].get("durationMs"), int)
+        self.assertGreaterEqual(trace["timing"]["durationMs"], 0)
+
+        self.assertEqual(trace["output"]["includedCount"] + trace["output"]["excludedCount"], len(trace["candidates"]))
+        self.assertEqual(trace["output"]["citationsCount"], len(out["citations"]))
+        self.assertEqual(trace["output"]["citationsCount"], len(trace["output"]["refreshedRecordRefs"]))
+        self.assertIn("query", trace)
+        self.assertIsNone(trace["query"].get("scope"))
+        self.assertIsNone(trace["query"].get("intent"))
+        conn.close()
+
     def test_pack_respects_budget_tokens(self):
         conn = _connect(":memory:")
 
