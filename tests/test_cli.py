@@ -3457,5 +3457,82 @@ class TestCliM0(unittest.TestCase):
         conn.close()
 
 
+    def test_pack_without_trace_does_not_include_trace_payload(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.88},
+            "obs_map": {
+                1: {
+                    "summary": "no trace sample",
+                    "summary_en": "no trace sample",
+                    "kind": "fact",
+                    "lang": "en",
+                },
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "no-trace", "--json", "--limit", "1"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertNotIn("trace", out)
+        self.assertIn("items", out)
+        self.assertIn("citations", out)
+        self.assertEqual(len(out["items"]), 1)
+        self.assertEqual(out["items"][0]["id"], 1)
+        self.assertEqual(out["items"][0]["recordRef"], "obs:1")
+        self.assertEqual(len(out["citations"]), 1)
+        self.assertEqual(out["citations"][0]["recordRef"], "obs:1")
+        conn.close()
+
+    def test_pack_trace_missing_row_reason_is_reported(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [123],
+            "fts_ids": set(),
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {123: 0.21},
+            "obs_map": {},
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "missing", "--trace", "--json", "--limit", "2"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        candidates = out["trace"]["candidates"]
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["id"], "obs:123")
+        self.assertFalse(candidates[0]["decision"]["included"])
+        self.assertEqual(candidates[0]["decision"]["reason"], ["missing_row"])
+        self.assertEqual(out["items"], [])
+        self.assertEqual(out["citations"], [])
+        self.assertEqual(out["trace"]["output"]["includedCount"], 0)
+        self.assertEqual(out["trace"]["output"]["excludedCount"], 1)
+        self.assertEqual(out["trace"]["output"]["citationsCount"], 0)
+        self.assertEqual(out["trace"]["output"]["refreshedRecordRefs"], [])
+        conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()
