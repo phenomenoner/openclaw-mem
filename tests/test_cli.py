@@ -2311,6 +2311,48 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["bundle_text"], "")
         conn.close()
 
+    def test_pack_trace_missing_summary_reason_is_reported(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.55},
+            "obs_map": {
+                1: {
+                    "summary": "",
+                    "summary_en": "",
+                    "kind": "fact",
+                    "lang": "en",
+                },
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "missing summary", "--trace", "--json", "--limit", "2"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(len(out["trace"]["candidates"]), 1)
+        cand = out["trace"]["candidates"][0]
+        self.assertFalse(cand["decision"]["included"])
+        self.assertIn("missing_summary", cand["decision"].get("reason", []))
+
+        self.assertEqual(out["items"], [])
+        self.assertEqual(out["citations"], [])
+        self.assertEqual(out["trace"]["output"]["includedCount"], 0)
+        self.assertEqual(out["trace"]["output"]["excludedCount"], 1)
+        self.assertEqual(out["trace"]["output"]["citationsCount"], 0)
+        conn.close()
+
     def test_pack_trace_empty_candidates_returns_zero_counts(self):
         conn = _connect(":memory:")
 
