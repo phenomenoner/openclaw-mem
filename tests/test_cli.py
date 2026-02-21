@@ -3080,6 +3080,87 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("within_budget", out["trace"]["candidates"][0]["decision"]["reason"])
         conn.close()
 
+    def test_pack_trace_candidate_order_is_stable_with_exclusions(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [2, 1],
+            "fts_ids": {2, 1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.9, 2: 0.8},
+            "obs_map": {
+                1: {
+                    "summary": "first short summary",
+                    "summary_en": "first short summary",
+                    "kind": "fact",
+                    "lang": "en",
+                },
+                2: {
+                    "summary": "second short summary",
+                    "summary_en": "second short summary",
+                    "kind": "fact",
+                    "lang": "en",
+                },
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "short", "--trace", "--json", "--limit", "1"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        candidates = out["trace"]["candidates"]
+        self.assertEqual([c["id"] for c in candidates], ["obs:2", "obs:1"])
+        self.assertTrue(candidates[0]["decision"]["included"])
+        self.assertTrue(candidates[0]["decision"]["reason"].__contains__("within_item_limit"))
+        self.assertFalse(candidates[1]["decision"]["included"])
+        self.assertEqual(candidates[1]["decision"]["reason"], ["max_items_reached"])
+        self.assertEqual(out["trace"]["output"]["includedCount"], 1)
+        self.assertEqual(out["trace"]["output"]["excludedCount"], 1)
+        self.assertEqual(out["trace"]["output"]["refreshedRecordRefs"], ["obs:2"])
+        conn.close()
+
+    def test_pack_trace_missing_row_reason_is_reported(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [99],
+            "fts_ids": set(),
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {99: 0.1},
+            "obs_map": {},
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "missing", "--trace", "--json", "--limit", "2"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        candidates = out["trace"]["candidates"]
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["id"], "obs:99")
+        self.assertEqual(candidates[0]["decision"]["reason"], ["missing_row"])
+        self.assertFalse(candidates[0]["decision"]["included"])
+        self.assertEqual(out["items"], [])
+        self.assertEqual(out["trace"]["output"]["includedCount"], 0)
+        self.assertEqual(out["trace"]["output"]["excludedCount"], 1)
+        self.assertEqual(out["trace"]["output"]["refreshedRecordRefs"], [])
+        conn.close()
+
     def test_pack_trace_records_max_items_reached_reason(self):
         conn = _connect(":memory:")
 
