@@ -2355,6 +2355,105 @@ class TestCliM0(unittest.TestCase):
         self.assertNotIn("/root/", trace_dump)
         conn.close()
 
+    def test_pack_trace_stable_schema_contract(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "fact",
+                        "summary": "stability sample one",
+                        "summary_en": "stability sample one",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "fact",
+                        "summary": "stability sample two",
+                        "summary_en": "stability sample two",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        for obs_id in (1, 2):
+            conn.execute(
+                "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (obs_id, "text-embedding-3-small", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+            )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = build_parser().parse_args(["pack", "--query", "stability", "--query-en", "stability", "--trace", "--json", "--limit", "2", "--budget-tokens", "150"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        trace = out["trace"]
+
+        self.assertEqual(trace["kind"], "openclaw-mem.pack.trace.v0")
+        self.assertIn("ts", trace)
+        self.assertIn("version", trace)
+        self.assertEqual(trace["version"]["schema"], "v0")
+        self.assertIn("query", trace)
+        self.assertIn("text", trace["query"])
+        self.assertIn("scope", trace["query"])
+        self.assertIn("intent", trace["query"])
+        self.assertIn("budgets", trace)
+        self.assertEqual(trace["budgets"]["maxItems"], 2)
+        self.assertEqual(trace["budgets"]["maxL2Items"], 0)
+        self.assertEqual(trace["budgets"]["niceCap"], 100)
+
+        lane_names = [lane["name"] for lane in trace["lanes"]]
+        self.assertEqual(lane_names, ["hot", "warm", "cold"])
+        warm = next(lane for lane in trace["lanes"] if lane["name"] == "warm")
+        self.assertEqual(warm["source"], "sqlite-observations")
+        self.assertTrue(warm["searched"])
+        self.assertEqual([r["kind"] for r in warm["retrievers"]], ["fts5", "vector", "rrf"])
+
+        self.assertIn("candidates", trace)
+        self.assertGreater(len(trace["candidates"]), 0)
+        candidate = trace["candidates"][0]
+        for key in ["id", "layer", "importance", "trust", "scores", "decision", "citations"]:
+            self.assertIn(key, candidate)
+        self.assertIn("niceCapHit", candidate["decision"]["caps"])
+        self.assertIn("l2CapHit", candidate["decision"]["caps"])
+        self.assertIn("output", trace)
+        self.assertIn("includedCount", trace["output"])
+        self.assertIn("refreshedRecordRefs", trace["output"])
+        self.assertIsInstance(trace["output"]["refreshedRecordRefs"], list)
+
+        conn.close()
+
     def test_pack_trace_candidate_uses_importance_and_trust_from_detail_json(self):
         conn = _connect(":memory:")
 
