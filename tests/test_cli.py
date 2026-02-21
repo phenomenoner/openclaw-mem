@@ -2243,7 +2243,7 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(buf.getvalue(), "- [obs:1] a\n")
         conn.close()
 
-    def test_pack_without_trace_does_not_include_trace_payload(self):
+    def test_pack_without_trace_does_not_include_trace_payload_when_json_output(self):
         conn = _connect(":memory:")
 
         pack_state = {
@@ -3089,7 +3089,6 @@ class TestCliM0(unittest.TestCase):
 
         first, second, third = candidates[0], candidates[1], candidates[2]
 
-        # limit=2 means first two candidates are included, third excluded by max_items_reached.
         self.assertTrue(first["decision"]["included"])
         self.assertTrue(second["decision"]["included"])
         self.assertFalse(third["decision"]["included"])
@@ -3100,7 +3099,6 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("matched_vector", second["decision"]["reason"])
         self.assertNotIn("matched_fts", second["decision"]["reason"])
 
-        # fts set also includes row 3, but row 3 is excluded by limit cap.
         self.assertEqual(third["decision"]["reason"], ["max_items_reached"])
 
         for cand in (first, second, third):
@@ -3125,7 +3123,7 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["trace"]["output"]["refreshedRecordRefs"], ["obs:1", "obs:2"])
         conn.close()
 
-    def test_pack_trace_missing_row_reason_is_reported(self):
+    def test_pack_trace_missing_row_reason_is_reported_for_gap_id_123(self):
         conn = _connect(":memory:")
 
         pack_state = {
@@ -3248,6 +3246,46 @@ class TestCliM0(unittest.TestCase):
         self.assertNotIn(excluded_candidate["id"], citation_records)
         self.assertNotIn(excluded_candidate["id"], trace["output"]["refreshedRecordRefs"])
         self.assertEqual(excluded_candidate["decision"].get("reason"), ["max_items_reached"])
+
+        conn.close()
+
+    def test_pack_without_trace_does_not_include_trace_payload(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.97},
+            "obs_map": {
+                1: {
+                    "summary": "no trace sample",
+                    "summary_en": "no trace sample",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "no trace", "--json", "--limit", "1"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertNotIn("trace", out)
+        self.assertIn("items", out)
+        self.assertIn("citations", out)
+        self.assertEqual(len(out["items"]), 1)
+        self.assertEqual(out["items"][0]["recordRef"], "obs:1")
+        self.assertEqual(len(out["citations"]), 1)
+        self.assertEqual(out["citations"][0]["recordRef"], "obs:1")
         conn.close()
 
     def test_pack_respects_budget_tokens(self):
