@@ -3160,6 +3160,96 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["trace"]["output"]["refreshedRecordRefs"], [])
         conn.close()
 
+    def test_pack_trace_citations_align_with_included_items(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "fact",
+                        "summary": "first included summary",
+                        "summary_en": "first included summary",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "fact",
+                        "summary": "second excluded summary",
+                        "summary_en": "second excluded summary",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        for obs_id in (1, 2):
+            conn.execute(
+                "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (obs_id, "text-embedding-3-small", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+            )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = build_parser().parse_args(["pack", "--query", "citations", "--trace", "--json", "--limit", "1", "--budget-tokens", "1200"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        trace = out["trace"]
+
+        self.assertIn("citations", out)
+        self.assertEqual(len(out["citations"]), trace["output"]["citationsCount"])
+        self.assertEqual(len(trace["output"]["refreshedRecordRefs"]), len(out["citations"]))
+
+        citation_records = [c["recordRef"] for c in out["citations"]]
+        self.assertEqual(citation_records, trace["output"]["refreshedRecordRefs"])
+
+        candidates = trace["candidates"]
+        self.assertEqual(len(candidates), 2)
+        included = [c for c in candidates if c["decision"]["included"]]
+        excluded = [c for c in candidates if not c["decision"]["included"]]
+        self.assertEqual(len(included), 1)
+        self.assertEqual(len(excluded), 1)
+
+        included_candidate = included[0]
+        self.assertEqual(included_candidate["id"], out["citations"][0]["recordRef"])
+        self.assertEqual(included_candidate["citations"], out["citations"][0])
+        self.assertIn(included_candidate["id"], trace["output"]["refreshedRecordRefs"])
+
+        excluded_candidate = excluded[0]
+        self.assertNotIn(excluded_candidate["id"], citation_records)
+        self.assertNotIn(excluded_candidate["id"], trace["output"]["refreshedRecordRefs"])
+        self.assertEqual(excluded_candidate["decision"].get("reason"), ["max_items_reached"])
+        conn.close()
+
     def test_pack_respects_budget_tokens(self):
         conn = _connect(":memory:")
 
