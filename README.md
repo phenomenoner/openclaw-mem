@@ -41,6 +41,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **PARTIAL (dev)**: Context Packer (`pack`) with redaction-safe `--trace` receipts (exists, not yet auto-wired; see `docs/automation-status.md`).
 - **ROADMAP**: lifecycle manager (ref/last_used_at decay + archive-first); packaging/console scripts; graph semantic memory.
   - Spec (dev): `docs/specs/graphic-memory-graphrag-lite-prd.md`
+  - v0 automation knobs (dev): `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 
 ---
 
@@ -307,6 +308,32 @@ This is designed to be safe for heartbeat automation: fast, local, and determini
 
 ---
 
+## Graphic Memory v0 automation knobs (optional, dev)
+
+Graphic Memory automation toggles are opt-in (default OFF):
+
+- `OPENCLAW_MEM_GRAPH_AUTO_RECALL=1` for deterministic preflight recall packs (`graph preflight`)
+- `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1` for recurring git commit capture (`graph capture-git`)
+- `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1` for markdown heading indexing (`graph capture-md`)
+
+Inspect effective toggle state:
+
+```bash
+uv run python -m openclaw_mem graph auto-status --json
+```
+
+Automation examples:
+
+```bash
+OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
+
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
+
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
+```
+
+Design notes: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
+
 ## Obsidian (optional): turn memory into a “second brain”
 
 If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, daily notes), Obsidian is a great human-facing UI on top of the artifacts `openclaw-mem` produces.
@@ -339,6 +366,7 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 - `docs/obsidian.md` — optional Obsidian adoption guide
 - `docs/v0.5.9-adapter-spec.md` — minimal-risk adapter design for `memory-core`/`memory-lancedb`
 - `docs/ecosystem-fit.md` — ownership boundaries + deployment patterns (`memory-core`/`memory-lancedb` + `openclaw-mem`)
+- `docs/specs/graphic-memory-auto-capture-auto-recall.md` — Graphic Memory auto-recall/auto-capture knobs (dev)
 - `CHANGELOG.md` — notable changes (Keep a Changelog)
 
 ---

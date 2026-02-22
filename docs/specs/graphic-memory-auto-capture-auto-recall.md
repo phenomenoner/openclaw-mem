@@ -29,6 +29,19 @@
 
 ## Commands
 
+### 0) Inspect toggle state: `graph auto-status`
+```bash
+openclaw-mem graph auto-status --json
+```
+
+Behavior:
+- Reports effective state for:
+  - `OPENCLAW_MEM_GRAPH_AUTO_RECALL`
+  - `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE`
+  - `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD`
+- Output includes per-flag `present`, `raw`, `normalized`, `enabled`, and `valid`.
+- Invalid values are fail-open (`enabled=false`, `valid=false`) and do not exit non-zero.
+
 ### 1) Auto-recall preflight: `graph preflight`
 ```bash
 openclaw-mem graph preflight "slow-cook benchmark drift" \
