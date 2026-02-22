@@ -41,6 +41,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **PARTIAL (dev)**: Context Packer (`pack`) with redaction-safe `--trace` receipts (exists, not yet auto-wired; see `docs/automation-status.md`).
 - **ROADMAP**: lifecycle manager (ref/last_used_at decay + archive-first); packaging/console scripts; graph semantic memory.
   - Spec (dev): `docs/specs/graphic-memory-graphrag-lite-prd.md`
+  - v0 automation knobs (dev): `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 
 ---
 
@@ -306,6 +307,24 @@ uv run python -m openclaw_mem triage --mode heartbeat --json
 This is designed to be safe for heartbeat automation: fast, local, and deterministic.
 
 ---
+
+
+## Graphic Memory v0 automation knobs (optional, dev)
+
+Graphic Memory has opt-in environment switches (default OFF):
+
+- `OPENCLAW_MEM_GRAPH_AUTO_RECALL=1`: enable preflight context packing via `graph preflight`
+- `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1`: enable scheduled git commit capture via `graph capture-git`
+
+Example commands:
+
+```bash
+OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
+
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
+```
+
+Design notes: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 
 ## Obsidian (optional): turn memory into a “second brain”
 

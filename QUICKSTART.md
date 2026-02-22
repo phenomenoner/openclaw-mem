@@ -180,6 +180,25 @@ Or override only this command:
 ```bash
 uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
 ```
+
+
+## Step 8: Graphic Memory automation knobs (optional, dev)
+
+Graphic Memory automation toggles are opt-in (default OFF):
+
+- `OPENCLAW_MEM_GRAPH_AUTO_RECALL=1` for deterministic preflight recall packs
+- `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1` for recurring git commit capture
+
+```bash
+# Preflight recall pack (bounded context bundle)
+OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
+
+# Capture recent repo commits as observations
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
+```
+
+Spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
+
 ## Next steps
 
 - Full docs: `README.md`
@@ -188,6 +207,7 @@ uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-emb
 - Deployment: `docs/deployment.md`
 - Ecosystem fit: `docs/ecosystem-fit.md`
 - Changes/features: `CHANGELOG.md`
+- Graphic Memory knobs/spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 
 ## Tests
 
