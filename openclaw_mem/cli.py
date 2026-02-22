@@ -937,7 +937,7 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         sys.exit(1)
 
     use_gateway = bool(getattr(args, "gateway", False) or os.environ.get("OPENCLAW_MEM_USE_GATEWAY") == "1")
-    
+
     api_key: Optional[str] = None
     base_url: str = defaults.openai_base_url()
     extra_headers: Dict[str, str] = {}
@@ -2884,7 +2884,7 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     # 3. Append to memory/YYYY-MM-DD.md
     workspace = Path(args.workspace) if hasattr(args, "workspace") and args.workspace else DEFAULT_WORKSPACE
-    
+
     # Fallback logic for workspace memory dir
     memory_dir = workspace / "memory"
     if not memory_dir.exists():
@@ -2894,9 +2894,9 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     date_str = datetime.now().strftime("%Y-%m-%d")
     md_file = memory_dir / f"{date_str}.md"
-    
+
     md_entry = f"- [{args.category.upper()}] {text} (importance: {importance_obj['score']:.2f}, {importance_obj['label']})\n"
-    
+
     try:
         _atomic_append_file(md_file, md_entry)
         stored_path = str(md_file)
@@ -2904,6 +2904,361 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         stored_path = f"failed ({e})"
 
     _emit({"ok": True, "id": rowid, "file": stored_path, "embedded": bool(api_key)}, args.json)
+
+
+
+
+# --- Graphic memory (GraphRAG-lite) — v0 skeleton (index-first + progressive disclosure) ---
+#
+# v0 design goals:
+# - deterministic and local-only
+# - safe-by-default (summary/snippet only; no detail_json dumps)
+# - budgeted injection payloads (IndexPack / ContextPack)
+#
+# v0 implementation note:
+# - this is NOT a full entity/KG system. It is a minimal link-graph using
+#   timeline adjacency as the neighborhood expansion primitive.
+
+
+def _graph_record_ref(obs_id: int) -> str:
+    return f"obs:{int(obs_id)}"
+
+
+def _graph_parse_record_ref(token: str) -> int:
+    t = (token or "").strip()
+    if not t:
+        raise ValueError("empty record ref")
+    if t.startswith("obs:"):
+        t = t.split(":", 1)[1]
+    return int(t)
+
+
+def _graph_search_rows(conn: sqlite3.Connection, query: str, limit: int) -> List[sqlite3.Row]:
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    rows = conn.execute(
+        """
+        SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
+               snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
+               snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
+               bm25(observations_fts) AS score
+        FROM observations_fts
+        JOIN observations o ON o.id = observations_fts.rowid
+        WHERE observations_fts MATCH ?
+        ORDER BY score ASC
+        LIMIT ?;
+        """,
+        (q, int(limit)),
+    ).fetchall()
+
+    # Fallback for CJK keyword queries when FTS5 tokenizer cannot split terms well.
+    if not rows and _has_cjk(q):
+        rows = _search_cjk_fallback(conn, q, int(limit))
+
+    return rows
+
+
+def _graph_row_title(r: sqlite3.Row) -> str:
+    # Prefer human-friendly summary; fallback to snippet.
+    summary = (r["summary"] or "").replace("\n", " ").strip()
+    if summary:
+        s = summary
+    else:
+        s = (r["snippet"] or "").replace("\n", " ").strip()
+
+    if not s:
+        kind = (r["kind"] or "obs").strip()
+        tool = (r["tool_name"] or "").strip()
+        s = f"{kind}:{tool}".strip(":")
+
+    # Hard cap for safety in index packs.
+    if len(s) > 180:
+        s = s[:177] + "…"
+    return s
+
+
+def cmd_graph_index(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    query = (args.query or "").strip()
+    if not query:
+        _emit({"error": "empty query"}, True)
+        sys.exit(2)
+
+    scope = (getattr(args, "scope", None) or "").strip() or None
+    limit = max(1, int(getattr(args, "limit", 12)))
+    window = max(0, int(getattr(args, "window", 2)))
+    suggest_limit = max(0, int(getattr(args, "suggest_limit", 6)))
+    budget_tokens = max(1, int(getattr(args, "budget_tokens", 900)))
+
+    rows = _graph_search_rows(conn, query, limit)
+
+    # Candidate list (L0)
+    candidates: List[Dict[str, Any]] = []
+    cand_ids: List[int] = []
+    for r in rows:
+        oid = int(r["id"])
+        cand_ids.append(oid)
+        candidates.append(
+            {
+                "recordRef": _graph_record_ref(oid),
+                "id": oid,
+                "ts": r["ts"],
+                "kind": r["kind"],
+                "tool_name": r["tool_name"],
+                "score": float(r["score"]) if r["score"] is not None else None,
+                "title": _graph_row_title(r),
+                "why_relevant": "fts_match",
+            }
+        )
+
+    # Neighborhood suggestions (simple deterministic link-graph): timeline adjacency.
+    neighbor_support: Dict[int, List[int]] = {}
+    if window and cand_ids:
+        seen = set(cand_ids)
+        for oid in cand_ids:
+            lo, hi = oid - window, oid + window
+            nrows = conn.execute(
+                "SELECT id FROM observations WHERE id BETWEEN ? AND ? ORDER BY id",
+                (lo, hi),
+            ).fetchall()
+            for nr in nrows:
+                nid = int(nr[0])
+                if nid in seen:
+                    continue
+                neighbor_support.setdefault(nid, []).append(oid)
+
+    suggested_next: List[Dict[str, Any]] = []
+    if suggest_limit and neighbor_support:
+        for nid, supports in sorted(neighbor_support.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:suggest_limit]:
+            suggested_next.append(
+                {
+                    "recordRef": _graph_record_ref(nid),
+                    "id": nid,
+                    "reason": "timeline_adjacent",
+                    "support": {
+                        "from": [_graph_record_ref(x) for x in supports[:5]],
+                        "count": len(supports),
+                    },
+                }
+            )
+
+    # Build index_text (the injection payload) and enforce budget.
+    lines: List[str] = []
+    lines.append("[GRAPH_INDEX v0]")
+    lines.append(f"Query: {query}")
+    if scope:
+        lines.append(f"Scope: {scope}")
+    lines.append("")
+    lines.append("Top candidates:")
+
+    included: List[Dict[str, Any]] = []
+    for c in candidates:
+        line = f"- {c['recordRef']} [{c.get('kind')}] {c.get('tool_name') or ''} :: {c.get('title') or ''}".strip()
+        new_est = _estimate_tokens("\n".join(lines + [line]))
+        if new_est > budget_tokens and included:
+            break
+        lines.append(line)
+        included.append(c)
+
+    # Suggested expansions section (best-effort under budget)
+    if suggested_next:
+        lines.append("")
+        lines.append("Suggested next expansions:")
+        for s in suggested_next:
+            line = f"- {s['recordRef']} reason={s['reason']} from={','.join(s['support']['from'])}".strip()
+            new_est = _estimate_tokens("\n".join(lines + [line]))
+            if new_est > budget_tokens:
+                break
+            lines.append(line)
+
+    index_text = "\n".join(lines).strip() + "\n"
+
+    # Defensive hard truncation to satisfy strict budgets (even for tiny budgets).
+    max_chars = max(0, int(budget_tokens) * 4 - 3)
+    if len(index_text) > max_chars:
+        index_text = index_text[:max_chars].rstrip() + "\n"
+
+    payload = {
+        "kind": "openclaw-mem.graph.index.v0",
+        "ts": _utcnow_iso(),
+        "query": {"text": query, "scope": scope},
+        "budget": {
+            "budgetTokens": budget_tokens,
+            "estimatedTokens": _estimate_tokens(index_text),
+            "window": window,
+        },
+        "top_candidates": included,
+        "suggested_next_expansions": suggested_next,
+        "index_text": index_text,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+    print(index_text, end="")
+
+
+def cmd_graph_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    raw_ids = list(getattr(args, "ids", []) or [])
+    if not raw_ids:
+        _emit({"error": "no ids"}, True)
+        sys.exit(2)
+
+    budget_tokens = max(1, int(getattr(args, "budget_tokens", 1500)))
+    max_items = max(1, int(getattr(args, "max_items", 20)))
+
+    ids: List[int] = []
+    for t in raw_ids:
+        try:
+            ids.append(_graph_parse_record_ref(t))
+        except Exception:
+            _emit({"error": f"bad id: {t}"}, True)
+            sys.exit(2)
+
+    # Dedupe while preserving order
+    uniq: List[int] = []
+    seen: set[int] = set()
+    for i in ids:
+        if i in seen:
+            continue
+        seen.add(i)
+        uniq.append(i)
+    uniq = uniq[:max_items]
+
+    rows = conn.execute(
+        f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(uniq))}) ORDER BY id",
+        uniq,
+    ).fetchall()
+
+    items: List[Dict[str, Any]] = []
+    for r in rows:
+        oid = int(r["id"])
+        items.append(
+            {
+                "recordRef": _graph_record_ref(oid),
+                "id": oid,
+                "ts": r["ts"],
+                "kind": r["kind"],
+                "tool_name": r["tool_name"],
+                "summary": (r["summary"] or "").replace("\n", " ").strip(),
+            }
+        )
+
+    lines: List[str] = []
+    lines.append("[GRAPH_CONTEXT v0]")
+    lines.append(f"Items: {len(items)}")
+    lines.append("")
+
+    included_items: List[Dict[str, Any]] = []
+    for idx, it in enumerate(items, 1):
+        line = f"{idx}) {it['recordRef']} ts={it.get('ts')} [{it.get('kind')}] {it.get('tool_name') or ''} :: {it.get('summary') or ''}".strip()
+        new_est = _estimate_tokens("\n".join(lines + [line]))
+        if new_est > budget_tokens and included_items:
+            break
+        lines.append(line)
+        included_items.append(it)
+
+    bundle_text = "\n".join(lines).strip() + "\n"
+
+    # Defensive hard truncation to satisfy strict budgets (even for tiny budgets).
+    max_chars = max(0, int(budget_tokens) * 4 - 3)
+    if len(bundle_text) > max_chars:
+        bundle_text = bundle_text[:max_chars].rstrip() + "\n"
+
+    payload = {
+        "kind": "openclaw-mem.graph.pack.v0",
+        "ts": _utcnow_iso(),
+        "budget": {
+            "budgetTokens": budget_tokens,
+            "estimatedTokens": _estimate_tokens(bundle_text),
+        },
+        "items": included_items,
+        "bundle_text": bundle_text,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+    print(bundle_text, end="")
+
+
+def cmd_graph_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    query = (args.query or "").strip()
+    to_path = (args.to or "").strip()
+    scope = (getattr(args, "scope", None) or "").strip() or None
+
+    if not query:
+        _emit({"error": "empty query"}, True)
+        sys.exit(2)
+    if not to_path:
+        _emit({"error": "missing --to"}, True)
+        sys.exit(2)
+
+    limit = max(1, int(getattr(args, "limit", 12)))
+    window = max(0, int(getattr(args, "window", 2)))
+
+    rows = _graph_search_rows(conn, query, limit)
+    cand_ids = [int(r["id"]) for r in rows]
+
+    nodes: Dict[int, Dict[str, Any]] = {}
+    edges: List[Dict[str, Any]] = []
+
+    def add_node(oid: int) -> None:
+        if oid in nodes:
+            return
+        r = conn.execute(
+            "SELECT id, ts, kind, tool_name, summary FROM observations WHERE id=?",
+            (oid,),
+        ).fetchone()
+        if not r:
+            return
+        nodes[oid] = {
+            "id": _graph_record_ref(oid),
+            "type": "observation",
+            "project": scope,
+            "title": (r["summary"] or "").replace("\n", " ").strip()[:180],
+            "provenance": {"ts": r["ts"], "kind": r["kind"], "tool_name": r["tool_name"]},
+        }
+
+    for oid in cand_ids:
+        add_node(oid)
+
+    if window and cand_ids:
+        for oid in cand_ids:
+            lo, hi = oid - window, oid + window
+            nrows = conn.execute(
+                "SELECT id FROM observations WHERE id BETWEEN ? AND ? ORDER BY id",
+                (lo, hi),
+            ).fetchall()
+            for nr in nrows:
+                nid = int(nr[0])
+                add_node(nid)
+                if nid == oid:
+                    continue
+                edges.append(
+                    {
+                        "src": _graph_record_ref(oid),
+                        "dst": _graph_record_ref(nid),
+                        "type": "timeline_adjacent",
+                        "provenance": {"window": window},
+                    }
+                )
+
+    graph = {
+        "kind": "openclaw-mem.graph.export.v0",
+        "ts": _utcnow_iso(),
+        "query": {"text": query, "scope": scope},
+        "nodes": list(nodes.values()),
+        "edges": edges,
+    }
+
+    out_path = Path(to_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    payload = {"ok": True, "to": str(out_path), "nodes": len(graph["nodes"]), "edges": len(edges)}
+    _emit(payload, bool(args.json))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3127,6 +3482,43 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v0`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)
+
+
+    # Graphic memory (GraphRAG-lite) — v0 command group
+    sp = sub.add_parser("graph", help="Graphic memory helpers (index-first graph recall + packing)")
+    sp.add_argument("--db", default=None, help="SQLite DB path")
+    sp.add_argument(
+        "--json",
+        dest="json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true). Use --no-json for text-only payload.",
+    )
+    gsub = sp.add_subparsers(dest="graph_cmd", required=True)
+
+    g = gsub.add_parser("index", help="Build an L0 IndexPack for a query (budgeted, injection-ready)")
+    g.add_argument("query", help="Query text")
+    g.add_argument("--scope", help="Optional project/scope hint (string; v0 is advisory)")
+    g.add_argument("--limit", type=int, default=12, help="Max candidate hits to consider (default: 12)")
+    g.add_argument("--window", type=int, default=2, help="Timeline window for neighborhood suggestions (default: 2)")
+    g.add_argument("--suggest-limit", dest="suggest_limit", type=int, default=6, help="Max suggested expansions (default: 6)")
+    g.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=900, help="Token budget for index_text (default: 900)")
+    g.set_defaults(func=cmd_graph_index)
+
+    g = gsub.add_parser("pack", help="Build an L1 ContextPack from selected recordRefs/ids (safe-by-default)")
+    g.add_argument("ids", nargs="+", help="Record refs (e.g., obs:123) or numeric ids")
+    g.add_argument("--max-items", dest="max_items", type=int, default=20, help="Max items to include (default: 20)")
+    g.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1500, help="Token budget for bundle_text (default: 1500)")
+    g.set_defaults(func=cmd_graph_pack)
+
+    g = gsub.add_parser("export", help="Export a small graph.json artifact around query hits (portable artifact)")
+    g.add_argument("--query", required=True, help="Query text")
+    g.add_argument("--scope", help="Optional project/scope hint (string; v0 is advisory)")
+    g.add_argument("--to", required=True, help="Output path for graph.json")
+    g.add_argument("--limit", type=int, default=12)
+    g.add_argument("--window", type=int, default=2)
+    g.set_defaults(func=cmd_graph_export)
+
 
     sp = sub.add_parser("store", help="Proactively store a memory")
     add_common(sp)
