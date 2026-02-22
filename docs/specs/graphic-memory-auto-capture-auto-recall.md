@@ -19,6 +19,12 @@
   - `openclaw-mem graph capture-git --repo <path> ...`
 - Purpose: let Graphic Memory grow naturally from day-to-day code activity.
 
+### `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD`
+- Default: `0` / unset (disabled)
+- Separate opt-in for Markdown section indexing (index-only):
+  - `openclaw-mem graph capture-md --path <file-or-dir> ...`
+- Purpose: capture heading-level pointers (e.g., captain diary sections) without storing body excerpts.
+
 > v0 note: switches are operational toggles used by wrappers/cron/agent policy. They do **not** force automatic background jobs by themselves.
 
 ## Commands
@@ -70,10 +76,43 @@ Behavior:
   - `skipped_existing`
   - `errors`
 
+### 3) Auto-capture from markdown headings: `graph capture-md`
+```bash
+openclaw-mem graph capture-md \
+  --path /root/.openclaw/workspace/lyria-working-ledger \
+  --include .md \
+  --exclude-glob '**/.git/**' \
+  --exclude-glob '**/node_modules/**' \
+  --max-files 200 \
+  --max-sections-per-file 50 \
+  --min-heading-level 2 \
+  --since-hours 24 \
+  --state ~/.openclaw/memory/openclaw-mem/graph-capture-md-state.json \
+  --json
+```
+
+Behavior:
+- Scans files from `--path` (file or directory; repeatable) filtered by include extension + exclude globs.
+- Stateful cursor by file mtime:
+  - Re-scan when file mtime is newer than prior cursor.
+  - On first-seen files, only scan within `--since-hours` lookback.
+- Parses Markdown headings and captures sections at `--min-heading-level` or deeper.
+- Inserts one observation per section (index-only):
+  - `kind=note`
+  - `tool_name=graph.capture-md`
+  - `summary=[MD] <basename>#<heading>` (bounded)
+  - `detail_json={source_path, rel_path?, heading, heading_level, start_line, end_line, mtime, file_hash, section_fingerprint}`
+- Idempotent by section fingerprint (`graph_capture_md_seen.fingerprint`).
+- Returns aggregate counters:
+  - `scanned_files`
+  - `changed_files`
+  - `inserted`
+  - `skipped_existing`
+  - `errors`
+
 ## Safety posture (v0)
-- **No diff hunks** are stored.
-- **No file contents** are stored.
-- Only high-level commit metadata + changed file paths are captured.
+- `capture-git`: **No diff hunks** are stored; only commit metadata + changed file paths.
+- `capture-md`: **index-only** capture (heading + structural pointers). No body excerpts are stored.
 - Output/trace remains redaction-safe and aligned with progressive disclosure.
 
 ## Cron examples
@@ -86,6 +125,17 @@ openclaw-mem graph capture-git \
   --repo /root/.openclaw/workspace/openclaw-async-coding-playbook \
   --since 24 \
   --max-commits 50 \
+  --json
+```
+
+### Auto-capture markdown diary/index sections
+```bash
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 \
+openclaw-mem graph capture-md \
+  --path /root/.openclaw/workspace/lyria-working-ledger \
+  --include .md \
+  --min-heading-level 2 \
+  --since-hours 24 \
   --json
 ```
 

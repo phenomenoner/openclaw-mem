@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_capture_git, cmd_graph_export
+from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
 
 
 class TestCliM0(unittest.TestCase):
@@ -137,6 +137,11 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.cmd, "graph")
         self.assertEqual(a.graph_cmd, "capture-git")
         self.assertEqual(a.repo, ["/tmp/repo"])
+
+        a = build_parser().parse_args(["graph", "capture-md", "--path", "/tmp/notes"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "capture-md")
+        self.assertEqual(a.path, ["/tmp/notes"])
 
         a = build_parser().parse_args(["graph", "export", "--query", "hello", "--to", "/tmp/graph.json"])
         self.assertEqual(a.cmd, "graph")
@@ -334,6 +339,81 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["totals"]["errors"], 1)
         self.assertEqual(out["repos"][0]["inserted"], 0)
+
+        conn.close()
+
+    def test_graph_capture_md_smoke_is_index_only_and_idempotent(self):
+        import os
+        import tempfile
+        import time
+
+        conn = _connect(":memory:")
+
+        with tempfile.TemporaryDirectory() as td:
+            md_path = os.path.join(td, "notes.md")
+            state_path = os.path.join(td, "graph-capture-md-state.json")
+
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "# Title\n\n"
+                    "## Alpha\n"
+                    "first line\n"
+                    "```\n"
+                    "## hidden\n"
+                    "```\n\n"
+                    "### Beta\n"
+                    "second line\n"
+                )
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "path": [td],
+                    "include": [".md"],
+                    "exclude_glob": ["**/node_modules/**", "**/.venv/**", "**/.git/**", "**/dist/**"],
+                    "max_files": 200,
+                    "max_sections_per_file": 50,
+                    "min_heading_level": 2,
+                    "state": state_path,
+                    "since_hours": 24,
+                    "json": True,
+                },
+            )()
+
+            buf1 = io.StringIO()
+            with redirect_stdout(buf1):
+                cmd_graph_capture_md(conn, args)
+
+            out1 = json.loads(buf1.getvalue())
+            self.assertEqual(out1["inserted"], 2)
+            self.assertEqual(out1["skipped_existing"], 0)
+            self.assertEqual(out1["errors"], 0)
+
+            now = time.time() + 2.0
+            os.utime(md_path, (now, now))
+
+            buf2 = io.StringIO()
+            with redirect_stdout(buf2):
+                cmd_graph_capture_md(conn, args)
+
+            out2 = json.loads(buf2.getvalue())
+            self.assertEqual(out2["changed_files"], 1)
+            self.assertEqual(out2["inserted"], 0)
+            self.assertEqual(out2["skipped_existing"], 2)
+
+            rows = conn.execute(
+                "SELECT summary, detail_json FROM observations WHERE tool_name = 'graph.capture-md' ORDER BY id"
+            ).fetchall()
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(all(r["summary"].startswith("[MD] notes.md#") for r in rows))
+
+            detail = json.loads(rows[0]["detail_json"])
+            self.assertIn("source_path", detail)
+            self.assertIn("heading", detail)
+            self.assertIn("section_fingerprint", detail)
+            self.assertNotIn("excerpt", detail)
+            self.assertNotIn("content", detail)
 
         conn.close()
 
