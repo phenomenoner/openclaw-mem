@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -64,6 +65,12 @@ def _resolve_openclaw_config_path() -> str:
 
 STATE_DIR = _resolve_state_dir()
 DEFAULT_INDEX_PATH = os.path.join(STATE_DIR, "memory", "openclaw-mem", "observations-index.md")
+DEFAULT_GRAPH_CAPTURE_STATE_PATH = os.path.join(
+    STATE_DIR,
+    "memory",
+    "openclaw-mem",
+    "graph-capture-state.json",
+)
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
@@ -243,6 +250,17 @@ def _init_db(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_observation_embeddings_en_model ON observation_embeddings_en(model);")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS graph_capture_git_seen (
+            repo TEXT NOT NULL,
+            sha TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            PRIMARY KEY(repo, sha)
+        );
+        """
+    )
 
     conn.commit()
 
@@ -2979,18 +2997,16 @@ def _graph_row_title(r: sqlite3.Row) -> str:
     return s
 
 
-def cmd_graph_index(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    query = (args.query or "").strip()
-    if not query:
-        _emit({"error": "empty query"}, True)
-        sys.exit(2)
-
-    scope = (getattr(args, "scope", None) or "").strip() or None
-    limit = max(1, int(getattr(args, "limit", 12)))
-    window = max(0, int(getattr(args, "window", 2)))
-    suggest_limit = max(0, int(getattr(args, "suggest_limit", 6)))
-    budget_tokens = max(1, int(getattr(args, "budget_tokens", 900)))
-
+def _graph_index_payload(
+    conn: sqlite3.Connection,
+    *,
+    query: str,
+    scope: Optional[str],
+    limit: int,
+    window: int,
+    suggest_limit: int,
+    budget_tokens: int,
+) -> Dict[str, Any]:
     rows = _graph_search_rows(conn, query, limit)
 
     # Candidate list (L0)
@@ -3079,7 +3095,7 @@ def cmd_graph_index(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if len(index_text) > max_chars:
         index_text = index_text[:max_chars].rstrip() + "\n"
 
-    payload = {
+    return {
         "kind": "openclaw-mem.graph.index.v0",
         "ts": _utcnow_iso(),
         "query": {"text": query, "scope": scope},
@@ -3093,28 +3109,57 @@ def cmd_graph_index(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "index_text": index_text,
     }
 
+
+def cmd_graph_index(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    query = (args.query or "").strip()
+    if not query:
+        _emit({"error": "empty query"}, True)
+        sys.exit(2)
+
+    payload = _graph_index_payload(
+        conn,
+        query=query,
+        scope=(getattr(args, "scope", None) or "").strip() or None,
+        limit=max(1, int(getattr(args, "limit", 12))),
+        window=max(0, int(getattr(args, "window", 2))),
+        suggest_limit=max(0, int(getattr(args, "suggest_limit", 6))),
+        budget_tokens=max(1, int(getattr(args, "budget_tokens", 900))),
+    )
+
     if bool(args.json):
         _emit(payload, True)
         return
-    print(index_text, end="")
+    print(payload["index_text"], end="")
 
 
-def cmd_graph_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    raw_ids = list(getattr(args, "ids", []) or [])
+def _graph_pack_payload(
+    conn: sqlite3.Connection,
+    *,
+    raw_ids: List[str],
+    budget_tokens: int,
+    max_items: int,
+    allow_empty: bool = False,
+) -> Dict[str, Any]:
     if not raw_ids:
-        _emit({"error": "no ids"}, True)
-        sys.exit(2)
-
-    budget_tokens = max(1, int(getattr(args, "budget_tokens", 1500)))
-    max_items = max(1, int(getattr(args, "max_items", 20)))
+        if allow_empty:
+            return {
+                "kind": "openclaw-mem.graph.pack.v0",
+                "ts": _utcnow_iso(),
+                "budget": {
+                    "budgetTokens": budget_tokens,
+                    "estimatedTokens": 0,
+                },
+                "items": [],
+                "bundle_text": "",
+            }
+        raise ValueError("no ids")
 
     ids: List[int] = []
     for t in raw_ids:
         try:
             ids.append(_graph_parse_record_ref(t))
-        except Exception:
-            _emit({"error": f"bad id: {t}"}, True)
-            sys.exit(2)
+        except Exception as e:
+            raise ValueError(f"bad id: {t}") from e
 
     # Dedupe while preserving order
     uniq: List[int] = []
@@ -3127,13 +3172,16 @@ def cmd_graph_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     uniq = uniq[:max_items]
 
     rows = conn.execute(
-        f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(uniq))}) ORDER BY id",
+        f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(uniq))})",
         uniq,
     ).fetchall()
 
+    row_map = {int(r["id"]): r for r in rows}
     items: List[Dict[str, Any]] = []
-    for r in rows:
-        oid = int(r["id"])
+    for oid in uniq:
+        r = row_map.get(int(oid))
+        if r is None:
+            continue
         items.append(
             {
                 "recordRef": _graph_record_ref(oid),
@@ -3166,7 +3214,7 @@ def cmd_graph_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if len(bundle_text) > max_chars:
         bundle_text = bundle_text[:max_chars].rstrip() + "\n"
 
-    payload = {
+    return {
         "kind": "openclaw-mem.graph.pack.v0",
         "ts": _utcnow_iso(),
         "budget": {
@@ -3177,10 +3225,367 @@ def cmd_graph_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "bundle_text": bundle_text,
     }
 
+
+def cmd_graph_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    raw_ids = list(getattr(args, "ids", []) or [])
+    budget_tokens = max(1, int(getattr(args, "budget_tokens", 1500)))
+    max_items = max(1, int(getattr(args, "max_items", 20)))
+
+    try:
+        payload = _graph_pack_payload(
+            conn,
+            raw_ids=raw_ids,
+            budget_tokens=budget_tokens,
+            max_items=max_items,
+        )
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
     if bool(args.json):
         _emit(payload, True)
         return
-    print(bundle_text, end="")
+    print(payload["bundle_text"], end="")
+
+
+def _graph_preflight_selection(index_payload: Dict[str, Any], take: int) -> List[str]:
+    refs: List[str] = []
+    for c in list(index_payload.get("top_candidates") or []):
+        ref = (c or {}).get("recordRef")
+        if isinstance(ref, str) and ref.strip():
+            refs.append(ref.strip())
+
+    for s in list(index_payload.get("suggested_next_expansions") or []):
+        ref = (s or {}).get("recordRef")
+        if isinstance(ref, str) and ref.strip():
+            refs.append(ref.strip())
+
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for ref in refs:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        deduped.append(ref)
+        if len(deduped) >= take:
+            break
+
+    return deduped
+
+
+def cmd_graph_preflight(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    query = (args.query or "").strip()
+    if not query:
+        _emit({"error": "empty query"}, True)
+        sys.exit(2)
+
+    scope = (getattr(args, "scope", None) or "").strip() or None
+    limit = max(1, int(getattr(args, "limit", 12)))
+    window = max(0, int(getattr(args, "window", 2)))
+    suggest_limit = max(0, int(getattr(args, "suggest_limit", 6)))
+    budget_tokens = max(1, int(getattr(args, "budget_tokens", 1200)))
+    take = max(1, int(getattr(args, "take", 12)))
+
+    index_payload = _graph_index_payload(
+        conn,
+        query=query,
+        scope=scope,
+        limit=limit,
+        window=window,
+        suggest_limit=suggest_limit,
+        budget_tokens=budget_tokens,
+    )
+
+    selected_refs = _graph_preflight_selection(index_payload, take=take)
+
+    pack_payload = _graph_pack_payload(
+        conn,
+        raw_ids=selected_refs,
+        budget_tokens=budget_tokens,
+        max_items=max(1, take),
+        allow_empty=True,
+    )
+
+    payload = {
+        "kind": "openclaw-mem.graph.preflight.v0",
+        "ts": _utcnow_iso(),
+        "query": {"text": query, "scope": scope},
+        "selection": {
+            "take": take,
+            "recordRefs": selected_refs,
+            "selectedCount": len(selected_refs),
+        },
+        "budget": {
+            "budgetTokens": budget_tokens,
+            "estimatedTokens": _estimate_tokens(pack_payload["bundle_text"]),
+        },
+        "index": {
+            "kind": index_payload.get("kind"),
+            "budget": index_payload.get("budget"),
+            "top_candidates": index_payload.get("top_candidates", []),
+            "suggested_next_expansions": index_payload.get("suggested_next_expansions", []),
+        },
+        "pack": pack_payload,
+        "items": pack_payload.get("items", []),
+        "bundle_text": pack_payload.get("bundle_text", ""),
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+    print(pack_payload.get("bundle_text", ""), end="")
+
+
+def _graph_capture_git_default_since_iso(hours: float) -> str:
+    dt = datetime.now(timezone.utc) - timedelta(hours=max(0.0, float(hours)))
+    return dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _graph_capture_git_run_log(repo_path: Path, *, since_iso: str, max_commits: int) -> List[Dict[str, Any]]:
+    cmd = [
+        "git",
+        "-C",
+        str(repo_path),
+        "log",
+        f"--since={since_iso}",
+        f"--max-count={max(1, int(max_commits))}",
+        "--date=iso-strict",
+        "--pretty=format:%H%x1f%aI%x1f%s%x1e",
+        "--name-only",
+    ]
+
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError((p.stderr or p.stdout or "git log failed").strip())
+
+    out: List[Dict[str, Any]] = []
+    raw = p.stdout or ""
+    for chunk in raw.split("\x1e"):
+        part = chunk.strip("\n")
+        if not part.strip():
+            continue
+        lines = part.splitlines()
+        if not lines:
+            continue
+        header = lines[0]
+        cols = header.split("\x1f", 2)
+        if len(cols) < 3:
+            continue
+        sha, author_ts, subject = cols
+
+        files: List[str] = []
+        seen_files: set[str] = set()
+        for f in lines[1:]:
+            ff = f.strip()
+            if not ff or ff in seen_files:
+                continue
+            seen_files.add(ff)
+            files.append(ff)
+
+        out.append(
+            {
+                "sha": sha.strip(),
+                "author_ts": author_ts.strip(),
+                "subject": subject.strip(),
+                "files": files,
+            }
+        )
+
+    return out
+
+def _graph_capture_git_is_repo(path: Path) -> bool:
+    p = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True,
+        text=True,
+    )
+    return p.returncode == 0 and (p.stdout or "").strip() == "true"
+
+
+def _graph_capture_git_seen(conn: sqlite3.Connection, repo: str, sha: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM graph_capture_git_seen WHERE repo = ? AND sha = ? LIMIT 1",
+        (repo, sha),
+    ).fetchone()
+    return row is not None
+
+
+def _graph_capture_git_mark_seen(conn: sqlite3.Connection, repo: str, sha: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO graph_capture_git_seen (repo, sha, captured_at) VALUES (?, ?, ?)",
+        (repo, sha, _utcnow_iso()),
+    )
+
+
+def _graph_capture_git_observation_exists(conn: sqlite3.Connection, repo: str, sha: str) -> bool:
+    try:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM observations
+            WHERE tool_name = 'graph.capture-git'
+              AND json_extract(detail_json, '$.repo') = ?
+              AND json_extract(detail_json, '$.sha') = ?
+            LIMIT 1
+            """,
+            (repo, sha),
+        ).fetchone()
+        return row is not None
+    except sqlite3.OperationalError:
+        rows = conn.execute(
+            "SELECT detail_json FROM observations WHERE tool_name = 'graph.capture-git'"
+        ).fetchall()
+        for r in rows:
+            try:
+                obj = json.loads(r["detail_json"] or "{}")
+            except Exception:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            if str(obj.get("repo") or "") == repo and str(obj.get("sha") or "") == sha:
+                return True
+        return False
+
+
+def cmd_graph_capture_git(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    repos = list(getattr(args, "repo", []) or [])
+    if not repos:
+        _emit({"error": "missing --repo"}, True)
+        sys.exit(2)
+
+    since_hours = max(0.0, float(getattr(args, "since", 24) or 24))
+    max_commits = max(1, int(getattr(args, "max_commits", 50) or 50))
+    state_path = Path(
+        os.path.expanduser(
+            getattr(args, "state", None) or DEFAULT_GRAPH_CAPTURE_STATE_PATH
+        )
+    )
+
+    state = _load_triage_state(state_path)
+    if not isinstance(state, dict):
+        state = {}
+    repos_state = state.get("repos") if isinstance(state.get("repos"), dict) else {}
+
+    results: List[Dict[str, Any]] = []
+    had_errors = False
+
+    for repo_raw in repos:
+        repo_path = Path(repo_raw).expanduser().resolve()
+        repo_key = str(repo_path)
+        repo_label = repo_path.name or repo_key
+
+        summary = {
+            "repo": repo_key,
+            "inserted": 0,
+            "skipped_existing": 0,
+            "errors": 0,
+        }
+
+        if not repo_path.exists():
+            summary["errors"] = 1
+            had_errors = True
+            results.append(summary)
+            continue
+
+        if not _graph_capture_git_is_repo(repo_path):
+            summary["errors"] = 1
+            had_errors = True
+            results.append(summary)
+            continue
+
+        repo_prev = repos_state.get(repo_key) if isinstance(repos_state.get(repo_key), dict) else {}
+        since_iso = str(repo_prev.get("last_author_ts") or _graph_capture_git_default_since_iso(since_hours))
+
+        try:
+            commits = _graph_capture_git_run_log(
+                repo_path,
+                since_iso=since_iso,
+                max_commits=max_commits,
+            )
+        except Exception:
+            summary["errors"] = 1
+            had_errors = True
+            results.append(summary)
+            continue
+
+        newest_author_ts = str(repo_prev.get("last_author_ts") or "")
+        newest_sha = str(repo_prev.get("last_sha") or "")
+
+        # Process old->new for deterministic accumulation.
+        for c in reversed(commits):
+            sha = str(c.get("sha") or "").strip()
+            if not sha:
+                continue
+            author_ts = str(c.get("author_ts") or "").strip() or _utcnow_iso()
+            subject = str(c.get("subject") or "").strip() or "(no subject)"
+            files = list(c.get("files") or [])
+
+            already_seen = _graph_capture_git_seen(conn, repo_key, sha)
+            if not already_seen and _graph_capture_git_observation_exists(conn, repo_key, sha):
+                _graph_capture_git_mark_seen(conn, repo_key, sha)
+                already_seen = True
+
+            if already_seen:
+                summary["skipped_existing"] += 1
+            else:
+                obs = {
+                    "ts": author_ts,
+                    "kind": "note",
+                    "tool_name": "graph.capture-git",
+                    "summary": f"[GIT] {repo_label} {sha[:7]} {subject}",
+                    "detail": {
+                        "repo": repo_key,
+                        "sha": sha,
+                        "author_ts": author_ts,
+                        "files": files,
+                    },
+                }
+                _insert_observation(conn, obs)
+                _graph_capture_git_mark_seen(conn, repo_key, sha)
+                summary["inserted"] += 1
+
+            if author_ts > newest_author_ts:
+                newest_author_ts = author_ts
+                newest_sha = sha
+
+        repos_state[repo_key] = {
+            "last_author_ts": newest_author_ts or since_iso,
+            "last_sha": newest_sha,
+            "updated_at": _utcnow_iso(),
+        }
+
+        conn.commit()
+        results.append(summary)
+
+    state["repos"] = repos_state
+    _atomic_write_json(state_path, state)
+
+    totals = {
+        "inserted": sum(int(r["inserted"]) for r in results),
+        "skipped_existing": sum(int(r["skipped_existing"]) for r in results),
+        "errors": sum(int(r["errors"]) for r in results),
+    }
+
+    payload = {
+        "kind": "openclaw-mem.graph.capture-git.v0",
+        "ts": _utcnow_iso(),
+        "state_path": str(state_path),
+        "since_hours": since_hours,
+        "max_commits": max_commits,
+        "repos": results,
+        "totals": totals,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+    else:
+        for r in results:
+            print(
+                f"{r['repo']}: inserted={r['inserted']} skipped_existing={r['skipped_existing']} errors={r['errors']}"
+            )
+
+    if had_errors:
+        sys.exit(1)
 
 
 def cmd_graph_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -3510,6 +3915,23 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--max-items", dest="max_items", type=int, default=20, help="Max items to include (default: 20)")
     g.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1500, help="Token budget for bundle_text (default: 1500)")
     g.set_defaults(func=cmd_graph_pack)
+
+    g = gsub.add_parser("preflight", help="Run index+selection+pack in one deterministic step")
+    g.add_argument("query", help="Query text")
+    g.add_argument("--scope", help="Optional project/scope hint (string; v0 is advisory)")
+    g.add_argument("--limit", type=int, default=12, help="Max candidate hits to consider (default: 12)")
+    g.add_argument("--window", type=int, default=2, help="Timeline window for neighborhood suggestions (default: 2)")
+    g.add_argument("--suggest-limit", dest="suggest_limit", type=int, default=6, help="Max suggested expansions (default: 6)")
+    g.add_argument("--take", type=int, default=12, help="Max selected refs to pack (default: 12)")
+    g.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle_text (default: 1200)")
+    g.set_defaults(func=cmd_graph_preflight, json=False)
+
+    g = gsub.add_parser("capture-git", help="Capture recent git commits as observations (idempotent)")
+    g.add_argument("--repo", action="append", required=True, help="Git repository path (repeatable)")
+    g.add_argument("--since", type=float, default=24, help="Fallback lookback window in hours (default: 24)")
+    g.add_argument("--state", default=DEFAULT_GRAPH_CAPTURE_STATE_PATH, help=f"Capture state file (default: {DEFAULT_GRAPH_CAPTURE_STATE_PATH})")
+    g.add_argument("--max-commits", dest="max_commits", type=int, default=50, help="Max commits per repo per run (default: 50)")
+    g.set_defaults(func=cmd_graph_capture_git)
 
     g = gsub.add_parser("export", help="Export a small graph.json artifact around query hits (portable artifact)")
     g.add_argument("--query", required=True, help="Query text")
