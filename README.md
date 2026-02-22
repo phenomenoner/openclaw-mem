@@ -308,20 +308,28 @@ This is designed to be safe for heartbeat automation: fast, local, and determini
 
 ---
 
-
 ## Graphic Memory v0 automation knobs (optional, dev)
 
-Graphic Memory has opt-in environment switches (default OFF):
+Graphic Memory automation toggles are opt-in (default OFF):
 
-- `OPENCLAW_MEM_GRAPH_AUTO_RECALL=1`: enable preflight context packing via `graph preflight`
-- `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1`: enable scheduled git commit capture via `graph capture-git`
+- `OPENCLAW_MEM_GRAPH_AUTO_RECALL=1` for deterministic preflight recall packs (`graph preflight`)
+- `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1` for recurring git commit capture (`graph capture-git`)
+- `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1` for markdown heading indexing (`graph capture-md`)
 
-Example commands:
+Inspect effective toggle state:
+
+```bash
+uv run python -m openclaw_mem graph auto-status --json
+```
+
+Automation examples:
 
 ```bash
 OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
 
 OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
+
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
 ```
 
 Design notes: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
@@ -358,6 +366,7 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 - `docs/obsidian.md` — optional Obsidian adoption guide
 - `docs/v0.5.9-adapter-spec.md` — minimal-risk adapter design for `memory-core`/`memory-lancedb`
 - `docs/ecosystem-fit.md` — ownership boundaries + deployment patterns (`memory-core`/`memory-lancedb` + `openclaw-mem`)
+- `docs/specs/graphic-memory-auto-capture-auto-recall.md` — Graphic Memory auto-recall/auto-capture knobs (dev)
 - `CHANGELOG.md` — notable changes (Keep a Changelog)
 
 ---

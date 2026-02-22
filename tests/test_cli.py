@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
+from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
 
 
 class TestCliM0(unittest.TestCase):
@@ -132,6 +132,10 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.cmd, "graph")
         self.assertEqual(a.graph_cmd, "preflight")
         self.assertEqual(a.query, "hello")
+
+        a = build_parser().parse_args(["graph", "auto-status"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "auto-status")
 
         a = build_parser().parse_args(["graph", "capture-git", "--repo", "/tmp/repo"])
         self.assertEqual(a.cmd, "graph")
@@ -306,6 +310,43 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("obs:", out["bundle_text"])
         self.assertLessEqual(out["budget"]["estimatedTokens"], out["budget"]["budgetTokens"])
         self.assertGreaterEqual(len(out["selection"]["recordRefs"]), 1)
+
+        conn.close()
+
+
+    def test_graph_auto_status_reports_flags_and_invalid_values(self):
+        from unittest.mock import patch
+
+        conn = _connect(":memory:")
+
+        args = type("Args", (), {"json": True})()
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENCLAW_MEM_GRAPH_AUTO_RECALL": "1",
+                "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": "off",
+                "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": "maybe",
+            },
+            clear=False,
+        ):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_auto_status(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.auto-status.v0")
+
+        recall = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_RECALL"]
+        self.assertTrue(recall["enabled"])
+        self.assertTrue(recall["valid"])
+
+        capture = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_CAPTURE"]
+        self.assertFalse(capture["enabled"])
+        self.assertTrue(capture["valid"])
+
+        capture_md = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD"]
+        self.assertFalse(capture_md["enabled"])
+        self.assertFalse(capture_md["valid"])
 
         conn.close()
 
