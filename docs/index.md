@@ -38,6 +38,7 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 - Importance grading (MVP v1): [Go →](importance-grading.md)
 - Context engineering lessons (local-first): [Go →](context-engineering-lessons.md)
 - Roadmap (engineering): [Go →](roadmap.md)
+- Graphic memory (spec/PRD, dev): [Go →](specs/graphic-memory-graphrag-lite-prd.md)
 - Upgrade checklist (system upgrades): [Go →](upgrade-checklist.md)
 - Release checklist (repo rule): [Go →](release-checklist.md)
 
