@@ -31,6 +31,8 @@ nav:
   - Home: index.md
   - Reality check & status: reality-check.md
   - Quickstart: quickstart.md
+  - Specs:
+      - Graphic memory (GraphRAG-lite PRD): specs/graphic-memory-graphrag-lite-prd.md
   - Reference:
       - Ecosystem fit: ecosystem-fit.md
       - Deployment: deployment.md
