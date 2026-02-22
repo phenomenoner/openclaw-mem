@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend
+from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_export
 
 
 class TestCliM0(unittest.TestCase):
@@ -116,6 +116,111 @@ class TestCliM0(unittest.TestCase):
 
         self.assertTrue(merged_before)
         self.assertTrue(merged_after)
+
+    def test_graph_parser_can_parse_subcommands(self):
+        a = build_parser().parse_args(["graph", "index", "hello"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "index")
+        self.assertEqual(a.query, "hello")
+
+        a = build_parser().parse_args(["graph", "pack", "obs:1"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "pack")
+        self.assertEqual(a.ids, ["obs:1"])
+
+        a = build_parser().parse_args(["graph", "export", "--query", "hello", "--to", "/tmp/graph.json"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "export")
+        self.assertEqual(a.query, "hello")
+
+    def test_graph_index_and_pack_smoke_budgeted(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "tool",
+                        "tool_name": "exec",
+                        "summary": "alpha one",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "tool",
+                        "tool_name": "read",
+                        "summary": "beta two",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:02:00Z",
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "alpha three",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        # graph index
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "alpha",
+                "scope": None,
+                "limit": 8,
+                "window": 1,
+                "suggest_limit": 3,
+                "budget_tokens": 20,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_index(conn, args)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.index.v0")
+        self.assertIn("index_text", out)
+        self.assertLessEqual(out["budget"]["estimatedTokens"], out["budget"]["budgetTokens"])
+
+        # graph pack
+        args = type(
+            "Args",
+            (),
+            {
+                "ids": ["obs:1", "2"],
+                "max_items": 20,
+                "budget_tokens": 30,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_pack(conn, args)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.pack.v0")
+        self.assertIn("bundle_text", out)
+        self.assertIn("obs:1", out["bundle_text"])
+
+        conn.close()
 
     def test_profile_reports_counts_labels_and_recent(self):
         conn = _connect(":memory:")
