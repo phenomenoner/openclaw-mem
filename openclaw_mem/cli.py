@@ -10,6 +10,8 @@ AI-native design:
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -71,8 +73,21 @@ DEFAULT_GRAPH_CAPTURE_STATE_PATH = os.path.join(
     "openclaw-mem",
     "graph-capture-state.json",
 )
+DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH = os.path.join(
+    STATE_DIR,
+    "memory",
+    "openclaw-mem",
+    "graph-capture-md-state.json",
+)
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
+DEFAULT_GRAPH_CAPTURE_MD_INCLUDES = (".md",)
+DEFAULT_GRAPH_CAPTURE_MD_EXCLUDES = (
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/.git/**",
+    "**/dist/**",
+)
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
 
 
@@ -258,6 +273,16 @@ def _init_db(conn: sqlite3.Connection) -> None:
             sha TEXT NOT NULL,
             captured_at TEXT NOT NULL,
             PRIMARY KEY(repo, sha)
+        );
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS graph_capture_md_seen (
+            fingerprint TEXT PRIMARY KEY,
+            source_path TEXT NOT NULL,
+            mtime REAL NOT NULL
         );
         """
     )
@@ -3336,6 +3361,441 @@ def cmd_graph_preflight(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     print(pack_payload.get("bundle_text", ""), end="")
 
 
+def _graph_capture_md_norm_ext(ext: str) -> str:
+    v = str(ext or "").strip().lower()
+    if not v:
+        return ""
+    if not v.startswith("."):
+        v = "." + v
+    return v
+
+
+def _graph_capture_md_includes(values: Optional[List[str]]) -> List[str]:
+    out: List[str] = []
+    for raw in list(values or []):
+        ext = _graph_capture_md_norm_ext(raw)
+        if not ext or ext in out:
+            continue
+        out.append(ext)
+    if out:
+        return out
+    return [*DEFAULT_GRAPH_CAPTURE_MD_INCLUDES]
+
+
+def _graph_capture_md_excludes(values: Optional[List[str]]) -> List[str]:
+    out: List[str] = []
+    for raw in list(values or []):
+        pat = str(raw or "").strip()
+        if not pat or pat in out:
+            continue
+        out.append(pat)
+    if out:
+        return out
+    return [*DEFAULT_GRAPH_CAPTURE_MD_EXCLUDES]
+
+
+def _graph_capture_md_is_excluded(path: Path, patterns: List[str]) -> bool:
+    raw = path.as_posix()
+    for pat in patterns:
+        if fnmatch.fnmatch(raw, pat):
+            return True
+    return False
+
+
+def _graph_capture_md_collect_files(
+    raw_paths: List[str],
+    *,
+    includes: List[str],
+    excludes: List[str],
+    max_files: int,
+) -> Tuple[List[Path], int]:
+    selected: List[Path] = []
+    seen: set[str] = set()
+    errors = 0
+
+    for raw in raw_paths:
+        p = Path(raw).expanduser().resolve()
+        if not p.exists():
+            errors += 1
+            continue
+
+        candidates: List[Path] = []
+        if p.is_file():
+            candidates = [p]
+        elif p.is_dir():
+            candidates = [x for x in p.rglob("*") if x.is_file()]
+        else:
+            errors += 1
+            continue
+
+        for fp in sorted(candidates):
+            if len(selected) >= max_files:
+                return selected, errors
+
+            abs_key = str(fp)
+            if abs_key in seen:
+                continue
+
+            ext = fp.suffix.lower()
+            if ext not in includes:
+                continue
+
+            if _graph_capture_md_is_excluded(fp, excludes):
+                continue
+
+            seen.add(abs_key)
+            selected.append(fp)
+
+    return selected, errors
+
+
+def _graph_capture_md_parse_sections(
+    text: str,
+    *,
+    min_heading_level: int,
+    max_sections: int,
+) -> List[Dict[str, Any]]:
+    if max_sections <= 0:
+        return []
+
+    heading_re = re.compile(r"^\s{0,3}(#{1,6})\s+(.*?)\s*$")
+    fence_re = re.compile(r"^\s{0,3}(```+|~~~+)")
+
+    lines = text.splitlines()
+    sections: List[Dict[str, Any]] = []
+    active: Optional[Dict[str, Any]] = None
+    in_code = False
+
+    for idx, line in enumerate(lines, 1):
+        if fence_re.match(line):
+            in_code = not in_code
+            continue
+
+        if in_code:
+            continue
+
+        m = heading_re.match(line)
+        if not m:
+            continue
+
+        if active is not None:
+            active["end_line"] = idx - 1
+            sections.append(active)
+            active = None
+
+        level = len(m.group(1))
+        heading = re.sub(r"\s+#+\s*$", "", (m.group(2) or "").strip()).strip() or "(untitled)"
+
+        if level >= min_heading_level:
+            active = {
+                "heading": heading,
+                "heading_level": level,
+                "start_line": idx,
+                "end_line": len(lines),
+            }
+
+    if active is not None:
+        active["end_line"] = len(lines)
+        sections.append(active)
+
+    return sections[:max_sections]
+
+
+def _graph_capture_md_first_lines_for_fingerprint(
+    lines: List[str],
+    *,
+    start_line: int,
+    end_line: int,
+) -> List[str]:
+    fence_re = re.compile(r"^\s{0,3}(```+|~~~+)")
+    out: List[str] = []
+    in_code = False
+
+    begin = max(start_line + 1, 1)
+    end = min(end_line, len(lines))
+    for i in range(begin, end + 1):
+        raw = lines[i - 1]
+        if fence_re.match(raw):
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+
+        v = raw.strip()
+        if not v:
+            continue
+
+        out.append(v)
+        if len(out) >= 5:
+            break
+
+    return out
+
+
+def _graph_capture_md_summary(path: Path, heading: str) -> str:
+    heading_text = re.sub(r"\s+", " ", (heading or "").replace("\n", " ")).strip() or "(untitled)"
+    summary = f"[MD] {path.name}#{heading_text}"
+    if len(summary) > 180:
+        return summary[:177] + "…"
+    return summary
+
+
+def _graph_capture_md_git_root(file_path: Path, cache: Dict[str, Optional[Path]]) -> Optional[Path]:
+    dir_key = str(file_path.parent.resolve())
+    if dir_key in cache:
+        return cache[dir_key]
+
+    p = subprocess.run(
+        ["git", "-C", str(file_path.parent), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode != 0:
+        cache[dir_key] = None
+        return None
+
+    raw = (p.stdout or "").strip()
+    if not raw:
+        cache[dir_key] = None
+        return None
+
+    root = Path(raw).expanduser().resolve()
+    cache[dir_key] = root
+    return root
+
+
+def _graph_capture_md_seen(conn: sqlite3.Connection, fingerprint: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM graph_capture_md_seen WHERE fingerprint = ? LIMIT 1",
+        (fingerprint,),
+    ).fetchone()
+    return row is not None
+
+
+def _graph_capture_md_mark_seen(
+    conn: sqlite3.Connection,
+    *,
+    fingerprint: str,
+    source_path: str,
+    mtime: float,
+) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO graph_capture_md_seen (fingerprint, source_path, mtime) VALUES (?, ?, ?)",
+        (fingerprint, source_path, float(mtime)),
+    )
+
+
+def cmd_graph_capture_md(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    raw_paths = list(getattr(args, "path", []) or [])
+    if not raw_paths:
+        _emit({"error": "missing --path"}, True)
+        sys.exit(2)
+
+    includes = _graph_capture_md_includes(getattr(args, "include", None))
+    excludes = _graph_capture_md_excludes(getattr(args, "exclude_glob", None))
+    max_files = max(1, int(getattr(args, "max_files", 200) or 200))
+    max_sections_per_file = max(1, int(getattr(args, "max_sections_per_file", 50) or 50))
+    min_heading_level = max(1, int(getattr(args, "min_heading_level", 2) or 2))
+    since_hours = max(0.0, float(getattr(args, "since_hours", 24) or 24))
+
+    state_path = Path(
+        os.path.expanduser(
+            getattr(args, "state", None) or DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH
+        )
+    )
+
+    state = _load_triage_state(state_path)
+    if not isinstance(state, dict):
+        state = {}
+    files_state = state.get("files") if isinstance(state.get("files"), dict) else {}
+
+    since_ts = datetime.now(timezone.utc).timestamp() - (since_hours * 3600.0)
+
+    files, collect_errors = _graph_capture_md_collect_files(
+        raw_paths,
+        includes=includes,
+        excludes=excludes,
+        max_files=max_files,
+    )
+
+    totals = {
+        "scanned_files": 0,
+        "changed_files": 0,
+        "inserted": 0,
+        "skipped_existing": 0,
+        "errors": int(collect_errors),
+    }
+
+    per_path: List[Dict[str, Any]] = []
+    for raw in raw_paths:
+        p = Path(raw).expanduser().resolve()
+        per_path.append(
+            {
+                "path": str(p),
+                "scanned_files": 0,
+                "changed_files": 0,
+                "inserted": 0,
+                "skipped_existing": 0,
+                "errors": 0 if p.exists() else 1,
+            }
+        )
+
+    git_root_cache: Dict[str, Optional[Path]] = {}
+    file_to_group_idx: Dict[str, int] = {}
+    for idx, item in enumerate(per_path):
+        group_path = Path(item["path"])
+        for fp in files:
+            try:
+                if fp == group_path or fp.is_relative_to(group_path):
+                    file_to_group_idx[str(fp)] = idx
+            except Exception:
+                continue
+
+    for fp in files:
+        abs_path = str(fp.resolve())
+        totals["scanned_files"] += 1
+
+        group_idx = file_to_group_idx.get(abs_path)
+        if group_idx is not None:
+            per_path[group_idx]["scanned_files"] += 1
+
+        try:
+            st = fp.stat()
+            mtime = float(st.st_mtime)
+        except Exception:
+            totals["errors"] += 1
+            if group_idx is not None:
+                per_path[group_idx]["errors"] += 1
+            continue
+
+        prev = files_state.get(abs_path) if isinstance(files_state.get(abs_path), dict) else None
+        prev_mtime = None
+        if isinstance(prev, dict) and isinstance(prev.get("mtime"), (int, float)):
+            prev_mtime = float(prev.get("mtime"))
+
+        if prev_mtime is None:
+            should_scan = mtime >= since_ts
+        else:
+            should_scan = mtime > prev_mtime
+
+        if not should_scan:
+            continue
+
+        totals["changed_files"] += 1
+        if group_idx is not None:
+            per_path[group_idx]["changed_files"] += 1
+
+        try:
+            text = fp.read_text(encoding="utf-8")
+            raw_bytes = text.encode("utf-8")
+            lines = text.splitlines()
+            file_hash = hashlib.sha1(raw_bytes).hexdigest()
+
+            sections = _graph_capture_md_parse_sections(
+                text,
+                min_heading_level=min_heading_level,
+                max_sections=max_sections_per_file,
+            )
+
+            for sec in sections:
+                heading = str(sec.get("heading") or "(untitled)")
+                first_lines = _graph_capture_md_first_lines_for_fingerprint(
+                    lines,
+                    start_line=int(sec.get("start_line") or 1),
+                    end_line=int(sec.get("end_line") or len(lines)),
+                )
+                material = "\n".join([heading, *first_lines])
+                fingerprint = hashlib.sha1(material.encode("utf-8")).hexdigest()
+
+                if _graph_capture_md_seen(conn, fingerprint):
+                    totals["skipped_existing"] += 1
+                    if group_idx is not None:
+                        per_path[group_idx]["skipped_existing"] += 1
+                    continue
+
+                git_root = _graph_capture_md_git_root(fp, git_root_cache)
+                rel_path = None
+                if git_root is not None:
+                    try:
+                        rel_path = fp.resolve().relative_to(git_root).as_posix()
+                    except Exception:
+                        rel_path = None
+
+                obs = {
+                    "kind": "note",
+                    "tool_name": "graph.capture-md",
+                    "summary": _graph_capture_md_summary(fp, heading),
+                    "detail": {
+                        "source_path": abs_path,
+                        "rel_path": rel_path,
+                        "heading": heading,
+                        "heading_level": int(sec.get("heading_level") or 0),
+                        "start_line": int(sec.get("start_line") or 1),
+                        "end_line": int(sec.get("end_line") or len(lines)),
+                        "mtime": mtime,
+                        "file_hash": file_hash,
+                        "section_fingerprint": fingerprint,
+                    },
+                }
+                _insert_observation(conn, obs)
+                _graph_capture_md_mark_seen(
+                    conn,
+                    fingerprint=fingerprint,
+                    source_path=abs_path,
+                    mtime=mtime,
+                )
+
+                totals["inserted"] += 1
+                if group_idx is not None:
+                    per_path[group_idx]["inserted"] += 1
+
+            files_state[abs_path] = {
+                "mtime": mtime,
+                "updated_at": _utcnow_iso(),
+            }
+        except Exception:
+            totals["errors"] += 1
+            if group_idx is not None:
+                per_path[group_idx]["errors"] += 1
+
+    conn.commit()
+
+    state["files"] = files_state
+    _atomic_write_json(state_path, state)
+
+    payload = {
+        "kind": "openclaw-mem.graph.capture-md.v0",
+        "ts": _utcnow_iso(),
+        "state_path": str(state_path),
+        "since_hours": since_hours,
+        "scanned_files": totals["scanned_files"],
+        "changed_files": totals["changed_files"],
+        "inserted": totals["inserted"],
+        "skipped_existing": totals["skipped_existing"],
+        "errors": totals["errors"],
+    }
+
+    if bool(args.json):
+        payload["paths"] = per_path
+        _emit(payload, True)
+    else:
+        print(
+            " ".join(
+                [
+                    f"scanned_files={payload['scanned_files']}",
+                    f"changed_files={payload['changed_files']}",
+                    f"inserted={payload['inserted']}",
+                    f"skipped_existing={payload['skipped_existing']}",
+                    f"errors={payload['errors']}",
+                ]
+            )
+        )
+
+    if int(totals["errors"]) > 0:
+        sys.exit(1)
+
+
+
 def _graph_capture_git_default_since_iso(hours: float) -> str:
     dt = datetime.now(timezone.utc) - timedelta(hours=max(0.0, float(hours)))
     return dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -3932,6 +4392,17 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--state", default=DEFAULT_GRAPH_CAPTURE_STATE_PATH, help=f"Capture state file (default: {DEFAULT_GRAPH_CAPTURE_STATE_PATH})")
     g.add_argument("--max-commits", dest="max_commits", type=int, default=50, help="Max commits per repo per run (default: 50)")
     g.set_defaults(func=cmd_graph_capture_git)
+
+    g = gsub.add_parser("capture-md", help="Capture Markdown heading sections as index-only observations (idempotent)")
+    g.add_argument("--path", action="append", required=True, help="Markdown file/directory path (repeatable)")
+    g.add_argument("--include", action="append", default=None, help="File extension filter (repeatable, default: .md)")
+    g.add_argument("--exclude-glob", dest="exclude_glob", action="append", default=None, help="Exclude glob pattern (repeatable)")
+    g.add_argument("--max-files", dest="max_files", type=int, default=200, help="Max files to inspect per run (default: 200)")
+    g.add_argument("--max-sections-per-file", dest="max_sections_per_file", type=int, default=50, help="Max heading sections captured per file (default: 50)")
+    g.add_argument("--min-heading-level", dest="min_heading_level", type=int, default=2, help="Capture headings at this level or deeper (default: 2)")
+    g.add_argument("--state", default=DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH, help=f"Capture state file (default: {DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH})")
+    g.add_argument("--since-hours", dest="since_hours", type=float, default=24, help="Fallback lookback window in hours for first scan (default: 24)")
+    g.set_defaults(func=cmd_graph_capture_md)
 
     g = gsub.add_parser("export", help="Export a small graph.json artifact around query hits (portable artifact)")
     g.add_argument("--query", required=True, help="Query text")
