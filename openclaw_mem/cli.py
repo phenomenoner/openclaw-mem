@@ -3423,6 +3423,69 @@ def cmd_graph_preflight(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     print(pack_payload.get("bundle_text", ""), end="")
 
 
+def _graph_env_bool_status(name: str, *, default: bool = False) -> Dict[str, Any]:
+    raw = os.getenv(name)
+    if raw is None:
+        return {
+            "present": False,
+            "raw": None,
+            "normalized": None,
+            "enabled": bool(default),
+            "valid": True,
+            "default": bool(default),
+        }
+
+    normalized = str(raw).strip().lower()
+    truthy = {"1", "true", "on", "yes", "y", "t"}
+    falsy = {"0", "false", "off", "no", "n", "f", ""}
+
+    if normalized in truthy:
+        enabled = True
+        valid = True
+    elif normalized in falsy:
+        enabled = False
+        valid = True
+    else:
+        enabled = bool(default)
+        valid = False
+
+    return {
+        "present": True,
+        "raw": str(raw),
+        "normalized": normalized,
+        "enabled": enabled,
+        "valid": valid,
+        "default": bool(default),
+    }
+
+
+def cmd_graph_auto_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    flags = {
+        "OPENCLAW_MEM_GRAPH_AUTO_RECALL": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_RECALL", default=False),
+        "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_CAPTURE", default=False),
+        "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD", default=False),
+    }
+
+    payload = {
+        "kind": "openclaw-mem.graph.auto-status.v0",
+        "ts": _utcnow_iso(),
+        "flags": flags,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    for name, st in flags.items():
+        raw = st.get("raw")
+        raw_show = raw if isinstance(raw, str) else "(unset)"
+        print(
+            f"{name}: enabled={str(bool(st.get('enabled'))).lower()} "
+            f"valid={str(bool(st.get('valid'))).lower()} raw={raw_show}"
+        )
+
+
 def _graph_capture_md_norm_ext(ext: str) -> str:
     v = str(ext or "").strip().lower()
     if not v:
@@ -4447,6 +4510,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--take", type=int, default=12, help="Max selected refs to pack (default: 12)")
     g.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle_text (default: 1200)")
     g.set_defaults(func=cmd_graph_preflight, json=False)
+
+    g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
+    g.set_defaults(func=cmd_graph_auto_status)
 
     g = gsub.add_parser("capture-git", help="Capture recent git commits as observations (idempotent)")
     g.add_argument("--repo", action="append", required=True, help="Git repository path (repeatable)")

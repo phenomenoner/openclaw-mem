@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
+from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
 
 
 class TestCliM0(unittest.TestCase):
@@ -45,6 +45,11 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("task- check alerts"))
         self.assertTrue(_summary_has_task_marker("(TASK): review PR"))
         self.assertTrue(_summary_has_task_marker("- [ ] TODO file patch"))
+
+    def test_summary_has_task_marker_accepts_marker_only_forms(self):
+        self.assertTrue(_summary_has_task_marker("TODO"))
+        self.assertTrue(_summary_has_task_marker("[TASK]"))
+        self.assertTrue(_summary_has_task_marker("(REMINDER)"))
 
     def test_summary_has_task_marker_accepts_bracket_wrapped_marker(self):
         self.assertTrue(_summary_has_task_marker("[TODO] buy milk"))
@@ -127,6 +132,10 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.cmd, "graph")
         self.assertEqual(a.graph_cmd, "preflight")
         self.assertEqual(a.query, "hello")
+
+        a = build_parser().parse_args(["graph", "auto-status"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "auto-status")
 
         a = build_parser().parse_args(["graph", "capture-git", "--repo", "/tmp/repo"])
         self.assertEqual(a.cmd, "graph")
@@ -301,6 +310,43 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("obs:", out["bundle_text"])
         self.assertLessEqual(out["budget"]["estimatedTokens"], out["budget"]["budgetTokens"])
         self.assertGreaterEqual(len(out["selection"]["recordRefs"]), 1)
+
+        conn.close()
+
+
+    def test_graph_auto_status_reports_flags_and_invalid_values(self):
+        from unittest.mock import patch
+
+        conn = _connect(":memory:")
+
+        args = type("Args", (), {"json": True})()
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENCLAW_MEM_GRAPH_AUTO_RECALL": "1",
+                "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": "off",
+                "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": "maybe",
+            },
+            clear=False,
+        ):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_auto_status(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.auto-status.v0")
+
+        recall = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_RECALL"]
+        self.assertTrue(recall["enabled"])
+        self.assertTrue(recall["valid"])
+
+        capture = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_CAPTURE"]
+        self.assertFalse(capture["enabled"])
+        self.assertTrue(capture["valid"])
+
+        capture_md = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD"]
+        self.assertFalse(capture_md["enabled"])
+        self.assertFalse(capture_md["valid"])
 
         conn.close()
 
@@ -918,6 +964,67 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["tasks"]["found_new"], 1)
         self.assertEqual(out["tasks"]["matches"][0]["summary"], "TODO buy coffee this afternoon")
+
+        conn.close()
+
+    def test_triage_tasks_accepts_marker_only_summary(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "TODO",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "tasks",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["tasks"]["found_new"], 1)
+        self.assertEqual(out["tasks"]["matches"][0]["summary"], "TODO")
 
         conn.close()
 
