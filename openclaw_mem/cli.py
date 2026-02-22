@@ -2976,25 +2976,87 @@ def _graph_parse_record_ref(token: str) -> int:
     return int(t)
 
 
+def _graph_fts_sanitize_query(q: str) -> str:
+    """Make ad-hoc keyword queries safer for SQLite FTS.
+
+    Why:
+    - FTS query syntax treats '-' specially. A query like `auto-capture` or
+      `capture-md` can throw `sqlite3.OperationalError: no such column: capture`.
+    - For "search bar" usage, we prefer a best-effort match over crashing.
+
+    Strategy:
+    - Quote tokens that contain '-' (turn them into phrase queries).
+    - Preserve common boolean operators (OR/AND/NOT) and parentheses.
+    """
+
+    parts = []
+    for raw in (q or "").split():
+        if not raw:
+            continue
+
+        upper = raw.upper()
+        if upper in {"OR", "AND", "NOT"}:
+            parts.append(upper)
+            continue
+
+        # Peel parentheses + lightweight trailing punctuation.
+        tok = raw
+        prefix = ""
+        while tok.startswith("("):
+            prefix += "("
+            tok = tok[1:]
+
+        suffix = ""
+        while tok.endswith(")"):
+            suffix = ")" + suffix
+            tok = tok[:-1]
+
+        trail = ""
+        while tok and tok[-1] in ",.;:":
+            trail = tok[-1] + trail
+            tok = tok[:-1]
+
+        if tok and "-" in tok and not (tok.startswith('"') and tok.endswith('"')):
+            tok = f'"{tok}"'
+
+        parts.append(prefix + tok + trail + suffix)
+
+    return " ".join(parts).strip()
+
+
 def _graph_search_rows(conn: sqlite3.Connection, query: str, limit: int) -> List[sqlite3.Row]:
     q = (query or "").strip()
     if not q:
         return []
 
-    rows = conn.execute(
-        """
-        SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
-               snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
-               snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
-               bm25(observations_fts) AS score
-        FROM observations_fts
-        JOIN observations o ON o.id = observations_fts.rowid
-        WHERE observations_fts MATCH ?
-        ORDER BY score ASC
-        LIMIT ?;
-        """,
-        (q, int(limit)),
-    ).fetchall()
+    def _run(match_q: str) -> List[sqlite3.Row]:
+        return conn.execute(
+            """
+            SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
+                   snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
+                   snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
+                   bm25(observations_fts) AS score
+            FROM observations_fts
+            JOIN observations o ON o.id = observations_fts.rowid
+            WHERE observations_fts MATCH ?
+            ORDER BY score ASC
+            LIMIT ?;
+            """,
+            (match_q, int(limit)),
+        ).fetchall()
+
+    try:
+        rows = _run(q)
+    except sqlite3.OperationalError:
+        # Common failure mode: hyphenated terms in a "search bar" style query.
+        q2 = _graph_fts_sanitize_query(q)
+        if q2 and q2 != q:
+            try:
+                rows = _run(q2)
+            except sqlite3.OperationalError:
+                rows = []
+        else:
+            rows = []
 
     # Fallback for CJK keyword queries when FTS5 tokenizer cannot split terms well.
     if not rows and _has_cjk(q):
