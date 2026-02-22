@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_export
+from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_capture_git, cmd_graph_export
 
 
 class TestCliM0(unittest.TestCase):
@@ -123,6 +123,16 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.graph_cmd, "pack")
         self.assertEqual(a.ids, ["obs:1"])
 
+        a = build_parser().parse_args(["graph", "preflight", "hello"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "preflight")
+        self.assertEqual(a.query, "hello")
+
+        a = build_parser().parse_args(["graph", "capture-git", "--repo", "/tmp/repo"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "capture-git")
+        self.assertEqual(a.repo, ["/tmp/repo"])
+
         a = build_parser().parse_args(["graph", "export", "--query", "hello", "--to", "/tmp/graph.json"])
         self.assertEqual(a.cmd, "graph")
         self.assertEqual(a.graph_cmd, "export")
@@ -214,6 +224,111 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["kind"], "openclaw-mem.graph.pack.v0")
         self.assertIn("bundle_text", out)
         self.assertIn("obs:1", out["bundle_text"])
+
+        conn.close()
+
+    def test_graph_preflight_smoke_selects_refs_and_respects_budget(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "tool",
+                        "tool_name": "exec",
+                        "summary": "alpha one",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "tool",
+                        "tool_name": "read",
+                        "summary": "alpha two",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:02:00Z",
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "beta three",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "alpha",
+                "scope": None,
+                "limit": 8,
+                "window": 1,
+                "suggest_limit": 3,
+                "budget_tokens": 25,
+                "take": 12,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_preflight(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.preflight.v0")
+        self.assertIn("bundle_text", out)
+        self.assertIn("obs:", out["bundle_text"])
+        self.assertLessEqual(out["budget"]["estimatedTokens"], out["budget"]["budgetTokens"])
+        self.assertGreaterEqual(len(out["selection"]["recordRefs"]), 1)
+
+        conn.close()
+
+    def test_graph_capture_git_errors_cleanly_when_repo_missing(self):
+        import tempfile
+
+        conn = _connect(":memory:")
+        missing_repo = "/tmp/openclaw-mem-not-a-repo"
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "repo": [missing_repo],
+                "since": 24,
+                "state": state_path,
+                "max_commits": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_graph_capture_git(conn, args)
+
+        self.assertEqual(cm.exception.code, 1)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["totals"]["errors"], 1)
+        self.assertEqual(out["repos"][0]["inserted"], 0)
 
         conn.close()
 
