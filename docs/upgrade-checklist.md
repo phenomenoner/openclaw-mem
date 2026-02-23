@@ -123,9 +123,9 @@ uv run python -m openclaw_mem triage \
 
 Task extraction is deterministic and picks rows when either:
 - `kind == "task"`, or
-- `summary` starts with `TODO`, `TASK`, or `REMINDER` (case-insensitive; width-normalized via NFKC, so `ＴＯＤＯ`/`ＴＡＳＫ`/`ＲＥＭＩＮＤＥＲ` are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`), with optional leading markdown list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]`) and optional ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical), followed by:
+- `summary` starts with `TODO`, `TASK`, or `REMINDER` (case-insensitive; width-normalized via NFKC, so `ＴＯＤＯ`/`ＴＡＳＫ`/`ＲＥＭＩＮＤＥＲ` are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`), with optional leading markdown list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]`) and optional ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical), followed by:
   - `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
-  - Example formats: `TODO`, `TODO: rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`.
+  - Example formats: `TODO`, `TODO: rotate runbook`, `task- check alerts`, `(TASK): review PR`, `【TASK】 renew domain`, `- [ ] TODO file patch`.
   - Example run:
 
     ```bash

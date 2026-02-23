@@ -55,6 +55,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("[TODO] buy milk"))
         self.assertTrue(_summary_has_task_marker("(task): clean desk"))
         self.assertTrue(_summary_has_task_marker("（ＲＥＭＩＮＤＥＲ） 續約網域"))
+        self.assertTrue(_summary_has_task_marker("【ＴＡＳＫ】 續約網域"))
 
     def test_summary_has_task_marker_accepts_list_and_checkbox_prefixes(self):
         self.assertTrue(_summary_has_task_marker("- TODO buy milk"))
@@ -85,6 +86,7 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("taskforce sync tomorrow"))
         self.assertFalse(_summary_has_task_marker("[TODOLIST] clean old notes"))
         self.assertFalse(_summary_has_task_marker("[TODO]clean old notes"))
+        self.assertFalse(_summary_has_task_marker("【TODO】clean old notes"))
         self.assertFalse(_summary_has_task_marker("-TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("+TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("‣TODO clean old notes"))
@@ -1086,6 +1088,67 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["tasks"]["found_new"], 1)
         self.assertEqual(out["tasks"]["matches"][0]["summary"], "[TODO] buy coffee this afternoon")
+
+        conn.close()
+
+    def test_triage_tasks_accepts_cjk_bracket_wrapped_task_marker_prefix(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "【TODO】 buy coffee this afternoon",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "tasks",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["tasks"]["found_new"], 1)
+        self.assertEqual(out["tasks"]["matches"][0]["summary"], "【TODO】 buy coffee this afternoon")
 
         conn.close()
 
