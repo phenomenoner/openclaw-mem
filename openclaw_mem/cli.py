@@ -834,7 +834,8 @@ def cmd_timeline(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 def _emit(payload: Any, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        # JSON output is intended for automation and should be single-line.
+        print(json.dumps(payload, ensure_ascii=False))
         return
     if isinstance(payload, list):
         for item in payload:
@@ -2040,7 +2041,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         }
 
     if bool(args.json):
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        # Keep CLI --json output single-line for automation.
+        print(json.dumps(payload, ensure_ascii=False))
     else:
         print(bundle_text)
 
