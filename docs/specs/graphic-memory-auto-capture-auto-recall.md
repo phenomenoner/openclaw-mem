@@ -39,7 +39,8 @@ Behavior:
   - `OPENCLAW_MEM_GRAPH_AUTO_RECALL`
   - `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE`
   - `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD`
-- Output includes per-flag `present`, `raw`, `normalized`, `enabled`, and `valid`.
+- Output includes per-flag `present`, `raw`, `normalized`, `enabled`, `valid`, and `reason`.
+- `reason` is deterministic (`unset_default`, `parsed_truthy`, `parsed_falsy`, `invalid_fallback_default`) to simplify ops debugging.
 - Invalid values are fail-open (`enabled=false`, `valid=false`) and do not exit non-zero.
 
 ### 1) Auto-recall preflight: `graph preflight`

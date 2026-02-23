@@ -341,14 +341,39 @@ class TestCliM0(unittest.TestCase):
         recall = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_RECALL"]
         self.assertTrue(recall["enabled"])
         self.assertTrue(recall["valid"])
+        self.assertEqual(recall["reason"], "parsed_truthy")
 
         capture = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_CAPTURE"]
         self.assertFalse(capture["enabled"])
         self.assertTrue(capture["valid"])
+        self.assertEqual(capture["reason"], "parsed_falsy")
 
         capture_md = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD"]
         self.assertFalse(capture_md["enabled"])
         self.assertFalse(capture_md["valid"])
+        self.assertEqual(capture_md["reason"], "invalid_fallback_default")
+
+        conn.close()
+
+    def test_graph_auto_status_reports_unset_default_reason(self):
+        from unittest.mock import patch
+
+        conn = _connect(":memory:")
+
+        args = type("Args", (), {"json": True})()
+        with patch.dict("os.environ", {}, clear=True):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_auto_status(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.auto-status.v0")
+
+        for st in out["flags"].values():
+            self.assertFalse(st["present"])
+            self.assertFalse(st["enabled"])
+            self.assertTrue(st["valid"])
+            self.assertEqual(st["reason"], "unset_default")
 
         conn.close()
 

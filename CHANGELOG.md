@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Added `graph auto-status` command to report effective Graphic Memory automation env toggles (`OPENCLAW_MEM_GRAPH_AUTO_RECALL`, `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE`, `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD`) with validity-aware parsing.
+- `graph auto-status` now emits a deterministic per-flag `reason` field (`unset_default`, `parsed_truthy`, `parsed_falsy`, `invalid_fallback_default`) for easier operational debugging.
 - Added `profile` CLI command for deterministic ops snapshots (`counts`, `importance` label distribution, top tools/kinds, recent rows, embeddings model stats).
 - `pack` now supports `--query-en` to add an English assist query lane alongside the main query (useful for bilingual recall).
 - `pack --trace` now derives candidate `importance` and `trust` from observation `detail_json` (canonical normalization + `unknown` fallback for malformed/absent values).
@@ -32,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Docs
 - Documented Graphic Memory automation knobs + `graph auto-status` inspection flow in `README.md`, `QUICKSTART.md`, and `docs/specs/graphic-memory-auto-capture-auto-recall.md`.
+- Documented `graph auto-status` per-flag `reason` values in `docs/specs/graphic-memory-auto-capture-auto-recall.md`.
 - Removed a contradictory duplicate license footer from `README.md` so the dual-license statement (`MIT OR Apache-2.0`) is defined once and consistently.
 - Quickstart sample-ingest step now uses a deterministic `python -c` JSONL writer instead of a heredoc, reducing shell quoting/EOF pitfalls in automation contexts.
 - Documented deterministic `triage --mode tasks` marker grammar updates (plain + bracketed markers, optional markdown list/checklist + ordered-list prefixes, accepted separators) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
@@ -40,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 - Added regression coverage for `graph auto-status` parser wiring and validity-aware env flag reporting.
+- Added regression coverage for `graph auto-status` `reason` values, including unset-default behavior.
 - Added regression coverage for `pack --trace` output receipts (shape + exclusion counting).
 - Added schema checks for trace metadata (`ts`/`version`/budget caps) and candidate decision/citation fields.
 - Added `pack --trace` tests for candidate importance/trust extraction from `detail_json`, including invalid-label fallback to `unknown`.

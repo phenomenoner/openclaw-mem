@@ -3433,6 +3433,7 @@ def _graph_env_bool_status(name: str, *, default: bool = False) -> Dict[str, Any
             "enabled": bool(default),
             "valid": True,
             "default": bool(default),
+            "reason": "unset_default",
         }
 
     normalized = str(raw).strip().lower()
@@ -3442,12 +3443,15 @@ def _graph_env_bool_status(name: str, *, default: bool = False) -> Dict[str, Any
     if normalized in truthy:
         enabled = True
         valid = True
+        reason = "parsed_truthy"
     elif normalized in falsy:
         enabled = False
         valid = True
+        reason = "parsed_falsy"
     else:
         enabled = bool(default)
         valid = False
+        reason = "invalid_fallback_default"
 
     return {
         "present": True,
@@ -3456,6 +3460,7 @@ def _graph_env_bool_status(name: str, *, default: bool = False) -> Dict[str, Any
         "enabled": enabled,
         "valid": valid,
         "default": bool(default),
+        "reason": reason,
     }
 
 
