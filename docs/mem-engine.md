@@ -215,6 +215,7 @@ Deliverables:
   - `memory_recall(query, limit?, scope?, …)`
   - `memory_forget(id)`
 - JSON receipts for every tool call (at least: counts, filters applied, latency ms)
+- `memory_recall` receipts now include compact `ftsTop` / `vecTop` arrays (top candidate hits from each channel before fusion) for audit/debugging.
 
 Definition of done:
 

@@ -68,6 +68,9 @@ type ScopeMode = "explicit" | "inferred" | "global";
 const DEFAULT_RECALL_LIMIT = 5;
 const MAX_RECALL_LIMIT = 50;
 const RRF_K = 60;
+const DEFAULT_RECEIPT_TOP_HITS = 3;
+const MAX_RECEIPT_TOP_HITS = 5;
+const RECEIPT_TEXT_PREVIEW_MAX = 120;
 
 function normalizeImportance(raw: unknown): number | undefined {
   if (typeof raw === "number" && Number.isFinite(raw)) {
@@ -154,8 +157,54 @@ type RecallResult = {
   score: number;
 };
 
+type RecallReceiptTopHit = {
+  id: string;
+  score: number;
+  distance?: number;
+  category: MemoryCategory;
+  importance: number | null;
+  importance_label: ImportanceLabel;
+  scope: string;
+  trust_tier: string;
+  createdAt: number;
+  textPreview: string;
+};
+
 function toImportanceRecord(raw: unknown): number | undefined {
   return normalizeImportance(raw);
+}
+
+function textPreview(rawText: string, maxChars: number = RECEIPT_TEXT_PREVIEW_MAX): string {
+  const text = String(rawText ?? "");
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}…`;
+}
+
+function toRecallTopHit(result: RecallResult, options: { includeDistance?: boolean } = {}): RecallReceiptTopHit {
+  const normalizedImportance = toImportanceRecord(result.row.importance);
+  const normalizedLabel = resolveImportanceLabel(normalizedImportance, result.row.importance_label);
+
+  const hit: RecallReceiptTopHit = {
+    id: result.row.id,
+    score: result.score,
+    category: (result.row.category ?? "other") as MemoryCategory,
+    importance: normalizedImportance ?? null,
+    importance_label: normalizedLabel,
+    scope: String(result.row.scope ?? ""),
+    trust_tier: String(result.row.trust_tier ?? ""),
+    createdAt: Number(result.row.createdAt ?? 0),
+    textPreview: textPreview(String(result.row.text ?? "")),
+  };
+
+  if (options.includeDistance && typeof result.distance === "number") {
+    hit.distance = result.distance;
+  }
+
+  return hit;
+}
+
+function toRecallTopHits(results: RecallResult[], count: number, options: { includeDistance?: boolean } = {}): RecallReceiptTopHit[] {
+  const limit = Math.max(0, Math.min(MAX_RECEIPT_TOP_HITS, Math.floor(count)));
+  return results.slice(0, limit).map((result) => toRecallTopHit(result, options));
 }
 
 function scopeFilterExpr(scope: string): string {
@@ -560,6 +609,12 @@ const memoryPlugin = {
             db.vectorSearch(vector, Math.min(searchLimit, MAX_RECALL_LIMIT), scope).catch(() => []),
           ]);
 
+          const topHitLimit = Math.min(MAX_RECEIPT_TOP_HITS, Math.max(1, DEFAULT_RECEIPT_TOP_HITS));
+          const receiptTopHits = {
+            ftsTop: toRecallTopHits(ftsResults, topHitLimit),
+            vecTop: toRecallTopHits(vecResults, topHitLimit, { includeDistance: true }),
+          };
+
           let fused: { order: RecallResult[] };
           try {
             fused = fuseRecall({ vector: vecResults, fts: ftsResults, limit: normalizedLimit });
@@ -579,6 +634,9 @@ const memoryPlugin = {
                   vecCount: vecResults.length,
                   scopeMode,
                   scope,
+                  scopeFilterApplied,
+                  ftsTop: receiptTopHits.ftsTop,
+                  vecTop: receiptTopHits.vecTop,
                 },
               },
             };
@@ -621,6 +679,8 @@ const memoryPlugin = {
                   scopeMode,
                   scope,
                   scopeFilterApplied,
+                  ftsTop: receiptTopHits.ftsTop,
+                  vecTop: receiptTopHits.vecTop,
                 },
               },
             };
@@ -651,6 +711,8 @@ const memoryPlugin = {
                 scopeMode,
                 scope,
                 scopeFilterApplied,
+                ftsTop: receiptTopHits.ftsTop,
+                vecTop: receiptTopHits.vecTop,
               },
             },
           };
