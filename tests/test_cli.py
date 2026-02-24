@@ -2960,10 +2960,10 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         trace = out["trace"]
 
-        self.assertEqual(trace["kind"], "openclaw-mem.pack.trace.v0")
+        self.assertEqual(trace["kind"], "openclaw-mem.pack.trace.v1")
         self.assertIn("ts", trace)
         self.assertIn("version", trace)
-        self.assertEqual(trace["version"]["schema"], "v0")
+        self.assertEqual(trace["version"]["schema"], "v1")
         self.assertIn("query", trace)
         self.assertIn("text", trace["query"])
         self.assertIn("scope", trace["query"])
