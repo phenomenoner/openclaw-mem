@@ -5,6 +5,10 @@ __pycache__/
 .DS_Store
 SESSION_SUMMARY*.md
 
+# Local hot-reload scratch dirs (do not commit)
+extensions-hot/
+extensions/*-hot/
+
 # MkDocs build output
 site/
 
