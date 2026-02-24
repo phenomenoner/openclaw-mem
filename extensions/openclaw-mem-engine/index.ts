@@ -560,7 +560,29 @@ const memoryPlugin = {
             db.vectorSearch(vector, Math.min(searchLimit, MAX_RECALL_LIMIT), scope).catch(() => []),
           ]);
 
-          const fused = fuseRecall({ vector: vecResults, fts: ftsResults, limit: normalizedLimit });
+          let fused: { order: RecallResult[] };
+          try {
+            fused = fuseRecall({ vector: vecResults, fts: ftsResults, limit: normalizedLimit });
+          } catch (err) {
+            const message = err instanceof Error ? err.stack ?? err.message : String(err);
+            return {
+              content: [{ type: "text", text: `memory_recall failed: ${message}` }],
+              details: {
+                error: String(err),
+                stack: message,
+                receipt: {
+                  dbPath: resolvedDbPath,
+                  tableName,
+                  limit: normalizedLimit,
+                  model,
+                  ftsCount: ftsResults.length,
+                  vecCount: vecResults.length,
+                  scopeMode,
+                  scope,
+                },
+              },
+            };
+          }
           const latencyMs = Math.round(performance.now() - t0);
 
           const memories = fused.order.map((r) => {
