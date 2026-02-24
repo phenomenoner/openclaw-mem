@@ -2863,12 +2863,57 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 # Regex patterns for writeback extraction.
 _LANCEDB_ID_RE = re.compile(r"\b[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\b")
+_LANCEDB_FORCE_FIELDS = (
+    "importance",
+    "importance_label",
+    "scope",
+    "trust_tier",
+    "category",
+)
+_LANCEDB_FORCE_FIELDS_SET = set(_LANCEDB_FORCE_FIELDS)
+_LANCEDB_FORCE_FIELDS_DEFAULT = (
+    "importance",
+    "importance_label",
+    "scope",
+    "category",
+)
 
 _LANCEDB_WRITEBACK_NODE_SCRIPT = r"""import { readFile } from 'node:fs/promises';
 import { connect } from '@lancedb/lancedb';
 
 const ALLOWED_IMPORTANCE_LABELS = new Set(['must_remember', 'nice_to_have', 'ignore', 'unknown']);
 const ALLOWED_TRUST_TIERS = new Set(['trusted', 'untrusted', 'quarantined']);
+const ALLOWED_FORCE_FIELDS = new Set(['importance', 'importance_label', 'scope', 'category', 'trust_tier']);
+
+function normalizeForceFieldList(rawValue) {
+  if (typeof rawValue === 'string') {
+    return rawValue
+      .split(',')
+      .map((value) => String(value ?? '').trim().toLowerCase())
+      .filter((value) => ALLOWED_FORCE_FIELDS.has(value));
+  }
+
+  if (!Array.isArray(rawValue)) {
+    return [];
+  }
+
+  return rawValue
+    .map((value) => String(value ?? '').trim().toLowerCase())
+    .filter((value) => ALLOWED_FORCE_FIELDS.has(value));
+}
+
+function normalizeFieldSet(values) {
+  const unique = [];
+  const seen = new Set();
+  for (const value of values) {
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    unique.push(value);
+  }
+  return new Set(unique);
+}
 
 function hasMeaningfulValue(value) {
   if (value === null || value === undefined) {
@@ -2928,6 +2973,8 @@ if (!payloadPath) {
   const tableName = String(payload.tableName || '').trim();
   const dryRun = Boolean(payload.dryRun);
   const forceOverwrite = Boolean(payload.forceOverwrite);
+  const requestedForceFields = normalizeForceFieldList(payload.forceFields);
+  const overwriteFields = forceOverwrite ? normalizeFieldSet(requestedForceFields) : new Set();
   const updates = Array.isArray(payload.updates) ? payload.updates : [];
 
   const summary = {
@@ -2940,6 +2987,10 @@ if (!payloadPath) {
     errors: 0,
     errorIds: [],
   };
+
+  function canOverwriteField(name) {
+    return forceOverwrite && overwriteFields.has(name);
+  }
 
   if (!dbPath) {
     throw new Error('missing dbPath');
@@ -2981,11 +3032,11 @@ if (!payloadPath) {
 
     const incomingImportance = clamp01(incoming.importance);
     const hasCurrentImportance = hasMeaningfulValue(current.importance);
-    if (incomingImportance !== undefined && hasColumn(columns, 'importance') && (!hasCurrentImportance || forceOverwrite)) {
+    if (incomingImportance !== undefined && hasColumn(columns, 'importance') && (!hasCurrentImportance || canOverwriteField('importance'))) {
       const currentImportance = clamp01(current.importance);
       if (currentImportance !== incomingImportance) {
         patch.importance = incomingImportance;
-        if (forceOverwrite && hasMeaningfulValue(current.importance)) {
+        if (canOverwriteField('importance') && hasMeaningfulValue(current.importance)) {
           rowOverwritten = true;
           overwrittenFields += 1;
         }
@@ -2996,10 +3047,10 @@ if (!payloadPath) {
 
     const incomingLabel = allowedLabel(incoming.importance_label);
     const currentLabel = String(current.importance_label || '').trim();
-    if (incomingLabel && hasColumn(columns, 'importance_label') && (!hasMeaningfulValue(currentLabel) || forceOverwrite)) {
+    if (incomingLabel && hasColumn(columns, 'importance_label') && (!hasMeaningfulValue(currentLabel) || canOverwriteField('importance_label'))) {
       if (currentLabel !== incomingLabel) {
         patch.importance_label = incomingLabel;
-        if (forceOverwrite && currentLabel) {
+        if (canOverwriteField('importance_label') && currentLabel) {
           rowOverwritten = true;
           overwrittenFields += 1;
         }
@@ -3009,11 +3060,11 @@ if (!payloadPath) {
     }
 
     const incomingScope = String(incoming.scope || '').trim();
-    if (incomingScope && hasColumn(columns, 'scope') && (!hasMeaningfulValue(current.scope) || forceOverwrite)) {
+    if (incomingScope && hasColumn(columns, 'scope') && (!hasMeaningfulValue(current.scope) || canOverwriteField('scope'))) {
       const currentScope = String(current.scope || '').trim();
       if (currentScope !== incomingScope) {
         patch.scope = incomingScope;
-        if (forceOverwrite && currentScope) {
+        if (canOverwriteField('scope') && currentScope) {
           rowOverwritten = true;
           overwrittenFields += 1;
         }
@@ -3024,10 +3075,10 @@ if (!payloadPath) {
 
     const incomingTrust = allowedTrust(incoming.trust_tier);
     const currentTrust = String(current.trust_tier || '').trim();
-    if (incomingTrust && hasColumn(columns, 'trust_tier') && (!hasMeaningfulValue(currentTrust) || forceOverwrite)) {
+    if (incomingTrust && hasColumn(columns, 'trust_tier') && (!hasMeaningfulValue(currentTrust) || canOverwriteField('trust_tier'))) {
       if (currentTrust !== incomingTrust) {
         patch.trust_tier = incomingTrust;
-        if (forceOverwrite && currentTrust) {
+        if (canOverwriteField('trust_tier') && currentTrust) {
           rowOverwritten = true;
           overwrittenFields += 1;
         }
@@ -3037,11 +3088,11 @@ if (!payloadPath) {
     }
 
     const incomingCategory = String(incoming.category || '').trim();
-    if (incomingCategory && hasColumn(columns, 'category') && (!hasMeaningfulValue(current.category) || forceOverwrite)) {
+    if (incomingCategory && hasColumn(columns, 'category') && (!hasMeaningfulValue(current.category) || canOverwriteField('category'))) {
       const currentCategory = String(current.category || '').trim();
       if (currentCategory !== incomingCategory) {
         patch.category = incomingCategory;
-        if (forceOverwrite && currentCategory) {
+        if (canOverwriteField('category') && currentCategory) {
           rowOverwritten = true;
           overwrittenFields += 1;
         }
@@ -3246,6 +3297,28 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
     batch = max(1, int(getattr(args, "batch", 50)))
     force_overwrite = bool(getattr(args, "force", False))
 
+    force_fields: List[str] = []
+    if force_overwrite:
+        raw_force_fields = str(getattr(args, "force_fields", "")).strip() if getattr(args, "force_fields", None) is not None else ""
+        if raw_force_fields:
+            requested = [f.strip().lower() for f in raw_force_fields.split(",") if f.strip()]
+            bad_fields = [f for f in requested if f not in _LANCEDB_FORCE_FIELDS_SET]
+            if bad_fields:
+                _emit(
+                    {
+                        "error": "invalid --force-fields value(s)",
+                        "invalidFields": sorted(set(bad_fields)),
+                        "allowedFields": sorted(_LANCEDB_FORCE_FIELDS_SET),
+                    },
+                    args.json,
+                )
+                sys.exit(1)
+
+            # Preserve order, de-dupe
+            force_fields = list(dict.fromkeys([f for f in requested if f in _LANCEDB_FORCE_FIELDS_SET]))
+        else:
+            force_fields = list(_LANCEDB_FORCE_FIELDS_DEFAULT)
+
     lancedb_path = os.path.expanduser(str(getattr(args, "lancedb", "")).strip())
     table = (getattr(args, "table", "") or "").strip()
     if not lancedb_path:
@@ -3293,6 +3366,7 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
                 "limit": limit,
                 "batch": batch,
                 "forceOverwrite": force_overwrite,
+                "forceFields": force_fields,
                 "checked": skipped_no_id,
                 "updated": 0,
                 "overwritten": 0,
@@ -3325,6 +3399,7 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
                 "tableName": table,
                 "dryRun": dry_run,
                 "forceOverwrite": force_overwrite,
+                "forceFields": force_fields,
                 "updates": chunk,
             }
 
@@ -3381,6 +3456,7 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
         "limit": limit,
         "batch": batch,
         "forceOverwrite": force_overwrite,
+        "forceFields": force_fields,
         "checked": total_checked,
         "updated": total_updated,
         "overwritten": total_overwritten,
@@ -5214,6 +5290,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Overwrite existing metadata fields when incoming values are available",
+    )
+    sp.add_argument(
+        "--force-fields",
+        dest="force_fields",
+        default=None,
+        help=(
+            "Comma-separated list of fields allowed to be overwritten when --force is set "
+            "(importance, importance_label, scope, category, trust_tier)."
+        ),
     )
     sp.add_argument("--dry-run", action="store_true", help="Dry-run mode: show receipts without writing")
     sp.set_defaults(func=cmd_writeback_lancedb)
