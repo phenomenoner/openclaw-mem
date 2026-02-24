@@ -17,6 +17,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import type * as LanceDB from "@lancedb/lancedb";
@@ -239,6 +240,42 @@ class OpenAIEmbeddings {
 // Plugin
 // ============================================================================
 
+function resolveEnvVars(value: string): string {
+  return value.replace(/\$\{([^}]+)\}/g, (_, envVar) => {
+    const envValue = process.env[String(envVar)];
+    return envValue ?? "";
+  });
+}
+
+function readBundledMemoryLanceDbApiKey(api: OpenClawPluginApi): string {
+  try {
+    const stateDir = api.runtime.state.resolveStateDir();
+    const cfgPath = path.join(stateDir, "openclaw.json");
+    if (!fs.existsSync(cfgPath)) return "";
+    const raw = fs.readFileSync(cfgPath, "utf8");
+    const json = JSON.parse(raw) as any;
+    const key = json?.plugins?.entries?.["memory-lancedb"]?.config?.embedding?.apiKey;
+    return typeof key === "string" ? key.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+function resolveEmbeddingApiKey(api: OpenClawPluginApi, cfg: PluginConfig): string {
+  const fromCfg = (cfg.embedding?.apiKey ?? "").trim();
+  const resolvedCfg = resolveEnvVars(fromCfg).trim();
+  if (resolvedCfg) return resolvedCfg;
+
+  const fromEnv = (process.env.OPENAI_API_KEY ?? "").trim();
+  if (fromEnv) return fromEnv;
+
+  // Fallback: reuse the bundled memory-lancedb key to avoid duplicating secrets.
+  const fromMemoryLanceDb = resolveEnvVars(readBundledMemoryLanceDbApiKey(api)).trim();
+  if (fromMemoryLanceDb) return fromMemoryLanceDb;
+
+  return "";
+}
+
 function resolveStateRelativePath(api: OpenClawPluginApi, input: string | undefined, fallback: string): string {
   const stateDir = api.runtime.state.resolveStateDir();
   const raw = (input ?? fallback).trim();
@@ -269,7 +306,7 @@ const memoryPlugin = {
     const model = cfg.embedding?.model ?? DEFAULT_MODEL;
     const vectorDim = vectorDimsForModel(model);
 
-    const apiKey = cfg.embedding?.apiKey ?? process.env.OPENAI_API_KEY;
+    const apiKey = resolveEmbeddingApiKey(api, cfg);
 
     const resolvedDbPath = resolveStateRelativePath(api, cfg.dbPath, DEFAULT_DB_PATH);
     const tableName = (cfg.tableName ?? DEFAULT_TABLE_NAME).trim() || DEFAULT_TABLE_NAME;
