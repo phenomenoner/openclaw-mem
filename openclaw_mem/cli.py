@@ -10,10 +10,13 @@ AI-native design:
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import hashlib
 import json
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -65,8 +68,27 @@ def _resolve_openclaw_config_path() -> str:
 
 STATE_DIR = _resolve_state_dir()
 DEFAULT_INDEX_PATH = os.path.join(STATE_DIR, "memory", "openclaw-mem", "observations-index.md")
+DEFAULT_GRAPH_CAPTURE_STATE_PATH = os.path.join(
+    STATE_DIR,
+    "memory",
+    "openclaw-mem",
+    "graph-capture-state.json",
+)
+DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH = os.path.join(
+    STATE_DIR,
+    "memory",
+    "openclaw-mem",
+    "graph-capture-md-state.json",
+)
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
+DEFAULT_GRAPH_CAPTURE_MD_INCLUDES = (".md",)
+DEFAULT_GRAPH_CAPTURE_MD_EXCLUDES = (
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/.git/**",
+    "**/dist/**",
+)
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
 
 
@@ -244,6 +266,27 @@ def _init_db(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_observation_embeddings_en_model ON observation_embeddings_en(model);")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS graph_capture_git_seen (
+            repo TEXT NOT NULL,
+            sha TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            PRIMARY KEY(repo, sha)
+        );
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS graph_capture_md_seen (
+            fingerprint TEXT PRIMARY KEY,
+            source_path TEXT NOT NULL,
+            mtime REAL NOT NULL
+        );
+        """
+    )
 
     conn.commit()
 
@@ -938,7 +981,7 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         sys.exit(1)
 
     use_gateway = bool(getattr(args, "gateway", False) or os.environ.get("OPENCLAW_MEM_USE_GATEWAY") == "1")
-    
+
     api_key: Optional[str] = None
     base_url: str = defaults.openai_base_url()
     extra_headers: Dict[str, str] = {}
@@ -1737,7 +1780,7 @@ def _normalize_importance_label(raw: Any) -> Optional[str]:
     key = aliases.get(key, key)
     key = key.replace("-", "_").replace(" ", "_")
 
-    if key in {"must_remember", "nice_to_have", "ignore"}:
+    if key in {"must_remember", "nice_to_have", "ignore", "unknown"}:
         return key
     return None
 
@@ -2271,7 +2314,8 @@ def _summary_has_task_marker(summary: str) -> bool:
     - plain marker: `TODO ...`
     - bracketed marker: `[TODO] ...` or `(TODO) ...`
 
-    Optional leading list/checklist wrappers are tolerated before markers:
+    Optional leading markdown wrappers are tolerated before markers:
+    - blockquotes: `>` (when followed by whitespace; repeatable)
     - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (when followed by whitespace)
     - markdown checkboxes: `[ ]` / `[x]` (when followed by whitespace)
     - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (when followed by whitespace)
@@ -2389,6 +2433,10 @@ def _summary_has_task_marker(summary: str) -> bool:
         while changed:
             changed = False
 
+            if len(t) >= 2 and t[0] == ">" and t[1].isspace():
+                t = t[1:].lstrip()
+                changed = True
+
             if len(t) >= 2 and t[0] in bullet_prefixes and t[1].isspace():
                 t = t[1:].lstrip()
                 changed = True
@@ -2426,8 +2474,9 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; supports plain or
       bracketed forms like `[TODO]`/`(TASK)`, plus optional leading
-      list/checklist prefixes like `-`/`*`/`+`/`•`, `[ ]`/`[x]`, and
-      ordered-list prefixes like `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`;
+      markdown wrappers like `>` blockquotes, list/checklist prefixes
+      (`-`/`*`/`+`/`•`, `[ ]`/`[x]`), and ordered-list prefixes like
+      `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`;
       accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
@@ -2816,6 +2865,620 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(out, args.json)
 
 
+# Regex patterns for writeback extraction.
+_LANCEDB_ID_RE = re.compile(r"\b[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\b")
+_LANCEDB_FORCE_FIELDS = (
+    "importance",
+    "importance_label",
+    "scope",
+    "trust_tier",
+    "category",
+)
+_LANCEDB_FORCE_FIELDS_SET = set(_LANCEDB_FORCE_FIELDS)
+_LANCEDB_FORCE_FIELDS_DEFAULT = (
+    "importance",
+    "importance_label",
+    "scope",
+    "category",
+)
+
+_LANCEDB_WRITEBACK_NODE_SCRIPT = r"""import { readFile } from 'node:fs/promises';
+import { connect } from '@lancedb/lancedb';
+
+const ALLOWED_IMPORTANCE_LABELS = new Set(['must_remember', 'nice_to_have', 'ignore', 'unknown']);
+const ALLOWED_TRUST_TIERS = new Set(['trusted', 'untrusted', 'quarantined']);
+const ALLOWED_FORCE_FIELDS = new Set(['importance', 'importance_label', 'scope', 'category', 'trust_tier']);
+
+function normalizeForceFieldList(rawValue) {
+  if (typeof rawValue === 'string') {
+    return rawValue
+      .split(',')
+      .map((value) => String(value ?? '').trim().toLowerCase())
+      .filter((value) => ALLOWED_FORCE_FIELDS.has(value));
+  }
+
+  if (!Array.isArray(rawValue)) {
+    return [];
+  }
+
+  return rawValue
+    .map((value) => String(value ?? '').trim().toLowerCase())
+    .filter((value) => ALLOWED_FORCE_FIELDS.has(value));
+}
+
+function normalizeFieldSet(values) {
+  const unique = [];
+  const seen = new Set();
+  for (const value of values) {
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    unique.push(value);
+  }
+  return new Set(unique);
+}
+
+function hasMeaningfulValue(value) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+
+  return true;
+}
+
+function hasColumn(columns, name) {
+  return columns.has(name);
+}
+
+function clamp01(value) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized)) return undefined;
+  if (normalized < 0) return 0;
+  if (normalized > 1) return 1;
+  return normalized;
+}
+
+function safeIdentifier(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  return raw.replace(/'/g, "''");
+}
+
+function allowedLabel(value) {
+  const normalized = String(value ?? '').trim();
+  return ALLOWED_IMPORTANCE_LABELS.has(normalized) ? normalized : null;
+}
+
+function allowedTrust(value) {
+  const normalized = String(value ?? '').trim();
+  return ALLOWED_TRUST_TIERS.has(normalized) ? normalized : null;
+}
+
+const payloadPath = process.argv[2];
+if (!payloadPath) {
+  console.error('missing payload path');
+  process.exit(1);
+}
+
+(async () => {
+  const rawPayload = await readFile(payloadPath, 'utf8');
+  const payload = JSON.parse(rawPayload);
+
+  const dbPath = String(payload.dbPath || '').trim();
+  const tableName = String(payload.tableName || '').trim();
+  const dryRun = Boolean(payload.dryRun);
+  const forceOverwrite = Boolean(payload.forceOverwrite);
+  const requestedForceFields = normalizeForceFieldList(payload.forceFields);
+  const overwriteFields = forceOverwrite ? normalizeFieldSet(requestedForceFields) : new Set();
+  const updates = Array.isArray(payload.updates) ? payload.updates : [];
+
+  const summary = {
+    checked: 0,
+    updated: 0,
+    overwritten: 0,
+    overwrittenFields: 0,
+    skipped: 0,
+    missingIds: [],
+    errors: 0,
+    errorIds: [],
+  };
+
+  function canOverwriteField(name) {
+    return forceOverwrite && overwriteFields.has(name);
+  }
+
+  if (!dbPath) {
+    throw new Error('missing dbPath');
+  }
+
+  const db = await connect(dbPath);
+  const table = await db.openTable(tableName);
+  const schema = await table.schema();
+  const columns = new Set((schema?.fields || []).map((field) => String(field?.name || '').trim()));
+
+  for (const item of updates) {
+    const candidateId = String(item?.id || '').trim();
+    const incoming = item?.updates || {};
+
+    if (!candidateId) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    const where = `id = '${safeIdentifier(candidateId)}'`;
+    const rows = await table.query().where(where).limit(1).toArray();
+    if (!rows || rows.length === 0) {
+      summary.missingIds.push(candidateId);
+      continue;
+    }
+
+    const row = rows[0] || {};
+    const current = {
+      importance: row.importance,
+      importance_label: row.importance_label,
+      scope: row.scope,
+      trust_tier: row.trust_tier,
+      category: row.category,
+    };
+
+    const patch = {};
+    let overwrittenFields = 0;
+    let rowOverwritten = false;
+
+    const incomingImportance = clamp01(incoming.importance);
+    const hasCurrentImportance = hasMeaningfulValue(current.importance);
+    if (incomingImportance !== undefined && hasColumn(columns, 'importance') && (!hasCurrentImportance || canOverwriteField('importance'))) {
+      const currentImportance = clamp01(current.importance);
+      if (currentImportance !== incomingImportance) {
+        patch.importance = incomingImportance;
+        if (canOverwriteField('importance') && hasMeaningfulValue(current.importance)) {
+          rowOverwritten = true;
+          overwrittenFields += 1;
+        }
+      } else if (!hasCurrentImportance) {
+        patch.importance = incomingImportance;
+      }
+    }
+
+    const incomingLabel = allowedLabel(incoming.importance_label);
+    const currentLabel = String(current.importance_label || '').trim();
+    if (incomingLabel && hasColumn(columns, 'importance_label') && (!hasMeaningfulValue(currentLabel) || canOverwriteField('importance_label'))) {
+      if (currentLabel !== incomingLabel) {
+        patch.importance_label = incomingLabel;
+        if (canOverwriteField('importance_label') && currentLabel) {
+          rowOverwritten = true;
+          overwrittenFields += 1;
+        }
+      } else if (!currentLabel) {
+        patch.importance_label = incomingLabel;
+      }
+    }
+
+    const incomingScope = String(incoming.scope || '').trim();
+    if (incomingScope && hasColumn(columns, 'scope') && (!hasMeaningfulValue(current.scope) || canOverwriteField('scope'))) {
+      const currentScope = String(current.scope || '').trim();
+      if (currentScope !== incomingScope) {
+        patch.scope = incomingScope;
+        if (canOverwriteField('scope') && currentScope) {
+          rowOverwritten = true;
+          overwrittenFields += 1;
+        }
+      } else if (!currentScope) {
+        patch.scope = incomingScope;
+      }
+    }
+
+    const incomingTrust = allowedTrust(incoming.trust_tier);
+    const currentTrust = String(current.trust_tier || '').trim();
+    if (incomingTrust && hasColumn(columns, 'trust_tier') && (!hasMeaningfulValue(currentTrust) || canOverwriteField('trust_tier'))) {
+      if (currentTrust !== incomingTrust) {
+        patch.trust_tier = incomingTrust;
+        if (canOverwriteField('trust_tier') && currentTrust) {
+          rowOverwritten = true;
+          overwrittenFields += 1;
+        }
+      } else if (!currentTrust) {
+        patch.trust_tier = incomingTrust;
+      }
+    }
+
+    const incomingCategory = String(incoming.category || '').trim();
+    if (incomingCategory && hasColumn(columns, 'category') && (!hasMeaningfulValue(current.category) || canOverwriteField('category'))) {
+      const currentCategory = String(current.category || '').trim();
+      if (currentCategory !== incomingCategory) {
+        patch.category = incomingCategory;
+        if (canOverwriteField('category') && currentCategory) {
+          rowOverwritten = true;
+          overwrittenFields += 1;
+        }
+      } else if (!currentCategory) {
+        patch.category = incomingCategory;
+      }
+    }
+
+    summary.checked += 1;
+    if (Object.keys(patch).length === 0) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    if (!dryRun) {
+      try {
+        await table.update({ where, values: patch });
+      } catch (err) {
+        summary.errors += 1;
+        summary.errorIds.push(candidateId);
+        continue;
+      }
+    }
+
+    summary.updated += 1;
+    if (rowOverwritten) {
+      summary.overwritten += 1;
+      summary.overwrittenFields += overwrittenFields;
+    }
+  }
+
+  console.log(JSON.stringify({ success: true, summary }));
+  await db.close?.();
+})().catch((error) => {
+  console.error(String(error?.stack || error));
+  process.exit(1);
+});
+"""
+
+def _coerce_lancedb_id(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+
+    m = _LANCEDB_ID_RE.search(value)
+    if not m:
+        return None
+
+    return m.group(0).strip()
+
+
+def _extract_lancedb_id_from_obj(value: Any, *, hint_keys: Optional[Tuple[str, ...]] = None) -> Optional[str]:
+    keys = set(k.lower() for k in (hint_keys or ("memory_id", "memoryid", "memory_uuid", "memoryuuid", "lancedb_id", "lancedbid", "lancedb", "lance_id")))
+
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if not isinstance(key, str):
+                continue
+
+            if key.lower() in keys:
+                candidate = _coerce_lancedb_id(nested)
+                if candidate:
+                    return candidate
+
+            if isinstance(nested, (dict, list)):
+                candidate = _extract_lancedb_id_from_obj(nested, hint_keys=hint_keys)
+                if candidate:
+                    return candidate
+
+        return None
+
+    if isinstance(value, list):
+        for item in value:
+            candidate = _extract_lancedb_id_from_obj(item, hint_keys=hint_keys)
+            if candidate:
+                return candidate
+
+    return _coerce_lancedb_id(value)
+
+
+def _extract_lancedb_id(row: sqlite3.Row, detail_obj: Dict[str, Any]) -> Optional[str]:
+    for src in (
+        detail_obj,
+        detail_obj.get("result"),
+        detail_obj.get("response"),
+        detail_obj.get("output"),
+        detail_obj.get("payload"),
+        detail_obj.get("memory"),
+        detail_obj.get("data"),
+    ):
+        if not isinstance(src, dict):
+            continue
+
+        direct = _extract_lancedb_id_from_obj(src)
+        if direct:
+            return direct
+
+    summary = str(row["summary"] or "").strip()
+    summary_en = str(row["summary_en"] or "").strip()
+
+    for raw in (summary, summary_en):
+        if not raw:
+            continue
+
+        m = _LANCEDB_ID_RE.search(raw)
+        if m:
+            return m.group(0).strip()
+
+    return None
+
+
+def _extract_importance_from_detail(detail_obj: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
+    from openclaw_mem.importance import label_from_score
+
+    if not isinstance(detail_obj, dict):
+        return (None, None)
+
+    raw = detail_obj.get("importance")
+    score: Optional[float] = None
+    label: Optional[str] = None
+
+    if isinstance(raw, dict):
+        label = _normalize_importance_label(raw.get("label"))
+        candidate = raw.get("score")
+        if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+            score = max(0.0, min(1.0, float(candidate)))
+        elif isinstance(candidate, str):
+            try:
+                candidate_score = float(candidate.strip())
+            except ValueError:
+                candidate_score = None
+            if candidate_score is not None:
+                score = max(0.0, min(1.0, float(candidate_score)))
+
+    elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        score = max(0.0, min(1.0, float(raw)))
+    elif isinstance(raw, str):
+        if raw.strip():
+            try:
+                score = max(0.0, min(1.0, float(raw.strip())))
+            except ValueError:
+                score = None
+
+    if score is None and label is None:
+        return (None, None)
+
+    if label not in {"must_remember", "nice_to_have", "ignore", "unknown"}:
+        label = None
+
+    if score is None:
+        score_map = {
+            "must_remember": 0.9,
+            "nice_to_have": 0.7,
+            "ignore": 0.2,
+            "unknown": 0.0,
+        }
+        if not label:
+            return (None, None)
+        score = score_map.get(label, 0.0)
+    elif not label:
+        label = _normalize_importance_label(label_from_score(score))
+
+    return (score, label)
+
+
+def _extract_writeback_updates(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+    detail_obj = _pack_parse_detail_json(row["detail_json"])
+
+    lancedb_id = _extract_lancedb_id(row, detail_obj)
+    if not lancedb_id:
+        return None
+
+    updates: Dict[str, Any] = {}
+
+    score, label = _extract_importance_from_detail(detail_obj)
+    if score is not None:
+        updates["importance"] = score
+
+    if label:
+        updates["importance_label"] = label
+
+    scope = str(detail_obj.get("scope") or row["kind"] or "").strip()
+    if scope:
+        updates["scope"] = scope
+
+    trust = _pack_trust_tier(detail_obj)
+    if trust != "unknown":
+        updates["trust_tier"] = trust
+
+    if isinstance(detail_obj.get("category"), str):
+        updates["category"] = (detail_obj.get("category") or "").strip()
+    elif isinstance(row["kind"], str):
+        updates["category"] = str(row["kind"]).strip()
+
+    return {"id": lancedb_id, "updates": updates}
+
+
+def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Write governance metadata from SQLite ledger rows back to LanceDB."""
+
+    dry_run = bool(args.dry_run)
+    limit = max(1, int(args.limit))
+    batch = max(1, int(getattr(args, "batch", 50)))
+    force_overwrite = bool(getattr(args, "force", False))
+
+    force_fields: List[str] = []
+    if force_overwrite:
+        raw_force_fields = str(getattr(args, "force_fields", "")).strip() if getattr(args, "force_fields", None) is not None else ""
+        if raw_force_fields:
+            requested = [f.strip().lower() for f in raw_force_fields.split(",") if f.strip()]
+            bad_fields = [f for f in requested if f not in _LANCEDB_FORCE_FIELDS_SET]
+            if bad_fields:
+                _emit(
+                    {
+                        "error": "invalid --force-fields value(s)",
+                        "invalidFields": sorted(set(bad_fields)),
+                        "allowedFields": sorted(_LANCEDB_FORCE_FIELDS_SET),
+                    },
+                    args.json,
+                )
+                sys.exit(1)
+
+            # Preserve order, de-dupe
+            force_fields = list(dict.fromkeys([f for f in requested if f in _LANCEDB_FORCE_FIELDS_SET]))
+        else:
+            force_fields = list(_LANCEDB_FORCE_FIELDS_DEFAULT)
+
+    lancedb_path = os.path.expanduser(str(getattr(args, "lancedb", "")).strip())
+    table = (getattr(args, "table", "") or "").strip()
+    if not lancedb_path:
+        _emit({"error": "missing --lancedb"}, args.json)
+        sys.exit(1)
+
+    if not table:
+        _emit({"error": "missing --table"}, args.json)
+        sys.exit(1)
+
+    engine_path = Path(__file__).resolve().parents[1] / "extensions" / "openclaw-mem-engine"
+    if not engine_path.exists():
+        _emit({"error": f"openclaw-mem-engine path not found: {engine_path}"}, args.json)
+        sys.exit(1)
+
+    rows = conn.execute(
+        """
+        SELECT id, kind, summary, summary_en, detail_json
+        FROM observations
+        WHERE tool_name = 'memory_store'
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+    prepared: List[Dict[str, Any]] = []
+    skipped_no_id = 0
+
+    for row in rows:
+        payload = _extract_writeback_updates(row)
+        if not payload:
+            skipped_no_id += 1
+            continue
+
+        prepared.append(payload)
+
+    if not prepared:
+        _emit(
+            {
+                "ok": True,
+                "dryRun": dry_run,
+                "db": lancedb_path,
+                "table": table,
+                "limit": limit,
+                "batch": batch,
+                "forceOverwrite": force_overwrite,
+                "forceFields": force_fields,
+                "checked": skipped_no_id,
+                "updated": 0,
+                "overwritten": 0,
+                "overwrittenFields": 0,
+                "skipped": skipped_no_id,
+                "missing": 0,
+                "missingIds": [],
+            },
+            args.json,
+        )
+        return
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".mjs", delete=False, dir=str(engine_path)) as script_file:
+        script_file.write(_LANCEDB_WRITEBACK_NODE_SCRIPT)
+
+    total_updated = 0
+    total_overwritten = 0
+    total_overwritten_fields = 0
+    total_skipped = skipped_no_id
+    total_checked = skipped_no_id
+    missing_ids: List[str] = []
+    total_errors = 0
+    error_ids: List[str] = []
+
+    try:
+        for i in range(0, len(prepared), batch):
+            chunk = prepared[i : i + batch]
+            payload = {
+                "dbPath": lancedb_path,
+                "tableName": table,
+                "dryRun": dry_run,
+                "forceOverwrite": force_overwrite,
+                "forceFields": force_fields,
+                "updates": chunk,
+            }
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as payload_file:
+                json.dump(payload, payload_file, ensure_ascii=False)
+                payload_path = payload_file.name
+
+            proc = subprocess.run(
+                ["node", script_file.name, payload_path],
+                capture_output=True,
+                text=True,
+                cwd=str(engine_path),
+                check=False,
+            )
+            os.unlink(payload_path)
+
+            if proc.returncode != 0:
+                detail = (proc.stderr or proc.stdout or "").strip()
+                _emit({"error": "lancedb writeback execution failed", "detail": detail}, args.json)
+                sys.exit(1)
+
+            try:
+                parsed = json.loads(proc.stdout or "{}")
+            except json.JSONDecodeError:
+                _emit({"error": "lancedb writeback returned invalid JSON"}, args.json)
+                sys.exit(1)
+
+            summary = parsed.get("summary", {}) if isinstance(parsed, dict) else {}
+            if not isinstance(summary, dict):
+                _emit({"error": "lancedb writeback returned malformed summary"}, args.json)
+                sys.exit(1)
+
+            total_checked += int(summary.get("checked", 0))
+            total_updated += int(summary.get("updated", 0))
+            total_overwritten += int(summary.get("overwritten", 0))
+            total_overwritten_fields += int(summary.get("overwrittenFields", 0))
+            total_skipped += int(summary.get("skipped", 0))
+            missing_ids.extend(summary.get("missingIds", []))
+
+            chunk_errors = int(summary.get("errors", 0))
+            total_errors += chunk_errors
+            for error_id in summary.get("errorIds", []):
+                if isinstance(error_id, str):
+                    error_ids.append(error_id)
+
+    finally:
+        os.unlink(script_file.name)
+
+    out = {
+        "ok": total_errors == 0,
+        "dryRun": dry_run,
+        "db": lancedb_path,
+        "table": table,
+        "limit": limit,
+        "batch": batch,
+        "forceOverwrite": force_overwrite,
+        "forceFields": force_fields,
+        "checked": total_checked,
+        "updated": total_updated,
+        "overwritten": total_overwritten,
+        "overwrittenFields": total_overwritten_fields,
+        "skipped": total_skipped,
+        "missing": len(missing_ids),
+        "missingIds": missing_ids,
+    }
+
+    if total_errors:
+        out["error_count"] = total_errors
+        out["errorIds"] = error_ids
+
+    _emit(out, args.json)
+
+    if total_errors:
+        sys.exit(1)
+
 def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Proactive memory storage (SQLite + Vector + Markdown)."""
     text = args.text.strip()
@@ -2888,7 +3551,7 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     # 3. Append to memory/YYYY-MM-DD.md
     workspace = Path(args.workspace) if hasattr(args, "workspace") and args.workspace else DEFAULT_WORKSPACE
-    
+
     # Fallback logic for workspace memory dir
     memory_dir = workspace / "memory"
     if not memory_dir.exists():
@@ -2898,9 +3561,9 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     date_str = datetime.now().strftime("%Y-%m-%d")
     md_file = memory_dir / f"{date_str}.md"
-    
+
     md_entry = f"- [{args.category.upper()}] {text} (importance: {importance_obj['score']:.2f}, {importance_obj['label']})\n"
-    
+
     try:
         _atomic_append_file(md_file, md_entry)
         stored_path = str(md_file)
@@ -2908,6 +3571,1308 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         stored_path = f"failed ({e})"
 
     _emit({"ok": True, "id": rowid, "file": stored_path, "embedded": bool(api_key)}, args.json)
+
+
+
+
+# --- Graphic memory (GraphRAG-lite) — v0 skeleton (index-first + progressive disclosure) ---
+#
+# v0 design goals:
+# - deterministic and local-only
+# - safe-by-default (summary/snippet only; no detail_json dumps)
+# - budgeted injection payloads (IndexPack / ContextPack)
+#
+# v0 implementation note:
+# - this is NOT a full entity/KG system. It is a minimal link-graph using
+#   timeline adjacency as the neighborhood expansion primitive.
+
+
+def _graph_record_ref(obs_id: int) -> str:
+    return f"obs:{int(obs_id)}"
+
+
+def _graph_parse_record_ref(token: str) -> int:
+    t = (token or "").strip()
+    if not t:
+        raise ValueError("empty record ref")
+    if t.startswith("obs:"):
+        t = t.split(":", 1)[1]
+    return int(t)
+
+
+def _graph_fts_sanitize_query(q: str) -> str:
+    """Make ad-hoc keyword queries safer for SQLite FTS.
+
+    Why:
+    - FTS query syntax treats '-' specially. A query like `auto-capture` or
+      `capture-md` can throw `sqlite3.OperationalError: no such column: capture`.
+    - For "search bar" usage, we prefer a best-effort match over crashing.
+
+    Strategy:
+    - Quote tokens that contain '-' (turn them into phrase queries).
+    - Preserve common boolean operators (OR/AND/NOT) and parentheses.
+    """
+
+    parts = []
+    for raw in (q or "").split():
+        if not raw:
+            continue
+
+        upper = raw.upper()
+        if upper in {"OR", "AND", "NOT"}:
+            parts.append(upper)
+            continue
+
+        # Peel parentheses + lightweight trailing punctuation.
+        tok = raw
+        prefix = ""
+        while tok.startswith("("):
+            prefix += "("
+            tok = tok[1:]
+
+        suffix = ""
+        while tok.endswith(")"):
+            suffix = ")" + suffix
+            tok = tok[:-1]
+
+        trail = ""
+        while tok and tok[-1] in ",.;:":
+            trail = tok[-1] + trail
+            tok = tok[:-1]
+
+        if tok and "-" in tok and not (tok.startswith('"') and tok.endswith('"')):
+            tok = f'"{tok}"'
+
+        parts.append(prefix + tok + trail + suffix)
+
+    return " ".join(parts).strip()
+
+
+def _graph_search_rows(conn: sqlite3.Connection, query: str, limit: int) -> List[sqlite3.Row]:
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    def _run(match_q: str) -> List[sqlite3.Row]:
+        return conn.execute(
+            """
+            SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
+                   snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
+                   snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
+                   bm25(observations_fts) AS score
+            FROM observations_fts
+            JOIN observations o ON o.id = observations_fts.rowid
+            WHERE observations_fts MATCH ?
+            ORDER BY score ASC
+            LIMIT ?;
+            """,
+            (match_q, int(limit)),
+        ).fetchall()
+
+    try:
+        rows = _run(q)
+    except sqlite3.OperationalError:
+        # Common failure mode: hyphenated terms in a "search bar" style query.
+        q2 = _graph_fts_sanitize_query(q)
+        if q2 and q2 != q:
+            try:
+                rows = _run(q2)
+            except sqlite3.OperationalError:
+                rows = []
+        else:
+            rows = []
+
+    # Fallback for CJK keyword queries when FTS5 tokenizer cannot split terms well.
+    if not rows and _has_cjk(q):
+        rows = _search_cjk_fallback(conn, q, int(limit))
+
+    return rows
+
+
+def _graph_row_title(r: sqlite3.Row) -> str:
+    # Prefer human-friendly summary; fallback to snippet.
+    summary = (r["summary"] or "").replace("\n", " ").strip()
+    if summary:
+        s = summary
+    else:
+        s = (r["snippet"] or "").replace("\n", " ").strip()
+
+    if not s:
+        kind = (r["kind"] or "obs").strip()
+        tool = (r["tool_name"] or "").strip()
+        s = f"{kind}:{tool}".strip(":")
+
+    # Hard cap for safety in index packs.
+    if len(s) > 180:
+        s = s[:177] + "…"
+    return s
+
+
+def _graph_index_payload(
+    conn: sqlite3.Connection,
+    *,
+    query: str,
+    scope: Optional[str],
+    limit: int,
+    window: int,
+    suggest_limit: int,
+    budget_tokens: int,
+) -> Dict[str, Any]:
+    rows = _graph_search_rows(conn, query, limit)
+
+    # Candidate list (L0)
+    candidates: List[Dict[str, Any]] = []
+    cand_ids: List[int] = []
+    for r in rows:
+        oid = int(r["id"])
+        cand_ids.append(oid)
+        candidates.append(
+            {
+                "recordRef": _graph_record_ref(oid),
+                "id": oid,
+                "ts": r["ts"],
+                "kind": r["kind"],
+                "tool_name": r["tool_name"],
+                "score": float(r["score"]) if r["score"] is not None else None,
+                "title": _graph_row_title(r),
+                "why_relevant": "fts_match",
+            }
+        )
+
+    # Neighborhood suggestions (simple deterministic link-graph): timeline adjacency.
+    neighbor_support: Dict[int, List[int]] = {}
+    if window and cand_ids:
+        seen = set(cand_ids)
+        for oid in cand_ids:
+            lo, hi = oid - window, oid + window
+            nrows = conn.execute(
+                "SELECT id FROM observations WHERE id BETWEEN ? AND ? ORDER BY id",
+                (lo, hi),
+            ).fetchall()
+            for nr in nrows:
+                nid = int(nr[0])
+                if nid in seen:
+                    continue
+                neighbor_support.setdefault(nid, []).append(oid)
+
+    suggested_next: List[Dict[str, Any]] = []
+    if suggest_limit and neighbor_support:
+        for nid, supports in sorted(neighbor_support.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:suggest_limit]:
+            suggested_next.append(
+                {
+                    "recordRef": _graph_record_ref(nid),
+                    "id": nid,
+                    "reason": "timeline_adjacent",
+                    "support": {
+                        "from": [_graph_record_ref(x) for x in supports[:5]],
+                        "count": len(supports),
+                    },
+                }
+            )
+
+    # Build index_text (the injection payload) and enforce budget.
+    lines: List[str] = []
+    lines.append("[GRAPH_INDEX v0]")
+    lines.append(f"Query: {query}")
+    if scope:
+        lines.append(f"Scope: {scope}")
+    lines.append("")
+    lines.append("Top candidates:")
+
+    included: List[Dict[str, Any]] = []
+    for c in candidates:
+        line = f"- {c['recordRef']} [{c.get('kind')}] {c.get('tool_name') or ''} :: {c.get('title') or ''}".strip()
+        new_est = _estimate_tokens("\n".join(lines + [line]))
+        if new_est > budget_tokens and included:
+            break
+        lines.append(line)
+        included.append(c)
+
+    # Suggested expansions section (best-effort under budget)
+    if suggested_next:
+        lines.append("")
+        lines.append("Suggested next expansions:")
+        for s in suggested_next:
+            line = f"- {s['recordRef']} reason={s['reason']} from={','.join(s['support']['from'])}".strip()
+            new_est = _estimate_tokens("\n".join(lines + [line]))
+            if new_est > budget_tokens:
+                break
+            lines.append(line)
+
+    index_text = "\n".join(lines).strip() + "\n"
+
+    # Defensive hard truncation to satisfy strict budgets (even for tiny budgets).
+    max_chars = max(0, int(budget_tokens) * 4 - 3)
+    if len(index_text) > max_chars:
+        index_text = index_text[:max_chars].rstrip() + "\n"
+
+    return {
+        "kind": "openclaw-mem.graph.index.v0",
+        "ts": _utcnow_iso(),
+        "query": {"text": query, "scope": scope},
+        "budget": {
+            "budgetTokens": budget_tokens,
+            "estimatedTokens": _estimate_tokens(index_text),
+            "window": window,
+        },
+        "top_candidates": included,
+        "suggested_next_expansions": suggested_next,
+        "index_text": index_text,
+    }
+
+
+def cmd_graph_index(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    query = (args.query or "").strip()
+    if not query:
+        _emit({"error": "empty query"}, True)
+        sys.exit(2)
+
+    payload = _graph_index_payload(
+        conn,
+        query=query,
+        scope=(getattr(args, "scope", None) or "").strip() or None,
+        limit=max(1, int(getattr(args, "limit", 12))),
+        window=max(0, int(getattr(args, "window", 2))),
+        suggest_limit=max(0, int(getattr(args, "suggest_limit", 6))),
+        budget_tokens=max(1, int(getattr(args, "budget_tokens", 900))),
+    )
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+    print(payload["index_text"], end="")
+
+
+def _graph_pack_payload(
+    conn: sqlite3.Connection,
+    *,
+    raw_ids: List[str],
+    budget_tokens: int,
+    max_items: int,
+    allow_empty: bool = False,
+) -> Dict[str, Any]:
+    if not raw_ids:
+        if allow_empty:
+            return {
+                "kind": "openclaw-mem.graph.pack.v0",
+                "ts": _utcnow_iso(),
+                "budget": {
+                    "budgetTokens": budget_tokens,
+                    "estimatedTokens": 0,
+                },
+                "items": [],
+                "bundle_text": "",
+            }
+        raise ValueError("no ids")
+
+    ids: List[int] = []
+    for t in raw_ids:
+        try:
+            ids.append(_graph_parse_record_ref(t))
+        except Exception as e:
+            raise ValueError(f"bad id: {t}") from e
+
+    # Dedupe while preserving order
+    uniq: List[int] = []
+    seen: set[int] = set()
+    for i in ids:
+        if i in seen:
+            continue
+        seen.add(i)
+        uniq.append(i)
+    uniq = uniq[:max_items]
+
+    rows = conn.execute(
+        f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(uniq))})",
+        uniq,
+    ).fetchall()
+
+    row_map = {int(r["id"]): r for r in rows}
+    items: List[Dict[str, Any]] = []
+    for oid in uniq:
+        r = row_map.get(int(oid))
+        if r is None:
+            continue
+        items.append(
+            {
+                "recordRef": _graph_record_ref(oid),
+                "id": oid,
+                "ts": r["ts"],
+                "kind": r["kind"],
+                "tool_name": r["tool_name"],
+                "summary": (r["summary"] or "").replace("\n", " ").strip(),
+            }
+        )
+
+    lines: List[str] = []
+    lines.append("[GRAPH_CONTEXT v0]")
+    lines.append(f"Items: {len(items)}")
+    lines.append("")
+
+    included_items: List[Dict[str, Any]] = []
+    for idx, it in enumerate(items, 1):
+        line = f"{idx}) {it['recordRef']} ts={it.get('ts')} [{it.get('kind')}] {it.get('tool_name') or ''} :: {it.get('summary') or ''}".strip()
+        new_est = _estimate_tokens("\n".join(lines + [line]))
+        if new_est > budget_tokens and included_items:
+            break
+        lines.append(line)
+        included_items.append(it)
+
+    bundle_text = "\n".join(lines).strip() + "\n"
+
+    # Defensive hard truncation to satisfy strict budgets (even for tiny budgets).
+    max_chars = max(0, int(budget_tokens) * 4 - 3)
+    if len(bundle_text) > max_chars:
+        bundle_text = bundle_text[:max_chars].rstrip() + "\n"
+
+    return {
+        "kind": "openclaw-mem.graph.pack.v0",
+        "ts": _utcnow_iso(),
+        "budget": {
+            "budgetTokens": budget_tokens,
+            "estimatedTokens": _estimate_tokens(bundle_text),
+        },
+        "items": included_items,
+        "bundle_text": bundle_text,
+    }
+
+
+def cmd_graph_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    raw_ids = list(getattr(args, "ids", []) or [])
+    budget_tokens = max(1, int(getattr(args, "budget_tokens", 1500)))
+    max_items = max(1, int(getattr(args, "max_items", 20)))
+
+    try:
+        payload = _graph_pack_payload(
+            conn,
+            raw_ids=raw_ids,
+            budget_tokens=budget_tokens,
+            max_items=max_items,
+        )
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+    print(payload["bundle_text"], end="")
+
+
+def _graph_preflight_selection(index_payload: Dict[str, Any], take: int) -> List[str]:
+    refs: List[str] = []
+    for c in list(index_payload.get("top_candidates") or []):
+        ref = (c or {}).get("recordRef")
+        if isinstance(ref, str) and ref.strip():
+            refs.append(ref.strip())
+
+    for s in list(index_payload.get("suggested_next_expansions") or []):
+        ref = (s or {}).get("recordRef")
+        if isinstance(ref, str) and ref.strip():
+            refs.append(ref.strip())
+
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for ref in refs:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        deduped.append(ref)
+        if len(deduped) >= take:
+            break
+
+    return deduped
+
+
+def cmd_graph_preflight(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    query = (args.query or "").strip()
+    if not query:
+        _emit({"error": "empty query"}, True)
+        sys.exit(2)
+
+    scope = (getattr(args, "scope", None) or "").strip() or None
+    limit = max(1, int(getattr(args, "limit", 12)))
+    window = max(0, int(getattr(args, "window", 2)))
+    suggest_limit = max(0, int(getattr(args, "suggest_limit", 6)))
+    budget_tokens = max(1, int(getattr(args, "budget_tokens", 1200)))
+    take = max(1, int(getattr(args, "take", 12)))
+
+    index_payload = _graph_index_payload(
+        conn,
+        query=query,
+        scope=scope,
+        limit=limit,
+        window=window,
+        suggest_limit=suggest_limit,
+        budget_tokens=budget_tokens,
+    )
+
+    selected_refs = _graph_preflight_selection(index_payload, take=take)
+
+    pack_payload = _graph_pack_payload(
+        conn,
+        raw_ids=selected_refs,
+        budget_tokens=budget_tokens,
+        max_items=max(1, take),
+        allow_empty=True,
+    )
+
+    payload = {
+        "kind": "openclaw-mem.graph.preflight.v0",
+        "ts": _utcnow_iso(),
+        "query": {"text": query, "scope": scope},
+        "selection": {
+            "take": take,
+            "recordRefs": selected_refs,
+            "selectedCount": len(selected_refs),
+        },
+        "budget": {
+            "budgetTokens": budget_tokens,
+            "estimatedTokens": _estimate_tokens(pack_payload["bundle_text"]),
+        },
+        "index": {
+            "kind": index_payload.get("kind"),
+            "budget": index_payload.get("budget"),
+            "top_candidates": index_payload.get("top_candidates", []),
+            "suggested_next_expansions": index_payload.get("suggested_next_expansions", []),
+        },
+        "pack": pack_payload,
+        "items": pack_payload.get("items", []),
+        "bundle_text": pack_payload.get("bundle_text", ""),
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+    print(pack_payload.get("bundle_text", ""), end="")
+
+
+def _graph_env_bool_status(name: str, *, default: bool = False) -> Dict[str, Any]:
+    raw = os.getenv(name)
+    if raw is None:
+        return {
+            "present": False,
+            "raw": None,
+            "normalized": None,
+            "enabled": bool(default),
+            "valid": True,
+            "default": bool(default),
+        }
+
+    normalized = str(raw).strip().lower()
+    truthy = {"1", "true", "on", "yes", "y", "t"}
+    falsy = {"0", "false", "off", "no", "n", "f", ""}
+
+    if normalized in truthy:
+        enabled = True
+        valid = True
+    elif normalized in falsy:
+        enabled = False
+        valid = True
+    else:
+        enabled = bool(default)
+        valid = False
+
+    return {
+        "present": True,
+        "raw": str(raw),
+        "normalized": normalized,
+        "enabled": enabled,
+        "valid": valid,
+        "default": bool(default),
+    }
+
+
+def cmd_graph_auto_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    flags = {
+        "OPENCLAW_MEM_GRAPH_AUTO_RECALL": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_RECALL", default=False),
+        "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_CAPTURE", default=False),
+        "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD", default=False),
+    }
+
+    payload = {
+        "kind": "openclaw-mem.graph.auto-status.v0",
+        "ts": _utcnow_iso(),
+        "flags": flags,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    for name, st in flags.items():
+        raw = st.get("raw")
+        raw_show = raw if isinstance(raw, str) else "(unset)"
+        print(
+            f"{name}: enabled={str(bool(st.get('enabled'))).lower()} "
+            f"valid={str(bool(st.get('valid'))).lower()} raw={raw_show}"
+        )
+
+
+def _graph_capture_md_norm_ext(ext: str) -> str:
+    v = str(ext or "").strip().lower()
+    if not v:
+        return ""
+    if not v.startswith("."):
+        v = "." + v
+    return v
+
+
+def _graph_capture_md_includes(values: Optional[List[str]]) -> List[str]:
+    out: List[str] = []
+    for raw in list(values or []):
+        ext = _graph_capture_md_norm_ext(raw)
+        if not ext or ext in out:
+            continue
+        out.append(ext)
+    if out:
+        return out
+    return [*DEFAULT_GRAPH_CAPTURE_MD_INCLUDES]
+
+
+def _graph_capture_md_excludes(values: Optional[List[str]]) -> List[str]:
+    out: List[str] = []
+    for raw in list(values or []):
+        pat = str(raw or "").strip()
+        if not pat or pat in out:
+            continue
+        out.append(pat)
+    if out:
+        return out
+    return [*DEFAULT_GRAPH_CAPTURE_MD_EXCLUDES]
+
+
+def _graph_capture_md_is_excluded(path: Path, patterns: List[str]) -> bool:
+    raw = path.as_posix()
+    for pat in patterns:
+        if fnmatch.fnmatch(raw, pat):
+            return True
+    return False
+
+
+def _graph_capture_md_collect_files(
+    raw_paths: List[str],
+    *,
+    includes: List[str],
+    excludes: List[str],
+    max_files: int,
+) -> Tuple[List[Path], int]:
+    selected: List[Path] = []
+    seen: set[str] = set()
+    errors = 0
+
+    for raw in raw_paths:
+        p = Path(raw).expanduser().resolve()
+        if not p.exists():
+            errors += 1
+            continue
+
+        candidates: List[Path] = []
+        if p.is_file():
+            candidates = [p]
+        elif p.is_dir():
+            candidates = [x for x in p.rglob("*") if x.is_file()]
+        else:
+            errors += 1
+            continue
+
+        for fp in sorted(candidates):
+            if len(selected) >= max_files:
+                return selected, errors
+
+            abs_key = str(fp)
+            if abs_key in seen:
+                continue
+
+            ext = fp.suffix.lower()
+            if ext not in includes:
+                continue
+
+            if _graph_capture_md_is_excluded(fp, excludes):
+                continue
+
+            seen.add(abs_key)
+            selected.append(fp)
+
+    return selected, errors
+
+
+def _graph_capture_md_parse_sections(
+    text: str,
+    *,
+    min_heading_level: int,
+    max_sections: int,
+) -> List[Dict[str, Any]]:
+    if max_sections <= 0:
+        return []
+
+    heading_re = re.compile(r"^\s{0,3}(#{1,6})\s+(.*?)\s*$")
+    fence_re = re.compile(r"^\s{0,3}(```+|~~~+)")
+
+    lines = text.splitlines()
+    sections: List[Dict[str, Any]] = []
+    active: Optional[Dict[str, Any]] = None
+    in_code = False
+
+    for idx, line in enumerate(lines, 1):
+        if fence_re.match(line):
+            in_code = not in_code
+            continue
+
+        if in_code:
+            continue
+
+        m = heading_re.match(line)
+        if not m:
+            continue
+
+        if active is not None:
+            active["end_line"] = idx - 1
+            sections.append(active)
+            active = None
+
+        level = len(m.group(1))
+        heading = re.sub(r"\s+#+\s*$", "", (m.group(2) or "").strip()).strip() or "(untitled)"
+
+        if level >= min_heading_level:
+            active = {
+                "heading": heading,
+                "heading_level": level,
+                "start_line": idx,
+                "end_line": len(lines),
+            }
+
+    if active is not None:
+        active["end_line"] = len(lines)
+        sections.append(active)
+
+    return sections[:max_sections]
+
+
+def _graph_capture_md_first_lines_for_fingerprint(
+    lines: List[str],
+    *,
+    start_line: int,
+    end_line: int,
+) -> List[str]:
+    fence_re = re.compile(r"^\s{0,3}(```+|~~~+)")
+    out: List[str] = []
+    in_code = False
+
+    begin = max(start_line + 1, 1)
+    end = min(end_line, len(lines))
+    for i in range(begin, end + 1):
+        raw = lines[i - 1]
+        if fence_re.match(raw):
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+
+        v = raw.strip()
+        if not v:
+            continue
+
+        out.append(v)
+        if len(out) >= 5:
+            break
+
+    return out
+
+
+def _graph_capture_md_summary(path: Path, heading: str) -> str:
+    heading_text = re.sub(r"\s+", " ", (heading or "").replace("\n", " ")).strip() or "(untitled)"
+    summary = f"[MD] {path.name}#{heading_text}"
+    if len(summary) > 180:
+        return summary[:177] + "…"
+    return summary
+
+
+def _graph_capture_md_git_root(file_path: Path, cache: Dict[str, Optional[Path]]) -> Optional[Path]:
+    dir_key = str(file_path.parent.resolve())
+    if dir_key in cache:
+        return cache[dir_key]
+
+    p = subprocess.run(
+        ["git", "-C", str(file_path.parent), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode != 0:
+        cache[dir_key] = None
+        return None
+
+    raw = (p.stdout or "").strip()
+    if not raw:
+        cache[dir_key] = None
+        return None
+
+    root = Path(raw).expanduser().resolve()
+    cache[dir_key] = root
+    return root
+
+
+def _graph_capture_md_seen(conn: sqlite3.Connection, fingerprint: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM graph_capture_md_seen WHERE fingerprint = ? LIMIT 1",
+        (fingerprint,),
+    ).fetchone()
+    return row is not None
+
+
+def _graph_capture_md_mark_seen(
+    conn: sqlite3.Connection,
+    *,
+    fingerprint: str,
+    source_path: str,
+    mtime: float,
+) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO graph_capture_md_seen (fingerprint, source_path, mtime) VALUES (?, ?, ?)",
+        (fingerprint, source_path, float(mtime)),
+    )
+
+
+def cmd_graph_capture_md(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    raw_paths = list(getattr(args, "path", []) or [])
+    if not raw_paths:
+        _emit({"error": "missing --path"}, True)
+        sys.exit(2)
+
+    includes = _graph_capture_md_includes(getattr(args, "include", None))
+    excludes = _graph_capture_md_excludes(getattr(args, "exclude_glob", None))
+    max_files = max(1, int(getattr(args, "max_files", 200) or 200))
+    max_sections_per_file = max(1, int(getattr(args, "max_sections_per_file", 50) or 50))
+    min_heading_level = max(1, int(getattr(args, "min_heading_level", 2) or 2))
+    since_hours = max(0.0, float(getattr(args, "since_hours", 24) or 24))
+
+    state_path = Path(
+        os.path.expanduser(
+            getattr(args, "state", None) or DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH
+        )
+    )
+
+    state = _load_triage_state(state_path)
+    if not isinstance(state, dict):
+        state = {}
+    files_state = state.get("files") if isinstance(state.get("files"), dict) else {}
+
+    since_ts = datetime.now(timezone.utc).timestamp() - (since_hours * 3600.0)
+
+    files, collect_errors = _graph_capture_md_collect_files(
+        raw_paths,
+        includes=includes,
+        excludes=excludes,
+        max_files=max_files,
+    )
+
+    totals = {
+        "scanned_files": 0,
+        "changed_files": 0,
+        "inserted": 0,
+        "skipped_existing": 0,
+        "errors": int(collect_errors),
+    }
+
+    per_path: List[Dict[str, Any]] = []
+    for raw in raw_paths:
+        p = Path(raw).expanduser().resolve()
+        per_path.append(
+            {
+                "path": str(p),
+                "scanned_files": 0,
+                "changed_files": 0,
+                "inserted": 0,
+                "skipped_existing": 0,
+                "errors": 0 if p.exists() else 1,
+            }
+        )
+
+    git_root_cache: Dict[str, Optional[Path]] = {}
+    file_to_group_idx: Dict[str, int] = {}
+    for idx, item in enumerate(per_path):
+        group_path = Path(item["path"])
+        for fp in files:
+            try:
+                if fp == group_path or fp.is_relative_to(group_path):
+                    file_to_group_idx[str(fp)] = idx
+            except Exception:
+                continue
+
+    for fp in files:
+        abs_path = str(fp.resolve())
+        totals["scanned_files"] += 1
+
+        group_idx = file_to_group_idx.get(abs_path)
+        if group_idx is not None:
+            per_path[group_idx]["scanned_files"] += 1
+
+        try:
+            st = fp.stat()
+            mtime = float(st.st_mtime)
+        except Exception:
+            totals["errors"] += 1
+            if group_idx is not None:
+                per_path[group_idx]["errors"] += 1
+            continue
+
+        prev = files_state.get(abs_path) if isinstance(files_state.get(abs_path), dict) else None
+        prev_mtime = None
+        if isinstance(prev, dict) and isinstance(prev.get("mtime"), (int, float)):
+            prev_mtime = float(prev.get("mtime"))
+
+        if prev_mtime is None:
+            should_scan = mtime >= since_ts
+        else:
+            should_scan = mtime > prev_mtime
+
+        if not should_scan:
+            continue
+
+        totals["changed_files"] += 1
+        if group_idx is not None:
+            per_path[group_idx]["changed_files"] += 1
+
+        try:
+            text = fp.read_text(encoding="utf-8")
+            raw_bytes = text.encode("utf-8")
+            lines = text.splitlines()
+            file_hash = hashlib.sha1(raw_bytes).hexdigest()
+
+            sections = _graph_capture_md_parse_sections(
+                text,
+                min_heading_level=min_heading_level,
+                max_sections=max_sections_per_file,
+            )
+
+            for sec in sections:
+                heading = str(sec.get("heading") or "(untitled)")
+                first_lines = _graph_capture_md_first_lines_for_fingerprint(
+                    lines,
+                    start_line=int(sec.get("start_line") or 1),
+                    end_line=int(sec.get("end_line") or len(lines)),
+                )
+                material = "\n".join([heading, *first_lines])
+                fingerprint = hashlib.sha1(material.encode("utf-8")).hexdigest()
+
+                if _graph_capture_md_seen(conn, fingerprint):
+                    totals["skipped_existing"] += 1
+                    if group_idx is not None:
+                        per_path[group_idx]["skipped_existing"] += 1
+                    continue
+
+                git_root = _graph_capture_md_git_root(fp, git_root_cache)
+                rel_path = None
+                if git_root is not None:
+                    try:
+                        rel_path = fp.resolve().relative_to(git_root).as_posix()
+                    except Exception:
+                        rel_path = None
+
+                obs = {
+                    "kind": "note",
+                    "tool_name": "graph.capture-md",
+                    "summary": _graph_capture_md_summary(fp, heading),
+                    "detail": {
+                        "source_path": abs_path,
+                        "rel_path": rel_path,
+                        "heading": heading,
+                        "heading_level": int(sec.get("heading_level") or 0),
+                        "start_line": int(sec.get("start_line") or 1),
+                        "end_line": int(sec.get("end_line") or len(lines)),
+                        "mtime": mtime,
+                        "file_hash": file_hash,
+                        "section_fingerprint": fingerprint,
+                    },
+                }
+                _insert_observation(conn, obs)
+                _graph_capture_md_mark_seen(
+                    conn,
+                    fingerprint=fingerprint,
+                    source_path=abs_path,
+                    mtime=mtime,
+                )
+
+                totals["inserted"] += 1
+                if group_idx is not None:
+                    per_path[group_idx]["inserted"] += 1
+
+            files_state[abs_path] = {
+                "mtime": mtime,
+                "updated_at": _utcnow_iso(),
+            }
+        except Exception:
+            totals["errors"] += 1
+            if group_idx is not None:
+                per_path[group_idx]["errors"] += 1
+
+    conn.commit()
+
+    state["files"] = files_state
+    _atomic_write_json(state_path, state)
+
+    payload = {
+        "kind": "openclaw-mem.graph.capture-md.v0",
+        "ts": _utcnow_iso(),
+        "state_path": str(state_path),
+        "since_hours": since_hours,
+        "scanned_files": totals["scanned_files"],
+        "changed_files": totals["changed_files"],
+        "inserted": totals["inserted"],
+        "skipped_existing": totals["skipped_existing"],
+        "errors": totals["errors"],
+    }
+
+    if bool(args.json):
+        payload["paths"] = per_path
+        _emit(payload, True)
+    else:
+        print(
+            " ".join(
+                [
+                    f"scanned_files={payload['scanned_files']}",
+                    f"changed_files={payload['changed_files']}",
+                    f"inserted={payload['inserted']}",
+                    f"skipped_existing={payload['skipped_existing']}",
+                    f"errors={payload['errors']}",
+                ]
+            )
+        )
+
+    if int(totals["errors"]) > 0:
+        sys.exit(1)
+
+
+
+def _graph_capture_git_default_since_iso(hours: float) -> str:
+    dt = datetime.now(timezone.utc) - timedelta(hours=max(0.0, float(hours)))
+    return dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _graph_capture_git_run_log(repo_path: Path, *, since_iso: str, max_commits: int) -> List[Dict[str, Any]]:
+    cmd = [
+        "git",
+        "-C",
+        str(repo_path),
+        "log",
+        f"--since={since_iso}",
+        f"--max-count={max(1, int(max_commits))}",
+        "--date=iso-strict",
+        "--pretty=format:%H%x1f%aI%x1f%s%x1e",
+        "--name-only",
+    ]
+
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError((p.stderr or p.stdout or "git log failed").strip())
+
+    out: List[Dict[str, Any]] = []
+    raw = p.stdout or ""
+    for chunk in raw.split("\x1e"):
+        part = chunk.strip("\n")
+        if not part.strip():
+            continue
+        lines = part.splitlines()
+        if not lines:
+            continue
+        header = lines[0]
+        cols = header.split("\x1f", 2)
+        if len(cols) < 3:
+            continue
+        sha, author_ts, subject = cols
+
+        files: List[str] = []
+        seen_files: set[str] = set()
+        for f in lines[1:]:
+            ff = f.strip()
+            if not ff or ff in seen_files:
+                continue
+            seen_files.add(ff)
+            files.append(ff)
+
+        out.append(
+            {
+                "sha": sha.strip(),
+                "author_ts": author_ts.strip(),
+                "subject": subject.strip(),
+                "files": files,
+            }
+        )
+
+    return out
+
+def _graph_capture_git_is_repo(path: Path) -> bool:
+    p = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True,
+        text=True,
+    )
+    return p.returncode == 0 and (p.stdout or "").strip() == "true"
+
+
+def _graph_capture_git_seen(conn: sqlite3.Connection, repo: str, sha: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM graph_capture_git_seen WHERE repo = ? AND sha = ? LIMIT 1",
+        (repo, sha),
+    ).fetchone()
+    return row is not None
+
+
+def _graph_capture_git_mark_seen(conn: sqlite3.Connection, repo: str, sha: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO graph_capture_git_seen (repo, sha, captured_at) VALUES (?, ?, ?)",
+        (repo, sha, _utcnow_iso()),
+    )
+
+
+def _graph_capture_git_observation_exists(conn: sqlite3.Connection, repo: str, sha: str) -> bool:
+    try:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM observations
+            WHERE tool_name = 'graph.capture-git'
+              AND json_extract(detail_json, '$.repo') = ?
+              AND json_extract(detail_json, '$.sha') = ?
+            LIMIT 1
+            """,
+            (repo, sha),
+        ).fetchone()
+        return row is not None
+    except sqlite3.OperationalError:
+        rows = conn.execute(
+            "SELECT detail_json FROM observations WHERE tool_name = 'graph.capture-git'"
+        ).fetchall()
+        for r in rows:
+            try:
+                obj = json.loads(r["detail_json"] or "{}")
+            except Exception:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            if str(obj.get("repo") or "") == repo and str(obj.get("sha") or "") == sha:
+                return True
+        return False
+
+
+def cmd_graph_capture_git(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    repos = list(getattr(args, "repo", []) or [])
+    if not repos:
+        _emit({"error": "missing --repo"}, True)
+        sys.exit(2)
+
+    since_hours = max(0.0, float(getattr(args, "since", 24) or 24))
+    max_commits = max(1, int(getattr(args, "max_commits", 50) or 50))
+    state_path = Path(
+        os.path.expanduser(
+            getattr(args, "state", None) or DEFAULT_GRAPH_CAPTURE_STATE_PATH
+        )
+    )
+
+    state = _load_triage_state(state_path)
+    if not isinstance(state, dict):
+        state = {}
+    repos_state = state.get("repos") if isinstance(state.get("repos"), dict) else {}
+
+    results: List[Dict[str, Any]] = []
+    had_errors = False
+
+    for repo_raw in repos:
+        repo_path = Path(repo_raw).expanduser().resolve()
+        repo_key = str(repo_path)
+        repo_label = repo_path.name or repo_key
+
+        summary = {
+            "repo": repo_key,
+            "inserted": 0,
+            "skipped_existing": 0,
+            "errors": 0,
+        }
+
+        if not repo_path.exists():
+            summary["errors"] = 1
+            had_errors = True
+            results.append(summary)
+            continue
+
+        if not _graph_capture_git_is_repo(repo_path):
+            summary["errors"] = 1
+            had_errors = True
+            results.append(summary)
+            continue
+
+        repo_prev = repos_state.get(repo_key) if isinstance(repos_state.get(repo_key), dict) else {}
+        since_iso = str(repo_prev.get("last_author_ts") or _graph_capture_git_default_since_iso(since_hours))
+
+        try:
+            commits = _graph_capture_git_run_log(
+                repo_path,
+                since_iso=since_iso,
+                max_commits=max_commits,
+            )
+        except Exception:
+            summary["errors"] = 1
+            had_errors = True
+            results.append(summary)
+            continue
+
+        newest_author_ts = str(repo_prev.get("last_author_ts") or "")
+        newest_sha = str(repo_prev.get("last_sha") or "")
+
+        # Process old->new for deterministic accumulation.
+        for c in reversed(commits):
+            sha = str(c.get("sha") or "").strip()
+            if not sha:
+                continue
+            author_ts = str(c.get("author_ts") or "").strip() or _utcnow_iso()
+            subject = str(c.get("subject") or "").strip() or "(no subject)"
+            files = list(c.get("files") or [])
+
+            already_seen = _graph_capture_git_seen(conn, repo_key, sha)
+            if not already_seen and _graph_capture_git_observation_exists(conn, repo_key, sha):
+                _graph_capture_git_mark_seen(conn, repo_key, sha)
+                already_seen = True
+
+            if already_seen:
+                summary["skipped_existing"] += 1
+            else:
+                obs = {
+                    "ts": author_ts,
+                    "kind": "note",
+                    "tool_name": "graph.capture-git",
+                    "summary": f"[GIT] {repo_label} {sha[:7]} {subject}",
+                    "detail": {
+                        "repo": repo_key,
+                        "sha": sha,
+                        "author_ts": author_ts,
+                        "files": files,
+                    },
+                }
+                _insert_observation(conn, obs)
+                _graph_capture_git_mark_seen(conn, repo_key, sha)
+                summary["inserted"] += 1
+
+            if author_ts > newest_author_ts:
+                newest_author_ts = author_ts
+                newest_sha = sha
+
+        repos_state[repo_key] = {
+            "last_author_ts": newest_author_ts or since_iso,
+            "last_sha": newest_sha,
+            "updated_at": _utcnow_iso(),
+        }
+
+        conn.commit()
+        results.append(summary)
+
+    state["repos"] = repos_state
+    _atomic_write_json(state_path, state)
+
+    totals = {
+        "inserted": sum(int(r["inserted"]) for r in results),
+        "skipped_existing": sum(int(r["skipped_existing"]) for r in results),
+        "errors": sum(int(r["errors"]) for r in results),
+    }
+
+    payload = {
+        "kind": "openclaw-mem.graph.capture-git.v0",
+        "ts": _utcnow_iso(),
+        "state_path": str(state_path),
+        "since_hours": since_hours,
+        "max_commits": max_commits,
+        "repos": results,
+        "totals": totals,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+    else:
+        for r in results:
+            print(
+                f"{r['repo']}: inserted={r['inserted']} skipped_existing={r['skipped_existing']} errors={r['errors']}"
+            )
+
+    if had_errors:
+        sys.exit(1)
+
+
+def cmd_graph_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    query = (args.query or "").strip()
+    to_path = (args.to or "").strip()
+    scope = (getattr(args, "scope", None) or "").strip() or None
+
+    if not query:
+        _emit({"error": "empty query"}, True)
+        sys.exit(2)
+    if not to_path:
+        _emit({"error": "missing --to"}, True)
+        sys.exit(2)
+
+    limit = max(1, int(getattr(args, "limit", 12)))
+    window = max(0, int(getattr(args, "window", 2)))
+
+    rows = _graph_search_rows(conn, query, limit)
+    cand_ids = [int(r["id"]) for r in rows]
+
+    nodes: Dict[int, Dict[str, Any]] = {}
+    edges: List[Dict[str, Any]] = []
+
+    def add_node(oid: int) -> None:
+        if oid in nodes:
+            return
+        r = conn.execute(
+            "SELECT id, ts, kind, tool_name, summary FROM observations WHERE id=?",
+            (oid,),
+        ).fetchone()
+        if not r:
+            return
+        nodes[oid] = {
+            "id": _graph_record_ref(oid),
+            "type": "observation",
+            "project": scope,
+            "title": (r["summary"] or "").replace("\n", " ").strip()[:180],
+            "provenance": {"ts": r["ts"], "kind": r["kind"], "tool_name": r["tool_name"]},
+        }
+
+    for oid in cand_ids:
+        add_node(oid)
+
+    if window and cand_ids:
+        for oid in cand_ids:
+            lo, hi = oid - window, oid + window
+            nrows = conn.execute(
+                "SELECT id FROM observations WHERE id BETWEEN ? AND ? ORDER BY id",
+                (lo, hi),
+            ).fetchall()
+            for nr in nrows:
+                nid = int(nr[0])
+                add_node(nid)
+                if nid == oid:
+                    continue
+                edges.append(
+                    {
+                        "src": _graph_record_ref(oid),
+                        "dst": _graph_record_ref(nid),
+                        "type": "timeline_adjacent",
+                        "provenance": {"window": window},
+                    }
+                )
+
+    graph = {
+        "kind": "openclaw-mem.graph.export.v0",
+        "ts": _utcnow_iso(),
+        "query": {"text": query, "scope": scope},
+        "nodes": list(nodes.values()),
+        "edges": edges,
+    }
+
+    out_path = Path(to_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    payload = {"ok": True, "to": str(out_path), "nodes": len(graph["nodes"]), "edges": len(edges)}
+    _emit(payload, bool(args.json))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2937,6 +4902,9 @@ def build_parser() -> argparse.ArgumentParser:
         "  export OPENAI_API_KEY=sk-...\n"
         "  openclaw-mem embed --limit 500 --json\n"
         "  openclaw-mem vsearch \"gateway timeout\" --limit 10 --json\n"
+        "\n"
+        "  # Recall/writeback (Phase 5)\n"
+        "  openclaw-mem writeback-lancedb --db mem.sqlite --lancedb ~/.openclaw/memory/lancedb --table memories --limit 50 --dry-run\n"
         "\n"
         "  # Hybrid Search & Store (Phase 4)\n"
         "  openclaw-mem hybrid \"python error\" --limit 5 --json\n"
@@ -3132,6 +5100,74 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)
 
+
+    # Graphic memory (GraphRAG-lite) — v0 command group
+    sp = sub.add_parser("graph", help="Graphic memory helpers (index-first graph recall + packing)")
+    sp.add_argument("--db", default=None, help="SQLite DB path")
+    sp.add_argument(
+        "--json",
+        dest="json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true). Use --no-json for text-only payload.",
+    )
+    gsub = sp.add_subparsers(dest="graph_cmd", required=True)
+
+    g = gsub.add_parser("index", help="Build an L0 IndexPack for a query (budgeted, injection-ready)")
+    g.add_argument("query", help="Query text")
+    g.add_argument("--scope", help="Optional project/scope hint (string; v0 is advisory)")
+    g.add_argument("--limit", type=int, default=12, help="Max candidate hits to consider (default: 12)")
+    g.add_argument("--window", type=int, default=2, help="Timeline window for neighborhood suggestions (default: 2)")
+    g.add_argument("--suggest-limit", dest="suggest_limit", type=int, default=6, help="Max suggested expansions (default: 6)")
+    g.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=900, help="Token budget for index_text (default: 900)")
+    g.set_defaults(func=cmd_graph_index)
+
+    g = gsub.add_parser("pack", help="Build an L1 ContextPack from selected recordRefs/ids (safe-by-default)")
+    g.add_argument("ids", nargs="+", help="Record refs (e.g., obs:123) or numeric ids")
+    g.add_argument("--max-items", dest="max_items", type=int, default=20, help="Max items to include (default: 20)")
+    g.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1500, help="Token budget for bundle_text (default: 1500)")
+    g.set_defaults(func=cmd_graph_pack)
+
+    g = gsub.add_parser("preflight", help="Run index+selection+pack in one deterministic step")
+    g.add_argument("query", help="Query text")
+    g.add_argument("--scope", help="Optional project/scope hint (string; v0 is advisory)")
+    g.add_argument("--limit", type=int, default=12, help="Max candidate hits to consider (default: 12)")
+    g.add_argument("--window", type=int, default=2, help="Timeline window for neighborhood suggestions (default: 2)")
+    g.add_argument("--suggest-limit", dest="suggest_limit", type=int, default=6, help="Max suggested expansions (default: 6)")
+    g.add_argument("--take", type=int, default=12, help="Max selected refs to pack (default: 12)")
+    g.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle_text (default: 1200)")
+    g.set_defaults(func=cmd_graph_preflight, json=False)
+
+    g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
+    g.set_defaults(func=cmd_graph_auto_status)
+
+    g = gsub.add_parser("capture-git", help="Capture recent git commits as observations (idempotent)")
+    g.add_argument("--repo", action="append", required=True, help="Git repository path (repeatable)")
+    g.add_argument("--since", type=float, default=24, help="Fallback lookback window in hours (default: 24)")
+    g.add_argument("--state", default=DEFAULT_GRAPH_CAPTURE_STATE_PATH, help=f"Capture state file (default: {DEFAULT_GRAPH_CAPTURE_STATE_PATH})")
+    g.add_argument("--max-commits", dest="max_commits", type=int, default=50, help="Max commits per repo per run (default: 50)")
+    g.set_defaults(func=cmd_graph_capture_git)
+
+    g = gsub.add_parser("capture-md", help="Capture Markdown heading sections as index-only observations (idempotent)")
+    g.add_argument("--path", action="append", required=True, help="Markdown file/directory path (repeatable)")
+    g.add_argument("--include", action="append", default=None, help="File extension filter (repeatable, default: .md)")
+    g.add_argument("--exclude-glob", dest="exclude_glob", action="append", default=None, help="Exclude glob pattern (repeatable)")
+    g.add_argument("--max-files", dest="max_files", type=int, default=200, help="Max files to inspect per run (default: 200)")
+    g.add_argument("--max-sections-per-file", dest="max_sections_per_file", type=int, default=50, help="Max heading sections captured per file (default: 50)")
+    g.add_argument("--min-heading-level", dest="min_heading_level", type=int, default=2, help="Capture headings at this level or deeper (default: 2)")
+    g.add_argument("--state", default=DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH, help=f"Capture state file (default: {DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH})")
+    g.add_argument("--since-hours", dest="since_hours", type=float, default=24, help="Fallback lookback window in hours for first scan (default: 24)")
+    g.set_defaults(func=cmd_graph_capture_md)
+
+    g = gsub.add_parser("export", help="Export a small graph.json artifact around query hits (portable artifact)")
+    g.add_argument("--query", required=True, help="Query text")
+    g.add_argument("--scope", help="Optional project/scope hint (string; v0 is advisory)")
+    g.add_argument("--to", required=True, help="Output path for graph.json")
+    g.add_argument("--limit", type=int, default=12)
+    g.add_argument("--window", type=int, default=2)
+    g.set_defaults(func=cmd_graph_export)
+
+
     sp = sub.add_parser("store", help="Proactively store a memory")
     add_common(sp)
     sp.add_argument("text", help="Memory content")
@@ -3239,6 +5275,37 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--index-to", default=None, help=f"Index output path (default: {DEFAULT_INDEX_PATH})")
     sp.add_argument("--index-limit", type=int, default=5000, help="Index: max observations to include")
     sp.set_defaults(func=cmd_harvest)
+
+    sp = sub.add_parser("writeback-lancedb", help="Write graded metadata back into LanceDB rows")
+    add_common(sp)
+    sp.add_argument("--lancedb", required=True, help="LanceDB directory path")
+    sp.add_argument("--table", required=True, help="LanceDB table name")
+    sp.add_argument("--limit", type=int, default=50, help="Max SQLite rows to inspect (default: 50)")
+    sp.add_argument(
+        "--batch",
+        type=int,
+        default=25,
+        help="Batch size for node writeback calls (default: 25)",
+    )
+    sp.add_argument(
+        "--force",
+        "--overwrite",
+        dest="force",
+        action="store_true",
+        default=False,
+        help="Overwrite existing metadata fields when incoming values are available",
+    )
+    sp.add_argument(
+        "--force-fields",
+        dest="force_fields",
+        default=None,
+        help=(
+            "Comma-separated list of fields allowed to be overwritten when --force is set "
+            "(importance, importance_label, scope, category, trust_tier)."
+        ),
+    )
+    sp.add_argument("--dry-run", action="store_true", help="Dry-run mode: show receipts without writing")
+    sp.set_defaults(func=cmd_writeback_lancedb)
 
     return p
 

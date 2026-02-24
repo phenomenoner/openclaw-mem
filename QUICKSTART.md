@@ -148,8 +148,8 @@ uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --j
 
 Task matching rules in `--mode tasks` are deterministic:
 - `kind == "task"`, or
-- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`), with optional leading markdown list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]`) and optional ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
-- Example formats: `TODO: rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`.
+- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`), with optional leading markdown wrappers: blockquotes (`>`), list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
+- Example formats: `TODO: rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`.
 - Example run:
 
 ```bash
@@ -157,6 +157,58 @@ uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --i
 ```
 
 ---
+
+
+## Step 7: Autograde toggle (optional)
+
+`openclaw-mem` can auto-score importance during ingest/harvest with `heuristic-v1`.
+
+Enable per-command:
+
+```bash
+OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+```
+
+Disable for a one-off run (kill-switch):
+
+```bash
+OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+```
+
+Or override only this command:
+
+```bash
+uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
+```
+
+## Step 8: Graphic Memory automation knobs (optional, dev)
+
+Graphic Memory automation toggles are opt-in (default OFF):
+
+- `OPENCLAW_MEM_GRAPH_AUTO_RECALL=1` for deterministic preflight recall packs
+- `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1` for recurring git commit capture
+- `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1` for markdown heading indexing
+
+Inspect effective toggle state:
+
+```bash
+uv run python -m openclaw_mem graph auto-status --json
+```
+
+Examples:
+
+```bash
+# Preflight recall pack (bounded context bundle)
+OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
+
+# Capture recent repo commits as observations
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
+
+# Capture markdown heading sections (index-only)
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
+```
+
+Spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 
 ## Next steps
 
@@ -166,6 +218,7 @@ uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --i
 - Deployment: `docs/deployment.md`
 - Ecosystem fit: `docs/ecosystem-fit.md`
 - Changes/features: `CHANGELOG.md`
+- Graphic Memory knobs/spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 
 ## Tests
 

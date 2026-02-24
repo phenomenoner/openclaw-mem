@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend
+from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
 
 
 class TestCliM0(unittest.TestCase):
@@ -46,6 +46,11 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("(TASK): review PR"))
         self.assertTrue(_summary_has_task_marker("- [ ] TODO file patch"))
 
+    def test_summary_has_task_marker_accepts_marker_only_forms(self):
+        self.assertTrue(_summary_has_task_marker("TODO"))
+        self.assertTrue(_summary_has_task_marker("[TASK]"))
+        self.assertTrue(_summary_has_task_marker("(REMINDER)"))
+
     def test_summary_has_task_marker_accepts_bracket_wrapped_marker(self):
         self.assertTrue(_summary_has_task_marker("[TODO] buy milk"))
         self.assertTrue(_summary_has_task_marker("(task): clean desk"))
@@ -55,6 +60,8 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("- TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("* [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("+ TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("> TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("> > [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("• [x] [REMINDER] renew domain"))
         self.assertTrue(_summary_has_task_marker("‣ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("∙ [ ] TASK: clean desk"))
@@ -72,6 +79,8 @@ class TestCliM0(unittest.TestCase):
     def test_summary_has_task_marker_accepts_nested_prefix_combinations(self):
         self.assertTrue(_summary_has_task_marker("* (1) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker("• （２） [x] [TASK] rotate notes"))
+        self.assertTrue(_summary_has_task_marker("> - a) [ ] TODO: clean desk"))
+        self.assertTrue(_summary_has_task_marker("- > (iv) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker("- a) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker("- (iv) [ ] TODO: clean desk"))
 
@@ -82,6 +91,8 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("[TODO]clean old notes"))
         self.assertFalse(_summary_has_task_marker("-TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("+TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker(">TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker(">>TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("‣TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("·TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("[x]TODO clean old notes"))
@@ -111,6 +122,377 @@ class TestCliM0(unittest.TestCase):
 
         self.assertTrue(merged_before)
         self.assertTrue(merged_after)
+
+    def test_graph_parser_can_parse_subcommands(self):
+        a = build_parser().parse_args(["graph", "index", "hello"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "index")
+        self.assertEqual(a.query, "hello")
+
+        a = build_parser().parse_args(["graph", "pack", "obs:1"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "pack")
+        self.assertEqual(a.ids, ["obs:1"])
+
+        a = build_parser().parse_args(["graph", "preflight", "hello"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "preflight")
+        self.assertEqual(a.query, "hello")
+
+        a = build_parser().parse_args(["graph", "auto-status"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "auto-status")
+
+        a = build_parser().parse_args(["graph", "capture-git", "--repo", "/tmp/repo"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "capture-git")
+        self.assertEqual(a.repo, ["/tmp/repo"])
+
+        a = build_parser().parse_args(["graph", "capture-md", "--path", "/tmp/notes"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "capture-md")
+        self.assertEqual(a.path, ["/tmp/notes"])
+
+        a = build_parser().parse_args(["graph", "export", "--query", "hello", "--to", "/tmp/graph.json"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "export")
+        self.assertEqual(a.query, "hello")
+
+
+    def test_writeback_lancedb_parser_accepts_flags(self):
+        a = build_parser().parse_args([
+            "writeback-lancedb",
+            "--db",
+            "/tmp/sidecar.sqlite",
+            "--lancedb",
+            "/tmp/lancedb",
+            "--table",
+            "memories",
+            "--limit",
+            "11",
+            "--batch",
+            "7",
+            "--dry-run",
+            "--force",
+            "--force-fields",
+            "importance,trust_tier,category",
+        ])
+
+        self.assertEqual(a.cmd, "writeback-lancedb")
+        self.assertEqual(a.db, "/tmp/sidecar.sqlite")
+        self.assertEqual(a.lancedb, "/tmp/lancedb")
+        self.assertEqual(a.table, "memories")
+        self.assertEqual(a.limit, 11)
+        self.assertEqual(a.batch, 7)
+        self.assertTrue(a.dry_run)
+        self.assertTrue(a.force)
+        self.assertEqual(a.force_fields, "importance,trust_tier,category")
+
+    def test_graph_index_and_pack_smoke_budgeted(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "tool",
+                        "tool_name": "exec",
+                        "summary": "alpha one",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "tool",
+                        "tool_name": "read",
+                        "summary": "beta two",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:02:00Z",
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "alpha three",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        # graph index
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "alpha",
+                "scope": None,
+                "limit": 8,
+                "window": 1,
+                "suggest_limit": 3,
+                "budget_tokens": 20,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_index(conn, args)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.index.v0")
+        self.assertIn("index_text", out)
+        self.assertLessEqual(out["budget"]["estimatedTokens"], out["budget"]["budgetTokens"])
+
+        # graph pack
+        args = type(
+            "Args",
+            (),
+            {
+                "ids": ["obs:1", "2"],
+                "max_items": 20,
+                "budget_tokens": 30,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_pack(conn, args)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.pack.v0")
+        self.assertIn("bundle_text", out)
+        self.assertIn("obs:1", out["bundle_text"])
+
+        conn.close()
+
+    def test_graph_preflight_smoke_selects_refs_and_respects_budget(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "tool",
+                        "tool_name": "exec",
+                        "summary": "alpha one",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "tool",
+                        "tool_name": "read",
+                        "summary": "alpha two",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:02:00Z",
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "beta three",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "alpha",
+                "scope": None,
+                "limit": 8,
+                "window": 1,
+                "suggest_limit": 3,
+                "budget_tokens": 25,
+                "take": 12,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_preflight(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.preflight.v0")
+        self.assertIn("bundle_text", out)
+        self.assertIn("obs:", out["bundle_text"])
+        self.assertLessEqual(out["budget"]["estimatedTokens"], out["budget"]["budgetTokens"])
+        self.assertGreaterEqual(len(out["selection"]["recordRefs"]), 1)
+
+        conn.close()
+
+
+    def test_graph_auto_status_reports_flags_and_invalid_values(self):
+        from unittest.mock import patch
+
+        conn = _connect(":memory:")
+
+        args = type("Args", (), {"json": True})()
+        with patch.dict(
+            "os.environ",
+            {
+                "OPENCLAW_MEM_GRAPH_AUTO_RECALL": "1",
+                "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": "off",
+                "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": "maybe",
+            },
+            clear=False,
+        ):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_auto_status(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.auto-status.v0")
+
+        recall = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_RECALL"]
+        self.assertTrue(recall["enabled"])
+        self.assertTrue(recall["valid"])
+
+        capture = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_CAPTURE"]
+        self.assertFalse(capture["enabled"])
+        self.assertTrue(capture["valid"])
+
+        capture_md = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD"]
+        self.assertFalse(capture_md["enabled"])
+        self.assertFalse(capture_md["valid"])
+
+        conn.close()
+
+    def test_graph_capture_git_errors_cleanly_when_repo_missing(self):
+        import tempfile
+
+        conn = _connect(":memory:")
+        missing_repo = "/tmp/openclaw-mem-not-a-repo"
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "repo": [missing_repo],
+                "since": 24,
+                "state": state_path,
+                "max_commits": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_graph_capture_git(conn, args)
+
+        self.assertEqual(cm.exception.code, 1)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["totals"]["errors"], 1)
+        self.assertEqual(out["repos"][0]["inserted"], 0)
+
+        conn.close()
+
+    def test_graph_capture_md_smoke_is_index_only_and_idempotent(self):
+        import os
+        import tempfile
+        import time
+
+        conn = _connect(":memory:")
+
+        with tempfile.TemporaryDirectory() as td:
+            md_path = os.path.join(td, "notes.md")
+            state_path = os.path.join(td, "graph-capture-md-state.json")
+
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "# Title\n\n"
+                    "## Alpha\n"
+                    "first line\n"
+                    "```\n"
+                    "## hidden\n"
+                    "```\n\n"
+                    "### Beta\n"
+                    "second line\n"
+                )
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "path": [td],
+                    "include": [".md"],
+                    "exclude_glob": ["**/node_modules/**", "**/.venv/**", "**/.git/**", "**/dist/**"],
+                    "max_files": 200,
+                    "max_sections_per_file": 50,
+                    "min_heading_level": 2,
+                    "state": state_path,
+                    "since_hours": 24,
+                    "json": True,
+                },
+            )()
+
+            buf1 = io.StringIO()
+            with redirect_stdout(buf1):
+                cmd_graph_capture_md(conn, args)
+
+            out1 = json.loads(buf1.getvalue())
+            self.assertEqual(out1["inserted"], 2)
+            self.assertEqual(out1["skipped_existing"], 0)
+            self.assertEqual(out1["errors"], 0)
+
+            now = time.time() + 2.0
+            os.utime(md_path, (now, now))
+
+            buf2 = io.StringIO()
+            with redirect_stdout(buf2):
+                cmd_graph_capture_md(conn, args)
+
+            out2 = json.loads(buf2.getvalue())
+            self.assertEqual(out2["changed_files"], 1)
+            self.assertEqual(out2["inserted"], 0)
+            self.assertEqual(out2["skipped_existing"], 2)
+
+            rows = conn.execute(
+                "SELECT summary, detail_json FROM observations WHERE tool_name = 'graph.capture-md' ORDER BY id"
+            ).fetchall()
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(all(r["summary"].startswith("[MD] notes.md#") for r in rows))
+
+            detail = json.loads(rows[0]["detail_json"])
+            self.assertIn("source_path", detail)
+            self.assertIn("heading", detail)
+            self.assertIn("section_fingerprint", detail)
+            self.assertNotIn("excerpt", detail)
+            self.assertNotIn("content", detail)
+
+        conn.close()
 
     def test_profile_reports_counts_labels_and_recent(self):
         conn = _connect(":memory:")
@@ -621,6 +1003,67 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_triage_tasks_accepts_marker_only_summary(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "TODO",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "tasks",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["tasks"]["found_new"], 1)
+        self.assertEqual(out["tasks"]["matches"][0]["summary"], "TODO")
+
+        conn.close()
+
     def test_triage_tasks_accepts_bracket_wrapped_task_marker_prefix(self):
         import tempfile
         from datetime import datetime, timezone
@@ -803,6 +1246,75 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["tasks"]["matches"][0]["summary"], "+ TODO: rotate on-call notes")
 
         conn.close()
+
+    def test_triage_tasks_accepts_blockquote_prefixed_task_marker(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        summaries = (
+            "> TODO: rotate on-call notes",
+            "> > [ ] TASK: rotate on-call notes",
+            "- > (iv) [ ] TODO: rotate on-call notes",
+        )
+
+        for summary in summaries:
+            with self.subTest(summary=summary):
+                conn = _connect(":memory:")
+
+                now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                sample = "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "ts": now,
+                                "kind": "note",
+                                "tool_name": "memory_store",
+                                "summary": summary,
+                                "detail": {"importance": 0.9},
+                            }
+                        )
+                    ]
+                )
+
+                old_stdin = sys.stdin
+                try:
+                    sys.stdin = io.StringIO(sample)
+                    args = type("Args", (), {"file": None, "json": True})()
+                    with redirect_stdout(io.StringIO()):
+                        cmd_ingest(conn, args)
+                finally:
+                    sys.stdin = old_stdin
+
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+                    state_path = st.name
+
+                args = type(
+                    "Args",
+                    (),
+                    {
+                        "mode": "tasks",
+                        "since_minutes": 60,
+                        "limit": 10,
+                        "keywords": None,
+                        "cron_jobs_path": None,
+                        "tasks_since_minutes": 1440,
+                        "importance_min": 0.7,
+                        "state_path": state_path,
+                        "json": True,
+                    },
+                )()
+
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    with self.assertRaises(SystemExit) as cm:
+                        cmd_triage(conn, args)
+
+                self.assertEqual(cm.exception.code, 10)
+                out = json.loads(buf.getvalue())
+                self.assertEqual(out["tasks"]["found_new"], 1)
+                self.assertEqual(out["tasks"]["matches"][0]["summary"], summary)
+
+                conn.close()
 
     def test_triage_tasks_accepts_unicode_bullet_prefixed_task_marker(self):
         import tempfile
@@ -2383,6 +2895,105 @@ class TestCliM0(unittest.TestCase):
         self.assertNotRegex(trace_dump, r"[A-Za-z]:\\\\")
         conn.close()
 
+    def test_pack_trace_stable_schema_contract(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "fact",
+                        "summary": "stability sample one",
+                        "summary_en": "stability sample one",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "fact",
+                        "summary": "stability sample two",
+                        "summary_en": "stability sample two",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        for obs_id in (1, 2):
+            conn.execute(
+                "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (obs_id, "text-embedding-3-small", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+            )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = build_parser().parse_args(["pack", "--query", "stability", "--query-en", "stability", "--trace", "--json", "--limit", "2", "--budget-tokens", "150"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        trace = out["trace"]
+
+        self.assertEqual(trace["kind"], "openclaw-mem.pack.trace.v0")
+        self.assertIn("ts", trace)
+        self.assertIn("version", trace)
+        self.assertEqual(trace["version"]["schema"], "v0")
+        self.assertIn("query", trace)
+        self.assertIn("text", trace["query"])
+        self.assertIn("scope", trace["query"])
+        self.assertIn("intent", trace["query"])
+        self.assertIn("budgets", trace)
+        self.assertEqual(trace["budgets"]["maxItems"], 2)
+        self.assertEqual(trace["budgets"]["maxL2Items"], 0)
+        self.assertEqual(trace["budgets"]["niceCap"], 100)
+
+        lane_names = [lane["name"] for lane in trace["lanes"]]
+        self.assertEqual(lane_names, ["hot", "warm", "cold"])
+        warm = next(lane for lane in trace["lanes"] if lane["name"] == "warm")
+        self.assertEqual(warm["source"], "sqlite-observations")
+        self.assertTrue(warm["searched"])
+        self.assertEqual([r["kind"] for r in warm["retrievers"]], ["fts5", "vector", "rrf"])
+
+        self.assertIn("candidates", trace)
+        self.assertGreater(len(trace["candidates"]), 0)
+        candidate = trace["candidates"][0]
+        for key in ["id", "layer", "importance", "trust", "scores", "decision", "citations"]:
+            self.assertIn(key, candidate)
+        self.assertIn("niceCapHit", candidate["decision"]["caps"])
+        self.assertIn("l2CapHit", candidate["decision"]["caps"])
+        self.assertIn("output", trace)
+        self.assertIn("includedCount", trace["output"])
+        self.assertIn("refreshedRecordRefs", trace["output"])
+        self.assertIsInstance(trace["output"]["refreshedRecordRefs"], list)
+
+        conn.close()
+
     def test_pack_trace_candidate_uses_importance_and_trust_from_detail_json(self):
         conn = _connect(":memory:")
 
@@ -2566,6 +3177,102 @@ class TestCliM0(unittest.TestCase):
         self.assertGreaterEqual(trace["output"]["excludedCount"], 1)
         self.assertEqual(trace["output"]["includedCount"] + trace["output"]["excludedCount"], len(trace["candidates"]))
         self.assertEqual(trace["output"]["refreshedRecordRefs"], [out["items"][0]["recordRef"]])
+        conn.close()
+
+    def test_pack_trace_reason_keys_are_known(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "fact",
+                        "summary": "trace reason sample one",
+                        "summary_en": "trace reason sample one",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "fact",
+                        "summary": "",
+                        "summary_en": "",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:02:00Z",
+                        "kind": "fact",
+                        "summary": "trace reason sample three",
+                        "summary_en": "trace reason sample three",
+                        "tool_name": "memory_store",
+                        "detail": {},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            ingest_args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, ingest_args)
+        finally:
+            sys.stdin = old_stdin
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        for obs_id in (1, 2, 3):
+            conn.execute(
+                "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (obs_id, "text-embedding-3-small", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "2026-02-05T00:00:00Z"),
+            )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        args = build_parser().parse_args(["pack", "--query", "trace", "--trace", "--json", "--limit", "1"])
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        allowed = {
+            "missing_row",
+            "missing_summary",
+            "max_items_reached",
+            "budget_tokens_exceeded",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts",
+            "matched_vector",
+        }
+        observed_reasons = set()
+        for candidate in out["trace"]["candidates"]:
+            reasons = candidate["decision"].get("reason", [])
+            reason_set = set(reasons)
+            self.assertTrue(reasons, f"candidate {candidate.get('id')} has no decision reasons")
+            self.assertLessEqual(reason_set - allowed, set())
+            observed_reasons |= reason_set
+
+        self.assertIn("missing_summary", observed_reasons)
+        self.assertIn("within_budget", observed_reasons)
+        self.assertIn("within_item_limit", observed_reasons)
         conn.close()
 
     def test_pack_respects_budget_tokens(self):
