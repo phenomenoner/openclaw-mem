@@ -49,6 +49,19 @@ Acceptance criteria:
 - `memory_store/memory_recall/memory_forget` emit JSON receipts (filters, latency, counts).
 - M1 delivers a “concept → decisions/preferences” golden set where hybrid beats vector-only.
 
+### 1.6) Sunrise rollout (Stage A→B→C)
+
+Status: **ROADMAP**.
+
+- Stage A: background writeback cron (no slot switch)
+- Stage B: daily canary slot switch + golden-set recall check
+- Stage C: live switch with auto-downgrade guard
+
+Acceptance criteria:
+- Stage A runs stably for 3 days: `missingIds=0`, `error_count=0`.
+- Stage B canary passes 3 consecutive days: engine recall returns receipts with `policyTier` + `ftsTop/vecTop` and no tool errors.
+- Stage C is only enabled after A+B are green.
+
 ### 1.5) Writeback + recall policy loop (M1.5)
 
 Status: **ROADMAP**.

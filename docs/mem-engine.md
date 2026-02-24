@@ -190,6 +190,25 @@ Hybrid is the minimum that makes “concept→decisions/preferences” feel reli
 
 ---
 
+## Sunrise rollout (slow-cook lane + cron “日出條款”)
+
+We roll this out in **three stages** to keep the system safe and rollbackable.
+
+- **Stage A (background, 0-risk)**: keep `plugins.slots.memory` on `memory-lancedb`.
+  - Run periodic **writeback** from sidecar SQLite → LanceDB (metadata governance).
+  - Silent-on-success; only notify on anomalies (errors/missing IDs).
+
+- **Stage B (canary, short window)**: off-peak *temporary* slot switch.
+  - Backup config → switch slot to `openclaw-mem-engine` → run a small golden-set recall check → rollback.
+  - Goal: prove `policyTier` + `ftsTop/vecTop` behave as expected under real traffic.
+
+- **Stage C (live)**: switch default slot to `openclaw-mem-engine`.
+  - Keep an auto-downgrade path (switch back to `memory-lancedb`) if recall error-rate/latency spikes.
+
+Recommended cron alignment (Asia/Taipei):
+- Importance grading slow-cook runs `0 */4 * * *`.
+- Stage A writeback runs at **`20 */4 * * *`** (20 minutes after) to avoid overlap.
+
 ## Indexing & performance (making LanceDB “actually fast”)
 
 We should treat index lifecycle as an operator concern with receipts.
