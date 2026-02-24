@@ -2325,7 +2325,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     Optional leading list/checklist wrappers are tolerated before markers:
     - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (when followed by whitespace)
     - markdown checkboxes: `[ ]` / `[x]` (when followed by whitespace)
-    - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (when followed by whitespace)
+    - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (ASCII alpha/Roman tokens only; when followed by whitespace)
 
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
@@ -2407,7 +2407,7 @@ def _summary_has_task_marker(summary: str) -> bool:
                     return value[j + 1 :].lstrip()
 
                 k = 1
-                while k < len(value) and value[k].isalpha():
+                while k < len(value) and value[k].isascii() and value[k].isalpha():
                     k += 1
                 if k > 1 and k + 1 < len(value) and value[k] == ")" and value[k + 1].isspace():
                     token = value[1:k]
@@ -2427,7 +2427,7 @@ def _summary_has_task_marker(summary: str) -> bool:
                 return value[i + 1 :].lstrip()
 
             j = 0
-            while j < len(value) and value[j].isalpha():
+            while j < len(value) and value[j].isascii() and value[j].isalpha():
                 j += 1
             if j > 0 and j + 1 < len(value) and value[j] in {".", ")"} and value[j + 1].isspace():
                 token = value[:j]

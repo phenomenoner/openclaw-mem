@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `triage --mode tasks` now also accepts CJK lenticular bracket task markers (`【TODO】 ...`, `【TASK】 ...`, `【REMINDER】 ...`) with the same deterministic separator/suffix rules.
 - `triage --mode tasks` now accepts markdown list/checklist-prefixed markers (for example `- TODO ...`, `* [ ] TASK: ...`, `+ TODO ...`, `• [x] [REMINDER] ...`) and ordered-list prefixes (`1. ...`, `1) ...`, `(1) ...`, `a. ...`, `a) ...`, `(a) ...`, `iv. ...`, `iv) ...`, `(iv) ...`) while keeping deterministic separator checks.
 - Roman ordered-list prefixes now require canonical Roman numerals (for example `iv`, `IX`), reducing permissive false positives such as `ic`/`iiv`.
+- Alphabetic ordered-list prefixes in task-marker parsing are now limited to ASCII tokens, preventing false positives from non-Latin prefixes like `中)` / `(中)` while keeping NFKC width-normalized Latin forms (for example `（ａ）`) supported.
 - `profile --json` now classifies malformed `detail_json.importance` payloads as `unknown` (instead of coercing to `ignore`) and keeps `avg_score` based on parseable importance only.
 - `parse_importance_score` now rejects boolean `importance.score` values inside object payloads (`{"score": true|false}`), matching top-level bool handling.
 - `make_importance` now enforces canonical labels (`ignore`/`nice_to_have`/`must_remember`) by normalizing known aliases and falling back to score-derived labels for unknown overrides.
@@ -52,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regression coverage for bracket-wrapped task markers (`[TODO] ...`, `(TASK) ...`) in parser-level and triage flows, including rejection cases for malformed/non-marker bracket prefixes.
 - Added regression coverage for CJK lenticular bracket task markers (`【TODO】 ...` / `【TASK】 ...`) in parser-level and triage flows.
 - Added regression coverage for markdown list/checklist-prefixed task markers (including `+`, `‣`, `∙`, and `·` bullets), nested prefix chains, and ordered-list prefixes (including `(1)`, full-width `（１）`, alpha forms like `a)`/`(a)`/`B.`, and Roman forms like `iv)`/`(iv)`), plus invalid Roman rejection cases, in parser-level and triage flows.
+- Added regression coverage for ASCII-only alphabetic ordered-list prefixes, including acceptance of NFKC-folded full-width Latin forms (`（ａ） ...`) and rejection of non-Latin tokens (`中)` / `(中)` / `é)` / `(é)`).
 - Added regression coverage for malformed importance parsing in `profile --json` and for bool-rejection in `parse_importance_score`.
 - Added regression coverage for `make_importance` label canonicalization (alias normalization + invalid-label fallback).
 - Added regression coverage for full-width importance labels across parsing, parseability checks, and `make_importance` normalization.
