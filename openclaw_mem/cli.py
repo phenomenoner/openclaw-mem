@@ -1968,6 +1968,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 "decision": {
                     "included": include,
                     "reason": reasons,
+                    "rationale": list(reasons),
                     "caps": {
                         "niceCapHit": False,
                         "l2CapHit": False,
@@ -1989,12 +1990,15 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if bool(args.trace):
         duration_ms = int((time.perf_counter() - started) * 1000)
         included_refs = [item["recordRef"] for item in selected_items]
+        included_candidates = [c for c in candidate_trace if bool(c.get("decision", {}).get("included"))]
+        rationale_missing_count = sum(1 for c in included_candidates if not c.get("decision", {}).get("reason"))
+        citation_missing_count = sum(1 for c in included_candidates if not c.get("citations", {}).get("recordRef"))
         payload["trace"] = {
-            "kind": "openclaw-mem.pack.trace.v0",
+            "kind": "openclaw-mem.pack.trace.v1",
             "ts": _utcnow_iso(),
             "version": {
                 "openclaw_mem": __version__,
-                "schema": "v0",
+                "schema": "v1",
             },
             "query": {
                 "text": query,
@@ -2036,6 +2040,12 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 "l2IncludedCount": 0,
                 "citationsCount": len(citations),
                 "refreshedRecordRefs": included_refs,
+                "coverage": {
+                    "rationaleMissingCount": rationale_missing_count,
+                    "citationMissingCount": citation_missing_count,
+                    "allIncludedHaveRationale": rationale_missing_count == 0,
+                    "allIncludedHaveCitations": citation_missing_count == 0,
+                },
             },
             "timing": {"durationMs": duration_ms},
         }
@@ -4477,7 +4487,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--query-en", help="Optional English query for bilingual retrieval")
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
-    sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v0`) with include/exclude decisions")
+    sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)
 
 
