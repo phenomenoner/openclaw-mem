@@ -97,6 +97,16 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _json_contract_meta(kind: str, schema: str = "v0") -> Dict[str, Any]:
+    """Return common contract metadata for machine-readable JSON receipts."""
+
+    return {
+        "kind": kind,
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": schema},
+    }
+
+
 @dataclass
 class IngestRunSummary:
     """Aggregate ingest/harvest stats for importance autograde.
@@ -2638,6 +2648,7 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     needs_attention = (len(obs_new) > 0) or (len(cron_new) > 0) or (len(tasks_new) > 0)
 
     out = {
+        **_json_contract_meta("openclaw-mem.triage.v0"),
         "ok": True,
         "mode": mode,
         "since_minutes": since_minutes,
@@ -2724,6 +2735,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if not processing_files:
         _emit(
             {
+                **_json_contract_meta("openclaw-mem.harvest.v0"),
                 "ok": True,
                 "processed_files": 0,
                 "ingested": 0,
@@ -2845,6 +2857,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     # Emit ONE harvest result payload.
     out: Dict[str, Any] = {
+        **_json_contract_meta("openclaw-mem.harvest.v0"),
         "ok": True,
         "ingested": len(inserted_ids),
         "processed_files": len(processing_files),

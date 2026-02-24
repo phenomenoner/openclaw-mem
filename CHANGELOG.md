@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pack --trace` now includes an `output` receipt block with:
   - `includedCount`, `excludedCount`, `l2IncludedCount`, `citationsCount`
   - `refreshedRecordRefs` (the exact `recordRef`s included in the final bundle for lifecycle/audit hooks)
+- Added contract metadata to machine-readable operator receipts:
+  - `harvest --json` now emits `kind=openclaw-mem.harvest.v0`, `ts`, and `version` (`openclaw_mem`, `schema`)
+  - `triage --json` now emits `kind=openclaw-mem.triage.v0`, `ts`, and `version` (`openclaw_mem`, `schema`)
 - Hardened `pack --trace` contract metadata for v0 receipts:
   - added top-level `ts` and `version` (`openclaw_mem`, `schema`)
   - expanded `budgets` with `maxL2Items` and `niceCap`
@@ -46,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regression coverage for `graph auto-status` `reason` values, including unset-default behavior.
 - Added regression coverage for `pack --trace` output receipts (shape + exclusion counting).
 - Added schema checks for trace metadata (`ts`/`version`/budget caps) and candidate decision/citation fields.
+- Added contract-schema regression coverage for `harvest --json` and `triage --json` receipt metadata (`kind`, `ts`, `version`).
 - Added `pack --trace` tests for candidate importance/trust extraction from `detail_json`, including invalid-label fallback to `unknown`.
 - Added coverage for `profile --json` (importance distribution + embeddings counters + recent rows).
 - Added triage regression coverage for full-width hyphen (`－`), en dash (`–`), em dash (`—`), and unicode minus (`−`) task-marker separators.
