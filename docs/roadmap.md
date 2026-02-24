@@ -8,7 +8,7 @@ Status tags used here: **DONE / PARTIAL / ROADMAP**.
 
 ## Principles (what we optimize for)
 
-- **Sidecar, not slot owner**: OpenClaw memory backends remain canonical; `openclaw-mem` provides capture + local-first recall + ops.
+- **Sidecar-first, optional slot owner**: `openclaw-mem` remains the ops sidecar by default. We may additionally ship an optional slot backend (**openclaw-mem-engine**) to replace `memory-lancedb` when enabled — still rollbackable via a one-line slot switch.
 - **Fail-open by default**: memory helpers should not break ingest or the agent loop.
 - **Non-destructive writes**: never overwrite operator-authored fields; only fill missing values.
 - **Upgrade-safe**: user-owned data/config is stable across versions.
@@ -35,6 +35,19 @@ To keep scope controlled for the current pilot:
 - No live OpenClaw config or cron schedule changes are included in this step.
 
 ## Now (next milestones)
+
+### 0) OpenClaw Mem Engine (optional memory slot backend)
+
+Status: **ROADMAP**.
+
+- Goal: replace `memory-lancedb` with a slot backend that supports **hybrid recall (FTS + vector)**, **scopes**, and **auditable policies**.
+- Why: the official backend currently uses LanceDB mostly as a basic vector store; it doesn’t expose hybrid/FTS/index lifecycle/versioning.
+- Design doc: [OpenClaw Mem Engine →](mem-engine.md)
+
+Acceptance criteria:
+- Slot switch + rollback is one line (`plugins.slots.memory`).
+- `memory_store/memory_recall/memory_forget` emit JSON receipts (filters, latency, counts).
+- M1 delivers a “concept → decisions/preferences” golden set where hybrid beats vector-only.
 
 ### 1) Importance grading rollout (MVP v1)
 
