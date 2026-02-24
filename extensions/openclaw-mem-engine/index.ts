@@ -62,12 +62,58 @@ function vectorDimsForModel(model: string): number {
   }
 }
 
-function importanceLabel(importance: number): string {
-  const x = Math.max(0, Math.min(1, importance));
-  if (x >= 0.9) return "high";
-  if (x >= 0.7) return "medium";
-  if (x >= 0.4) return "low";
-  return "trivial";
+type ImportanceLabel = "must_remember" | "nice_to_have" | "ignore" | "unknown";
+type ScopeMode = "explicit" | "inferred" | "global";
+
+const DEFAULT_RECALL_LIMIT = 5;
+const MAX_RECALL_LIMIT = 50;
+const RRF_K = 60;
+
+function normalizeImportance(raw: unknown): number | undefined {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return Math.max(0, Math.min(1, raw));
+  }
+  if (typeof raw === "string") {
+    const parsed = Number(raw.trim());
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, Math.min(1, parsed));
+    }
+  }
+  return undefined;
+}
+
+function importanceLabel(score: number | undefined): ImportanceLabel {
+  if (typeof score !== "number") return "unknown";
+  if (score >= 0.8) return "must_remember";
+  if (score >= 0.5) return "nice_to_have";
+  return "ignore";
+}
+
+function normalizeImportanceLabel(raw: unknown): ImportanceLabel | undefined {
+  if (typeof raw !== "string") return undefined;
+
+  const normalized = raw.trim().toLowerCase().replace(/[-\s]+/g, "_");
+  if (!normalized) return undefined;
+
+  const aliases: Record<string, ImportanceLabel> = {
+    must_remember: "must_remember",
+    nice_to_have: "nice_to_have",
+    ignore: "ignore",
+    unknown: "unknown",
+    none: "unknown",
+    high: "must_remember",
+    medium: "nice_to_have",
+    low: "ignore",
+    trivial: "ignore",
+  };
+
+  return aliases[normalized];
+}
+
+function resolveImportanceLabel(rawScore: number | undefined, rawLabel: unknown): ImportanceLabel {
+  const labeled = normalizeImportanceLabel(rawLabel);
+  if (labeled) return labeled;
+  return importanceLabel(rawScore);
 }
 
 // ============================================================================
@@ -96,7 +142,7 @@ type MemoryRow = {
   vector: number[];
   createdAt: number;
   category: MemoryCategory;
-  importance: number;
+  importance?: number | null;
   importance_label: string;
   scope: string;
   trust_tier: string;
@@ -107,6 +153,124 @@ type RecallResult = {
   distance: number;
   score: number;
 };
+
+function toImportanceRecord(raw: unknown): number | undefined {
+  return normalizeImportance(raw);
+}
+
+function scopeFilterExpr(scope: string): string {
+  const safeScope = scope.replace(/'/g, "''");
+  if (scope === "global") {
+    return `(scope = '${safeScope}' OR scope IS NULL OR scope = '')`;
+  }
+  return `scope = '${safeScope}'`;
+}
+
+function extractScopeFromText(rawText: unknown): string | undefined {
+  if (typeof rawText !== "string") return undefined;
+
+  const matches = [...rawText.matchAll(/\[(ISO|SCOPE):\s*([^\]]+)\]/gi)];
+  let isoScope: string | undefined;
+  let scopeScope: string | undefined;
+
+  for (const [, kind, value] of matches) {
+    const scope = value.trim();
+    if (!scope) continue;
+
+    if (kind.toUpperCase() === "ISO" && !isoScope) {
+      isoScope = scope;
+    }
+
+    if (kind.toUpperCase() === "SCOPE" && !scopeScope) {
+      scopeScope = scope;
+    }
+  }
+
+  if (isoScope) return isoScope;
+  return scopeScope;
+}
+
+function resolveScope(mode: {
+  explicitScope?: string;
+  text: string;
+}): { scope: string; scopeMode: ScopeMode } {
+  const explicit = (mode.explicitScope ?? "").trim();
+  if (explicit) {
+    return { scope: explicit, scopeMode: "explicit" };
+  }
+
+  const inferred = extractScopeFromText(mode.text);
+  if (inferred) {
+    return { scope: inferred, scopeMode: "inferred" };
+  }
+
+  return { scope: "global", scopeMode: "global" };
+}
+
+function clampLimit(rawLimit: number | undefined): number {
+  const parsed = Number(rawLimit);
+  if (!Number.isFinite(parsed)) return DEFAULT_RECALL_LIMIT;
+  return Math.max(1, Math.min(MAX_RECALL_LIMIT, Math.floor(parsed)));
+}
+
+function fuseRecall(results: {
+  vector: RecallResult[];
+  fts: RecallResult[];
+  limit: number;
+}): { order: RecallResult[] } {
+  const fused = new Map<string, { row: RecallResult["row"]; distance: number; score: number }>();
+
+  for (const [index, item] of results.fts.entries()) {
+    const id = item.row.id;
+    if (!id) continue;
+
+    const existing = fused.get(id);
+    const contribution = 1 / (RRF_K + index + 1);
+    if (existing) {
+      existing.score += contribution;
+      continue;
+    }
+
+    fused.set(id, {
+      row: item.row,
+      distance: item.distance,
+      score: contribution,
+    });
+  }
+
+  for (const [index, item] of results.vector.entries()) {
+    const id = item.row.id;
+    if (!id) continue;
+
+    const existing = fused.get(id);
+    const contribution = 1 / (RRF_K + index + 1);
+    if (existing) {
+      existing.score += contribution;
+      if (item.distance) existing.distance = item.distance;
+      continue;
+    }
+
+    fused.set(id, {
+      row: item.row,
+      distance: item.distance,
+      score: contribution,
+    });
+  }
+
+  const order = Array.from(fused.values())
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.row.id.localeCompare(b.row.id);
+    })
+    .slice(0, limit)
+    .map((item) => ({
+      row: item.row,
+      distance: item.distance,
+      score: item.score,
+    }));
+
+  return { order };
+}
 
 class MemoryDB {
   private db: LanceDB.Connection | null = null;
@@ -144,7 +308,7 @@ class MemoryDB {
       createdAt: 0,
       category: "other",
       importance: 0,
-      importance_label: "none",
+      importance_label: "unknown",
       scope: "global",
       trust_tier: "unknown",
     };
@@ -158,10 +322,13 @@ class MemoryDB {
     await this.table!.add([row]);
   }
 
-  async vectorSearch(vector: number[], limit: number): Promise<RecallResult[]> {
+  async vectorSearch(vector: number[], limit: number, scope?: string): Promise<RecallResult[]> {
     await this.ensureInitialized();
 
-    const results = await this.table!.vectorSearch(vector).limit(limit).toArray();
+    const query = this.table!.vectorSearch(vector);
+    if (scope) query.where(scopeFilterExpr(scope));
+
+    const results = await query.limit(limit).toArray();
 
     return results.map((r: any) => {
       const distance = typeof r._distance === "number" ? r._distance : 0;
@@ -172,12 +339,39 @@ class MemoryDB {
           text: String(r.text ?? ""),
           createdAt: Number(r.createdAt ?? 0),
           category: (r.category ?? "other") as MemoryRow["category"],
-          importance: Number(r.importance ?? 0),
+          importance: toImportanceRecord(r.importance),
           importance_label: String(r.importance_label ?? ""),
           scope: String(r.scope ?? ""),
           trust_tier: String(r.trust_tier ?? ""),
         },
         distance,
+        score,
+      };
+    });
+  }
+
+  async fullTextSearch(query: string, limit: number, scope?: string): Promise<RecallResult[]> {
+    await this.ensureInitialized();
+
+    const q = this.table!.search(query, "fts", ["text"]);
+    if (scope) q.where(scopeFilterExpr(scope));
+
+    const results = await q.limit(limit).toArray();
+
+    return results.map((r: any) => {
+      const score = typeof r._score === "number" ? r._score : 0;
+      return {
+        row: {
+          id: String(r.id),
+          text: String(r.text ?? ""),
+          createdAt: Number(r.createdAt ?? 0),
+          category: (r.category ?? "other") as MemoryRow["category"],
+          importance: toImportanceRecord(r.importance),
+          importance_label: String(r.importance_label ?? ""),
+          scope: String(r.scope ?? ""),
+          trust_tier: String(r.trust_tier ?? ""),
+        },
+        distance: 0,
         score,
       };
     });
@@ -330,11 +524,16 @@ const memoryPlugin = {
           "Search through long-term memories. Use when you need context about user preferences, past decisions, or previously discussed topics.",
         parameters: Type.Object({
           query: Type.String({ description: "Search query" }),
-          limit: Type.Optional(Type.Number({ description: "Max results (default: 5)" })),
+          limit: Type.Optional(Type.Number({ description: `Max results (default: ${DEFAULT_RECALL_LIMIT})` })),
+          scope: Type.Optional(Type.String({ description: "Scope hint (optional)" })),
         }),
         async execute(_toolCallId: string, params: unknown) {
           const t0 = performance.now();
-          const { query, limit = 5 } = params as { query: string; limit?: number };
+          const {
+            query,
+            limit,
+            scope: scopeInput,
+          } = params as { query: string; limit?: number; scope?: string };
 
           if (!embeddings) {
             return {
@@ -348,51 +547,88 @@ const memoryPlugin = {
             };
           }
 
-          const vector = await embeddings.embed(query);
-          const results = await db.vectorSearch(vector, Math.max(1, Math.min(50, limit)));
+          const normalizedLimit = clampLimit(limit);
+          const { scope, scopeMode } = resolveScope({ explicitScope: scopeInput, text: query });
+          const searchLimit = Math.max(normalizedLimit, normalizedLimit * 2);
 
+          const vector = await embeddings.embed(query);
+
+          const scopeFilterApplied = scopeMode === "global" || scopeMode === "inferred" || scopeMode === "explicit";
+
+          const [ftsResults, vecResults] = await Promise.all([
+            db.fullTextSearch(query, Math.min(searchLimit, MAX_RECALL_LIMIT), scope).catch(() => []),
+            db.vectorSearch(vector, Math.min(searchLimit, MAX_RECALL_LIMIT), scope).catch(() => []),
+          ]);
+
+          const fused = fuseRecall({ vector: vecResults, fts: ftsResults, limit: normalizedLimit });
           const latencyMs = Math.round(performance.now() - t0);
 
-          if (results.length === 0) {
+          const memories = fused.order.map((r) => {
+            const normalizedImportance = toImportanceRecord(r.row.importance);
+            const normalizedLabel = resolveImportanceLabel(normalizedImportance, r.row.importance_label);
+
+            return {
+              id: r.row.id,
+              text: r.row.text,
+              category: r.row.category,
+              importance: normalizedImportance ?? null,
+              importance_label: normalizedLabel,
+              scope: r.row.scope,
+              trust_tier: r.row.trust_tier,
+              createdAt: r.row.createdAt,
+              distance: r.distance,
+              score: r.score,
+            };
+          });
+
+          if (memories.length === 0) {
             return {
               content: [{ type: "text", text: "No relevant memories found." }],
               details: {
                 count: 0,
-                receipt: { dbPath: resolvedDbPath, tableName, limit, model, latencyMs },
+                memories: [],
+                receipt: {
+                  dbPath: resolvedDbPath,
+                  tableName,
+                  limit: normalizedLimit,
+                  model,
+                  latencyMs,
+                  ftsCount: ftsResults.length,
+                  vecCount: vecResults.length,
+                  fusedCount: 0,
+                  scopeMode,
+                  scope,
+                  scopeFilterApplied,
+                },
               },
             };
           }
 
-          const lines = results
-            .map((r, i) => {
-              const scorePct = (r.score * 100).toFixed(0);
-              const preview = r.row.text.length > 240 ? `${r.row.text.slice(0, 240)}…` : r.row.text;
-              return `${i + 1}. [${r.row.category}] ${preview} (${scorePct}%)`;
+          const lines = memories
+            .map((m, i) => {
+              const scorePct = (m.score * 100).toFixed(0);
+              const preview = m.text.length > 240 ? `${m.text.slice(0, 240)}…` : m.text;
+              return `${i + 1}. [${m.category}] ${preview} (${scorePct}%)`;
             })
             .join("\n");
 
           return {
-            content: [{ type: "text", text: `Found ${results.length} memories:\n\n${lines}` }],
+            content: [{ type: "text", text: `Found ${memories.length} memories:\n\n${lines}` }],
             details: {
-              count: results.length,
-              memories: results.map((r) => ({
-                id: r.row.id,
-                text: r.row.text,
-                category: r.row.category,
-                importance: r.row.importance,
-                importance_label: r.row.importance_label,
-                scope: r.row.scope,
-                trust_tier: r.row.trust_tier,
-                createdAt: r.row.createdAt,
-                distance: r.distance,
-                score: r.score,
-              })),
+              count: memories.length,
+              memories,
               receipt: {
                 dbPath: resolvedDbPath,
                 tableName,
-                limit,
+                limit: normalizedLimit,
                 model,
                 latencyMs,
+                ftsCount: ftsResults.length,
+                vecCount: vecResults.length,
+                fusedCount: memories.length,
+                scopeMode,
+                scope,
+                scopeFilterApplied,
               },
             },
           };
@@ -412,16 +648,18 @@ const memoryPlugin = {
         description: "Save important information in long-term memory. Use for preferences, facts, decisions.",
         parameters: Type.Object({
           text: Type.String({ description: "Information to remember" }),
-          importance: Type.Optional(Type.Number({ description: "Importance 0-1 (default: 0.7)" })),
+          importance: Type.Optional(Type.Number({ description: "Importance 0-1" })),
           category: Type.Optional(MemoryCategorySchema),
+          scope: Type.Optional(Type.String({ description: "Scope hint (optional)" })),
         }),
         async execute(_toolCallId: string, params: unknown) {
           const t0 = performance.now();
           const {
             text,
-            importance = 0.7,
+            importance,
             category = "other",
-          } = params as { text: string; importance?: number; category?: MemoryCategory };
+            scope: scopeInput,
+          } = params as { text: string; importance?: number; category?: MemoryCategory; scope?: string };
 
           if (!embeddings) {
             return {
@@ -435,10 +673,12 @@ const memoryPlugin = {
             };
           }
 
+          const { scope, scopeMode } = resolveScope({ explicitScope: scopeInput, text });
+          const normalizedImportance = toImportanceRecord(importance);
+          const normalizedLabel = importanceLabel(normalizedImportance);
           const vector = await embeddings.embed(text);
           const id = randomUUID();
           const createdAt = Date.now();
-          const imp = Math.max(0, Math.min(1, importance));
 
           const row: MemoryRow = {
             id,
@@ -446,11 +686,14 @@ const memoryPlugin = {
             vector,
             createdAt,
             category,
-            importance: imp,
-            importance_label: importanceLabel(imp),
-            scope: "global",
             trust_tier: "user",
+            scope,
+            importance_label: normalizedLabel,
           };
+
+          if (typeof normalizedImportance === "number") {
+            row.importance = normalizedImportance;
+          }
 
           await db.add(row);
 
@@ -463,9 +706,18 @@ const memoryPlugin = {
               id,
               createdAt,
               category: row.category,
-              importance: row.importance,
+              importance: row.importance ?? null,
               importance_label: row.importance_label,
-              receipt: { dbPath: resolvedDbPath, tableName, model, latencyMs },
+              scope: row.scope,
+              receipt: {
+                dbPath: resolvedDbPath,
+                tableName,
+                model,
+                latencyMs,
+                scope,
+                scopeMode,
+                scopeFilterApplied: true,
+              },
             },
           };
         },
