@@ -262,7 +262,7 @@ function fuseRecall(results: {
       if (b.score !== a.score) return b.score - a.score;
       return a.row.id.localeCompare(b.row.id);
     })
-    .slice(0, limit)
+    .slice(0, results.limit)
     .map((item) => ({
       row: item.row,
       distance: item.distance,
