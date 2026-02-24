@@ -60,6 +60,8 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("- TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("* [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("+ TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("> TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("> > [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("• [x] [REMINDER] renew domain"))
         self.assertTrue(_summary_has_task_marker("‣ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("∙ [ ] TASK: clean desk"))
@@ -77,6 +79,8 @@ class TestCliM0(unittest.TestCase):
     def test_summary_has_task_marker_accepts_nested_prefix_combinations(self):
         self.assertTrue(_summary_has_task_marker("* (1) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker("• （２） [x] [TASK] rotate notes"))
+        self.assertTrue(_summary_has_task_marker("> - a) [ ] TODO: clean desk"))
+        self.assertTrue(_summary_has_task_marker("- > (iv) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker("- a) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker("- (iv) [ ] TODO: clean desk"))
 
@@ -87,6 +91,8 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("[TODO]clean old notes"))
         self.assertFalse(_summary_has_task_marker("-TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("+TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker(">TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker(">>TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("‣TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("·TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("[x]TODO clean old notes"))
@@ -1235,6 +1241,75 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["tasks"]["matches"][0]["summary"], "+ TODO: rotate on-call notes")
 
         conn.close()
+
+    def test_triage_tasks_accepts_blockquote_prefixed_task_marker(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        summaries = (
+            "> TODO: rotate on-call notes",
+            "> > [ ] TASK: rotate on-call notes",
+            "- > (iv) [ ] TODO: rotate on-call notes",
+        )
+
+        for summary in summaries:
+            with self.subTest(summary=summary):
+                conn = _connect(":memory:")
+
+                now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                sample = "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "ts": now,
+                                "kind": "note",
+                                "tool_name": "memory_store",
+                                "summary": summary,
+                                "detail": {"importance": 0.9},
+                            }
+                        )
+                    ]
+                )
+
+                old_stdin = sys.stdin
+                try:
+                    sys.stdin = io.StringIO(sample)
+                    args = type("Args", (), {"file": None, "json": True})()
+                    with redirect_stdout(io.StringIO()):
+                        cmd_ingest(conn, args)
+                finally:
+                    sys.stdin = old_stdin
+
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+                    state_path = st.name
+
+                args = type(
+                    "Args",
+                    (),
+                    {
+                        "mode": "tasks",
+                        "since_minutes": 60,
+                        "limit": 10,
+                        "keywords": None,
+                        "cron_jobs_path": None,
+                        "tasks_since_minutes": 1440,
+                        "importance_min": 0.7,
+                        "state_path": state_path,
+                        "json": True,
+                    },
+                )()
+
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    with self.assertRaises(SystemExit) as cm:
+                        cmd_triage(conn, args)
+
+                self.assertEqual(cm.exception.code, 10)
+                out = json.loads(buf.getvalue())
+                self.assertEqual(out["tasks"]["found_new"], 1)
+                self.assertEqual(out["tasks"]["matches"][0]["summary"], summary)
+
+                conn.close()
 
     def test_triage_tasks_accepts_unicode_bullet_prefixed_task_marker(self):
         import tempfile

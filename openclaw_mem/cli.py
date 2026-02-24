@@ -2310,7 +2310,8 @@ def _summary_has_task_marker(summary: str) -> bool:
     - plain marker: `TODO ...`
     - bracketed marker: `[TODO] ...` or `(TODO) ...`
 
-    Optional leading list/checklist wrappers are tolerated before markers:
+    Optional leading markdown wrappers are tolerated before markers:
+    - blockquotes: `>` (when followed by whitespace; repeatable)
     - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (when followed by whitespace)
     - markdown checkboxes: `[ ]` / `[x]` (when followed by whitespace)
     - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (when followed by whitespace)
@@ -2428,6 +2429,10 @@ def _summary_has_task_marker(summary: str) -> bool:
         while changed:
             changed = False
 
+            if len(t) >= 2 and t[0] == ">" and t[1].isspace():
+                t = t[1:].lstrip()
+                changed = True
+
             if len(t) >= 2 and t[0] in bullet_prefixes and t[1].isspace():
                 t = t[1:].lstrip()
                 changed = True
@@ -2465,8 +2470,9 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; supports plain or
       bracketed forms like `[TODO]`/`(TASK)`, plus optional leading
-      list/checklist prefixes like `-`/`*`/`+`/`•`, `[ ]`/`[x]`, and
-      ordered-list prefixes like `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`;
+      markdown wrappers like `>` blockquotes, list/checklist prefixes
+      (`-`/`*`/`+`/`•`, `[ ]`/`[x]`), and ordered-list prefixes like
+      `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`;
       accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
