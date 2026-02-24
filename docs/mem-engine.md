@@ -145,7 +145,7 @@ Notes:
 
 3) **Metadata filtering** (before or during query)
    - `scope` filter (most important)
-   - `importance_label` filter (e.g., prefer must/nice)
+   - `importance_label` filter (default policy): prefer `must_remember + nice_to_have`, then fallback to `unknown`, then `ignore` if still empty.
    - recency bias (soft)
    - trust gating (prefer trusted; allow untrusted when recall would be empty)
 
@@ -173,13 +173,18 @@ Hybrid is the minimum that makes “concept→decisions/preferences” feel reli
 - Engine writes the primary record to LanceDB.
 - Sidecar may later write back computed governance fields:
   - `importance` / `importance_label`
+  - `scope`
   - `trust_tier`
+  - `category`
   - additional provenance
+- Command used for writeback: `openclaw-mem writeback-lancedb --db <sqlite> --lancedb <path> --table <name> [--limit N] [--batch N] [--dry-run]`
+- Writeback receipts should report: `updated`, `skipped`, and missing IDs.
 
 ### Importance grading integration
 
 - The **heuristic-v1** scorer (and later scorers) live in the sidecar.
-- Engine uses the graded fields for filtering defaults.
+- `memory_recall` defaults to must+nice (`must_remember` + `nice_to_have`), then fail-open includes `unknown`, then `ignore`.
+- Engine uses graded fields for filtering defaults and includes `policyTier` in recall receipts.
 
 ---
 
@@ -246,6 +251,21 @@ Definition of done:
 
 - For a golden set of “concept→decision/preference” queries, hybrid beats vector-only baseline.
 - Query results show scope & importance in the returned payload (auditable).
+
+### M1.5 — Sidecar writeback + policy-tiered recall defaults
+
+Goal: close the loop between graded SQLite ledger artifacts and runtime recall behavior.
+
+Deliverables:
+
+- Sidecar command for bounded, dry-run safe metadata writeback into LanceDB:
+  - `openclaw-mem writeback-lancedb --db <sqlite> --lancedb <path> --table <name> [--limit N] [--batch N] [--dry-run]`
+  - fields: `importance`, `importance_label`, `scope`, `trust_tier` (if available), `category`
+- `memory_recall` default policy sequence:
+  1. `must_remember + nice_to_have`
+  2. fallback `unknown`
+  3. fallback `ignore`
+- Recall receipts include which policy tier was selected (e.g., `must+nice`, `must+nice+unknown`, `must+nice+unknown+ignore`).
 
 ### M2 — Ops hardening (index lifecycle + optimize + drift)
 

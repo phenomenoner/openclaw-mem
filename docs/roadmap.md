@@ -49,6 +49,22 @@ Acceptance criteria:
 - `memory_store/memory_recall/memory_forget` emit JSON receipts (filters, latency, counts).
 - M1 delivers a “concept → decisions/preferences” golden set where hybrid beats vector-only.
 
+### 1.5) Writeback + recall policy loop (M1.5)
+
+Status: **ROADMAP**.
+
+- Add a bounded `openclaw-mem writeback-lancedb` path that pushes graded metadata from SQLite into LanceDB by row ID.
+- Default recall policy for `memory_recall` is fail-open:
+  1. must_remember + nice_to_have
+  2. +unknown
+  3. +ignore
+- Receipt must expose `policyTier` used (`must+nice`, `must+nice+unknown`, `must+nice+unknown+ignore`) for diagnostics.
+
+Acceptance criteria:
+- A smoke writeback run updates `importance`, `importance_label`, `scope`, `trust_tier`, `category` only when missing.
+- Empty-policy recall returns `ignore` tier and still yields results if any memory exists.
+- receipts include both engine and writeback summaries.
+
 ### 1) Importance grading rollout (MVP v1)
 
 Status: **PARTIAL** (baseline shipped; benchmark pass pending).

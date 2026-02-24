@@ -63,6 +63,7 @@ function vectorDimsForModel(model: string): number {
 }
 
 type ImportanceLabel = "must_remember" | "nice_to_have" | "ignore" | "unknown";
+type RecallPolicyTier = "must+nice" | "must+nice+unknown" | "must+nice+unknown+ignore";
 type ScopeMode = "explicit" | "inferred" | "global";
 
 const DEFAULT_RECALL_LIMIT = 5;
@@ -118,6 +119,47 @@ function resolveImportanceLabel(rawScore: number | undefined, rawLabel: unknown)
   if (labeled) return labeled;
   return importanceLabel(rawScore);
 }
+
+function buildImportanceFilterExpr(labels: readonly ImportanceLabel[]): string | undefined {
+  const unique = Array.from(new Set(labels.filter((label) => typeof label === "string")));
+  if (unique.length === 0) {
+    return undefined;
+  }
+
+  const safe = unique
+    .filter((label) => typeof label === "string")
+    .map((label) => `'${String(label).replace(/'/g, "''")}'`);
+  if (safe.length === 0) {
+    return undefined;
+  }
+
+  return `importance_label IN (${safe.join(", ")})`;
+}
+
+function buildRecallFilter(scope: string | undefined, labels: readonly ImportanceLabel[] | undefined): string | undefined {
+  const clauses: string[] = [];
+
+  if (scope) {
+    clauses.push(scopeFilterExpr(scope));
+  }
+
+  const importanceFilter = buildImportanceFilterExpr(labels || []);
+  if (importanceFilter) {
+    clauses.push(importanceFilter);
+  }
+
+  if (clauses.length === 0) {
+    return undefined;
+  }
+
+  return clauses.join(" AND ");
+}
+
+const RECALL_POLICY_TIERS: Array<{ tier: RecallPolicyTier; labels: ImportanceLabel[] }> = [
+  { tier: "must+nice", labels: ["must_remember", "nice_to_have"] },
+  { tier: "must+nice+unknown", labels: ["must_remember", "nice_to_have", "unknown"] },
+  { tier: "must+nice+unknown+ignore", labels: ["must_remember", "nice_to_have", "unknown", "ignore"] },
+];
 
 // ============================================================================
 // LanceDB loader
@@ -371,11 +413,17 @@ class MemoryDB {
     await this.table!.add([row]);
   }
 
-  async vectorSearch(vector: number[], limit: number, scope?: string): Promise<RecallResult[]> {
+  async vectorSearch(
+    vector: number[],
+    limit: number,
+    scope?: string,
+    importanceLabels?: ImportanceLabel[],
+  ): Promise<RecallResult[]> {
     await this.ensureInitialized();
 
     const query = this.table!.vectorSearch(vector);
-    if (scope) query.where(scopeFilterExpr(scope));
+    const where = buildRecallFilter(scope, importanceLabels);
+    if (where) query.where(where);
 
     const results = await query.limit(limit).toArray();
 
@@ -399,11 +447,17 @@ class MemoryDB {
     });
   }
 
-  async fullTextSearch(query: string, limit: number, scope?: string): Promise<RecallResult[]> {
+  async fullTextSearch(
+    query: string,
+    limit: number,
+    scope?: string,
+    importanceLabels?: ImportanceLabel[],
+  ): Promise<RecallResult[]> {
     await this.ensureInitialized();
 
     const q = this.table!.search(query, "fts", ["text"]);
-    if (scope) q.where(scopeFilterExpr(scope));
+    const where = buildRecallFilter(scope, importanceLabels);
+    if (where) q.where(where);
 
     const results = await q.limit(limit).toArray();
 
@@ -604,10 +658,22 @@ const memoryPlugin = {
 
           const scopeFilterApplied = scopeMode === "global" || scopeMode === "inferred" || scopeMode === "explicit";
 
-          const [ftsResults, vecResults] = await Promise.all([
-            db.fullTextSearch(query, Math.min(searchLimit, MAX_RECALL_LIMIT), scope).catch(() => []),
-            db.vectorSearch(vector, Math.min(searchLimit, MAX_RECALL_LIMIT), scope).catch(() => []),
-          ]);
+          let ftsResults: RecallResult[] = [];
+          let vecResults: RecallResult[] = [];
+          let policyTier: RecallPolicyTier = RECALL_POLICY_TIERS[0].tier;
+
+          for (const plan of RECALL_POLICY_TIERS) {
+            policyTier = plan.tier;
+
+            [ftsResults, vecResults] = await Promise.all([
+              db.fullTextSearch(query, Math.min(searchLimit, MAX_RECALL_LIMIT), scope, plan.labels).catch(() => []),
+              db.vectorSearch(vector, Math.min(searchLimit, MAX_RECALL_LIMIT), scope, plan.labels).catch(() => []),
+            ]);
+
+            if (ftsResults.length > 0 || vecResults.length > 0) {
+              break;
+            }
+          }
 
           const topHitLimit = Math.min(MAX_RECEIPT_TOP_HITS, Math.max(1, DEFAULT_RECEIPT_TOP_HITS));
           const receiptTopHits = {
@@ -632,6 +698,7 @@ const memoryPlugin = {
                   model,
                   ftsCount: ftsResults.length,
                   vecCount: vecResults.length,
+                  policyTier,
                   scopeMode,
                   scope,
                   scopeFilterApplied,
@@ -676,6 +743,7 @@ const memoryPlugin = {
                   ftsCount: ftsResults.length,
                   vecCount: vecResults.length,
                   fusedCount: 0,
+                  policyTier,
                   scopeMode,
                   scope,
                   scopeFilterApplied,
@@ -708,6 +776,7 @@ const memoryPlugin = {
                 ftsCount: ftsResults.length,
                 vecCount: vecResults.length,
                 fusedCount: memories.length,
+                policyTier,
                 scopeMode,
                 scope,
                 scopeFilterApplied,

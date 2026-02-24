@@ -152,6 +152,31 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.graph_cmd, "export")
         self.assertEqual(a.query, "hello")
 
+
+    def test_writeback_lancedb_parser_accepts_flags(self):
+        a = build_parser().parse_args([
+            "writeback-lancedb",
+            "--db",
+            "/tmp/sidecar.sqlite",
+            "--lancedb",
+            "/tmp/lancedb",
+            "--table",
+            "memories",
+            "--limit",
+            "11",
+            "--batch",
+            "7",
+            "--dry-run",
+        ])
+
+        self.assertEqual(a.cmd, "writeback-lancedb")
+        self.assertEqual(a.db, "/tmp/sidecar.sqlite")
+        self.assertEqual(a.lancedb, "/tmp/lancedb")
+        self.assertEqual(a.table, "memories")
+        self.assertEqual(a.limit, 11)
+        self.assertEqual(a.batch, 7)
+        self.assertTrue(a.dry_run)
+
     def test_graph_index_and_pack_smoke_budgeted(self):
         conn = _connect(":memory:")
 

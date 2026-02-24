@@ -1779,7 +1779,7 @@ def _normalize_importance_label(raw: Any) -> Optional[str]:
     key = aliases.get(key, key)
     key = key.replace("-", "_").replace(" ", "_")
 
-    if key in {"must_remember", "nice_to_have", "ignore"}:
+    if key in {"must_remember", "nice_to_have", "ignore", "unknown"}:
         return key
     return None
 
@@ -2854,6 +2854,476 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     _emit(out, args.json)
 
+
+# Regex patterns for writeback extraction.
+_LANCEDB_ID_RE = re.compile(r"\b[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\b")
+
+_LANCEDB_WRITEBACK_NODE_SCRIPT = r"""import { readFile } from 'node:fs/promises';
+import { connect } from '@lancedb/lancedb';
+
+const ALLOWED_IMPORTANCE_LABELS = new Set(['must_remember', 'nice_to_have', 'ignore', 'unknown']);
+const ALLOWED_TRUST_TIERS = new Set(['trusted', 'untrusted', 'quarantined']);
+
+function hasMeaningfulValue(value) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+
+  return true;
+}
+
+function hasColumn(columns, name) {
+  return columns.has(name);
+}
+
+function clamp01(value) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized)) return undefined;
+  if (normalized < 0) return 0;
+  if (normalized > 1) return 1;
+  return normalized;
+}
+
+function safeIdentifier(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  return raw.replace(/'/g, "''");
+}
+
+function allowedLabel(value) {
+  const normalized = String(value ?? '').trim();
+  return ALLOWED_IMPORTANCE_LABELS.has(normalized) ? normalized : null;
+}
+
+function allowedTrust(value) {
+  const normalized = String(value ?? '').trim();
+  return ALLOWED_TRUST_TIERS.has(normalized) ? normalized : null;
+}
+
+const payloadPath = process.argv[2];
+if (!payloadPath) {
+  console.error('missing payload path');
+  process.exit(1);
+}
+
+(async () => {
+  const rawPayload = await readFile(payloadPath, 'utf8');
+  const payload = JSON.parse(rawPayload);
+
+  const dbPath = String(payload.dbPath || '').trim();
+  const tableName = String(payload.tableName || '').trim();
+  const dryRun = Boolean(payload.dryRun);
+  const updates = Array.isArray(payload.updates) ? payload.updates : [];
+
+  const summary = {
+    checked: 0,
+    updated: 0,
+    skipped: 0,
+    missingIds: [],
+    errors: 0,
+    errorIds: [],
+  };
+
+  if (!dbPath) {
+    throw new Error('missing dbPath');
+  }
+
+  const db = await connect(dbPath);
+  const table = await db.openTable(tableName);
+  const schema = await table.schema();
+  const columns = new Set((schema?.fields || []).map((field) => String(field?.name || '').trim()));
+
+  for (const item of updates) {
+    const candidateId = String(item?.id || '').trim();
+    const incoming = item?.updates || {};
+
+    if (!candidateId) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    const where = `id = '${safeIdentifier(candidateId)}'`;
+    const rows = await table.query().where(where).limit(1).toArray();
+    if (!rows || rows.length === 0) {
+      summary.missingIds.push(candidateId);
+      continue;
+    }
+
+    const row = rows[0] || {};
+    const current = {
+      importance: row.importance,
+      importance_label: row.importance_label,
+      scope: row.scope,
+      trust_tier: row.trust_tier,
+      category: row.category,
+    };
+
+    const patch = {};
+
+    const incomingImportance = clamp01(incoming.importance);
+    if (incomingImportance !== undefined && hasColumn(columns, 'importance') && !hasMeaningfulValue(current.importance)) {
+      patch.importance = incomingImportance;
+    }
+
+    const incomingLabel = allowedLabel(incoming.importance_label);
+    if (incomingLabel && hasColumn(columns, 'importance_label') && !hasMeaningfulValue(current.importance_label)) {
+      patch.importance_label = incomingLabel;
+    }
+
+    const incomingScope = String(incoming.scope || '').trim();
+    if (incomingScope && hasColumn(columns, 'scope') && !hasMeaningfulValue(current.scope)) {
+      patch.scope = incomingScope;
+    }
+
+    const incomingTrust = allowedTrust(incoming.trust_tier);
+    if (incomingTrust && hasColumn(columns, 'trust_tier') && !hasMeaningfulValue(current.trust_tier)) {
+      patch.trust_tier = incomingTrust;
+    }
+
+    const incomingCategory = String(incoming.category || '').trim();
+    if (incomingCategory && hasColumn(columns, 'category') && !hasMeaningfulValue(current.category)) {
+      patch.category = incomingCategory;
+    }
+
+    summary.checked += 1;
+    if (Object.keys(patch).length === 0) {
+      summary.skipped += 1;
+      continue;
+    }
+    if (!dryRun) {
+      try {
+        await table.update({ where, values: patch });
+      } catch (err) {
+        summary.errors += 1;
+        summary.errorIds.push(candidateId);
+        continue;
+      }
+    }
+
+    summary.updated += 1;
+  }
+
+  console.log(JSON.stringify({ success: true, summary }));
+  await db.close?.();
+})().catch((error) => {
+  console.error(String(error?.stack || error));
+  process.exit(1);
+});
+"""
+
+def _coerce_lancedb_id(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+
+    m = _LANCEDB_ID_RE.search(value)
+    if not m:
+        return None
+
+    return m.group(0).strip()
+
+
+def _extract_lancedb_id_from_obj(value: Any, *, hint_keys: Optional[Tuple[str, ...]] = None) -> Optional[str]:
+    keys = set(k.lower() for k in (hint_keys or ("memory_id", "memoryid", "memory_uuid", "memoryuuid", "lancedb_id", "lancedbid", "lancedb", "lance_id")))
+
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if not isinstance(key, str):
+                continue
+
+            if key.lower() in keys:
+                candidate = _coerce_lancedb_id(nested)
+                if candidate:
+                    return candidate
+
+            if isinstance(nested, (dict, list)):
+                candidate = _extract_lancedb_id_from_obj(nested, hint_keys=hint_keys)
+                if candidate:
+                    return candidate
+
+        return None
+
+    if isinstance(value, list):
+        for item in value:
+            candidate = _extract_lancedb_id_from_obj(item, hint_keys=hint_keys)
+            if candidate:
+                return candidate
+
+    return _coerce_lancedb_id(value)
+
+
+def _extract_lancedb_id(row: sqlite3.Row, detail_obj: Dict[str, Any]) -> Optional[str]:
+    for src in (
+        detail_obj,
+        detail_obj.get("result"),
+        detail_obj.get("response"),
+        detail_obj.get("output"),
+        detail_obj.get("payload"),
+        detail_obj.get("memory"),
+        detail_obj.get("data"),
+    ):
+        if not isinstance(src, dict):
+            continue
+
+        direct = _extract_lancedb_id_from_obj(src)
+        if direct:
+            return direct
+
+    summary = str(row["summary"] or "").strip()
+    summary_en = str(row["summary_en"] or "").strip()
+
+    for raw in (summary, summary_en):
+        if not raw:
+            continue
+
+        m = _LANCEDB_ID_RE.search(raw)
+        if m:
+            return m.group(0).strip()
+
+    return None
+
+
+def _extract_importance_from_detail(detail_obj: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
+    from openclaw_mem.importance import label_from_score
+
+    if not isinstance(detail_obj, dict):
+        return (None, None)
+
+    raw = detail_obj.get("importance")
+    score: Optional[float] = None
+    label: Optional[str] = None
+
+    if isinstance(raw, dict):
+        label = _normalize_importance_label(raw.get("label"))
+        candidate = raw.get("score")
+        if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+            score = max(0.0, min(1.0, float(candidate)))
+        elif isinstance(candidate, str):
+            try:
+                candidate_score = float(candidate.strip())
+            except ValueError:
+                candidate_score = None
+            if candidate_score is not None:
+                score = max(0.0, min(1.0, float(candidate_score)))
+
+    elif isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        score = max(0.0, min(1.0, float(raw)))
+    elif isinstance(raw, str):
+        if raw.strip():
+            try:
+                score = max(0.0, min(1.0, float(raw.strip())))
+            except ValueError:
+                score = None
+
+    if score is None and label is None:
+        return (None, None)
+
+    if label not in {"must_remember", "nice_to_have", "ignore", "unknown"}:
+        label = None
+
+    if score is None:
+        score_map = {
+            "must_remember": 0.9,
+            "nice_to_have": 0.7,
+            "ignore": 0.2,
+            "unknown": 0.0,
+        }
+        if not label:
+            return (None, None)
+        score = score_map.get(label, 0.0)
+    elif not label:
+        label = _normalize_importance_label(label_from_score(score))
+
+    return (score, label)
+
+
+def _extract_writeback_updates(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+    detail_obj = _pack_parse_detail_json(row["detail_json"])
+
+    lancedb_id = _extract_lancedb_id(row, detail_obj)
+    if not lancedb_id:
+        return None
+
+    updates: Dict[str, Any] = {}
+
+    score, label = _extract_importance_from_detail(detail_obj)
+    if score is not None:
+        updates["importance"] = score
+
+    if label:
+        updates["importance_label"] = label
+
+    scope = str(detail_obj.get("scope") or row["kind"] or "").strip()
+    if scope:
+        updates["scope"] = scope
+
+    trust = _pack_trust_tier(detail_obj)
+    if trust != "unknown":
+        updates["trust_tier"] = trust
+
+    if isinstance(detail_obj.get("category"), str):
+        updates["category"] = (detail_obj.get("category") or "").strip()
+    elif isinstance(row["kind"], str):
+        updates["category"] = str(row["kind"]).strip()
+
+    return {"id": lancedb_id, "updates": updates}
+
+
+def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Write governance metadata from SQLite ledger rows back to LanceDB."""
+
+    dry_run = bool(args.dry_run)
+    limit = max(1, int(args.limit))
+    batch = max(1, int(getattr(args, "batch", 50)))
+
+    lancedb_path = os.path.expanduser(str(getattr(args, "lancedb", "")).strip())
+    table = (getattr(args, "table", "") or "").strip()
+    if not lancedb_path:
+        _emit({"error": "missing --lancedb"}, args.json)
+        sys.exit(1)
+
+    if not table:
+        _emit({"error": "missing --table"}, args.json)
+        sys.exit(1)
+
+    engine_path = Path(__file__).resolve().parents[1] / "extensions" / "openclaw-mem-engine"
+    if not engine_path.exists():
+        _emit({"error": f"openclaw-mem-engine path not found: {engine_path}"}, args.json)
+        sys.exit(1)
+
+    rows = conn.execute(
+        """
+        SELECT id, kind, summary, summary_en, detail_json
+        FROM observations
+        WHERE tool_name = 'memory_store'
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+    prepared: List[Dict[str, Any]] = []
+    skipped_no_id = 0
+
+    for row in rows:
+        payload = _extract_writeback_updates(row)
+        if not payload:
+            skipped_no_id += 1
+            continue
+
+        prepared.append(payload)
+
+    if not prepared:
+        _emit(
+            {
+                "ok": True,
+                "dryRun": dry_run,
+                "db": lancedb_path,
+                "table": table,
+                "limit": limit,
+                "batch": batch,
+                "checked": skipped_no_id,
+                "updated": 0,
+                "skipped": skipped_no_id,
+                "missing": 0,
+                "missingIds": [],
+            },
+            args.json,
+        )
+        return
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".mjs", delete=False, dir=str(engine_path)) as script_file:
+        script_file.write(_LANCEDB_WRITEBACK_NODE_SCRIPT)
+
+    total_updated = 0
+    total_skipped = skipped_no_id
+    total_checked = skipped_no_id
+    missing_ids: List[str] = []
+    total_errors = 0
+    error_ids: List[str] = []
+
+    try:
+        for i in range(0, len(prepared), batch):
+            chunk = prepared[i : i + batch]
+            payload = {
+                "dbPath": lancedb_path,
+                "tableName": table,
+                "dryRun": dry_run,
+                "updates": chunk,
+            }
+
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as payload_file:
+                json.dump(payload, payload_file, ensure_ascii=False)
+                payload_path = payload_file.name
+
+            proc = subprocess.run(
+                ["node", script_file.name, payload_path],
+                capture_output=True,
+                text=True,
+                cwd=str(engine_path),
+                check=False,
+            )
+            os.unlink(payload_path)
+
+            if proc.returncode != 0:
+                detail = (proc.stderr or proc.stdout or "").strip()
+                _emit({"error": "lancedb writeback execution failed", "detail": detail}, args.json)
+                sys.exit(1)
+
+            try:
+                parsed = json.loads(proc.stdout or "{}")
+            except json.JSONDecodeError:
+                _emit({"error": "lancedb writeback returned invalid JSON"}, args.json)
+                sys.exit(1)
+
+            summary = parsed.get("summary", {}) if isinstance(parsed, dict) else {}
+            if not isinstance(summary, dict):
+                _emit({"error": "lancedb writeback returned malformed summary"}, args.json)
+                sys.exit(1)
+
+            total_checked += int(summary.get("checked", 0))
+            total_updated += int(summary.get("updated", 0))
+            total_skipped += int(summary.get("skipped", 0))
+            missing_ids.extend(summary.get("missingIds", []))
+
+            chunk_errors = int(summary.get("errors", 0))
+            total_errors += chunk_errors
+            for error_id in summary.get("errorIds", []):
+                if isinstance(error_id, str):
+                    error_ids.append(error_id)
+
+    finally:
+        os.unlink(script_file.name)
+
+    out = {
+        "ok": total_errors == 0,
+        "dryRun": dry_run,
+        "db": lancedb_path,
+        "table": table,
+        "limit": limit,
+        "batch": batch,
+        "checked": total_checked,
+        "updated": total_updated,
+        "skipped": total_skipped,
+        "missing": len(missing_ids),
+        "missingIds": missing_ids,
+    }
+
+    if total_errors:
+        out["error_count"] = total_errors
+        out["errorIds"] = error_ids
+
+    _emit(out, args.json)
+
+    if total_errors:
+        sys.exit(1)
 
 def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Proactive memory storage (SQLite + Vector + Markdown)."""
@@ -4279,6 +4749,9 @@ def build_parser() -> argparse.ArgumentParser:
         "  openclaw-mem embed --limit 500 --json\n"
         "  openclaw-mem vsearch \"gateway timeout\" --limit 10 --json\n"
         "\n"
+        "  # Recall/writeback (Phase 5)\n"
+        "  openclaw-mem writeback-lancedb --db mem.sqlite --lancedb ~/.openclaw/memory/lancedb --table memories --limit 50 --dry-run\n"
+        "\n"
         "  # Hybrid Search & Store (Phase 4)\n"
         "  openclaw-mem hybrid \"python error\" --limit 5 --json\n"
         "  openclaw-mem hybrid \"python error\" --rerank-provider jina --rerank-topn 20 --json\n"
@@ -4648,6 +5121,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--index-to", default=None, help=f"Index output path (default: {DEFAULT_INDEX_PATH})")
     sp.add_argument("--index-limit", type=int, default=5000, help="Index: max observations to include")
     sp.set_defaults(func=cmd_harvest)
+
+    sp = sub.add_parser("writeback-lancedb", help="Write graded metadata back into LanceDB rows")
+    add_common(sp)
+    sp.add_argument("--lancedb", required=True, help="LanceDB directory path")
+    sp.add_argument("--table", required=True, help="LanceDB table name")
+    sp.add_argument("--limit", type=int, default=50, help="Max SQLite rows to inspect (default: 50)")
+    sp.add_argument(
+        "--batch",
+        type=int,
+        default=25,
+        help="Batch size for node writeback calls (default: 25)",
+    )
+    sp.add_argument("--dry-run", action="store_true", help="Dry-run mode: show receipts without writing")
+    sp.set_defaults(func=cmd_writeback_lancedb)
 
     return p
 
