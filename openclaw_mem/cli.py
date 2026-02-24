@@ -2927,11 +2927,14 @@ if (!payloadPath) {
   const dbPath = String(payload.dbPath || '').trim();
   const tableName = String(payload.tableName || '').trim();
   const dryRun = Boolean(payload.dryRun);
+  const forceOverwrite = Boolean(payload.forceOverwrite);
   const updates = Array.isArray(payload.updates) ? payload.updates : [];
 
   const summary = {
     checked: 0,
     updated: 0,
+    overwritten: 0,
+    overwrittenFields: 0,
     skipped: 0,
     missingIds: [],
     errors: 0,
@@ -2973,30 +2976,78 @@ if (!payloadPath) {
     };
 
     const patch = {};
+    let overwrittenFields = 0;
+    let rowOverwritten = false;
 
     const incomingImportance = clamp01(incoming.importance);
-    if (incomingImportance !== undefined && hasColumn(columns, 'importance') && !hasMeaningfulValue(current.importance)) {
-      patch.importance = incomingImportance;
+    const hasCurrentImportance = hasMeaningfulValue(current.importance);
+    if (incomingImportance !== undefined && hasColumn(columns, 'importance') && (!hasCurrentImportance || forceOverwrite)) {
+      const currentImportance = clamp01(current.importance);
+      if (currentImportance !== incomingImportance) {
+        patch.importance = incomingImportance;
+        if (forceOverwrite && hasMeaningfulValue(current.importance)) {
+          rowOverwritten = true;
+          overwrittenFields += 1;
+        }
+      } else if (!hasCurrentImportance) {
+        patch.importance = incomingImportance;
+      }
     }
 
     const incomingLabel = allowedLabel(incoming.importance_label);
-    if (incomingLabel && hasColumn(columns, 'importance_label') && !hasMeaningfulValue(current.importance_label)) {
-      patch.importance_label = incomingLabel;
+    const currentLabel = String(current.importance_label || '').trim();
+    if (incomingLabel && hasColumn(columns, 'importance_label') && (!hasMeaningfulValue(currentLabel) || forceOverwrite)) {
+      if (currentLabel !== incomingLabel) {
+        patch.importance_label = incomingLabel;
+        if (forceOverwrite && currentLabel) {
+          rowOverwritten = true;
+          overwrittenFields += 1;
+        }
+      } else if (!currentLabel) {
+        patch.importance_label = incomingLabel;
+      }
     }
 
     const incomingScope = String(incoming.scope || '').trim();
-    if (incomingScope && hasColumn(columns, 'scope') && !hasMeaningfulValue(current.scope)) {
-      patch.scope = incomingScope;
+    if (incomingScope && hasColumn(columns, 'scope') && (!hasMeaningfulValue(current.scope) || forceOverwrite)) {
+      const currentScope = String(current.scope || '').trim();
+      if (currentScope !== incomingScope) {
+        patch.scope = incomingScope;
+        if (forceOverwrite && currentScope) {
+          rowOverwritten = true;
+          overwrittenFields += 1;
+        }
+      } else if (!currentScope) {
+        patch.scope = incomingScope;
+      }
     }
 
     const incomingTrust = allowedTrust(incoming.trust_tier);
-    if (incomingTrust && hasColumn(columns, 'trust_tier') && !hasMeaningfulValue(current.trust_tier)) {
-      patch.trust_tier = incomingTrust;
+    const currentTrust = String(current.trust_tier || '').trim();
+    if (incomingTrust && hasColumn(columns, 'trust_tier') && (!hasMeaningfulValue(currentTrust) || forceOverwrite)) {
+      if (currentTrust !== incomingTrust) {
+        patch.trust_tier = incomingTrust;
+        if (forceOverwrite && currentTrust) {
+          rowOverwritten = true;
+          overwrittenFields += 1;
+        }
+      } else if (!currentTrust) {
+        patch.trust_tier = incomingTrust;
+      }
     }
 
     const incomingCategory = String(incoming.category || '').trim();
-    if (incomingCategory && hasColumn(columns, 'category') && !hasMeaningfulValue(current.category)) {
-      patch.category = incomingCategory;
+    if (incomingCategory && hasColumn(columns, 'category') && (!hasMeaningfulValue(current.category) || forceOverwrite)) {
+      const currentCategory = String(current.category || '').trim();
+      if (currentCategory !== incomingCategory) {
+        patch.category = incomingCategory;
+        if (forceOverwrite && currentCategory) {
+          rowOverwritten = true;
+          overwrittenFields += 1;
+        }
+      } else if (!currentCategory) {
+        patch.category = incomingCategory;
+      }
     }
 
     summary.checked += 1;
@@ -3004,6 +3055,7 @@ if (!payloadPath) {
       summary.skipped += 1;
       continue;
     }
+
     if (!dryRun) {
       try {
         await table.update({ where, values: patch });
@@ -3015,6 +3067,10 @@ if (!payloadPath) {
     }
 
     summary.updated += 1;
+    if (rowOverwritten) {
+      summary.overwritten += 1;
+      summary.overwrittenFields += overwrittenFields;
+    }
   }
 
   console.log(JSON.stringify({ success: true, summary }));
@@ -3188,6 +3244,7 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
     dry_run = bool(args.dry_run)
     limit = max(1, int(args.limit))
     batch = max(1, int(getattr(args, "batch", 50)))
+    force_overwrite = bool(getattr(args, "force", False))
 
     lancedb_path = os.path.expanduser(str(getattr(args, "lancedb", "")).strip())
     table = (getattr(args, "table", "") or "").strip()
@@ -3235,8 +3292,11 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
                 "table": table,
                 "limit": limit,
                 "batch": batch,
+                "forceOverwrite": force_overwrite,
                 "checked": skipped_no_id,
                 "updated": 0,
+                "overwritten": 0,
+                "overwrittenFields": 0,
                 "skipped": skipped_no_id,
                 "missing": 0,
                 "missingIds": [],
@@ -3249,6 +3309,8 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
         script_file.write(_LANCEDB_WRITEBACK_NODE_SCRIPT)
 
     total_updated = 0
+    total_overwritten = 0
+    total_overwritten_fields = 0
     total_skipped = skipped_no_id
     total_checked = skipped_no_id
     missing_ids: List[str] = []
@@ -3262,6 +3324,7 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
                 "dbPath": lancedb_path,
                 "tableName": table,
                 "dryRun": dry_run,
+                "forceOverwrite": force_overwrite,
                 "updates": chunk,
             }
 
@@ -3296,6 +3359,8 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
 
             total_checked += int(summary.get("checked", 0))
             total_updated += int(summary.get("updated", 0))
+            total_overwritten += int(summary.get("overwritten", 0))
+            total_overwritten_fields += int(summary.get("overwrittenFields", 0))
             total_skipped += int(summary.get("skipped", 0))
             missing_ids.extend(summary.get("missingIds", []))
 
@@ -3315,8 +3380,11 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
         "table": table,
         "limit": limit,
         "batch": batch,
+        "forceOverwrite": force_overwrite,
         "checked": total_checked,
         "updated": total_updated,
+        "overwritten": total_overwritten,
+        "overwrittenFields": total_overwritten_fields,
         "skipped": total_skipped,
         "missing": len(missing_ids),
         "missingIds": missing_ids,
@@ -5138,6 +5206,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=25,
         help="Batch size for node writeback calls (default: 25)",
+    )
+    sp.add_argument(
+        "--force",
+        "--overwrite",
+        dest="force",
+        action="store_true",
+        default=False,
+        help="Overwrite existing metadata fields when incoming values are available",
     )
     sp.add_argument("--dry-run", action="store_true", help="Dry-run mode: show receipts without writing")
     sp.set_defaults(func=cmd_writeback_lancedb)

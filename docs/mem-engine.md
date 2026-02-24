@@ -177,8 +177,9 @@ Hybrid is the minimum that makes “concept→decisions/preferences” feel reli
   - `trust_tier`
   - `category`
   - additional provenance
-- Command used for writeback: `openclaw-mem writeback-lancedb --db <sqlite> --lancedb <path> --table <name> [--limit N] [--batch N] [--dry-run]`
-- Writeback receipts should report: `updated`, `skipped`, and missing IDs.
+- Command used for writeback: `openclaw-mem writeback-lancedb --db <sqlite> --lancedb <path> --table <name> [--limit N] [--batch N] [--dry-run] [--force]`
+  - `--force`/`--overwrite` (default off): allow overwriting existing values when incoming values are present.
+- Writeback receipts should report: `forceOverwrite`, `updated`, `skipped`, `overwritten`, `overwrittenFields` (optional), and missing IDs.
 
 ### Importance grading integration
 
@@ -259,7 +260,7 @@ Goal: close the loop between graded SQLite ledger artifacts and runtime recall b
 Deliverables:
 
 - Sidecar command for bounded, dry-run safe metadata writeback into LanceDB:
-  - `openclaw-mem writeback-lancedb --db <sqlite> --lancedb <path> --table <name> [--limit N] [--batch N] [--dry-run]`
+  - `openclaw-mem writeback-lancedb --db <sqlite> --lancedb <path> --table <name> [--limit N] [--batch N] [--dry-run] [--force]`
   - fields: `importance`, `importance_label`, `scope`, `trust_tier` (if available), `category`
 - `memory_recall` default policy sequence:
   1. `must_remember + nice_to_have`

@@ -173,6 +173,7 @@ class TestCliM0(unittest.TestCase):
             "--batch",
             "7",
             "--dry-run",
+            "--force",
         ])
 
         self.assertEqual(a.cmd, "writeback-lancedb")
@@ -182,6 +183,7 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.limit, 11)
         self.assertEqual(a.batch, 7)
         self.assertTrue(a.dry_run)
+        self.assertTrue(a.force)
 
     def test_graph_index_and_pack_smoke_budgeted(self):
         conn = _connect(":memory:")
