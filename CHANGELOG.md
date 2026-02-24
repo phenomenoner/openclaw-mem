@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pack --trace` now includes an `output` receipt block with:
   - `includedCount`, `excludedCount`, `l2IncludedCount`, `citationsCount`
   - `refreshedRecordRefs` (the exact `recordRef`s included in the final bundle for lifecycle/audit hooks)
-- Hardened `pack --trace` contract metadata for v0 receipts:
+- Hardened `pack --trace` contract metadata for v1 receipts:
   - added top-level `ts` and `version` (`openclaw_mem`, `schema`)
   - expanded `budgets` with `maxL2Items` and `niceCap`
   - candidate `decision.caps` + candidate citation `url` key (nullable, redaction-safe)

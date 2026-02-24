@@ -30,6 +30,7 @@ from typing import Iterable, Dict, Any, List, Optional, Tuple
 
 from openclaw_mem import __version__
 from openclaw_mem import defaults
+from openclaw_mem import pack_trace_v1
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 
 def _resolve_home_dir() -> str:
@@ -1908,7 +1909,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     selected_items: List[Dict[str, Any]] = []
     citations: List[Dict[str, Any]] = []
-    candidate_trace: List[Dict[str, Any]] = []
+    candidate_trace: List[pack_trace_v1.PackTraceV1Candidate] = []
 
     used_tokens = 0
     for rid in ordered_ids:
@@ -1954,26 +1955,29 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             citations.append({"recordRef": record_ref, "url": None})
 
         candidate_trace.append(
-            {
-                "id": record_ref,
-                "layer": "L1",
-                "importance": importance_label,
-                "trust": trust_tier,
-                "scores": {
-                    "rrf": float(state["rrf_scores"].get(rid, 0.0)),
-                    "fts": float(1.0 if rid in state["fts_ids"] else 0.0),
-                    "semantic": float(1.0 if (rid in state["vec_ids"] or rid in state["vec_en_ids"]) else 0.0),
-                },
-                "decision": {
-                    "included": include,
-                    "reason": reasons,
-                    "caps": {
-                        "niceCapHit": False,
-                        "l2CapHit": False,
-                    },
-                },
-                "citations": {"url": None, "recordRef": record_ref},
-            }
+            pack_trace_v1.PackTraceV1Candidate(
+                id=record_ref,
+                layer="L1",
+                importance=importance_label,
+                trust=trust_tier,
+                scores=pack_trace_v1.PackTraceV1CandidateScores(
+                    rrf=float(state["rrf_scores"].get(rid, 0.0)),
+                    fts=float(1.0 if rid in state["fts_ids"] else 0.0),
+                    semantic=float(1.0 if (rid in state["vec_ids"] or rid in state["vec_en_ids"]) else 0.0),
+                ),
+                decision=pack_trace_v1.PackTraceV1Decision(
+                    included=include,
+                    reason=list(reasons),
+                    caps=pack_trace_v1.PackTraceV1DecisionCaps(
+                        niceCapHit=False,
+                        l2CapHit=False,
+                    ),
+                ),
+                citations=pack_trace_v1.PackTraceV1CandidateCitations(
+                    url=None,
+                    recordRef=record_ref,
+                ),
+            )
         )
 
     bundle_lines = [f"- [{item['recordRef']}] {item['summary']}" for item in selected_items]
@@ -1988,56 +1992,56 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if bool(args.trace):
         duration_ms = int((time.perf_counter() - started) * 1000)
         included_refs = [item["recordRef"] for item in selected_items]
-        payload["trace"] = {
-            "kind": "openclaw-mem.pack.trace.v0",
-            "ts": _utcnow_iso(),
-            "version": {
-                "openclaw_mem": __version__,
-                "schema": "v0",
-            },
-            "query": {
-                "text": query,
-                "scope": None,
-                "intent": None,
-            },
-            "budgets": {
-                "budgetTokens": budget_tokens,
-                "maxItems": limit,
-                "maxL2Items": max_l2_items,
-                "niceCap": nice_cap,
-            },
-            "lanes": [
-                {
-                    "name": "hot",
-                    "source": "session/recent",
-                    "searched": False,
-                },
-                {
-                    "name": "warm",
-                    "source": "sqlite-observations",
-                    "searched": True,
-                    "retrievers": [
-                        {"kind": "fts5", "topK": int(state["candidate_limit"])},
-                        {"kind": "vector", "topK": int(state["candidate_limit"])},
-                        {"kind": "rrf", "k": 60},
+        trace = pack_trace_v1.PackTraceV1(
+            kind=pack_trace_v1.PACK_TRACE_V1_KIND,
+            ts=_utcnow_iso(),
+            version=pack_trace_v1.PackTraceV1Version(openclaw_mem=__version__),
+            query=pack_trace_v1.PackTraceV1Query(
+                text=query,
+                scope=None,
+                intent=None,
+            ),
+            budgets=pack_trace_v1.PackTraceV1Budgets(
+                budgetTokens=budget_tokens,
+                maxItems=limit,
+                maxL2Items=max_l2_items,
+                niceCap=nice_cap,
+            ),
+            lanes=[
+                pack_trace_v1.PackTraceV1Lane(
+                    name="hot",
+                    source="session/recent",
+                    searched=False,
+                    retrievers=[],
+                ),
+                pack_trace_v1.PackTraceV1Lane(
+                    name="warm",
+                    source="sqlite-observations",
+                    searched=True,
+                    retrievers=[
+                        pack_trace_v1.PackTraceV1Retriever(kind="fts5", topK=int(state["candidate_limit"])),
+                        pack_trace_v1.PackTraceV1Retriever(kind="vector", topK=int(state["candidate_limit"])),
+                        pack_trace_v1.PackTraceV1Retriever(kind="rrf", k=60),
                     ],
-                },
-                {
-                    "name": "cold",
-                    "source": "curated/durable",
-                    "searched": False,
-                },
+                ),
+                pack_trace_v1.PackTraceV1Lane(
+                    name="cold",
+                    source="curated/durable",
+                    searched=False,
+                    retrievers=[],
+                ),
             ],
-            "candidates": candidate_trace,
-            "output": {
-                "includedCount": len(selected_items),
-                "excludedCount": max(0, len(candidate_trace) - len(selected_items)),
-                "l2IncludedCount": 0,
-                "citationsCount": len(citations),
-                "refreshedRecordRefs": included_refs,
-            },
-            "timing": {"durationMs": duration_ms},
-        }
+            candidates=candidate_trace,
+            output=pack_trace_v1.PackTraceV1Output(
+                includedCount=len(selected_items),
+                excludedCount=max(0, len(candidate_trace) - len(selected_items)),
+                l2IncludedCount=0,
+                citationsCount=len(citations),
+                refreshedRecordRefs=included_refs,
+            ),
+            timing=pack_trace_v1.PackTraceV1Timing(durationMs=duration_ms),
+        )
+        payload["trace"] = pack_trace_v1.to_dict(trace)
 
     if bool(args.json):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -5093,7 +5097,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--query-en", help="Optional English query for bilingual retrieval")
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
-    sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v0`) with include/exclude decisions")
+    sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)
 
 
