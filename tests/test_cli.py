@@ -105,12 +105,12 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker(">>[x]TODO: compact wrappers"))
         self.assertTrue(_summary_has_task_marker("-1)TODO compact ordered marker"))
 
-    def test_summary_has_task_marker_rejects_non_marker_prefixes_and_requires_marker_boundaries(self):
+    def test_summary_has_task_marker_rejects_non_marker_prefixes_and_requires_plain_marker_boundaries(self):
         self.assertFalse(_summary_has_task_marker("TODOLIST clean old notes"))
         self.assertFalse(_summary_has_task_marker("taskforce sync tomorrow"))
         self.assertFalse(_summary_has_task_marker("[TODOLIST] clean old notes"))
-        self.assertFalse(_summary_has_task_marker("[TODO]clean old notes"))
-        self.assertFalse(_summary_has_task_marker("【TODO】clean old notes"))
+        self.assertTrue(_summary_has_task_marker("[TODO]clean old notes"))
+        self.assertTrue(_summary_has_task_marker("【TODO】clean old notes"))
         self.assertTrue(_summary_has_task_marker("-TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("+TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker(">TODO clean old notes"))
@@ -120,6 +120,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("·TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("[x]TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("[✓]TODO clean old notes"))
+        self.assertTrue(_summary_has_task_marker("(TASK)clean old notes"))
         self.assertTrue(_summary_has_task_marker("1.TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("1)TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("(1)TODO clean old notes"))
@@ -1131,7 +1132,7 @@ class TestCliM0(unittest.TestCase):
                         "ts": now,
                         "kind": "note",
                         "tool_name": "memory_store",
-                        "summary": "[TODO] buy coffee this afternoon",
+                        "summary": "[TODO]buy coffee this afternoon",
                         "detail": {"importance": 0.9},
                     }
                 )
@@ -1174,7 +1175,7 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(cm.exception.code, 10)
         out = json.loads(buf.getvalue())
         self.assertEqual(out["tasks"]["found_new"], 1)
-        self.assertEqual(out["tasks"]["matches"][0]["summary"], "[TODO] buy coffee this afternoon")
+        self.assertEqual(out["tasks"]["matches"][0]["summary"], "[TODO]buy coffee this afternoon")
 
         conn.close()
 
@@ -1192,7 +1193,7 @@ class TestCliM0(unittest.TestCase):
                         "ts": now,
                         "kind": "note",
                         "tool_name": "memory_store",
-                        "summary": "【TODO】 buy coffee this afternoon",
+                        "summary": "【TODO】buy coffee this afternoon",
                         "detail": {"importance": 0.9},
                     }
                 )
@@ -1235,7 +1236,7 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(cm.exception.code, 10)
         out = json.loads(buf.getvalue())
         self.assertEqual(out["tasks"]["found_new"], 1)
-        self.assertEqual(out["tasks"]["matches"][0]["summary"], "【TODO】 buy coffee this afternoon")
+        self.assertEqual(out["tasks"]["matches"][0]["summary"], "【TODO】buy coffee this afternoon")
 
         conn.close()
 

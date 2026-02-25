@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `triage --mode tasks` now also accepts markdown blockquote-prefixed markers (`> TODO ...`, `> > [ ] TASK: ...`, compact `>> TODO ...`) and mixed wrapper chains (for example `- > (iv) [ ] TODO: ...`) using the same deterministic separator rules.
 - `triage --mode tasks` list/checklist wrapper parsing now also accepts checked checkbox markers `[✓]` and `[✔]` in addition to `[ ]` and `[x]`.
 - `triage --mode tasks` now also accepts compact no-space markdown wrapper chains before task markers (for example `-TODO ...`, `>>TODO ...`, `[x]TODO ...`, `1)TODO ...`, `* (1)TODO ...`) while preserving deterministic marker boundary checks.
+- `triage --mode tasks` bracket-wrapped task markers now also accept compact no-space suffix forms (for example `[TODO]buy milk`, `(TASK)review PR`, `【TODO】buy milk`) while preserving non-marker boundary checks (for example `[TODOLIST]...`).
 - Roman ordered-list prefixes now require canonical Roman numerals (for example `iv`, `IX`), reducing permissive false positives such as `ic`/`iiv`.
 - `profile --json` now classifies malformed `detail_json.importance` payloads as `unknown` (instead of coercing to `ignore`) and keeps `avg_score` based on parseable importance only.
 - `parse_importance_score` now rejects boolean `importance.score` values inside object payloads (`{"score": true|false}`), matching top-level bool handling.
@@ -37,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed a contradictory duplicate license footer from `README.md` so the dual-license statement (`MIT OR Apache-2.0`) is defined once and consistently.
 - Quickstart sample-ingest step now uses a deterministic `python -c` JSONL writer instead of a heredoc, reducing shell quoting/EOF pitfalls in automation contexts.
 - Documented deterministic `triage --mode tasks` marker grammar updates (plain + bracketed markers, optional markdown blockquotes + list/checklist + ordered-list prefixes, accepted separators) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
+- Expanded triage task-marker docs with compact no-space bracket examples (for example `[TODO]buy milk`, `【TODO】buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 - Clarified task-marker docs to explicitly include additional markdown bullets (`‣`, `∙`, `·`) alongside `-`, `*`, `+`, and `•`.
 - Clarified task-marker docs to explicitly include CJK bracket-wrapped marker forms (for example `【TODO】 ...`) alongside `[TODO] ...` and `(TASK) ...` forms.
 
@@ -51,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regression coverage for bracket-wrapped task markers (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`) in parser-level and triage flows, including marker-only acceptance and rejection cases for malformed/non-marker bracket prefixes.
 - Added regression coverage for markdown wrapper-prefixed task markers: blockquotes (`>` plus compact `>>` forms), list/checklist prefixes (including `+`, `‣`, `∙`, and `·` bullets, plus checked `[✓]`/`[✔]` variants), nested prefix chains, and ordered-list prefixes (including `(1)`, full-width `（１）`, alpha forms like `a)`/`(a)`/`B.`, and Roman forms like `iv)`/`(iv)`), plus invalid Roman rejection cases, in parser-level and triage flows.
 - Expanded task-marker regression coverage for compact no-space wrapper chaining (`-TODO`, `>>TODO`, `[x]TODO`, `1)TODO`, `* (1)TODO`) while retaining non-marker boundary rejection cases.
+- Added regression coverage for compact no-space bracket-wrapped task markers (`[TODO]text`, `【TODO】text`) in parser-level and triage flows.
 - Added regression coverage for malformed importance parsing in `profile --json` and for bool-rejection in `parse_importance_score`.
 - Added regression coverage for `make_importance` label canonicalization (alias normalization + invalid-label fallback).
 - Added regression coverage for full-width importance labels across parsing, parseability checks, and `make_importance` normalization.
