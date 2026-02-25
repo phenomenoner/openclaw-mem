@@ -32,6 +32,7 @@ nav:
   - Reality check & status: reality-check.md
   - Quickstart: quickstart.md
   - Specs:
+      - Docs memory (hybrid search v0): specs/docs-memory-hybrid-search-v0.md
       - Graphic memory (GraphRAG-lite PRD): specs/graphic-memory-graphrag-lite-prd.md
   - Reference:
       - Ecosystem fit: ecosystem-fit.md

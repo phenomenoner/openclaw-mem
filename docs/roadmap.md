@@ -44,6 +44,10 @@ Status: **ROADMAP**.
 - Why: the official backend currently uses LanceDB mostly as a basic vector store; it doesn’t expose hybrid/FTS/index lifecycle/versioning.
 - Design doc: [OpenClaw Mem Engine →](mem-engine.md)
 
+Add-on (critical UX win, no local LLM):
+- **Docs memory**: index operator-authored repos (DECISIONS / roadmaps / specs) as a recall surface and include it as a cold lane.
+  - Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
+
 Acceptance criteria:
 - Slot switch + rollback is one line (`plugins.slots.memory`).
 - `memory_store/memory_recall/memory_forget` emit JSON receipts (filters, latency, counts).

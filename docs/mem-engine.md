@@ -164,6 +164,15 @@ Notes:
 
 Hybrid is the minimum that makes “concept→decisions/preferences” feel reliable.
 
+### Docs memory (decisions/roadmaps/specs) as a cold lane
+
+Operators feel recall failure most painfully on: “we already decided this.”
+
+So the engine path should be able to **optionally** search an operator-authored docs corpus (DECISIONS / roadmaps / specs) using the same hybrid recipe (FTS + embeddings) and return bounded citations.
+
+- Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
+- Stance: **no local LLM**; rerank (if needed) is remote + bounded.
+
 ---
 
 ## Write path + governance writeback

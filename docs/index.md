@@ -14,6 +14,7 @@ Turn your agent’s work into a durable, searchable memory trail—without forci
 
 - **Always-fresh recall:** keep “what just happened?” searchable in minutes (or less).
 - **Cheap progressive recall:** `search → timeline → get` keeps most lookups local.
+- **Docs memory (decisions/specs):** treat your repos as a recall surface (hybrid: FTS + optional embeddings), so “we already decided this” is retrievable without hints.
 - **Auditability:** one SQLite ledger you can grep, backup, diff, and export.
 - **Safe boundaries:** default posture stays sidecar; slot ownership remains optional and rollbackable.
 
@@ -41,6 +42,7 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 - Context engineering lessons (local-first): [Go →](context-engineering-lessons.md)
 - Roadmap (engineering): [Go →](roadmap.md)
 - Mem Engine (optional slot backend): [Go →](mem-engine.md)
+- Docs memory (spec): [Go →](specs/docs-memory-hybrid-search-v0.md)
 - Graphic memory (spec/PRD, dev): [Go →](specs/graphic-memory-graphrag-lite-prd.md)
 - Graphic memory auto-capture + auto-recall v0 knobs: [Go →](specs/graphic-memory-auto-capture-auto-recall.md)
 - Upgrade checklist (system upgrades): [Go →](upgrade-checklist.md)
