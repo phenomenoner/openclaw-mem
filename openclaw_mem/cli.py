@@ -31,6 +31,16 @@ from typing import Iterable, Dict, Any, List, Optional, Tuple
 from openclaw_mem import __version__
 from openclaw_mem import defaults
 from openclaw_mem import pack_trace_v1
+from openclaw_mem.docs_memory import (
+    chunk_content_hash,
+    chunk_markdown,
+    detect_doc_kind,
+    fuse_rankings_rrf,
+    make_doc_id,
+    make_record_ref,
+    parse_ts_hint,
+    rrf_components,
+)
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 
 def _resolve_home_dir() -> str:
@@ -285,6 +295,90 @@ def _init_db(conn: sqlite3.Connection) -> None:
             source_path TEXT NOT NULL,
             mtime REAL NOT NULL
         );
+        """
+    )
+
+    # Docs memory sidecar (hybrid retrieval over operator-authored markdown).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS docs_chunks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            doc_id TEXT NOT NULL,
+            chunk_id TEXT NOT NULL,
+            repo TEXT NOT NULL,
+            path TEXT NOT NULL,
+            doc_kind TEXT NOT NULL,
+            heading_path TEXT,
+            title TEXT,
+            text TEXT NOT NULL,
+            source_kind TEXT NOT NULL DEFAULT 'operator',
+            source_ref TEXT NOT NULL,
+            ts_hint TEXT,
+            content_hash TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(doc_id, chunk_id)
+        );
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_docs_chunks_doc_id ON docs_chunks(doc_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_docs_chunks_kind ON docs_chunks(doc_kind);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_docs_chunks_repo_path ON docs_chunks(repo, path);")
+
+    conn.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS docs_chunks_fts
+        USING fts5(text, title, heading_path, path, repo, doc_kind, content='docs_chunks', content_rowid='id');
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS docs_embeddings (
+            chunk_rowid INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            dim INTEGER NOT NULL,
+            vector BLOB NOT NULL,
+            norm REAL NOT NULL,
+            text_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(chunk_rowid, model)
+        );
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_docs_embeddings_model ON docs_embeddings(model);")
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS docs_chunks_ai
+        AFTER INSERT ON docs_chunks
+        BEGIN
+            INSERT INTO docs_chunks_fts(rowid, text, title, heading_path, path, repo, doc_kind)
+            VALUES (new.id, new.text, new.title, new.heading_path, new.path, new.repo, new.doc_kind);
+        END;
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS docs_chunks_ad
+        AFTER DELETE ON docs_chunks
+        BEGIN
+            INSERT INTO docs_chunks_fts(docs_chunks_fts, rowid, text, title, heading_path, path, repo, doc_kind)
+            VALUES ('delete', old.id, old.text, old.title, old.heading_path, old.path, old.repo, old.doc_kind);
+        END;
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS docs_chunks_au
+        AFTER UPDATE ON docs_chunks
+        BEGIN
+            INSERT INTO docs_chunks_fts(docs_chunks_fts, rowid, text, title, heading_path, path, repo, doc_kind)
+            VALUES ('delete', old.id, old.text, old.title, old.heading_path, old.path, old.repo, old.doc_kind);
+            INSERT INTO docs_chunks_fts(rowid, text, title, heading_path, path, repo, doc_kind)
+            VALUES (new.id, new.text, new.title, new.heading_path, new.path, new.repo, new.doc_kind);
+        END;
         """
     )
 
@@ -803,6 +897,482 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     out = [dict(r) for r in rows]
     _emit(out, args.json)
+
+
+def _docs_collect_markdown_files(raw_paths: List[str]) -> Tuple[List[Path], List[str]]:
+    files: List[Path] = []
+    missing: List[str] = []
+    seen: set[str] = set()
+
+    for raw in raw_paths:
+        p = Path(raw).expanduser().resolve()
+        if not p.exists():
+            missing.append(str(p))
+            continue
+
+        candidates: List[Path]
+        if p.is_file():
+            candidates = [p] if p.suffix.lower() == ".md" else []
+        else:
+            candidates = [x for x in p.rglob("*.md") if x.is_file()]
+
+        for fp in sorted(candidates):
+            key = str(fp)
+            if key in seen:
+                continue
+            seen.add(key)
+            files.append(fp)
+
+    return files, missing
+
+
+def _docs_git_root(path: Path, cache: Dict[str, Optional[Path]]) -> Optional[Path]:
+    key = str(path.parent.resolve())
+    if key in cache:
+        return cache[key]
+
+    p = subprocess.run(
+        ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode != 0:
+        cache[key] = None
+        return None
+
+    root_raw = (p.stdout or "").strip()
+    if not root_raw:
+        cache[key] = None
+        return None
+
+    root = Path(root_raw).expanduser().resolve()
+    cache[key] = root
+    return root
+
+
+def _docs_repo_relpath(path: Path, git_cache: Dict[str, Optional[Path]]) -> Tuple[str, str]:
+    root = _docs_git_root(path, git_cache)
+    if root is not None:
+        try:
+            rel = path.resolve().relative_to(root).as_posix()
+            return root.name, rel
+        except Exception:
+            pass
+
+    return "local", path.name
+
+
+def _docs_embedding_input(*, title: str, heading_path: str, text: str) -> str:
+    parts = [p.strip() for p in [title, heading_path, text] if (p or "").strip()]
+    return "\n".join(parts)
+
+
+def cmd_docs_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    files, missing = _docs_collect_markdown_files(list(getattr(args, "path", []) or []))
+    max_chars = max(200, int(getattr(args, "max_chars", 1400) or 1400))
+
+    stats: Dict[str, Any] = {
+        "ok": True,
+        "files_seen": len(files),
+        "missing_paths": missing,
+        "files_ingested": 0,
+        "chunks_total": 0,
+        "chunks_inserted": 0,
+        "chunks_updated": 0,
+        "chunks_unchanged": 0,
+        "chunks_deleted": 0,
+        "embedded": 0,
+    }
+
+    embed_rows: List[Tuple[int, str, str]] = []
+    now = _utcnow_iso()
+    git_cache: Dict[str, Optional[Path]] = {}
+    model = str(getattr(args, "model", defaults.embed_model()))
+
+    for fp in files:
+        raw_text = fp.read_text(encoding="utf-8")
+        repo, rel_path = _docs_repo_relpath(fp, git_cache)
+        doc_id = make_doc_id(repo, rel_path)
+        doc_kind = detect_doc_kind(rel_path)
+        ts_hint = parse_ts_hint(raw_text, rel_path)
+
+        chunks = chunk_markdown(raw_text, default_title=fp.stem, max_chars=max_chars)
+        stats["chunks_total"] = int(stats["chunks_total"]) + len(chunks)
+
+        existing_rows = conn.execute(
+            "SELECT id, chunk_id, content_hash FROM docs_chunks WHERE doc_id = ?",
+            (doc_id,),
+        ).fetchall()
+        existing_map = {str(r["chunk_id"]): dict(r) for r in existing_rows}
+
+        seen_chunk_ids: set[str] = set()
+        for chunk in chunks:
+            seen_chunk_ids.add(chunk.chunk_id)
+            chunk_hash = chunk_content_hash(
+                heading_path=chunk.heading_path,
+                title=chunk.title,
+                text=chunk.text,
+            )
+            existing = existing_map.get(chunk.chunk_id)
+
+            if existing is None:
+                cur = conn.execute(
+                    """
+                    INSERT INTO docs_chunks (
+                        doc_id, chunk_id, repo, path, doc_kind, heading_path, title,
+                        text, source_kind, source_ref, ts_hint, content_hash, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        doc_id,
+                        chunk.chunk_id,
+                        repo,
+                        rel_path,
+                        doc_kind,
+                        chunk.heading_path,
+                        chunk.title,
+                        chunk.text,
+                        "operator",
+                        f"{repo}/{rel_path}",
+                        ts_hint,
+                        chunk_hash,
+                        now,
+                    ),
+                )
+                rowid = int(cur.lastrowid)
+                stats["chunks_inserted"] = int(stats["chunks_inserted"]) + 1
+                if bool(getattr(args, "embed", True)):
+                    embed_rows.append(
+                        (
+                            rowid,
+                            _docs_embedding_input(
+                                title=chunk.title,
+                                heading_path=chunk.heading_path,
+                                text=chunk.text,
+                            ),
+                            chunk_hash,
+                        )
+                    )
+                continue
+
+            rowid = int(existing["id"])
+            existing_hash = str(existing.get("content_hash") or "")
+            if existing_hash == chunk_hash:
+                stats["chunks_unchanged"] = int(stats["chunks_unchanged"]) + 1
+                continue
+
+            conn.execute(
+                """
+                UPDATE docs_chunks
+                SET repo = ?,
+                    path = ?,
+                    doc_kind = ?,
+                    heading_path = ?,
+                    title = ?,
+                    text = ?,
+                    source_kind = ?,
+                    source_ref = ?,
+                    ts_hint = ?,
+                    content_hash = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    repo,
+                    rel_path,
+                    doc_kind,
+                    chunk.heading_path,
+                    chunk.title,
+                    chunk.text,
+                    "operator",
+                    f"{repo}/{rel_path}",
+                    ts_hint,
+                    chunk_hash,
+                    now,
+                    rowid,
+                ),
+            )
+            stats["chunks_updated"] = int(stats["chunks_updated"]) + 1
+            if bool(getattr(args, "embed", True)):
+                embed_rows.append(
+                    (
+                        rowid,
+                        _docs_embedding_input(
+                            title=chunk.title,
+                            heading_path=chunk.heading_path,
+                            text=chunk.text,
+                        ),
+                        chunk_hash,
+                    )
+                )
+
+        stale_ids = [
+            int(r["id"])
+            for r in existing_rows
+            if str(r["chunk_id"] or "") not in seen_chunk_ids
+        ]
+        if stale_ids:
+            placeholders = ",".join(["?"] * len(stale_ids))
+            conn.execute(
+                f"DELETE FROM docs_embeddings WHERE chunk_rowid IN ({placeholders})",
+                stale_ids,
+            )
+            conn.execute(
+                f"DELETE FROM docs_chunks WHERE id IN ({placeholders})",
+                stale_ids,
+            )
+            stats["chunks_deleted"] = int(stats["chunks_deleted"]) + len(stale_ids)
+
+        stats["files_ingested"] = int(stats["files_ingested"]) + 1
+
+    embed_error: Optional[str] = None
+    if bool(getattr(args, "embed", True)) and embed_rows:
+        api_key = _get_api_key()
+        if not api_key:
+            embed_error = "missing_api_key"
+        else:
+            try:
+                client = OpenAIEmbeddingsClient(api_key=api_key, base_url=getattr(args, "base_url", defaults.openai_base_url()))
+                batch = max(1, int(getattr(args, "batch", 32) or 32))
+
+                for i in range(0, len(embed_rows), batch):
+                    batch_rows = embed_rows[i : i + batch]
+                    texts = [x[1] for x in batch_rows]
+                    vecs = client.embed(texts, model=model)
+                    for (rowid, _text, text_hash), vec in zip(batch_rows, vecs):
+                        conn.execute(
+                            """
+                            INSERT OR REPLACE INTO docs_embeddings
+                            (chunk_rowid, model, dim, vector, norm, text_hash, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (rowid, model, len(vec), pack_f32(vec), l2_norm(vec), text_hash, now),
+                        )
+                        stats["embedded"] = int(stats["embedded"]) + 1
+            except Exception as e:
+                embed_error = str(e)
+
+    conn.commit()
+    if embed_error:
+        stats["embed_error"] = embed_error
+
+    _emit(stats, args.json)
+
+
+def _docs_fts_rows(conn: sqlite3.Connection, query: str, top_k: int) -> List[Dict[str, Any]]:
+    try:
+        rows = conn.execute(
+            """
+            SELECT c.id, c.doc_id, c.chunk_id, c.repo, c.path, c.doc_kind, c.heading_path, c.title, c.text,
+                   bm25(docs_chunks_fts) AS score
+            FROM docs_chunks_fts
+            JOIN docs_chunks c ON c.id = docs_chunks_fts.rowid
+            WHERE docs_chunks_fts MATCH ?
+            ORDER BY score ASC, c.id ASC
+            LIMIT ?
+            """,
+            (query, int(top_k)),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        q2 = query
+        if "-" in query and not query.strip().startswith('"'):
+            q2 = f'"{query}"'
+        try:
+            rows = conn.execute(
+                """
+                SELECT c.id, c.doc_id, c.chunk_id, c.repo, c.path, c.doc_kind, c.heading_path, c.title, c.text,
+                       bm25(docs_chunks_fts) AS score
+                FROM docs_chunks_fts
+                JOIN docs_chunks c ON c.id = docs_chunks_fts.rowid
+                WHERE docs_chunks_fts MATCH ?
+                ORDER BY score ASC, c.id ASC
+                LIMIT ?
+                """,
+                (q2, int(top_k)),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+
+    return [dict(r) for r in rows]
+
+
+def _docs_vec_rows(
+    conn: sqlite3.Connection,
+    *,
+    query_vec: List[float],
+    model: str,
+    top_k: int,
+) -> List[Dict[str, Any]]:
+    emb_rows = conn.execute(
+        "SELECT chunk_rowid, vector, norm FROM docs_embeddings WHERE model = ?",
+        (model,),
+    ).fetchall()
+
+    ranked = rank_cosine(
+        query_vec=query_vec,
+        items=((int(r["chunk_rowid"]), r["vector"], float(r["norm"])) for r in emb_rows),
+        limit=max(1, int(top_k)),
+    )
+    if not ranked:
+        return []
+
+    ids = [rid for rid, _ in ranked]
+    q = f"SELECT id, doc_id, chunk_id, repo, path, doc_kind, heading_path, title, text FROM docs_chunks WHERE id IN ({','.join(['?']*len(ids))})"
+    chunk_rows = conn.execute(q, ids).fetchall()
+    by_id = {int(r["id"]): dict(r) for r in chunk_rows}
+
+    out: List[Dict[str, Any]] = []
+    for rid, score in ranked:
+        row = by_id.get(int(rid))
+        if row is None:
+            continue
+        row["score"] = float(score)
+        out.append(row)
+    return out
+
+
+def cmd_docs_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    query = (getattr(args, "query", "") or "").strip()
+    if not query:
+        _emit({"error": "empty query"}, True)
+        sys.exit(2)
+
+    limit = max(1, int(getattr(args, "limit", 10) or 10))
+    fts_k = max(limit, int(getattr(args, "fts_k", limit * 2) or (limit * 2)))
+    vec_k = max(limit, int(getattr(args, "vec_k", limit * 2) or (limit * 2)))
+    rrf_k = max(1, int(getattr(args, "k", 60) or 60))
+    model = str(getattr(args, "model", defaults.embed_model()))
+
+    fts_rows = _docs_fts_rows(conn, query, fts_k)
+    fts_ids = [int(r["id"]) for r in fts_rows]
+
+    vec_rows: List[Dict[str, Any]] = []
+    vec_error: Optional[str] = None
+
+    api_key = _get_api_key()
+    if api_key:
+        try:
+            client = OpenAIEmbeddingsClient(api_key=api_key, base_url=getattr(args, "base_url", defaults.openai_base_url()))
+            query_vec = client.embed([query], model=model)[0]
+            vec_rows = _docs_vec_rows(conn, query_vec=query_vec, model=model, top_k=vec_k)
+        except Exception as e:
+            vec_error = str(e)
+    else:
+        vec_error = "missing_api_key"
+
+    vec_ids = [int(r["id"]) for r in vec_rows]
+
+    fused = fuse_rankings_rrf(
+        fts_ids=fts_ids,
+        vec_ids=vec_ids,
+        k=rrf_k,
+        limit=max(limit, fts_k, vec_k),
+    )
+
+    fused_ids = [rid for rid, _ in fused]
+    if fused_ids:
+        q = f"SELECT id, doc_id, chunk_id, repo, path, doc_kind, heading_path, title, text FROM docs_chunks WHERE id IN ({','.join(['?']*len(fused_ids))})"
+        fused_rows = conn.execute(q, fused_ids).fetchall()
+        fused_map = {int(r["id"]): dict(r) for r in fused_rows}
+    else:
+        fused_map = {}
+
+    selected_ids = [rid for rid, _ in fused[:limit]]
+    selected_map = {rid: fused_map[rid] for rid in selected_ids if rid in fused_map}
+
+    final: List[Dict[str, Any]] = []
+    for rid, rrf_score in fused[:limit]:
+        row = selected_map.get(int(rid))
+        if not row:
+            continue
+
+        row["recordRef"] = make_record_ref(
+            repo=str(row.get("repo") or "local"),
+            rel_path=str(row.get("path") or ""),
+            chunk_id=str(row.get("chunk_id") or ""),
+        )
+        row["rrf_score"] = float(rrf_score)
+        row["match"] = []
+        if rid in fts_ids:
+            row["match"].append("fts")
+        if rid in vec_ids:
+            row["match"].append("vector")
+        final.append(row)
+
+    payload: Dict[str, Any] = {
+        "query": query,
+        "results": final,
+    }
+
+    if bool(getattr(args, "trace", False)):
+        fts_top = []
+        for r in fts_rows[:fts_k]:
+            fts_top.append(
+                {
+                    "id": int(r["id"]),
+                    "recordRef": make_record_ref(
+                        repo=str(r.get("repo") or "local"),
+                        rel_path=str(r.get("path") or ""),
+                        chunk_id=str(r.get("chunk_id") or ""),
+                    ),
+                    "score": float(r.get("score") or 0.0),
+                }
+            )
+
+        vec_top = []
+        for r in vec_rows[:vec_k]:
+            vec_top.append(
+                {
+                    "id": int(r["id"]),
+                    "recordRef": make_record_ref(
+                        repo=str(r.get("repo") or "local"),
+                        rel_path=str(r.get("path") or ""),
+                        chunk_id=str(r.get("chunk_id") or ""),
+                    ),
+                    "score": float(r.get("score") or 0.0),
+                }
+            )
+
+        fused_trace = rrf_components(fused=fused, fts_ids=fts_ids, vec_ids=vec_ids, k=rrf_k)
+        for item in fused_trace:
+            row = fused_map.get(int(item["id"]))
+            if row is None:
+                ref = None
+            else:
+                ref = make_record_ref(
+                    repo=str(row.get("repo") or "local"),
+                    rel_path=str(row.get("path") or ""),
+                    chunk_id=str(row.get("chunk_id") or ""),
+                )
+            item["recordRef"] = ref
+
+        payload["trace"] = {
+            "query": query,
+            "fts_top_k": fts_top,
+            "vec_top_k": vec_top,
+            "fused_ranking": fused_trace,
+            "selected_chunks": [
+                {
+                    "id": int(r.get("id") or 0),
+                    "recordRef": str(r.get("recordRef") or ""),
+                    "text": (str(r.get("text") or "").strip()[:240] + ("…" if len(str(r.get("text") or "").strip()) > 240 else "")),
+                }
+                for r in final
+            ],
+        }
+
+    if vec_error:
+        payload["vector_status"] = vec_error
+
+    if args.json:
+        _emit(payload, True)
+        return
+
+    for item in final:
+        text = str(item.get("text") or "").replace("\n", " ").strip()
+        if len(text) > 140:
+            text = text[:137] + "…"
+        print(f"{item['recordRef']} :: {text}")
 
 
 def cmd_get(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -4997,6 +5567,10 @@ def build_parser() -> argparse.ArgumentParser:
         "  openclaw-mem timeline 23 41 57 --window 4 --json\n"
         "  openclaw-mem get 23 41 57 --json\n"
         "\n"
+        "  # Docs memory (hybrid FTS + vector)\n"
+        "  openclaw-mem docs ingest --path ./docs --json\n"
+        "  openclaw-mem docs search \"hybrid retrieval\" --trace --json\n"
+        "\n"
         "  # AI compression (requires API key via env or ~/.openclaw/openclaw.json)\n"
         "  export OPENAI_API_KEY=sk-...\n"
         "  openclaw-mem summarize --json  # yesterday's notes\n"
@@ -5078,6 +5652,49 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("query", help="Search query (FTS5 syntax)")
     sp.add_argument("--limit", type=int, default=20)
     sp.set_defaults(func=cmd_search)
+
+    sp = sub.add_parser("docs", help="Docs memory (operator-authored markdown ingest/search)")
+    add_common(sp)
+    dsub = sp.add_subparsers(dest="docs_cmd", required=True)
+
+    d = dsub.add_parser("ingest", help="Ingest markdown docs into docs_chunks")
+    add_common(d)
+    d.add_argument("--path", action="append", required=True, help="Markdown file or directory path (repeatable)")
+    d.add_argument("--max-chars", dest="max_chars", type=int, default=1400, help="Chunk size upper bound in characters (default: 1400)")
+    d.add_argument("--embed", action="store_true", default=True, help="Generate embeddings for changed chunks when API key is available (default: true)")
+    d.add_argument("--no-embed", dest="embed", action="store_false", help="Skip embeddings during ingest")
+    d.add_argument("--batch", type=int, default=32, help="Embedding batch size (default: 32)")
+    d.add_argument(
+        "--model",
+        default=defaults.embed_model(),
+        help="Embedding model (env: OPENCLAW_MEM_EMBED_MODEL)",
+    )
+    d.add_argument(
+        "--base-url",
+        default=defaults.openai_base_url(),
+        help="OpenAI API base URL (env: OPENCLAW_MEM_OPENAI_BASE_URL)",
+    )
+    d.set_defaults(func=cmd_docs_ingest)
+
+    d = dsub.add_parser("search", help="Hybrid docs retrieval (FTS + vector + deterministic RRF)")
+    add_common(d)
+    d.add_argument("query", help="Search query text")
+    d.add_argument("--limit", type=int, default=10, help="Final selected chunks (default: 10)")
+    d.add_argument("--fts-k", dest="fts_k", type=int, default=30, help="FTS candidate count before fusion (default: 30)")
+    d.add_argument("--vec-k", dest="vec_k", type=int, default=30, help="Vector candidate count before fusion (default: 30)")
+    d.add_argument("--k", type=int, default=60, help="RRF constant (default: 60)")
+    d.add_argument("--trace", action="store_true", help="Include trace receipt: fts top-k, vec top-k, fused ranking, selected chunks")
+    d.add_argument(
+        "--model",
+        default=defaults.embed_model(),
+        help="Embedding model (env: OPENCLAW_MEM_EMBED_MODEL)",
+    )
+    d.add_argument(
+        "--base-url",
+        default=defaults.openai_base_url(),
+        help="OpenAI API base URL (env: OPENCLAW_MEM_OPENAI_BASE_URL)",
+    )
+    d.set_defaults(func=cmd_docs_search)
 
     sp = sub.add_parser("timeline", help="Windowed timeline around IDs")
     add_common(sp)
