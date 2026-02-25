@@ -125,7 +125,7 @@ Task extraction is deterministic and picks rows when either:
 - `kind == "task"`, or
 - `summary` starts with `TODO`, `TASK`, or `REMINDER` (case-insensitive; width-normalized via NFKC, so `ＴＯＤＯ`/`ＴＡＳＫ`/`ＲＥＭＩＮＤＥＲ` are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`), followed by:
   - `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
-  - Example formats: `TODO`, `TODO: rotate runbook`, `【TODO】 rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`.
+  - Example formats: `TODO`, `TODO: rotate runbook`, `【TODO】 rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`.
   - Example run:
 
     ```bash
