@@ -1968,6 +1968,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 decision=pack_trace_v1.PackTraceV1Decision(
                     included=include,
                     reason=list(reasons),
+                    rationale=list(reasons),
                     caps=pack_trace_v1.PackTraceV1DecisionCaps(
                         niceCapHit=False,
                         l2CapHit=False,
@@ -1992,6 +1993,11 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if bool(args.trace):
         duration_ms = int((time.perf_counter() - started) * 1000)
         included_refs = [item["recordRef"] for item in selected_items]
+        included_candidates = [c for c in candidate_trace if bool(getattr(c.decision, "included", False))]
+        rationale_missing_count = sum(1 for c in included_candidates if not list(getattr(c.decision, "reason", []) or []))
+        citation_missing_count = sum(1 for c in included_candidates if not str(getattr(c.citations, "recordRef", "") or "").strip())
+        all_included_have_rationale = rationale_missing_count == 0
+        all_included_have_citations = citation_missing_count == 0
         trace = pack_trace_v1.PackTraceV1(
             kind=pack_trace_v1.PACK_TRACE_V1_KIND,
             ts=_utcnow_iso(),
@@ -2038,6 +2044,12 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 l2IncludedCount=0,
                 citationsCount=len(citations),
                 refreshedRecordRefs=included_refs,
+                coverage=pack_trace_v1.PackTraceV1Coverage(
+                    rationaleMissingCount=rationale_missing_count,
+                    citationMissingCount=citation_missing_count,
+                    allIncludedHaveRationale=all_included_have_rationale,
+                    allIncludedHaveCitations=all_included_have_citations,
+                ),
             ),
             timing=pack_trace_v1.PackTraceV1Timing(durationMs=duration_ms),
         )
@@ -2358,7 +2370,7 @@ def _summary_has_task_marker(summary: str) -> bool:
         if not text:
             return False
 
-        close_by_open = {"[": "]", "(": ")"}
+        close_by_open = {"[": "]", "(": ")", "【": "】"}
         close = close_by_open.get(text[0])
         if close is None:
             return False
@@ -2400,7 +2412,7 @@ def _summary_has_task_marker(summary: str) -> bool:
                     return value[j + 1 :].lstrip()
 
                 k = 1
-                while k < len(value) and value[k].isalpha():
+                while k < len(value) and ("a" <= value[k] <= "z" or "A" <= value[k] <= "Z"):
                     k += 1
                 if k > 1 and k + 1 < len(value) and value[k] == ")" and value[k + 1].isspace():
                     token = value[1:k]
@@ -2420,7 +2432,7 @@ def _summary_has_task_marker(summary: str) -> bool:
                 return value[i + 1 :].lstrip()
 
             j = 0
-            while j < len(value) and value[j].isalpha():
+            while j < len(value) and ("a" <= value[j] <= "z" or "A" <= value[j] <= "Z"):
                 j += 1
             if j > 0 and j + 1 < len(value) and value[j] in {".", ")"} and value[j + 1].isspace():
                 token = value[:j]
@@ -2636,6 +2648,9 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     needs_attention = (len(obs_new) > 0) or (len(cron_new) > 0) or (len(tasks_new) > 0)
 
     out = {
+        "kind": "openclaw-mem.triage.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
         "ok": True,
         "mode": mode,
         "since_minutes": since_minutes,
@@ -2722,6 +2737,9 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if not processing_files:
         _emit(
             {
+                "kind": "openclaw-mem.harvest.v0",
+                "ts": _utcnow_iso(),
+                "version": {"openclaw_mem": __version__, "schema": "v0"},
                 "ok": True,
                 "processed_files": 0,
                 "ingested": 0,
@@ -2843,6 +2861,9 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     # Emit ONE harvest result payload.
     out: Dict[str, Any] = {
+        "kind": "openclaw-mem.harvest.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
         "ok": True,
         "ingested": len(inserted_ids),
         "processed_files": len(processing_files),
@@ -4057,6 +4078,7 @@ def _graph_env_bool_status(name: str, *, default: bool = False) -> Dict[str, Any
             "enabled": bool(default),
             "valid": True,
             "default": bool(default),
+            "reason": "unset_default",
         }
 
     normalized = str(raw).strip().lower()
@@ -4073,6 +4095,12 @@ def _graph_env_bool_status(name: str, *, default: bool = False) -> Dict[str, Any
         enabled = bool(default)
         valid = False
 
+    reason = "invalid_fallback_default"
+    if valid and enabled:
+        reason = "parsed_truthy"
+    elif valid and not enabled:
+        reason = "parsed_falsy"
+
     return {
         "present": True,
         "raw": str(raw),
@@ -4080,6 +4108,7 @@ def _graph_env_bool_status(name: str, *, default: bool = False) -> Dict[str, Any
         "enabled": enabled,
         "valid": valid,
         "default": bool(default),
+        "reason": reason,
     }
 
 
