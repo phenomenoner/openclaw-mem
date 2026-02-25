@@ -36,6 +36,7 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 ## Memory quality features
 
 - Architecture (design): [Go →](architecture.md)
+- Context packing (ContextPack): [Go →](context-pack.md)
 - Thought-links (why these design/benchmark choices): [Go →](thought-links.md)
 - Benchmark/eval plan pointers: [Go →](thought-links.md) · [Go →](rerank-poc-plan.md)
 - Importance grading (MVP v1): [Go →](importance-grading.md)

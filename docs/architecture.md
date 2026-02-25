@@ -109,6 +109,12 @@ Proposed output (to the LLM):
 - up to N short summaries (not raw logs)
 - 1–3 citations (record IDs / URLs), **no private paths**
 
+Preferred encoding (hybrid):
+- **bundle_text** for direct injection (human/LLM readable)
+- a shallow **ContextPack JSON** object for deterministic anchors (keys/arrays, provenance)
+
+See: [Context packing (ContextPack) →](context-pack.md)
+
 ### Layered context contract (L0/L1/L2) — design hook
 
 Borrow the *pattern* (not the implementation) of layered loading:
@@ -123,6 +129,11 @@ The packer should prefer:
 3) only pull L2 when strictly necessary (and still bounded + redaction-safe).
 
 This keeps bundles small, reduces token noise, and makes results easier to debug.
+
+Fresh-tail protection (design hook):
+- Keep a small protected tail of the most recent raw turns (continuity).
+- Treat older packed items/summaries as an evictable prefix under strict budgets.
+- This assembly policy is inspired by LCM-style context engines, but can be applied even when `openclaw-mem` stays a sidecar.
 
 ### Retrieval trajectory receipts (trace) — non-negotiable for ops
 

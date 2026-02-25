@@ -219,3 +219,26 @@ Source (external; concept clarity high):
 **Risk to watch (and mitigation):**
 - Infinite self-ingest loops (context blocks re-captured as learnings).
   - Mitigate with explicit injected-context markers + ignore-lists (see SuperMemory takeaways above).
+
+## 12) Lossless Context Management (LCM) / lossless-claw → fresh-tail protection + provenance + “expand” tooling reference
+
+Source (external; concept clarity high):
+- `martian-engineering/lossless-claw`: <https://github.com/martian-engineering/lossless-claw>
+- LCM paper: <https://voltropy.com/LCM>
+
+**What it is (in one line):**
+A pluggable context engine for OpenClaw that stores all session messages in SQLite, compacts via a **summary DAG**, and provides tools to **grep/describe/expand** compacted history.
+
+**What we take (portable patterns):**
+- **Protected “fresh tail”**: always keep the last N raw messages un-compacted for continuity.
+- **Evictable prefix**: fill remaining budget with older summaries; drop oldest first.
+- **Provenance by construction**: summaries link back to source messages; expansion is possible.
+- **Ops safety belts**: best-effort compaction with deterministic fallback so the loop doesn’t stall.
+
+**How it maps to openclaw-mem (without adopting an engine fork):**
+- Our **Context Packer** can adopt the same *assembly policy* (fresh tail + evictable prefix) even if we don’t own compaction.
+- We should treat a pack as a **hybrid text + JSON object** (stable anchors) with explicit provenance (`recordRef`) and trace receipts.
+
+See also:
+- `docs/context-pack.md` (ContextPack v1 direction)
+- `docs/architecture.md` (Context Packer)

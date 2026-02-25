@@ -152,6 +152,7 @@ Notes:
 4) **Return**
    - bounded list (K)
    - include lightweight explanations: score components + why it passed filters
+   - return **structured JSON objects** with stable ids + governance metadata so a packer can wrap results into an injection-ready ContextPack (see `docs/context-pack.md`)
 
 ### Why hybrid is MVP-critical
 

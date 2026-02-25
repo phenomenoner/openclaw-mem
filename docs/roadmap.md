@@ -173,6 +173,9 @@ Goal: for each request, locally build a **small, high-signal context bundle** in
 
 Deliverables:
 - A packing spec (inputs, budgets, citations, redaction rules) **including trust gating**
+- A stable **ContextPack** output contract (hybrid text + JSON) for injection + ops tooling:
+  - `openclaw-mem.context-pack.v1`
+  - See: `docs/context-pack.md`
 - `pack` CLI (or equivalent) that outputs:
   - a short “relevant state” section
   - bounded summaries of the top-K relevant durable facts/tasks
@@ -411,6 +414,9 @@ These are projects we referenced and **actually used** to shape features or arch
 
 - `volcengine/OpenViking`: <https://github.com/volcengine/OpenViking>
   - Used as a design reference for layered context loading (L0/L1/L2) and retrieval observability (trajectory/trace). Thought-link only; not a backend commitment.
+
+- `martian-engineering/lossless-claw` (LCM / lossless context engine): <https://github.com/martian-engineering/lossless-claw>
+  - Used as a design reference for **fresh-tail protection**, provenance-first summarization, and “expand for details” tooling. Thought-link only; we are not committing to an engine fork.
 
 - Reference-based decay / archive-first lifecycle (trusted background + field note):
   - Cepeda et al. (2006) distributed practice / spaced repetition: <https://doi.org/10.1037/0033-2909.132.3.354>
