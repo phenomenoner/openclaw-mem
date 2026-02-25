@@ -63,6 +63,7 @@ class PackTraceV1DecisionCaps:
 class PackTraceV1Decision:
     included: bool
     reason: List[str]
+    rationale: List[str]
     caps: PackTraceV1DecisionCaps
 
 
@@ -91,12 +92,21 @@ class PackTraceV1Candidate:
 
 
 @dataclass(frozen=True)
+class PackTraceV1Coverage:
+    rationaleMissingCount: int
+    citationMissingCount: int
+    allIncludedHaveRationale: bool
+    allIncludedHaveCitations: bool
+
+
+@dataclass(frozen=True)
 class PackTraceV1Output:
     includedCount: int
     excludedCount: int
     l2IncludedCount: int
     citationsCount: int
     refreshedRecordRefs: List[str]
+    coverage: PackTraceV1Coverage
 
 
 @dataclass(frozen=True)

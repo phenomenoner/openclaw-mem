@@ -179,7 +179,7 @@ Deliverables:
   - L1 overview as the default bundle payload
   - L2 detail only on-demand + strictly bounded
 - **Retrieval trajectory receipts** (`--trace`): pack must be debuggable (why included/excluded).
-  - Include a minimal JSON schema (v0) so we can diff behavior over time and compare arms in benchmarks.
+  - Include a minimal JSON schema (v1) so we can diff behavior over time and compare arms in benchmarks.
 - A cheap retrieval baseline **without embeddings** (FTS + heuristics)
 - Optional: embedding-based rerank as an opt-in layer
 

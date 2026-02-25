@@ -58,20 +58,39 @@ def _normalize_label(value: Any) -> str | None:
     return None
 
 
-def is_parseable_importance(value: Any) -> bool:
-    """Return whether `detail_json.importance` carries parseable signal."""
+def _parse_score_like(value: Any) -> float | None:
     if isinstance(value, bool):
-        return False
+        return None
 
     if isinstance(value, (int, float)):
-        return math.isfinite(float(value))
+        score = float(value)
+        if math.isfinite(score):
+            return score
+        return None
+
+    if isinstance(value, str):
+        normalized = unicodedata.normalize("NFKC", value).strip()
+        if not normalized:
+            return None
+        try:
+            score = float(normalized)
+        except Exception:
+            return None
+        if math.isfinite(score):
+            return score
+        return None
+
+    return None
+
+
+def is_parseable_importance(value: Any) -> bool:
+    """Return whether `detail_json.importance` carries parseable signal."""
+    if _parse_score_like(value) is not None:
+        return True
 
     if isinstance(value, dict):
-        score = value.get("score")
-        if isinstance(score, bool):
-            score = None
-        if isinstance(score, (int, float)):
-            return math.isfinite(float(score))
+        if _parse_score_like(value.get("score")) is not None:
+            return True
 
         return _normalize_label(value.get("label")) is not None
 
@@ -125,17 +144,14 @@ def parse_importance_score(value: Any) -> float:
     Returns:
       float score clamped to [0,1]. Missing/invalid returns 0.0.
     """
-    if isinstance(value, bool):
-        return 0.0
-    if isinstance(value, (int, float)):
-        return _clamp01(float(value))
+    score = _parse_score_like(value)
+    if score is not None:
+        return _clamp01(score)
 
     if isinstance(value, dict):
-        score = value.get("score")
-        if isinstance(score, bool):
-            score = None
-        if isinstance(score, (int, float)):
-            return _clamp01(float(score))
+        score = _parse_score_like(value.get("score"))
+        if score is not None:
+            return _clamp01(score)
 
         key = _normalize_label(value.get("label"))
         if key is not None:

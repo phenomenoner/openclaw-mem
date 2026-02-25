@@ -55,6 +55,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("[TODO] buy milk"))
         self.assertTrue(_summary_has_task_marker("(task): clean desk"))
         self.assertTrue(_summary_has_task_marker("（ＲＥＭＩＮＤＥＲ） 續約網域"))
+        self.assertTrue(_summary_has_task_marker("【ＴＡＳＫ】 續約網域"))
 
     def test_summary_has_task_marker_accepts_list_and_checkbox_prefixes(self):
         self.assertTrue(_summary_has_task_marker("- TODO buy milk"))
@@ -71,6 +72,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("(3) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("a) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("(a) TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("（ａ） TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("B. [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("iv) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("IX. [ ] TASK: clean desk"))
@@ -89,6 +91,7 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("taskforce sync tomorrow"))
         self.assertFalse(_summary_has_task_marker("[TODOLIST] clean old notes"))
         self.assertFalse(_summary_has_task_marker("[TODO]clean old notes"))
+        self.assertFalse(_summary_has_task_marker("【TODO】clean old notes"))
         self.assertFalse(_summary_has_task_marker("-TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("+TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker(">TODO clean old notes"))
@@ -102,6 +105,10 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("a)TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("ab) TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("(ab) TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker("中) TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker("(中) TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker("é) TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker("(é) TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("in) TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("ic) TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("(iiv) TODO clean old notes"))
@@ -375,14 +382,39 @@ class TestCliM0(unittest.TestCase):
         recall = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_RECALL"]
         self.assertTrue(recall["enabled"])
         self.assertTrue(recall["valid"])
+        self.assertEqual(recall["reason"], "parsed_truthy")
 
         capture = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_CAPTURE"]
         self.assertFalse(capture["enabled"])
         self.assertTrue(capture["valid"])
+        self.assertEqual(capture["reason"], "parsed_falsy")
 
         capture_md = out["flags"]["OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD"]
         self.assertFalse(capture_md["enabled"])
         self.assertFalse(capture_md["valid"])
+        self.assertEqual(capture_md["reason"], "invalid_fallback_default")
+
+        conn.close()
+
+    def test_graph_auto_status_reports_unset_default_reason(self):
+        from unittest.mock import patch
+
+        conn = _connect(":memory:")
+
+        args = type("Args", (), {"json": True})()
+        with patch.dict("os.environ", {}, clear=True):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_auto_status(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.auto-status.v0")
+
+        for st in out["flags"].values():
+            self.assertFalse(st["present"])
+            self.assertFalse(st["enabled"])
+            self.assertTrue(st["valid"])
+            self.assertEqual(st["reason"], "unset_default")
 
         conn.close()
 
@@ -1122,6 +1154,67 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["tasks"]["found_new"], 1)
         self.assertEqual(out["tasks"]["matches"][0]["summary"], "[TODO] buy coffee this afternoon")
+
+        conn.close()
+
+    def test_triage_tasks_accepts_cjk_bracket_wrapped_task_marker_prefix(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "【TODO】 buy coffee this afternoon",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "tasks",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["tasks"]["found_new"], 1)
+        self.assertEqual(out["tasks"]["matches"][0]["summary"], "【TODO】 buy coffee this afternoon")
 
         conn.close()
 
@@ -2856,11 +2949,15 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["trace"]["output"]["excludedCount"], 0)
         self.assertEqual(out["trace"]["output"]["citationsCount"], 1)
         self.assertEqual(out["trace"]["output"]["refreshedRecordRefs"], ["obs:1"])
+        self.assertIn("coverage", out["trace"]["output"])
+        self.assertEqual(out["trace"]["output"]["coverage"]["rationaleMissingCount"], 0)
+        self.assertEqual(out["trace"]["output"]["coverage"]["citationMissingCount"], 0)
 
         candidate = out["trace"]["candidates"][0]
         self.assertIn("caps", candidate["decision"])
         self.assertFalse(candidate["decision"]["caps"]["niceCapHit"])
         self.assertFalse(candidate["decision"]["caps"]["l2CapHit"])
+        self.assertEqual(candidate["decision"]["rationale"], candidate["decision"]["reason"])
         self.assertIsNone(candidate["citations"]["url"])
 
         self.assertEqual(
@@ -2987,9 +3084,14 @@ class TestCliM0(unittest.TestCase):
             self.assertIn(key, candidate)
         self.assertIn("niceCapHit", candidate["decision"]["caps"])
         self.assertIn("l2CapHit", candidate["decision"]["caps"])
+        self.assertIn("rationale", candidate["decision"])
+        self.assertEqual(candidate["decision"]["rationale"], candidate["decision"]["reason"])
         self.assertIn("output", trace)
         self.assertIn("includedCount", trace["output"])
         self.assertIn("refreshedRecordRefs", trace["output"])
+        self.assertIn("coverage", trace["output"])
+        self.assertIn("allIncludedHaveRationale", trace["output"]["coverage"])
+        self.assertIn("allIncludedHaveCitations", trace["output"]["coverage"])
         self.assertIsInstance(trace["output"]["refreshedRecordRefs"], list)
 
         conn.close()
