@@ -2327,10 +2327,10 @@ def _summary_has_task_marker(summary: str) -> bool:
     - bracketed marker: `[TODO] ...` or `(TODO) ...`
 
     Optional leading markdown wrappers are tolerated before markers:
-    - blockquotes: `>` (repeatable; supports spaced `> > ...` and compact `>> ...` forms when followed by whitespace)
-    - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (when followed by whitespace)
-    - markdown checkboxes: `[ ]` / `[x]` / `[✓]` / `[✔]` (when followed by whitespace)
-    - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (when followed by whitespace)
+    - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
+    - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (whitespace optional before nested wrappers/marker)
+    - markdown checkboxes: `[ ]` / `[x]` / `[✓]` / `[✔]` (whitespace optional before nested wrappers/marker)
+    - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (whitespace optional before nested wrappers/marker)
 
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
@@ -2393,52 +2393,110 @@ def _summary_has_task_marker(summary: str) -> bool:
     def _strip_list_prefix(text: str) -> str:
         t = text
 
-        def _strip_ordered_prefix(value: str) -> str:
-            def _is_roman_token(token: str) -> bool:
-                if not token:
-                    return False
+        def _is_roman_token(token: str) -> bool:
+            if not token:
+                return False
 
-                # Canonical Roman numerals (1-3999): reject permissive false
-                # positives such as `IC`/`IIV` while still accepting `iv`/`IX`.
-                return re.fullmatch(
-                    r"M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})",
-                    token.upper(),
-                ) is not None
+            # Canonical Roman numerals (1-3999): reject permissive false
+            # positives such as `IC`/`IIV` while still accepting `iv`/`IX`.
+            return re.fullmatch(
+                r"M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})",
+                token.upper(),
+            ) is not None
 
+        def _looks_like_checkbox_prefix(value: str) -> bool:
+            return len(value) >= 3 and value[0] == "[" and value[2] == "]" and value[1] in checkbox_markers
+
+        def _looks_like_ordered_prefix(value: str) -> bool:
             if len(value) >= 4 and value[0] == "(":
                 j = 1
                 while j < len(value) and value[j].isdigit():
                     j += 1
-                if j > 1 and j + 1 < len(value) and value[j] == ")" and value[j + 1].isspace():
-                    return value[j + 1 :].lstrip()
+                if j > 1 and j < len(value) and value[j] == ")" and j + 1 < len(value):
+                    return True
 
                 k = 1
                 while k < len(value) and ("a" <= value[k] <= "z" or "A" <= value[k] <= "Z"):
                     k += 1
-                if k > 1 and k + 1 < len(value) and value[k] == ")" and value[k + 1].isspace():
+                if k > 1 and k < len(value) and value[k] == ")" and k + 1 < len(value):
                     token = value[1:k]
                     if len(token) == 1 or _is_roman_token(token):
-                        return value[k + 1 :].lstrip()
+                        return True
 
             i = 0
             while i < len(value) and value[i].isdigit():
                 i += 1
-            if i > 0:
-                if i + 1 >= len(value):
-                    return value
-                if value[i] not in {".", ")"}:
-                    return value
-                if not value[i + 1].isspace():
-                    return value
-                return value[i + 1 :].lstrip()
+            if i > 0 and i < len(value) and value[i] in {".", ")"} and i + 1 < len(value):
+                return True
 
             j = 0
             while j < len(value) and ("a" <= value[j] <= "z" or "A" <= value[j] <= "Z"):
                 j += 1
-            if j > 0 and j + 1 < len(value) and value[j] in {".", ")"} and value[j + 1].isspace():
+            if j > 0 and j < len(value) and value[j] in {".", ")"} and j + 1 < len(value):
                 token = value[:j]
                 if len(token) == 1 or _is_roman_token(token):
-                    return value[j + 1 :].lstrip()
+                    return True
+
+            return False
+
+        def _can_strip_compact(remainder: str) -> bool:
+            if not remainder:
+                return False
+            if _matches_marker_prefix(remainder):
+                return True
+            if remainder[0] == ">" or remainder[0] in bullet_prefixes:
+                return True
+            if _looks_like_checkbox_prefix(remainder):
+                return True
+            if _looks_like_ordered_prefix(remainder):
+                return True
+            return False
+
+        def _strip_ordered_prefix(value: str) -> str:
+            if len(value) >= 4 and value[0] == "(":
+                j = 1
+                while j < len(value) and value[j].isdigit():
+                    j += 1
+                if j > 1 and j < len(value) and value[j] == ")" and j + 1 < len(value):
+                    next_part = value[j + 1 :]
+                    if next_part and next_part[0].isspace():
+                        return next_part.lstrip()
+                    if _can_strip_compact(next_part):
+                        return next_part
+
+                k = 1
+                while k < len(value) and ("a" <= value[k] <= "z" or "A" <= value[k] <= "Z"):
+                    k += 1
+                if k > 1 and k < len(value) and value[k] == ")" and k + 1 < len(value):
+                    token = value[1:k]
+                    if len(token) == 1 or _is_roman_token(token):
+                        next_part = value[k + 1 :]
+                        if next_part and next_part[0].isspace():
+                            return next_part.lstrip()
+                        if _can_strip_compact(next_part):
+                            return next_part
+
+            i = 0
+            while i < len(value) and value[i].isdigit():
+                i += 1
+            if i > 0 and i < len(value) and value[i] in {".", ")"} and i + 1 < len(value):
+                next_part = value[i + 1 :]
+                if next_part and next_part[0].isspace():
+                    return next_part.lstrip()
+                if _can_strip_compact(next_part):
+                    return next_part
+
+            j = 0
+            while j < len(value) and ("a" <= value[j] <= "z" or "A" <= value[j] <= "Z"):
+                j += 1
+            if j > 0 and j < len(value) and value[j] in {".", ")"} and j + 1 < len(value):
+                token = value[:j]
+                if len(token) == 1 or _is_roman_token(token):
+                    next_part = value[j + 1 :]
+                    if next_part and next_part[0].isspace():
+                        return next_part.lstrip()
+                    if _can_strip_compact(next_part):
+                        return next_part
 
             return value
 
@@ -2450,20 +2508,32 @@ def _summary_has_task_marker(summary: str) -> bool:
             while block_depth < len(t) and t[block_depth] == ">":
                 block_depth += 1
 
-            if block_depth == 1 and len(t) >= 2 and t[1].isspace():
-                t = t[1:].lstrip()
-                changed = True
-            elif block_depth >= 2 and block_depth < len(t) and t[block_depth].isspace():
-                t = t[block_depth:].lstrip()
-                changed = True
+            if block_depth > 0 and block_depth < len(t):
+                remainder = t[block_depth:]
+                if remainder and remainder[0].isspace():
+                    t = remainder.lstrip()
+                    changed = True
+                elif _can_strip_compact(remainder):
+                    t = remainder
+                    changed = True
 
-            if len(t) >= 2 and t[0] in bullet_prefixes and t[1].isspace():
-                t = t[1:].lstrip()
-                changed = True
+            if len(t) >= 2 and t[0] in bullet_prefixes:
+                remainder = t[1:]
+                if remainder[0].isspace():
+                    t = remainder.lstrip()
+                    changed = True
+                elif _can_strip_compact(remainder):
+                    t = remainder
+                    changed = True
 
-            if len(t) >= 4 and t[0] == "[" and t[2] == "]" and t[1] in checkbox_markers and t[3].isspace():
-                t = t[3:].lstrip()
-                changed = True
+            if _looks_like_checkbox_prefix(t) and len(t) >= 4:
+                remainder = t[3:]
+                if remainder and remainder[0].isspace():
+                    t = remainder.lstrip()
+                    changed = True
+                elif _can_strip_compact(remainder):
+                    t = remainder
+                    changed = True
 
             stripped_ordered = _strip_ordered_prefix(t)
             if stripped_ordered != t:
@@ -2496,7 +2566,8 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
       bracketed forms like `[TODO]`/`(TASK)`, plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
       (`-`/`*`/`+`/`•`, `[ ]`/`[x]`/`[✓]`/`[✔]`), and ordered-list prefixes like
-      `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`;
+      `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
+      between wrappers and the next wrapper/marker;
       accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
