@@ -63,10 +63,13 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("+ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("> TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("> > [ ] TASK: clean desk"))
+        self.assertTrue(_summary_has_task_marker(">> TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("• [x] [REMINDER] renew domain"))
         self.assertTrue(_summary_has_task_marker("‣ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("∙ [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("· [x] [REMINDER] renew domain"))
+        self.assertTrue(_summary_has_task_marker("- [✓] TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("1. [✔] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("1. TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("2) [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("(3) TODO buy milk"))
@@ -96,9 +99,11 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("+TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker(">TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker(">>TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker(">>>TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("‣TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("·TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("[x]TODO clean old notes"))
+        self.assertFalse(_summary_has_task_marker("[✓]TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("1.TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("1)TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("(1)TODO clean old notes"))
@@ -1347,6 +1352,7 @@ class TestCliM0(unittest.TestCase):
         summaries = (
             "> TODO: rotate on-call notes",
             "> > [ ] TASK: rotate on-call notes",
+            ">> TODO: rotate on-call notes",
             "- > (iv) [ ] TODO: rotate on-call notes",
         )
 

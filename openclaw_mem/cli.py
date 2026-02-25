@@ -2327,9 +2327,9 @@ def _summary_has_task_marker(summary: str) -> bool:
     - bracketed marker: `[TODO] ...` or `(TODO) ...`
 
     Optional leading markdown wrappers are tolerated before markers:
-    - blockquotes: `>` (when followed by whitespace; repeatable)
+    - blockquotes: `>` (repeatable; supports spaced `> > ...` and compact `>> ...` forms when followed by whitespace)
     - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (when followed by whitespace)
-    - markdown checkboxes: `[ ]` / `[x]` (when followed by whitespace)
+    - markdown checkboxes: `[ ]` / `[x]` / `[✓]` / `[✔]` (when followed by whitespace)
     - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (when followed by whitespace)
 
     A marker is considered valid when followed by:
@@ -2352,6 +2352,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     markers = ("TODO", "TASK", "REMINDER")
     separators = {":", "：", "-", "－", "–", "—", "−"}
     bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·"}
+    checkbox_markers = {" ", "x", "X", "✓", "✔"}
 
     def _has_valid_suffix(text: str, idx: int) -> bool:
         if len(text) == idx:
@@ -2445,15 +2446,22 @@ def _summary_has_task_marker(summary: str) -> bool:
         while changed:
             changed = False
 
-            if len(t) >= 2 and t[0] == ">" and t[1].isspace():
+            block_depth = 0
+            while block_depth < len(t) and t[block_depth] == ">":
+                block_depth += 1
+
+            if block_depth == 1 and len(t) >= 2 and t[1].isspace():
                 t = t[1:].lstrip()
+                changed = True
+            elif block_depth >= 2 and block_depth < len(t) and t[block_depth].isspace():
+                t = t[block_depth:].lstrip()
                 changed = True
 
             if len(t) >= 2 and t[0] in bullet_prefixes and t[1].isspace():
                 t = t[1:].lstrip()
                 changed = True
 
-            if len(t) >= 4 and t[0] == "[" and t[2] == "]" and t[1] in {" ", "x", "X"} and t[3].isspace():
+            if len(t) >= 4 and t[0] == "[" and t[2] == "]" and t[1] in checkbox_markers and t[3].isspace():
                 t = t[3:].lstrip()
                 changed = True
 
@@ -2487,7 +2495,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
       (case-insensitive; width-normalized via NFKC; supports plain or
       bracketed forms like `[TODO]`/`(TASK)`, plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
-      (`-`/`*`/`+`/`•`, `[ ]`/`[x]`), and ordered-list prefixes like
+      (`-`/`*`/`+`/`•`, `[ ]`/`[x]`/`[✓]`/`[✔]`), and ordered-list prefixes like
       `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`;
       accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
 
