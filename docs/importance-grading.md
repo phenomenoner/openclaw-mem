@@ -52,6 +52,9 @@ By default, do **not** drop/filter ungraded items unless a caller explicitly req
 - legacy numeric: `importance: 0.86`
 - canonical object: `importance: {"score": 0.86, ...}`
 
+Additional best-effort compatibility in parsers:
+- numeric-string score forms are accepted (`{"score": "0.86"}`), including NFKC width-normalized digits (`{"score": "０.８６"}`).
+
 See `openclaw_mem.importance.parse_importance_score()`.
 
 ## Writing importance

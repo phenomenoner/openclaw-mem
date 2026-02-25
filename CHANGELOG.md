@@ -8,13 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Added `graph auto-status` command to report effective Graphic Memory automation env toggles (`OPENCLAW_MEM_GRAPH_AUTO_RECALL`, `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE`, `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD`) with validity-aware parsing.
 - Added `profile` CLI command for deterministic ops snapshots (`counts`, `importance` label distribution, top tools/kinds, recent rows, embeddings model stats).
 - `pack` now supports `--query-en` to add an English assist query lane alongside the main query (useful for bilingual recall).
 - `pack --trace` now derives candidate `importance` and `trust` from observation `detail_json` (canonical normalization + `unknown` fallback for malformed/absent values).
 - `pack --trace` now includes an `output` receipt block with:
   - `includedCount`, `excludedCount`, `l2IncludedCount`, `citationsCount`
   - `refreshedRecordRefs` (the exact `recordRef`s included in the final bundle for lifecycle/audit hooks)
-- Hardened `pack --trace` contract metadata for v0 receipts:
+- Hardened `pack --trace` contract metadata for v1 receipts:
   - added top-level `ts` and `version` (`openclaw_mem`, `schema`)
   - expanded `budgets` with `maxL2Items` and `niceCap`
   - candidate `decision.caps` + candidate citation `url` key (nullable, redaction-safe)
@@ -22,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `triage --mode tasks` task-marker detection now normalizes width via NFKC, so full-width prefixes like `ＴＯＤＯ`/`ＴＡＳＫ`/`ＲＥＭＩＮＤＥＲ` are recognized.
 - `triage --mode tasks` now also accepts bracket-wrapped task markers (`[TODO] ...`, `(TASK) ...`) using the same deterministic separator rules as plain markers.
 - `triage --mode tasks` now accepts markdown list/checklist-prefixed markers (for example `- TODO ...`, `* [ ] TASK: ...`, `+ TODO ...`, `• [x] [REMINDER] ...`) and ordered-list prefixes (`1. ...`, `1) ...`, `(1) ...`, `a. ...`, `a) ...`, `(a) ...`, `iv. ...`, `iv) ...`, `(iv) ...`) while keeping deterministic separator checks.
+- `triage --mode tasks` now also accepts markdown blockquote-prefixed markers (`> TODO ...`, `> > [ ] TASK: ...`) and mixed wrapper chains (for example `- > (iv) [ ] TODO: ...`) using the same deterministic separator rules.
 - Roman ordered-list prefixes now require canonical Roman numerals (for example `iv`, `IX`), reducing permissive false positives such as `ic`/`iiv`.
 - `profile --json` now classifies malformed `detail_json.importance` payloads as `unknown` (instead of coercing to `ignore`) and keeps `avg_score` based on parseable importance only.
 - `parse_importance_score` now rejects boolean `importance.score` values inside object payloads (`{"score": true|false}`), matching top-level bool handling.
@@ -29,12 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Importance label normalization now applies NFKC width-folding before alias/canonical mapping, so full-width variants (for example `ＭＵＳＴ＿ＲＥＭＥＭＢＥＲ`, `ＮＩＣＥ－ＴＯ－ＨＡＶＥ`) parse consistently.
 
 ### Docs
+- Documented Graphic Memory automation knobs + `graph auto-status` inspection flow in `README.md`, `QUICKSTART.md`, and `docs/specs/graphic-memory-auto-capture-auto-recall.md`.
 - Removed a contradictory duplicate license footer from `README.md` so the dual-license statement (`MIT OR Apache-2.0`) is defined once and consistently.
 - Quickstart sample-ingest step now uses a deterministic `python -c` JSONL writer instead of a heredoc, reducing shell quoting/EOF pitfalls in automation contexts.
-- Documented deterministic `triage --mode tasks` marker grammar updates (plain + bracketed markers, optional markdown list/checklist + ordered-list prefixes, accepted separators) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
+- Documented deterministic `triage --mode tasks` marker grammar updates (plain + bracketed markers, optional markdown blockquotes + list/checklist + ordered-list prefixes, accepted separators) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 - Clarified task-marker docs to explicitly include additional markdown bullets (`‣`, `∙`, `·`) alongside `-`, `*`, `+`, and `•`.
 
 ### Testing
+- Added regression coverage for `graph auto-status` parser wiring and validity-aware env flag reporting.
 - Added regression coverage for `pack --trace` output receipts (shape + exclusion counting).
 - Added schema checks for trace metadata (`ts`/`version`/budget caps) and candidate decision/citation fields.
 - Added `pack --trace` tests for candidate importance/trust extraction from `detail_json`, including invalid-label fallback to `unknown`.
@@ -42,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added triage regression coverage for full-width hyphen (`－`), en dash (`–`), em dash (`—`), and unicode minus (`−`) task-marker separators.
 - Added task-marker regression coverage for full-width marker prefixes (for example `ＴＯＤＯ` / `ＴＡＳＫ`) in both parser-level and triage flows.
 - Added regression coverage for bracket-wrapped task markers (`[TODO] ...`, `(TASK) ...`) in parser-level and triage flows, including rejection cases for malformed/non-marker bracket prefixes.
-- Added regression coverage for markdown list/checklist-prefixed task markers (including `+`, `‣`, `∙`, and `·` bullets), nested prefix chains, and ordered-list prefixes (including `(1)`, full-width `（１）`, alpha forms like `a)`/`(a)`/`B.`, and Roman forms like `iv)`/`(iv)`), plus invalid Roman rejection cases, in parser-level and triage flows.
+- Added regression coverage for markdown wrapper-prefixed task markers: blockquotes (`>`), list/checklist prefixes (including `+`, `‣`, `∙`, and `·` bullets), nested prefix chains, and ordered-list prefixes (including `(1)`, full-width `（１）`, alpha forms like `a)`/`(a)`/`B.`, and Roman forms like `iv)`/`(iv)`), plus invalid Roman rejection cases, in parser-level and triage flows.
 - Added regression coverage for malformed importance parsing in `profile --json` and for bool-rejection in `parse_importance_score`.
 - Added regression coverage for `make_importance` label canonicalization (alias normalization + invalid-label fallback).
 - Added regression coverage for full-width importance labels across parsing, parseability checks, and `make_importance` normalization.

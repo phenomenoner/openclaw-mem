@@ -8,7 +8,7 @@ Status tags used here: **DONE / PARTIAL / ROADMAP**.
 
 ## Principles (what we optimize for)
 
-- **Sidecar, not slot owner**: OpenClaw memory backends remain canonical; `openclaw-mem` provides capture + local-first recall + ops.
+- **Sidecar-first, optional slot owner**: `openclaw-mem` remains the ops sidecar by default. We may additionally ship an optional slot backend (**openclaw-mem-engine**) to replace `memory-lancedb` when enabled — still rollbackable via a one-line slot switch.
 - **Fail-open by default**: memory helpers should not break ingest or the agent loop.
 - **Non-destructive writes**: never overwrite operator-authored fields; only fill missing values.
 - **Upgrade-safe**: user-owned data/config is stable across versions.
@@ -35,6 +35,48 @@ To keep scope controlled for the current pilot:
 - No live OpenClaw config or cron schedule changes are included in this step.
 
 ## Now (next milestones)
+
+### 0) OpenClaw Mem Engine (optional memory slot backend)
+
+Status: **ROADMAP**.
+
+- Goal: replace `memory-lancedb` with a slot backend that supports **hybrid recall (FTS + vector)**, **scopes**, and **auditable policies**.
+- Why: the official backend currently uses LanceDB mostly as a basic vector store; it doesn’t expose hybrid/FTS/index lifecycle/versioning.
+- Design doc: [OpenClaw Mem Engine →](mem-engine.md)
+
+Acceptance criteria:
+- Slot switch + rollback is one line (`plugins.slots.memory`).
+- `memory_store/memory_recall/memory_forget` emit JSON receipts (filters, latency, counts).
+- M1 delivers a “concept → decisions/preferences” golden set where hybrid beats vector-only.
+
+### 1.6) Sunrise rollout (Stage A→B→C)
+
+Status: **ROADMAP**.
+
+- Stage A: background writeback cron (no slot switch)
+- Stage B: daily canary slot switch + golden-set recall check
+- Stage C: live switch with auto-downgrade guard
+
+Acceptance criteria:
+- Stage A runs stably for 3 days: `missingIds=0`, `error_count=0`.
+- Stage B canary passes 3 consecutive days: engine recall returns receipts with `policyTier` + `ftsTop/vecTop` and no tool errors.
+- Stage C is only enabled after A+B are green.
+
+### 1.5) Writeback + recall policy loop (M1.5)
+
+Status: **ROADMAP**.
+
+- Add a bounded `openclaw-mem writeback-lancedb` path that pushes graded metadata from SQLite into LanceDB by row ID.
+- Default recall policy for `memory_recall` is fail-open:
+  1. must_remember + nice_to_have
+  2. +unknown
+  3. +ignore
+- Receipt must expose `policyTier` used (`must+nice`, `must+nice+unknown`, `must+nice+unknown+ignore`) for diagnostics.
+
+Acceptance criteria:
+- A smoke writeback run updates `importance`, `importance_label`, `scope`, `trust_tier`, `category` only when missing.
+- Empty-policy recall returns `ignore` tier and still yields results if any memory exists.
+- receipts include both engine and writeback summaries.
 
 ### 1) Importance grading rollout (MVP v1)
 
@@ -137,21 +179,21 @@ Deliverables:
   - L1 overview as the default bundle payload
   - L2 detail only on-demand + strictly bounded
 - **Retrieval trajectory receipts** (`--trace`): pack must be debuggable (why included/excluded).
-  - Include a minimal JSON schema (v0) so we can diff behavior over time and compare arms in benchmarks.
+  - Include a minimal JSON schema (v1) so we can diff behavior over time and compare arms in benchmarks.
 - A cheap retrieval baseline **without embeddings** (FTS + heuristics)
 - Optional: embedding-based rerank as an opt-in layer
 
-#### Trace receipt schema (v0, redaction-safe)
+#### Trace receipt schema (v1, redaction-safe)
 
 When `openclaw-mem pack --trace` is used, it should be able to emit a JSON receipt like:
 
 ```json
 {
-  "kind": "openclaw-mem.pack.trace.v0",
+  "kind": "openclaw-mem.pack.trace.v1",
   "ts": "2026-02-15T00:00:00Z",
   "version": {
     "openclaw_mem": "1.x",
-    "schema": "v0"
+    "schema": "v1"
   },
   "query": {
     "text": "…",
@@ -236,13 +278,21 @@ Acceptance criteria:
 
 ### 6) Graph semantic memory (idea → project matching)
 
+Status: **PARTIAL** (v0 graph surfaces exist; idea→project matching policy not yet shipped).
+
 Goal: represent projects/decisions/concepts as typed entities + edges so we can recommend work with **path justification**.
 
 Deliverables:
 - Minimal entity/edge schema (typed)
 - Ingest adapter that builds a graph view from:
   - digests, scout reports, decisions
-- Query path:
+- v0 automation surfaces (dev):
+  - [x] `graph index` / `graph pack` / `graph export` (graph-first index + packing + export)
+  - [x] `graph preflight` (deterministic recall pack preflight)
+  - [x] `graph capture-git` (commit capture)
+  - [x] `graph capture-md` (index-only markdown capture)
+  - [x] `graph auto-status` and env toggles (`OPENCLAW_MEM_GRAPH_AUTO_RECALL`, `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE`, `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD`)
+- Query path (target):
   - `idea/query → top projects → explanation path`
 - Storage evaluation:
   - Start with a local typed graph option (Kuzu candidate) but keep the store behind an interface to mitigate longevity risk.
@@ -316,7 +366,7 @@ Deliverables:
 - **Stable JSON output schemas (v0)** for key operator surfaces:
   - `harvest --json` summary (`total_seen`, `graded_filled`, `skipped_existing`, ...)
   - `triage --json` (`needs_attention`, `found_new`, ...)
-  - `pack --trace` receipt (`openclaw-mem.pack.trace.v0`)
+  - `pack --trace` receipt (`openclaw-mem.pack.trace.v1`)
 - **Schema tests** (unit-level) that verify:
   - required keys exist
   - types are stable

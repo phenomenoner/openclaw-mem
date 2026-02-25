@@ -41,6 +41,11 @@ class TestImportance(unittest.TestCase):
         self.assertEqual(parse_importance_score({"label": "ＮＩＣＥ－ＴＯ－ＨＡＶＥ"}), 0.5)
         self.assertEqual(parse_importance_score({"label": "ＨＩＧＨ"}), 0.8)
 
+    def test_parse_importance_score_supports_numeric_string_scores(self):
+        self.assertEqual(parse_importance_score("0.42"), 0.42)
+        self.assertEqual(parse_importance_score({"score": "0.86"}), 0.86)
+        self.assertEqual(parse_importance_score({"score": " ０.９５ "}), 0.95)
+
     def test_parse_importance_score_invalid_returns_zero(self):
         self.assertEqual(parse_importance_score(None), 0.0)
         self.assertEqual(parse_importance_score({"score": "high"}), 0.0)
@@ -52,10 +57,13 @@ class TestImportance(unittest.TestCase):
 
     def test_is_parseable_importance_detects_supported_shapes(self):
         self.assertTrue(is_parseable_importance(0.7))
+        self.assertTrue(is_parseable_importance("0.7"))
         self.assertTrue(is_parseable_importance({"score": 0.7}))
+        self.assertTrue(is_parseable_importance({"score": "0.7"}))
         self.assertTrue(is_parseable_importance({"label": "must remember"}))
         self.assertTrue(is_parseable_importance({"label": "ＭＵＳＴ＿ＲＥＭＥＭＢＥＲ"}))
         self.assertFalse(is_parseable_importance({"score": True}))
+        self.assertFalse(is_parseable_importance({"score": "not-a-number"}))
         self.assertFalse(is_parseable_importance({"label": "UNKNOWN"}))
         self.assertFalse(is_parseable_importance(None))
 
