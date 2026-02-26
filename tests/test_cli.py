@@ -83,6 +83,12 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("IX. [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("(iv) TODO buy milk"))
 
+    def test_summary_has_task_marker_accepts_compact_wrapper_chaining(self):
+        self.assertTrue(_summary_has_task_marker("•[x]TODO fix pipeline"))
+        self.assertTrue(_summary_has_task_marker("·[ ]TASK sync branch"))
+        self.assertTrue(_summary_has_task_marker("- (I)[ ] TODO reorder docs"))
+        self.assertTrue(_summary_has_task_marker(">>‣TODO audit logs"))
+
     def test_summary_has_task_marker_accepts_nested_prefix_combinations(self):
         self.assertTrue(_summary_has_task_marker("* (1) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker("• （２） [x] [TASK] rotate notes"))
