@@ -1419,6 +1419,76 @@ class TestCliM0(unittest.TestCase):
 
                 conn.close()
 
+    def test_triage_tasks_accepts_compact_wrappers_without_space(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        summaries = (
+            ">>[x]TODO: rotate on-call notes",
+            "-TODO: rotate on-call notes",
+            "(1)TODO: rotate on-call notes",
+            "a)TODO: rotate on-call notes",
+        )
+
+        for summary in summaries:
+            with self.subTest(summary=summary):
+                conn = _connect(":memory:")
+
+                now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                sample = "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "ts": now,
+                                "kind": "note",
+                                "tool_name": "memory_store",
+                                "summary": summary,
+                                "detail": {"importance": 0.9},
+                            }
+                        )
+                    ]
+                )
+
+                old_stdin = sys.stdin
+                try:
+                    sys.stdin = io.StringIO(sample)
+                    args = type("Args", (), {"file": None, "json": True})()
+                    with redirect_stdout(io.StringIO()):
+                        cmd_ingest(conn, args)
+                finally:
+                    sys.stdin = old_stdin
+
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+                    state_path = st.name
+
+                args = type(
+                    "Args",
+                    (),
+                    {
+                        "mode": "tasks",
+                        "since_minutes": 60,
+                        "limit": 10,
+                        "keywords": None,
+                        "cron_jobs_path": None,
+                        "tasks_since_minutes": 1440,
+                        "importance_min": 0.7,
+                        "state_path": state_path,
+                        "json": True,
+                    },
+                )()
+
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    with self.assertRaises(SystemExit) as cm:
+                        cmd_triage(conn, args)
+
+                self.assertEqual(cm.exception.code, 10)
+                out = json.loads(buf.getvalue())
+                self.assertEqual(out["tasks"]["found_new"], 1)
+                self.assertEqual(out["tasks"]["matches"][0]["summary"], summary)
+
+                conn.close()
+
     def test_triage_tasks_accepts_unicode_bullet_prefixed_task_marker(self):
         import tempfile
         from datetime import datetime, timezone
