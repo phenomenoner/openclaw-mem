@@ -71,6 +71,8 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("∙ [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("· [x] [REMINDER] renew domain"))
         self.assertTrue(_summary_has_task_marker("- [✓] TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("- [☑] TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("- [☐] TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("1. [✔] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("1. TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("2) [ ] TASK: clean desk"))

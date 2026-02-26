@@ -2899,7 +2899,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     Optional leading markdown wrappers are tolerated before markers:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
     - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (whitespace optional before nested wrappers/marker)
-    - markdown checkboxes: `[ ]` / `[x]` / `[✓]` / `[✔]` (whitespace optional before nested wrappers/marker)
+    - markdown checkboxes: `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` (whitespace optional before nested wrappers/marker)
     - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (whitespace optional before nested wrappers/marker)
 
     A marker is considered valid when followed by:
@@ -2922,7 +2922,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     markers = ("TODO", "TASK", "REMINDER")
     separators = {":", "：", "-", "－", "–", "—", "−"}
     bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·"}
-    checkbox_markers = {" ", "x", "X", "✓", "✔"}
+    checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
 
     def _has_valid_suffix(text: str, idx: int) -> bool:
         if len(text) == idx:
