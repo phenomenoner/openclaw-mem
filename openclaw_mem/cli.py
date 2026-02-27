@@ -2924,11 +2924,13 @@ def _summary_has_task_marker(summary: str) -> bool:
     bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·"}
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
 
-    def _has_valid_suffix(text: str, idx: int) -> bool:
+    def _has_valid_suffix(text: str, idx: int, *, allow_compact: bool = False) -> bool:
         if len(text) == idx:
             return True
         nxt = text[idx]
-        return nxt in separators or nxt.isspace()
+        if nxt in separators or nxt.isspace():
+            return True
+        return allow_compact
 
     def _matches_marker_prefix(text: str) -> bool:
         up = text.upper()
@@ -2955,7 +2957,7 @@ def _summary_has_task_marker(summary: str) -> bool:
             if close_idx >= len(text) or text[close_idx] != close:
                 continue
 
-            if _has_valid_suffix(text, close_idx + 1):
+            if _has_valid_suffix(text, close_idx + 1, allow_compact=True):
                 return True
 
         return False
@@ -3133,7 +3135,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - kind == 'task' OR
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; supports plain or
-      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`, plus optional leading
+      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`), plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
       (`-`/`*`/`+`/`•`, `[ ]`/`[x]`/`[✓]`/`[✔]`), and ordered-list prefixes like
       `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
