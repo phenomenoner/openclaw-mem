@@ -100,6 +100,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("- > (iv) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker("- a) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker("- (iv) [ ] TODO: clean desk"))
+        self.assertTrue(_summary_has_task_marker(">> [x]TODO: compact wrappers"))
         self.assertTrue(_summary_has_task_marker(">>[x]TODO: compact wrappers"))
         self.assertTrue(_summary_has_task_marker("-1)TODO compact ordered marker"))
 
