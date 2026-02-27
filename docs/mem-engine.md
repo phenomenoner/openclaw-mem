@@ -273,6 +273,34 @@ Definition of done:
 - With all optional layers OFF, M1 behavior remains unchanged.
 - With layers ON, golden-set precision improves measurably (and latency stays within a defined budget).
 
+### M1.6 — Lifecycle hooks + management surface (optional)
+
+Goal: match the “it just works” feel of a full memory backend **without** collapsing our split (sidecar governs; engine serves).
+
+Inspiration (external): `win4r/memory-lancedb-pro`.
+
+Deliverables:
+
+- **Auto-recall hook** (`before_agent_start`):
+  - run retrieval only when `adaptive_retrieval` says it’s worth it
+  - inject a bounded block (top-K) with an explicit marker (so capture can ignore it)
+  - include lightweight receipts (count + scope/trust filters)
+- **Auto-capture hook** (if we add it at all):
+  - default OFF; must be deduped + fail-open
+  - recommended posture: keep durable capture in the sidecar; engine hook only forwards *candidates*
+- **Management CLI / tools** (operator loop):
+  - `memory_stats` (counts, label dist, scopes, recent)
+  - `memory_list` (paged)
+  - `export/import` (JSONL)
+  - `reembed` (batch) with receipts + rate limits
+  - `migrate` helpers (from built-in `memory-lancedb` table)
+
+Definition of done:
+
+- Hooks are **toggleable** and safe-by-default (OFF unless explicitly enabled).
+- Injected context is clearly marked and can be excluded from capture (anti-echo).
+- Management operations emit trend-friendly receipts and never dump secrets.
+
 ### M2 — Ops hardening (index lifecycle + optimize + drift)
 
 Deliverables (coarse):

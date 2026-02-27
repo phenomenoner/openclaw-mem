@@ -30,10 +30,12 @@ Acceptance criteria:
 - `memory_store/memory_recall/memory_forget` emit JSON receipts (filters, latency, counts).
 - M1 delivers a “concept → decisions/preferences” golden set where hybrid beats vector-only.
 
-Optional (M1.5, inspired by `memory-lancedb-pro`):
+Optional (M1.5–M1.6, inspired by `memory-lancedb-pro`):
 - Cross-encoder rerank (fail-open) + deterministic refinements (recency/decay/length-norm).
 - Adaptive retrieval + noise filter policy (skip trivial queries; reduce garbage capture).
 - Diversity (MMR) to prevent near-duplicate top hits.
+- Lifecycle hooks (autoRecall + optional autoCapture) with explicit injected-context markers (anti-echo).
+- A management surface (CLI/tools): stats/list/export/import/reembed/migrate.
 
 ### 1) Importance grading rollout (MVP v1)
 
