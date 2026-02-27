@@ -1,6 +1,6 @@
 # Ecosystem Fit: `openclaw-mem` + OpenClaw Native Memory
 
-This page explains how `openclaw-mem` fits with OpenClaw’s native memory stack without ownership conflicts.
+This page explains how `openclaw-mem` fits with OpenClaw’s native memory stack today, and how the optional **openclaw-mem-engine** slot backend would fit without creating ownership conflicts.
 
 ## Who owns what
 
@@ -14,8 +14,14 @@ This page explains how `openclaw-mem` fits with OpenClaw’s native memory stack
 
 - `openclaw-mem` (this project)
   - role: sidecar capture + local memory operations + observability
-  - does **not** replace memory slot ownership
-  - does **not** re-register canonical backend tools
+  - default posture: **sidecar-only**
+
+- `openclaw-mem-engine` (planned, optional)
+  - role: alternative memory slot backend (replaces `memory-lancedb` when enabled)
+  - goal: hybrid recall (FTS + vector) + scopes + auditable policies
+  - rollback: one-line slot switch
+  - does **not** replace the sidecar ledger (SQLite remains for audit/ops)
+  - (when enabled) it **does** own the canonical backend tools for the active slot
 
 ## Why this split is useful
 

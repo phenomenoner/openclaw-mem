@@ -109,3 +109,40 @@ Source (external, high-level idea): CabLate Agent Skill talk notes (skills as 3 
 - Pilot contract: `openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-02-18_refinery_pilot_diary_meeting_extraction.md`
 
 **Why we pilot on diary/meeting notes:** high value density (decisions/people/money/tasks), stable schema, and measurable noise reduction without risky always-on capture.
+
+## 8) memory-lancedb-pro → hybrid retrieval “kitchen sink” (feature scout)
+
+Source (external, medium trust; not audited):
+- `win4r/memory-lancedb-pro`: <https://github.com/win4r/memory-lancedb-pro>
+
+### What it is (in one line)
+A drop-in replacement for OpenClaw’s built-in `memory-lancedb` that adds **BM25 FTS + hybrid fusion + cross-encoder rerank + multi-scope isolation + management CLI**.
+
+### Wedge / positioning (what it optimizes for)
+- **Retrieval quality + ops tooling** inside a single memory plugin.
+- It’s deliberately “feature-rich memory backend”, not a sidecar governance layer.
+
+### Killer demo flow (we can steal)
+1) Store a few similar memories (some noisy, some important).
+2) Show **vector-only** misses keyword-ish queries (names/paths/ids).
+3) Turn on **hybrid (vector+BM25)** → results immediately improve.
+4) Turn on **rerank + recency + MMR** → top-3 becomes cleaner, less duplicate.
+5) Show `memory stats` / `export` / `reembed` as an operator loop.
+
+### Before/after metrics we can actually claim (today)
+- The repo itself mostly lists features; it doesn’t ship a reproducible benchmark we can cite as “proved”.
+- For us: translate this into a **golden set + hit@k + wrong-scope rate + latency** (already in our mem-engine acceptance criteria).
+
+### Packaging / distribution notes (practical ops)
+- NPM-style plugin w/ Node deps (`@lancedb/lancedb`, `@sinclair/typebox`, OpenAI-compatible embedding endpoints).
+- Heavy use of env vars for keys; service processes can miss env → needs explicit config discipline.
+
+### Engineering takeaways (actionable for openclaw-mem)
+1) **Rerank must be optional + fail-open** (timeout + fallback to fused score).
+2) **Adaptive retrieval + noise filter** matter as much as better scoring (skip greetings/acks; filter low-quality capture/store).
+3) **Scope is the real guardrail**: multi-scope isolation + per-agent access control prevents “wrong-project” recall even when similarity is high.
+
+### How we fold this into *our* design (without becoming a black box)
+- Put scoring layers (hybrid → RRF → optional rerank/MMR/recency) in **`openclaw-mem-engine`**, with receipts for each stage.
+- Keep governance (trust tiers/provenance/citations + promotion policy) in **`openclaw-mem` sidecar**.
+- Treat every “smart” feature as a **toggleable policy** with deterministic receipts.

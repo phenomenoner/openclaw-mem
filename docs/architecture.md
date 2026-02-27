@@ -2,7 +2,7 @@
 
 `openclaw-mem` is a **local-first memory sidecar** for OpenClaw.
 
-It does **not** replace OpenClaw’s canonical memory slot/backends. Instead, it:
+It does **not** force-replace OpenClaw’s canonical memory slot/backends. Instead, it:
 - captures high-signal tool outcomes to durable local storage,
 - makes recall **cheap and auditable**,
 - adds governance (importance, receipts, redaction),
@@ -16,7 +16,7 @@ Agent “self/continuity” is largely a narrative constructed from memory. For 
 
 ## Non-goals
 
-- Becoming the global “memory core” for OpenClaw.
+- Forcing `openclaw-mem` itself to become the global “memory core” for OpenClaw (slot ownership remains optional via a separate backend plugin; see `docs/mem-engine.md`).
 - Auto-writing over operator-authored fields.
 - Forcing embeddings/LLM dependence (LLM-assisted features must be opt-in).
 
