@@ -56,6 +56,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("(task): clean desk"))
         self.assertTrue(_summary_has_task_marker("（ＲＥＭＩＮＤＥＲ） 續約網域"))
         self.assertTrue(_summary_has_task_marker("【ＴＡＳＫ】 續約網域"))
+        self.assertTrue(_summary_has_task_marker("【task】 rotate runbook"))
         self.assertTrue(_summary_has_task_marker("【TODO】"))
         self.assertTrue(_summary_has_task_marker("【TODO】: clean desk"))
         self.assertTrue(_summary_has_task_marker("〔TODO〕: plan rollout"))
