@@ -58,6 +58,8 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("【ＴＡＳＫ】 續約網域"))
         self.assertTrue(_summary_has_task_marker("【TODO】"))
         self.assertTrue(_summary_has_task_marker("【TODO】: clean desk"))
+        self.assertTrue(_summary_has_task_marker("〔TODO〕: plan rollout"))
+        self.assertTrue(_summary_has_task_marker("〔TASK〕 rotate notes"))
 
     def test_summary_has_task_marker_accepts_list_and_checkbox_prefixes(self):
         self.assertTrue(_summary_has_task_marker("- TODO buy milk"))
