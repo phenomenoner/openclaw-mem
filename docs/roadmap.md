@@ -271,7 +271,7 @@ Notes:
 
 Hybrid upgrade (quality-first, later within this epic):
 - Add a **retrieval router** that can combine multiple backends:
-  - Lexical (SQLite FTS5/BM25; QMD-style)
+  - Lexical (SQLite FTS5; BM25 scoring; QMD-style)
   - Semantic (vector store; e.g. LanceDB)
 - Default policy (quality-first):
   1) lexical anchors (fast + precise)
@@ -404,7 +404,7 @@ These are projects we referenced and **actually used** to shape features or arch
   - Used to justify the “**card → manual**” split and dynamic discovery pattern for SOP/skills (context-size friendly).
 
 - `tobi/qmd`: <https://github.com/tobi/qmd>
-  - Used to shape our hybrid retrieval direction (FTS5/BM25 + vectors + fusion + rerank) and the benchmarking plan for a “retrieval router” arm.
+  - Used to shape our hybrid retrieval direction (FTS5 (BM25 scoring) + vectors + fusion + rerank) and the benchmarking plan for a “retrieval router” arm.
 
 - 1Password — *From magic to malware: How OpenClaw's agent skills become an attack surface*: <https://1password.com/blog/from-magic-to-malware-how-openclaws-agent-skills-become-an-attack-surface>
   - Used to motivate provenance + trust tiers and “trust-aware” context packing (helpful content can still be hostile).

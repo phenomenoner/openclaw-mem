@@ -5,7 +5,7 @@
 `openclaw-mem` has two parts:
 
 - **Sidecar (always-on)**: capture + governance + receipts, stored locally in SQLite.
-- **Engine (optional)**: `openclaw-mem-engine` — an OpenClaw *memory slot backend* that can do hybrid recall (FTS + vector) and safe M1 autoRecall/autoCapture.
+- **Engine (optional)**: `openclaw-mem-engine` — an OpenClaw *memory slot backend* that can do hybrid recall (FTS; BM25-scored + vector) and safe M1 autoRecall/autoCapture.
 
 The sidecar captures useful observations (what tools ran, what happened, what mattered), stores them in a lightweight local SQLite database, and enables **cheap progressive recall** back into the agent:
 
@@ -69,7 +69,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 ### Optional (higher recall quality) — **PARTIAL**
 
 - **Embeddings**: `embed`, `vsearch`
-- **Hybrid retrieval**: `hybrid` (FTS + vector, **RRF** fusion)
+- **Hybrid retrieval**: `hybrid` (lexical FTS (BM25-scored) + vector, **RRF** fusion)
 - **Optional post-retrieval rerank (opt-in)** on hybrid path:
   - `--rerank-provider jina|cohere`
   - `--rerank-model ... --rerank-topn ...`
