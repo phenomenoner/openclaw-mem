@@ -1,12 +1,17 @@
 # openclaw-mem
 
-**Local-first memory sidecar for OpenClaw agents.**
+**Local-first memory sidecar + optional hybrid memory engine for OpenClaw agents.**
 
-`openclaw-mem` captures useful observations (what tools ran, what happened, what mattered), stores them in a lightweight local SQLite database, and enables **cheap progressive recall** back into the agent:
+`openclaw-mem` has two parts:
+
+- **Sidecar (always-on)**: capture + governance + receipts, stored locally in SQLite.
+- **Engine (optional)**: `openclaw-mem-engine` — an OpenClaw *memory slot backend* that can do hybrid recall (FTS + vector) and safe M1 autoRecall/autoCapture.
+
+The sidecar captures useful observations (what tools ran, what happened, what mattered), stores them in a lightweight local SQLite database, and enables **cheap progressive recall** back into the agent:
 
 1) **Search** (compact hits) → 2) **Timeline** (nearby context) → 3) **Get** (full record)
 
-It does **not** replace OpenClaw’s canonical memory slot/backends; it complements them with capture, auditability, and operator workflows.
+It can run purely as a sidecar (no slot changes), **or** you can switch the OpenClaw memory slot to `openclaw-mem-engine` when you want hybrid recall + controlled automation.
 
 Optional layers add embeddings + hybrid ranking, dual-language fields, gateway-assisted semantic recall, and heartbeat-safe triage.
 
@@ -32,6 +37,11 @@ uv run python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
 ```
 
 Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_ts`, and `ingest` prints `{inserted, ids}`.
+
+## Quick links
+- Engine: `docs/mem-engine.md` (what it is + how to enable + knobs)
+- Sidecar capture plugin: `docs/auto-capture.md`
+- Ecosystem fit / comparisons: `docs/ecosystem-fit.md`
 
 ## Status map (DONE / PARTIAL / ROADMAP)
 

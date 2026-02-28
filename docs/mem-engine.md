@@ -10,8 +10,9 @@
 
 `openclaw-mem-engine` becomes an optional **slot owner** (replaces `memory-lancedb` when enabled) so we can:
 
-- do **hybrid recall** (FTS/BM25 + vector) with **scopes & metadata filters**,
+- do **hybrid recall** (FTS + vector) with **scopes & metadata filters**,
 - make recall behavior **auditable + tunable** (receipts, knobs, policies),
+- add **safe M1 automation**: conservative `autoRecall` + strict `autoCapture` (configurable),
 - and actually exploit LanceDB features that the official `memory-lancedb` backend doesn’t surface.
 
 Rollback remains trivial: switch `plugins.slots.memory` back to `memory-lancedb` or `memory-core`.
@@ -62,6 +63,32 @@ Owned by `openclaw-mem-engine`:
 - uses LanceDB as the online store for fast retrieval & hybrid search.
 
 Key stance: **sidecar governs; engine serves**.
+
+---
+
+## M1 automation (what is safe to ship now)
+
+### autoRecall (conservative)
+- Hook: `before_agent_start`
+- Default: **on** (but gated by heuristics)
+- Behavior:
+  - skip trivial prompts (greetings/emojis/HEARTBEAT/slash commands)
+  - recall tiers: `must_remember` → `nice_to_have` → (optional) `unknown` fallback
+  - cap: <=5 memories
+  - escapes memory text to reduce prompt-injection risk
+
+### autoCapture (strict)
+- Hook: `agent_end`
+- Default: **on** (but strict allowlist)
+- Behavior:
+  - capture only a small number of items (1–3 per turn)
+  - default categories: `preference`, `decision`
+  - skip tool outputs; prefer user text; skip secrets-like strings
+  - dedupe near-identical items
+
+### Rollback
+One line:
+- set `plugins.slots.memory` back to `memory-lancedb` (or `memory-core`) and restart gateway.
 
 ---
 

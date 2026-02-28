@@ -1,5 +1,5 @@
 site_name: openclaw-mem
-site_description: Local-first memory sidecar for OpenClaw
+site_description: Local-first memory sidecar + optional hybrid memory engine for OpenClaw
 site_url: https://phenomenoner.github.io/openclaw-mem/
 repo_url: https://github.com/phenomenoner/openclaw-mem
 repo_name: phenomenoner/openclaw-mem
@@ -36,8 +36,9 @@ nav:
       - Graphic memory (GraphRAG-lite PRD): specs/graphic-memory-graphrag-lite-prd.md
   - Reference:
       - Ecosystem fit: ecosystem-fit.md
+      - Engine (slot backend): mem-engine.md
       - Deployment: deployment.md
-      - Auto-capture: auto-capture.md
+      - Auto-capture (sidecar plugin): auto-capture.md
       - Privacy/export rules: privacy-export-rules.md
       - Obsidian: obsidian.md
       - Release checklist (repo rule): release-checklist.md

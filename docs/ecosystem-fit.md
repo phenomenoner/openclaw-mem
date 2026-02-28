@@ -16,9 +16,9 @@ This page explains how `openclaw-mem` fits with OpenClaw’s native memory stack
   - role: sidecar capture + local memory operations + observability
   - default posture: **sidecar-only**
 
-- `openclaw-mem-engine` (planned, optional)
+- `openclaw-mem-engine` (optional)
   - role: alternative memory slot backend (replaces `memory-lancedb` when enabled)
-  - goal: hybrid recall (FTS + vector) + scopes + auditable policies
+  - goal: hybrid recall (FTS + vector) + scopes + auditable policies + safe M1 automation (autoRecall/autoCapture)
   - rollback: one-line slot switch
   - does **not** replace the sidecar ledger (SQLite remains for audit/ops)
   - (when enabled) it **does** own the canonical backend tools for the active slot
@@ -29,6 +29,27 @@ This page explains how `openclaw-mem` fits with OpenClaw’s native memory stack
 - Faster rollback: one slot switch can return you to baseline while capture/audit keeps running.
 - Better observability: tool outcomes and backend annotations are preserved in JSONL/SQLite for troubleshooting.
 - Lower operating cost: progressive recall (`search → timeline → get`) keeps most lookups local and cheap.
+
+## Comparison: `openclaw-mem-engine` vs `win4r/memory-lancedb-pro`
+
+We track completeness against <https://github.com/win4r/memory-lancedb-pro> at the level of **comparable operator-facing capabilities** (not identical UI).
+
+| Capability (comparable) | memory-lancedb-pro | openclaw-mem-engine (ours) |
+|---|---:|---:|
+| Local-first LanceDB backend | ✅ | ✅ |
+| Canonical memory tools (`store/recall/forget`) | ✅ | ✅ |
+| Hybrid recall (FTS + vector) | ✅ | ✅ |
+| Scope-aware filtering | ✅ | ✅ |
+| Policy tiers (must/nice/unknown fallback) | ✅ | ✅ |
+| Receipts/debug top-hits (auditable) | ✅ (varies) | ✅ (`ftsTop` / `vecTop` / `policyTier`) |
+| AutoRecall hook (conservative) | ✅ | ✅ (M1: skip trivial prompts, cap K, escape injection) |
+| AutoCapture hook (strict) | ✅ | ✅ (M1: category allowlist + secret-skip + dedupe + caps) |
+| One-line rollback | ➖ | ✅ (`plugins.slots.memory` switch) |
+
+Deferred (we intentionally keep out of M1):
+- UI-heavy memory management screens
+- aggressive auto-capture of everything (risk: noise + privacy)
+- mandatory rerankers (we keep deterministic fusion first)
 
 ## Recommended deployment patterns
 

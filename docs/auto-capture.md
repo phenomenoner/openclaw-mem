@@ -21,6 +21,8 @@ For explicit long-term memory writes/reads, use CLI directly:
 
 If you want the full deployment matrix, see `docs/ecosystem-fit.md`.
 
+> Note: if you want **autoRecall/autoCapture** at the *memory backend* layer, that is provided by the optional slot backend **`openclaw-mem-engine`** (not this capture-only plugin). See: `docs/mem-engine.md`.
+
 ---
 
 ## Features
