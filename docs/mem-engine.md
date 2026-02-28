@@ -224,6 +224,34 @@ So the engine path should be able to **optionally** search an operator-authored 
 
 ---
 
+## Embeddings hardening (clamp + fail-open)
+
+Embeddings providers enforce an input limit (often expressed as a **max token** count).
+If an agent passes a very long string into `memory_store`/`memory_recall`, the provider can return a 400 ("input too long").
+
+`openclaw-mem-engine` hardens this by:
+- **clamping** embedding inputs deterministically (head+tail) *before* calling the provider
+- **failing open** when embeddings are unavailable/over-limit (tools keep working; results may degrade)
+
+Config knobs (OpenClaw config paths):
+- `plugins.entries.openclaw-mem-engine.config.embedding.maxChars` (default: `6000`)
+- `plugins.entries.openclaw-mem-engine.config.embedding.headChars` (default: `500`)
+- `plugins.entries.openclaw-mem-engine.config.embedding.maxBytes` (optional; UTF-8 cap)
+
+Example (pin defaults explicitly):
+```bash
+openclaw config set plugins.entries.openclaw-mem-engine.config.embedding.maxChars 6000
+openclaw config set plugins.entries.openclaw-mem-engine.config.embedding.headChars 500
+# optional extra safety
+openclaw config set plugins.entries.openclaw-mem-engine.config.embedding.maxBytes 24000
+```
+
+Receipt visibility:
+- `memory_store` receipts include: `embeddingSkipped` + `embeddingSkipReason`
+- recall receipts may include skip reasons (e.g. `embedding_input_too_long`) when the embedding step is skipped
+
+---
+
 ## Write path + governance writeback
 
 ### `memory_store`
