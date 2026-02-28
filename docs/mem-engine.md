@@ -248,7 +248,11 @@ openclaw config set plugins.entries.openclaw-mem-engine.config.embedding.maxByte
 
 Receipt visibility:
 - `memory_store` receipts include: `embeddingSkipped` + `embeddingSkipReason`
-- recall receipts may include skip reasons (e.g. `embedding_input_too_long`) when the embedding step is skipped
+- `memory_recall` receipts include skip reasons (e.g. `embedding_input_too_long`) when vector embedding is skipped
+
+Fail-open UX:
+- If embeddings are unavailable/over-limit, `memory_recall` will **still return lexical-only (FTS) results** and prepend a ⚠️ warning.
+- If embedding is skipped during `memory_store`, the tool still stores the record (zero vector fallback) and returns a ⚠️ warning.
 
 ---
 
