@@ -27,9 +27,14 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
      - fallback namespace: `openclaw ltm <list|stats|export|import>`
    - Acceptance met: operator can audit counts by scope/category and export a sanitized snapshot with receipts.
 
-2) **Receipts/debug transparency for recall**
-   - Expose (configurable): ftsTop / vecTop / fusedTop summaries (no secrets)
-   - Acceptance: when recall happens, we can explain *why* an item was pulled
+2) ✅ **Receipts/debug transparency for recall lifecycle (P0-2)**
+   - Shipped bounded lifecycle receipt (`openclaw-mem-engine.recall.receipt.v1`) for:
+     - manual `memory_recall` tool results (`details.receipt.lifecycle`)
+     - `autoRecall` hook logs + injection wrapper comment
+   - Includes: skip status/reason, tiers searched, tier counts (candidates/selected), `ftsTop` / `vecTop` / `fusedTop` (IDs + scores only), final injected count
+   - Explicit rejection reasons now emitted: `trivial_prompt`, `no_query`, `no_results_must`, `no_results_nice`, `provider_unavailable`, `budget_cap`
+   - Config knobs: `receipts.enabled`, `receipts.verbosity`, `receipts.maxItems` (default: enabled + low + 3)
+   - Acceptance met: recall path is auditable without exposing memory text in receipts by default.
 
 3) **Namespace & scope hygiene**
    - Ensure safe defaults: project isolation, explicit scope tags, no cross-project bleed
@@ -62,4 +67,4 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
   - logs Decision/Tech Note if it changes ops posture
 
 ## Next slice (recommended)
-P0-1 → P0-2 → P0-3.
+P0-3 (namespace/scope hygiene) next, then P1-4 (fusion/ranking improvements).

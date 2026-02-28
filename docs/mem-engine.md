@@ -83,6 +83,8 @@ Key stance: **sidecar governs; engine serves**.
   - recall tiers: `must_remember` → `nice_to_have` → (optional) `unknown` fallback
   - cap: <=5 memories
   - escapes memory text to reduce prompt-injection risk
+  - emits bounded lifecycle receipt (`openclaw-mem-engine.recall.receipt.v1`) with skip reason / tier counts / top IDs
+  - injects a compact autoRecall wrapper comment (IDs only; no memory text in receipt)
 
 ### autoCapture (strict)
 - Hook: `agent_end`
@@ -92,10 +94,20 @@ Key stance: **sidecar governs; engine serves**.
   - default categories: `preference`, `decision`
   - skip tool outputs; prefer user text; skip secrets-like strings
   - dedupe near-identical items
+  - emits bounded lifecycle receipt (`openclaw-mem-engine.autoCapture.receipt.v1`) with extracted/filtered/stored counts
 
 ### Rollback
 One line:
 - set `plugins.slots.memory` back to `memory-lancedb` (or `memory-core`) and restart gateway.
+
+### Receipt controls (P0-2)
+- `receipts.enabled` (default `true`)
+- `receipts.verbosity` (`low` default, `high` optional)
+- `receipts.maxItems` (default `3`, hard cap `10`)
+
+Design constraints:
+- receipts are bounded/deterministic by default
+- no memory text is emitted in receipt payloads by default (IDs + scores only)
 
 ---
 
@@ -244,7 +256,7 @@ We roll this out in **three stages** to keep the system safe and rollbackable.
 
 - **Stage B (canary, short window)**: off-peak *temporary* slot switch.
   - Backup config → switch slot to `openclaw-mem-engine` → run a small golden-set recall check → rollback.
-  - Goal: prove `policyTier` + `ftsTop/vecTop` behave as expected under real traffic.
+  - Goal: prove lifecycle receipts (`policyTier` + `ftsTop/vecTop/fusedTop` + tier counts) behave as expected under real traffic.
 
 - **Stage C (live)**: switch default slot to `openclaw-mem-engine`.
   - Keep an auto-downgrade path (switch back to `memory-lancedb`) if recall error-rate/latency spikes.
@@ -302,7 +314,7 @@ Deliverables:
   - `memory_recall(query, limit?, scope?, …)`
   - `memory_forget(id)`
 - JSON receipts for every tool call (at least: counts, filters applied, latency ms)
-- `memory_recall` receipts now include compact `ftsTop` / `vecTop` arrays (top candidate hits from each channel before fusion) for audit/debugging.
+- `memory_recall` now exposes bounded lifecycle receipts (`details.receipt.lifecycle`) with skip reason, per-tier candidate/selected counts, and compact `ftsTop` / `vecTop` / `fusedTop` IDs.
 
 Definition of done:
 

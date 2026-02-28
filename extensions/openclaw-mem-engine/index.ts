@@ -60,6 +60,14 @@ type AutoCaptureConfigInput = {
   duplicateSearchMinScore?: number;
 };
 
+type ReceiptsVerbosity = "low" | "high";
+
+type ReceiptsConfigInput = {
+  enabled?: boolean;
+  verbosity?: ReceiptsVerbosity;
+  maxItems?: number;
+};
+
 type PluginConfig = {
   embedding?: {
     apiKey?: string;
@@ -69,6 +77,7 @@ type PluginConfig = {
   tableName?: string;
   autoRecall?: boolean | AutoRecallConfigInput;
   autoCapture?: boolean | AutoCaptureConfigInput;
+  receipts?: boolean | ReceiptsConfigInput;
 };
 
 const DEFAULT_DB_PATH = "~/.openclaw/memory/lancedb";
@@ -100,6 +109,12 @@ type AutoCaptureConfig = {
   duplicateSearchMinScore: number;
 };
 
+type ReceiptsConfig = {
+  enabled: boolean;
+  verbosity: ReceiptsVerbosity;
+  maxItems: number;
+};
+
 type AutoCaptureCategory = "preference" | "decision" | "todo";
 
 const DEFAULT_AUTO_RECALL_CONFIG: AutoRecallConfig = {
@@ -122,6 +137,12 @@ const DEFAULT_AUTO_CAPTURE_CONFIG: AutoCaptureConfig = {
   duplicateSearchMinScore: 0.94,
 };
 
+const DEFAULT_RECEIPTS_CONFIG: ReceiptsConfig = {
+  enabled: true,
+  verbosity: "low",
+  maxItems: 3,
+};
+
 function vectorDimsForModel(model: string): number {
   switch (model) {
     case "text-embedding-3-large":
@@ -133,15 +154,20 @@ function vectorDimsForModel(model: string): number {
 }
 
 type ImportanceLabel = "must_remember" | "nice_to_have" | "ignore" | "unknown";
-type RecallPolicyTier = "must+nice" | "must+nice+unknown" | "must+nice+unknown+ignore";
 type ScopeMode = "explicit" | "inferred" | "global";
+
+type RecallRejectionReason =
+  | "trivial_prompt"
+  | "no_query"
+  | "no_results_must"
+  | "no_results_nice"
+  | "provider_unavailable"
+  | "budget_cap";
 
 const DEFAULT_RECALL_LIMIT = 5;
 const MAX_RECALL_LIMIT = 50;
 const RRF_K = 60;
-const DEFAULT_RECEIPT_TOP_HITS = 3;
-const MAX_RECEIPT_TOP_HITS = 5;
-const RECEIPT_TEXT_PREVIEW_MAX = 120;
+const MAX_RECEIPT_ITEMS = 10;
 
 const DEFAULT_ADMIN_LIMIT = 50;
 const MAX_ADMIN_LIMIT = 5000;
@@ -235,12 +261,6 @@ function buildRecallFilter(scope: string | undefined, labels: readonly Importanc
 
   return clauses.join(" AND ");
 }
-
-const RECALL_POLICY_TIERS: Array<{ tier: RecallPolicyTier; labels: ImportanceLabel[] }> = [
-  { tier: "must+nice", labels: ["must_remember", "nice_to_have"] },
-  { tier: "must+nice+unknown", labels: ["must_remember", "nice_to_have", "unknown"] },
-  { tier: "must+nice+unknown+ignore", labels: ["must_remember", "nice_to_have", "unknown", "ignore"] },
-];
 
 const HEARTBEAT_PATTERN = /^heartbeat(?:_ok)?$/i;
 const SLASH_COMMAND_PATTERN = /^\/[-\w]+/;
@@ -373,6 +393,34 @@ function resolveAutoCaptureConfig(input: PluginConfig["autoCapture"]): AutoCaptu
     duplicateSearchMinScore: normalizeNumberInRange(raw.duplicateSearchMinScore, defaults.duplicateSearchMinScore, {
       min: 0.8,
       max: 0.999,
+    }),
+  };
+}
+
+function resolveReceiptsConfig(input: PluginConfig["receipts"]): ReceiptsConfig {
+  const defaults = DEFAULT_RECEIPTS_CONFIG;
+  if (input === false) {
+    return { ...defaults, enabled: false };
+  }
+
+  if (input === true || input == null) {
+    return { ...defaults };
+  }
+
+  if (typeof input !== "object") {
+    return { ...defaults };
+  }
+
+  const raw = input as ReceiptsConfigInput;
+  const verbosity = raw.verbosity === "high" ? "high" : defaults.verbosity;
+
+  return {
+    enabled: normalizeBoolean(raw.enabled, defaults.enabled),
+    verbosity,
+    maxItems: normalizeNumberInRange(raw.maxItems, defaults.maxItems, {
+      min: 1,
+      max: MAX_RECEIPT_ITEMS,
+      integer: true,
     }),
   };
 }
@@ -760,54 +808,185 @@ type RecallResult = {
   score: number;
 };
 
-type RecallReceiptTopHit = {
+type RecallReceiptRankedHit = {
   id: string;
   score: number;
   distance?: number;
-  category: MemoryCategory;
-  importance: number | null;
-  importance_label: ImportanceLabel;
+};
+
+type RecallTierReceipt = {
+  tier: string;
+  labels: ImportanceLabel[];
+  candidates: number;
+  selected: number;
+};
+
+type RecallLifecycleReceipt = {
+  schema: "openclaw-mem-engine.recall.receipt.v1";
+  verbosity: ReceiptsVerbosity;
+  skipped: boolean;
+  skipReason: RecallRejectionReason | null;
+  rejected: RecallRejectionReason[];
   scope: string;
-  trust_tier: string;
-  createdAt: number;
-  textPreview: string;
+  scopeMode: ScopeMode;
+  tiersSearched: string[];
+  tierCounts: RecallTierReceipt[];
+  ftsTop: RecallReceiptRankedHit[];
+  vecTop: RecallReceiptRankedHit[];
+  fusedTop: string[];
+  finalCount: number;
+  injectedCount: number;
+};
+
+type AutoCaptureLifecycleReceipt = {
+  schema: "openclaw-mem-engine.autoCapture.receipt.v1";
+  verbosity: ReceiptsVerbosity;
+  candidateExtractionCount: number;
+  filteredOut: {
+    tool_output: number;
+    secrets_like: number;
+    duplicate: number;
+  };
+  storedCount: number;
 };
 
 function toImportanceRecord(raw: unknown): number | undefined {
   return normalizeImportance(raw);
 }
 
-function textPreview(rawText: string, maxChars: number = RECEIPT_TEXT_PREVIEW_MAX): string {
-  const text = String(rawText ?? "");
-  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}…`;
+function clampReceiptItems(count: number, cfg: ReceiptsConfig): number {
+  return Math.max(1, Math.min(cfg.maxItems, MAX_RECEIPT_ITEMS, Math.floor(count)));
 }
 
-function toRecallTopHit(result: RecallResult, options: { includeDistance?: boolean } = {}): RecallReceiptTopHit {
-  const normalizedImportance = toImportanceRecord(result.row.importance);
-  const normalizedLabel = resolveImportanceLabel(normalizedImportance, result.row.importance_label);
+function roundScore(raw: number): number {
+  if (!Number.isFinite(raw)) return 0;
+  return Number(raw.toFixed(6));
+}
 
-  const hit: RecallReceiptTopHit = {
-    id: result.row.id,
-    score: result.score,
-    category: (result.row.category ?? "other") as MemoryCategory,
-    importance: normalizedImportance ?? null,
-    importance_label: normalizedLabel,
-    scope: String(result.row.scope ?? ""),
-    trust_tier: String(result.row.trust_tier ?? ""),
-    createdAt: Number(result.row.createdAt ?? 0),
-    textPreview: textPreview(String(result.row.text ?? "")),
-  };
+function buildRankedHits(
+  results: RecallResult[],
+  cfg: ReceiptsConfig,
+  options: { includeDistance?: boolean } = {},
+): RecallReceiptRankedHit[] {
+  const maxItems = clampReceiptItems(cfg.maxItems, cfg);
+  const ranked = new Map<string, RecallReceiptRankedHit>();
 
-  if (options.includeDistance && typeof result.distance === "number") {
-    hit.distance = result.distance;
+  for (const result of results) {
+    const id = String(result.row.id ?? "");
+    if (!id) continue;
+
+    const candidate: RecallReceiptRankedHit = {
+      id,
+      score: roundScore(result.score),
+    };
+
+    if (options.includeDistance) {
+      candidate.distance = roundScore(result.distance);
+    }
+
+    const existing = ranked.get(id);
+    if (!existing || candidate.score > existing.score) {
+      ranked.set(id, candidate);
+    }
   }
 
-  return hit;
+  return Array.from(ranked.values())
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.id.localeCompare(b.id);
+    })
+    .slice(0, maxItems);
 }
 
-function toRecallTopHits(results: RecallResult[], count: number, options: { includeDistance?: boolean } = {}): RecallReceiptTopHit[] {
-  const limit = Math.max(0, Math.min(MAX_RECEIPT_TOP_HITS, Math.floor(count)));
-  return results.slice(0, limit).map((result) => toRecallTopHit(result, options));
+function uniqueReasons(reasons: RecallRejectionReason[]): RecallRejectionReason[] {
+  const order: RecallRejectionReason[] = [
+    "trivial_prompt",
+    "no_query",
+    "no_results_must",
+    "no_results_nice",
+    "provider_unavailable",
+    "budget_cap",
+  ];
+  const set = new Set(reasons);
+  return order.filter((reason) => set.has(reason));
+}
+
+function buildRecallLifecycleReceipt(input: {
+  cfg: ReceiptsConfig;
+  skipped: boolean;
+  skipReason?: RecallRejectionReason;
+  rejected?: RecallRejectionReason[];
+  scope: string;
+  scopeMode: ScopeMode;
+  tierCounts: RecallTierReceipt[];
+  ftsResults: RecallResult[];
+  vecResults: RecallResult[];
+  fusedResults: RecallResult[];
+  injectedCount: number;
+}): RecallLifecycleReceipt {
+  const maxItems = clampReceiptItems(input.cfg.maxItems, input.cfg);
+  const tierCounts = input.tierCounts.slice(0, 6).map((item) => ({
+    tier: item.tier,
+    labels: input.cfg.verbosity === "high" ? item.labels.slice(0, 4) : [],
+    candidates: Math.max(0, Math.floor(item.candidates)),
+    selected: Math.max(0, Math.floor(item.selected)),
+  }));
+
+  return {
+    schema: "openclaw-mem-engine.recall.receipt.v1",
+    verbosity: input.cfg.verbosity,
+    skipped: input.skipped,
+    skipReason: input.skipReason ?? null,
+    rejected: uniqueReasons(input.rejected ?? []),
+    scope: input.scope,
+    scopeMode: input.scopeMode,
+    tiersSearched: tierCounts.map((item) => item.tier),
+    tierCounts,
+    ftsTop: buildRankedHits(input.ftsResults, input.cfg),
+    vecTop: buildRankedHits(input.vecResults, input.cfg, { includeDistance: true }),
+    fusedTop: input.fusedResults.slice(0, maxItems).map((item) => String(item.row.id ?? "")),
+    finalCount: input.fusedResults.length,
+    injectedCount: Math.max(0, Math.floor(input.injectedCount)),
+  };
+}
+
+function buildAutoCaptureLifecycleReceipt(input: {
+  cfg: ReceiptsConfig;
+  candidateExtractionCount: number;
+  filteredOut: {
+    tool_output: number;
+    secrets_like: number;
+    duplicate: number;
+  };
+  storedCount: number;
+}): AutoCaptureLifecycleReceipt {
+  return {
+    schema: "openclaw-mem-engine.autoCapture.receipt.v1",
+    verbosity: input.cfg.verbosity,
+    candidateExtractionCount: Math.max(0, Math.floor(input.candidateExtractionCount)),
+    filteredOut: {
+      tool_output: Math.max(0, Math.floor(input.filteredOut.tool_output)),
+      secrets_like: Math.max(0, Math.floor(input.filteredOut.secrets_like)),
+      duplicate: Math.max(0, Math.floor(input.filteredOut.duplicate)),
+    },
+    storedCount: Math.max(0, Math.floor(input.storedCount)),
+  };
+}
+
+function renderAutoRecallReceiptComment(receipt: RecallLifecycleReceipt, cfg: ReceiptsConfig): string {
+  if (!cfg.enabled) return "";
+
+  const compact = {
+    schema: receipt.schema,
+    verbosity: receipt.verbosity,
+    skipped: receipt.skipped,
+    skipReason: receipt.skipReason,
+    tiersSearched: receipt.tiersSearched,
+    fusedTop: receipt.fusedTop,
+    injectedCount: receipt.injectedCount,
+  };
+
+  return `<!-- openclaw-mem-engine:autoRecall ${JSON.stringify(compact)} -->`;
 }
 
 function scopeFilterExpr(scope: string): string {
@@ -922,6 +1101,80 @@ function fuseRecall(results: {
     }));
 
   return { order };
+}
+
+type RecallTierPlan = {
+  tier: string;
+  labels: ImportanceLabel[];
+  missReason?: RecallRejectionReason;
+};
+
+async function runTieredRecall(input: {
+  query: string;
+  scope: string;
+  limit: number;
+  searchLimit: number;
+  plans: RecallTierPlan[];
+  search: (args: {
+    query: string;
+    scope: string;
+    labels: ImportanceLabel[];
+    searchLimit: number;
+  }) => Promise<{ ftsResults: RecallResult[]; vecResults: RecallResult[] }>;
+}): Promise<{
+  selected: RecallResult[];
+  tierCounts: RecallTierReceipt[];
+  ftsResults: RecallResult[];
+  vecResults: RecallResult[];
+  rejected: RecallRejectionReason[];
+}> {
+  const selected: RecallResult[] = [];
+  const seen = new Set<string>();
+  const tierCounts: RecallTierReceipt[] = [];
+  const ftsResults: RecallResult[] = [];
+  const vecResults: RecallResult[] = [];
+  const rejected: RecallRejectionReason[] = [];
+
+  for (const plan of input.plans) {
+    const { ftsResults: tierFts, vecResults: tierVec } = await input.search({
+      query: input.query,
+      scope: input.scope,
+      labels: plan.labels,
+      searchLimit: input.searchLimit,
+    });
+
+    ftsResults.push(...tierFts);
+    vecResults.push(...tierVec);
+
+    const fused = fuseRecall({ vector: tierVec, fts: tierFts, limit: input.searchLimit }).order;
+
+    let added = 0;
+    for (const hit of fused) {
+      if (seen.has(hit.row.id)) continue;
+      seen.add(hit.row.id);
+      selected.push(hit);
+      added += 1;
+      if (selected.length >= input.limit) break;
+    }
+
+    tierCounts.push({
+      tier: plan.tier,
+      labels: plan.labels,
+      candidates: fused.length,
+      selected: added,
+    });
+
+    if (fused.length === 0 && plan.missReason) {
+      rejected.push(plan.missReason);
+    }
+
+    if (selected.length >= input.limit) {
+      rejected.push("budget_cap");
+      break;
+    }
+  }
+
+  return { selected, tierCounts, ftsResults, vecResults, rejected: uniqueReasons(rejected) };
 }
 
 const MEMORY_SCALAR_COLUMNS = [
@@ -1286,7 +1539,7 @@ const memoryEngineConfigSchema = {
     }
 
     const cfg = value as Record<string, unknown>;
-    assertAllowedKeys(cfg, ["embedding", "dbPath", "tableName", "autoRecall", "autoCapture"], "openclaw-mem-engine config");
+    assertAllowedKeys(cfg, ["embedding", "dbPath", "tableName", "autoRecall", "autoCapture", "receipts"], "openclaw-mem-engine config");
 
     let embedding: PluginConfig["embedding"] | undefined;
     if (cfg.embedding != null) {
@@ -1364,12 +1617,28 @@ const memoryEngineConfigSchema = {
       };
     };
 
+    const parseReceipts = (raw: unknown): PluginConfig["receipts"] => {
+      if (raw == null) return undefined;
+      if (typeof raw === "boolean") return raw;
+      if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("receipts must be a boolean or object");
+      }
+      const obj = raw as Record<string, unknown>;
+      assertAllowedKeys(obj, ["enabled", "verbosity", "maxItems"], "receipts config");
+      return {
+        enabled: typeof obj.enabled === "boolean" ? obj.enabled : undefined,
+        verbosity: obj.verbosity === "high" || obj.verbosity === "low" ? obj.verbosity : undefined,
+        maxItems: typeof obj.maxItems === "number" ? obj.maxItems : undefined,
+      };
+    };
+
     return {
       embedding,
       dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : undefined,
       tableName: typeof cfg.tableName === "string" ? cfg.tableName : undefined,
       autoRecall: parseAutoRecall(cfg.autoRecall),
       autoCapture: parseAutoCapture(cfg.autoCapture),
+      receipts: parseReceipts(cfg.receipts),
     };
   },
   uiHints: {
@@ -1402,6 +1671,21 @@ const memoryEngineConfigSchema = {
       label: "Auto Capture",
       help: "Capture strict user-origin preference/decision memories on agent end",
     },
+    "receipts.enabled": {
+      label: "Lifecycle Receipts",
+      help: "Emit bounded recall/capture receipts for debug and audits",
+      advanced: true,
+    },
+    "receipts.verbosity": {
+      label: "Receipts Verbosity",
+      help: "low (default) keeps compact aggregates; high includes extended counters",
+      advanced: true,
+    },
+    "receipts.maxItems": {
+      label: "Receipt Max Items",
+      help: "Maximum item count for top-hit arrays and tier slices",
+      advanced: true,
+    },
   },
 };
 
@@ -1417,6 +1701,7 @@ const memoryPlugin = {
 
     const autoRecallCfg = resolveAutoRecallConfig(cfg.autoRecall);
     const autoCaptureCfg = resolveAutoCaptureConfig(cfg.autoCapture);
+    const receiptsCfg = resolveReceiptsConfig(cfg.receipts);
 
     const model = cfg.embedding?.model ?? DEFAULT_MODEL;
     const vectorDim = vectorDimsForModel(model);
@@ -1430,7 +1715,7 @@ const memoryPlugin = {
     const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model) : null;
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, lazyInit=true)`,
     );
 
     const resolveAdminFilters = (input: {
@@ -1869,7 +2154,86 @@ const memoryPlugin = {
             scope: scopeInput,
           } = params as { query: string; limit?: number; scope?: string };
 
+          const normalizedQuery = String(query ?? "").trim();
+          const normalizedLimit = clampLimit(limit);
+          const { scope, scopeMode } = resolveScope({ explicitScope: scopeInput, text: normalizedQuery });
+          const scopeFilterApplied = scopeMode === "global" || scopeMode === "inferred" || scopeMode === "explicit";
+
+          const buildReceiptPayload = (input: {
+            skipped: boolean;
+            skipReason?: RecallRejectionReason;
+            rejected?: RecallRejectionReason[];
+            tierCounts?: RecallTierReceipt[];
+            ftsResults?: RecallResult[];
+            vecResults?: RecallResult[];
+            fusedResults?: RecallResult[];
+            injectedCount?: number;
+            latencyMs?: number;
+            policyTier?: string;
+          }) => {
+            const tierCounts = input.tierCounts ?? [];
+            const ftsResults = input.ftsResults ?? [];
+            const vecResults = input.vecResults ?? [];
+            const fusedResults = input.fusedResults ?? [];
+            const latencyMs = input.latencyMs ?? Math.round(performance.now() - t0);
+
+            const lifecycle = receiptsCfg.enabled
+              ? buildRecallLifecycleReceipt({
+                  cfg: receiptsCfg,
+                  skipped: input.skipped,
+                  skipReason: input.skipReason,
+                  rejected: input.rejected,
+                  scope,
+                  scopeMode,
+                  tierCounts,
+                  ftsResults,
+                  vecResults,
+                  fusedResults,
+                  injectedCount: input.injectedCount ?? 0,
+                })
+              : undefined;
+
+            return {
+              dbPath: resolvedDbPath,
+              tableName,
+              model,
+              limit: normalizedLimit,
+              latencyMs,
+              ftsCount: ftsResults.length,
+              vecCount: vecResults.length,
+              fusedCount: fusedResults.length,
+              policyTier: input.policyTier ?? (tierCounts.length > 0 ? tierCounts[tierCounts.length - 1]!.tier : null),
+              scopeMode,
+              scope,
+              scopeFilterApplied,
+              lifecycle,
+            };
+          };
+
+          if (!normalizedQuery) {
+            const receipt = buildReceiptPayload({
+              skipped: true,
+              skipReason: "no_query",
+              rejected: ["no_query"],
+            });
+
+            return {
+              content: [{ type: "text", text: "No recall query provided." }],
+              details: {
+                count: 0,
+                memories: [],
+                receipt,
+              },
+            };
+          }
+
           if (!embeddings) {
+            const receipt = buildReceiptPayload({
+              skipped: true,
+              skipReason: "provider_unavailable",
+              rejected: ["provider_unavailable"],
+            });
+
             return {
               content: [
                 {
@@ -1877,71 +2241,58 @@ const memoryPlugin = {
                   text: "openclaw-mem-engine is not configured (missing embedding.apiKey / OPENAI_API_KEY).",
                 },
               ],
-              details: { error: "missing_api_key" },
+              details: { error: "missing_api_key", receipt },
             };
           }
 
-          const normalizedLimit = clampLimit(limit);
-          const { scope, scopeMode } = resolveScope({ explicitScope: scopeInput, text: query });
           const searchLimit = Math.max(normalizedLimit, normalizedLimit * 2);
+          const plans: RecallTierPlan[] = [
+            { tier: "must", labels: ["must_remember"], missReason: "no_results_must" },
+            { tier: "nice", labels: ["nice_to_have"], missReason: "no_results_nice" },
+            { tier: "unknown", labels: ["unknown"] },
+            { tier: "ignore", labels: ["ignore"] },
+          ];
 
-          const vector = await embeddings.embed(query);
-
-          const scopeFilterApplied = scopeMode === "global" || scopeMode === "inferred" || scopeMode === "explicit";
-
-          let ftsResults: RecallResult[] = [];
-          let vecResults: RecallResult[] = [];
-          let policyTier: RecallPolicyTier = RECALL_POLICY_TIERS[0].tier;
-
-          for (const plan of RECALL_POLICY_TIERS) {
-            policyTier = plan.tier;
-
-            [ftsResults, vecResults] = await Promise.all([
-              db.fullTextSearch(query, Math.min(searchLimit, MAX_RECALL_LIMIT), scope, plan.labels).catch(() => []),
-              db.vectorSearch(vector, Math.min(searchLimit, MAX_RECALL_LIMIT), scope, plan.labels).catch(() => []),
-            ]);
-
-            if (ftsResults.length > 0 || vecResults.length > 0) {
-              break;
-            }
-          }
-
-          const topHitLimit = Math.min(MAX_RECEIPT_TOP_HITS, Math.max(1, DEFAULT_RECEIPT_TOP_HITS));
-          const receiptTopHits = {
-            ftsTop: toRecallTopHits(ftsResults, topHitLimit),
-            vecTop: toRecallTopHits(vecResults, topHitLimit, { includeDistance: true }),
-          };
-
-          let fused: { order: RecallResult[] };
+          let vector: number[];
           try {
-            fused = fuseRecall({ vector: vecResults, fts: ftsResults, limit: normalizedLimit });
-          } catch (err) {
-            const message = err instanceof Error ? err.stack ?? err.message : String(err);
+            vector = await embeddings.embed(normalizedQuery);
+          } catch {
+            const receipt = buildReceiptPayload({
+              skipped: true,
+              skipReason: "provider_unavailable",
+              rejected: ["provider_unavailable"],
+            });
+
             return {
-              content: [{ type: "text", text: `memory_recall failed: ${message}` }],
-              details: {
-                error: String(err),
-                stack: message,
-                receipt: {
-                  dbPath: resolvedDbPath,
-                  tableName,
-                  limit: normalizedLimit,
-                  model,
-                  ftsCount: ftsResults.length,
-                  vecCount: vecResults.length,
-                  policyTier,
-                  scopeMode,
-                  scope,
-                  scopeFilterApplied,
-                  ftsTop: receiptTopHits.ftsTop,
-                  vecTop: receiptTopHits.vecTop,
+              content: [
+                {
+                  type: "text",
+                  text: "openclaw-mem-engine embeddings provider is unavailable right now.",
                 },
+              ],
+              details: {
+                error: "provider_unavailable",
+                receipt,
               },
             };
           }
-          const latencyMs = Math.round(performance.now() - t0);
 
-          const memories = fused.order.map((r) => {
+          const tiered = await runTieredRecall({
+            query: normalizedQuery,
+            scope,
+            limit: normalizedLimit,
+            searchLimit: Math.min(searchLimit, MAX_RECALL_LIMIT),
+            plans,
+            search: async ({ query: textQuery, scope: targetScope, labels, searchLimit }) => {
+              const [ftsResults, vecResults] = await Promise.all([
+                db.fullTextSearch(textQuery, searchLimit, targetScope, labels).catch(() => []),
+                db.vectorSearch(vector, searchLimit, targetScope, labels).catch(() => []),
+              ]);
+              return { ftsResults, vecResults };
+            },
+          });
+
+          const memories = tiered.selected.map((r) => {
             const normalizedImportance = toImportanceRecord(r.row.importance);
             const normalizedLabel = resolveImportanceLabel(normalizedImportance, r.row.importance_label);
 
@@ -1959,28 +2310,23 @@ const memoryPlugin = {
             };
           });
 
+          const receipt = buildReceiptPayload({
+            skipped: false,
+            rejected: tiered.rejected,
+            tierCounts: tiered.tierCounts,
+            ftsResults: tiered.ftsResults,
+            vecResults: tiered.vecResults,
+            fusedResults: tiered.selected,
+            injectedCount: memories.length,
+          });
+
           if (memories.length === 0) {
             return {
               content: [{ type: "text", text: "No relevant memories found." }],
               details: {
                 count: 0,
                 memories: [],
-                receipt: {
-                  dbPath: resolvedDbPath,
-                  tableName,
-                  limit: normalizedLimit,
-                  model,
-                  latencyMs,
-                  ftsCount: ftsResults.length,
-                  vecCount: vecResults.length,
-                  fusedCount: 0,
-                  policyTier,
-                  scopeMode,
-                  scope,
-                  scopeFilterApplied,
-                  ftsTop: receiptTopHits.ftsTop,
-                  vecTop: receiptTopHits.vecTop,
-                },
+                receipt,
               },
             };
           }
@@ -1998,22 +2344,7 @@ const memoryPlugin = {
             details: {
               count: memories.length,
               memories,
-              receipt: {
-                dbPath: resolvedDbPath,
-                tableName,
-                limit: normalizedLimit,
-                model,
-                latencyMs,
-                ftsCount: ftsResults.length,
-                vecCount: vecResults.length,
-                fusedCount: memories.length,
-                policyTier,
-                scopeMode,
-                scope,
-                scopeFilterApplied,
-                ftsTop: receiptTopHits.ftsTop,
-                vecTop: receiptTopHits.vecTop,
-              },
+              receipt,
             },
           };
         },
@@ -2401,54 +2732,125 @@ const memoryPlugin = {
       } else {
         api.on("before_agent_start", async (event) => {
           const prompt = typeof event.prompt === "string" ? event.prompt : "";
-          if (!prompt) return;
-          if (shouldSkipAutoRecallPrompt(prompt, autoRecallCfg)) return;
+          const trimmedPrompt = prompt.trim();
+          const scopeInfo = resolveScope({ text: trimmedPrompt });
+
+          const emitAutoRecallReceipt = (input: {
+            skipped: boolean;
+            skipReason?: RecallRejectionReason;
+            rejected?: RecallRejectionReason[];
+            tierCounts?: RecallTierReceipt[];
+            ftsResults?: RecallResult[];
+            vecResults?: RecallResult[];
+            fusedResults?: RecallResult[];
+            injectedCount?: number;
+          }) => {
+            if (!receiptsCfg.enabled) return undefined;
+            return buildRecallLifecycleReceipt({
+              cfg: receiptsCfg,
+              skipped: input.skipped,
+              skipReason: input.skipReason,
+              rejected: input.rejected,
+              scope: scopeInfo.scope,
+              scopeMode: scopeInfo.scopeMode,
+              tierCounts: input.tierCounts ?? [],
+              ftsResults: input.ftsResults ?? [],
+              vecResults: input.vecResults ?? [],
+              fusedResults: input.fusedResults ?? [],
+              injectedCount: input.injectedCount ?? 0,
+            });
+          };
+
+          if (!trimmedPrompt) {
+            const receipt = emitAutoRecallReceipt({
+              skipped: true,
+              skipReason: "no_query",
+              rejected: ["no_query"],
+            });
+            if (receipt) {
+              api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
+            }
+            return;
+          }
+
+          if (shouldSkipAutoRecallPrompt(trimmedPrompt, autoRecallCfg)) {
+            const receipt = emitAutoRecallReceipt({
+              skipped: true,
+              skipReason: "trivial_prompt",
+              rejected: ["trivial_prompt"],
+            });
+            if (receipt) {
+              api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
+            }
+            return;
+          }
 
           try {
             const limit = Math.max(1, Math.min(AUTO_RECALL_MAX_ITEMS, autoRecallCfg.maxItems));
-            const scopeInfo = resolveScope({ text: prompt });
-            const scope = scopeInfo.scope;
             const searchLimit = Math.max(
               limit,
               Math.min(MAX_RECALL_LIMIT, limit * Math.max(1, autoRecallCfg.tierSearchMultiplier)),
             );
 
-            const vector = await embeddings.embed(prompt);
-
-            const tiers: ImportanceLabel[][] = [["must_remember"], ["nice_to_have"]];
-            if (autoRecallCfg.includeUnknownFallback) {
-              tiers.push(["unknown"]);
-            }
-
-            const selected: RecallResult[] = [];
-            const seenIds = new Set<string>();
-            const tierReceipts: Array<{ tier: string; added: number }> = [];
-
-            for (const labels of tiers) {
-              const [ftsResults, vecResults] = await Promise.all([
-                db.fullTextSearch(prompt, searchLimit, scope, labels).catch(() => []),
-                db.vectorSearch(vector, searchLimit, scope, labels).catch(() => []),
-              ]);
-
-              const fused = fuseRecall({ vector: vecResults, fts: ftsResults, limit: searchLimit }).order;
-              let added = 0;
-
-              for (const hit of fused) {
-                if (seenIds.has(hit.row.id)) continue;
-                seenIds.add(hit.row.id);
-                selected.push(hit);
-                added += 1;
-                if (selected.length >= limit) break;
+            let vector: number[];
+            try {
+              vector = await embeddings.embed(trimmedPrompt);
+            } catch {
+              const receipt = emitAutoRecallReceipt({
+                skipped: true,
+                skipReason: "provider_unavailable",
+                rejected: ["provider_unavailable"],
+              });
+              if (receipt) {
+                api.logger.warn(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
               }
-
-              tierReceipts.push({ tier: labels.join("+"), added });
-              if (selected.length >= limit) break;
+              return;
             }
 
-            if (selected.length === 0) return;
+            const plans: RecallTierPlan[] = [
+              { tier: "must", labels: ["must_remember"], missReason: "no_results_must" },
+              { tier: "nice", labels: ["nice_to_have"], missReason: "no_results_nice" },
+            ];
+            if (autoRecallCfg.includeUnknownFallback) {
+              plans.push({ tier: "unknown", labels: ["unknown"] });
+            }
+
+            const tiered = await runTieredRecall({
+              query: trimmedPrompt,
+              scope: scopeInfo.scope,
+              limit,
+              searchLimit,
+              plans,
+              search: async ({ query: textQuery, scope, labels, searchLimit }) => {
+                const [ftsResults, vecResults] = await Promise.all([
+                  db.fullTextSearch(textQuery, searchLimit, scope, labels).catch(() => []),
+                  db.vectorSearch(vector, searchLimit, scope, labels).catch(() => []),
+                ]);
+                return { ftsResults, vecResults };
+              },
+            });
+
+            const selected = tiered.selected.slice(0, limit);
+            const receipt = emitAutoRecallReceipt({
+              skipped: false,
+              rejected: tiered.rejected,
+              tierCounts: tiered.tierCounts,
+              ftsResults: tiered.ftsResults,
+              vecResults: tiered.vecResults,
+              fusedResults: tiered.selected,
+              injectedCount: selected.length,
+            });
+
+            if (receipt) {
+              api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
+            }
+
+            if (selected.length === 0) {
+              return;
+            }
 
             const context = formatRelevantMemoriesContext(
-              selected.slice(0, limit).map((hit) => {
+              selected.map((hit) => {
                 const normalizedImportance = toImportanceRecord(hit.row.importance);
                 const normalizedLabel = resolveImportanceLabel(normalizedImportance, hit.row.importance_label);
                 return {
@@ -2459,12 +2861,10 @@ const memoryPlugin = {
               }),
             );
 
-            // receipt: conservative autoRecall injects sanitized, bounded context only (<=5 lines; must→nice→unknown fallback).
-            api.logger.info(
-              `openclaw-mem-engine: autoRecall injected ${selected.length} memories (scope=${scope}, tiers=${tierReceipts.map((r) => `${r.tier}:${r.added}`).join(",")})`,
-            );
+            const receiptComment = receipt ? renderAutoRecallReceiptComment(receipt, receiptsCfg) : "";
+            const prependContext = receiptComment ? `${receiptComment}\n${context}` : context;
 
-            return { prependContext: context };
+            return { prependContext };
           } catch (err) {
             api.logger.warn(`openclaw-mem-engine: autoRecall failed: ${String(err)}`);
           }
@@ -2488,6 +2888,14 @@ const memoryPlugin = {
             const userTexts = extractUserTextMessages(event.messages);
             if (userTexts.length === 0) return;
 
+            const filteredOut = {
+              tool_output: 0,
+              secrets_like: 0,
+              duplicate: 0,
+            };
+
+            let candidateExtractionCount = 0;
+
             const captures: Array<{
               text: string;
               vector: number[];
@@ -2497,15 +2905,30 @@ const memoryPlugin = {
             }> = [];
 
             for (const userText of userTexts) {
-              if (looksLikeSecret(userText) || looksLikeToolOutput(userText)) continue;
+              const splitCandidates = splitCaptureCandidates(userText);
+              candidateExtractionCount += splitCandidates.length;
 
-              for (const rawCandidate of splitCaptureCandidates(userText)) {
-                if (captures.length >= autoCaptureCfg.maxItemsPerTurn) break;
+              const messageLooksSecret = looksLikeSecret(userText);
+              const messageLooksToolOutput = looksLikeToolOutput(userText);
+
+              for (const rawCandidate of splitCandidates) {
+                if (captures.length >= autoCaptureCfg.maxItemsPerTurn) {
+                  break;
+                }
 
                 const candidate = normalizeCaptureText(rawCandidate, autoCaptureCfg.maxCharsPerItem);
                 if (!candidate || candidate.length < 12) continue;
                 if (SLASH_COMMAND_PATTERN.test(candidate) || HEARTBEAT_PATTERN.test(candidate)) continue;
-                if (looksLikeSecret(candidate) || looksLikeToolOutput(candidate)) continue;
+
+                if (messageLooksSecret || looksLikeSecret(candidate)) {
+                  filteredOut.secrets_like += 1;
+                  continue;
+                }
+
+                if (messageLooksToolOutput || looksLikeToolOutput(candidate)) {
+                  filteredOut.tool_output += 1;
+                  continue;
+                }
 
                 const category = detectAutoCaptureCategory(candidate);
                 if (!category || !allowedCategories.has(category)) continue;
@@ -2513,7 +2936,10 @@ const memoryPlugin = {
                 const duplicateInTurn = captures.some((existing) =>
                   isNearDuplicateText(existing.text, candidate, autoCaptureCfg.dedupeSimilarityThreshold),
                 );
-                if (duplicateInTurn) continue;
+                if (duplicateInTurn) {
+                  filteredOut.duplicate += 1;
+                  continue;
+                }
 
                 const scopeInfo = resolveScope({ text: candidate });
                 const vector = await embeddings.embed(candidate);
@@ -2525,6 +2951,7 @@ const memoryPlugin = {
                   (existing.score >= autoCaptureCfg.duplicateSearchMinScore ||
                     isNearDuplicateText(existing.row.text, candidate, autoCaptureCfg.dedupeSimilarityThreshold))
                 ) {
+                  filteredOut.duplicate += 1;
                   continue;
                 }
 
@@ -2540,9 +2967,9 @@ const memoryPlugin = {
               if (captures.length >= autoCaptureCfg.maxItemsPerTurn) break;
             }
 
-            if (captures.length === 0) return;
+            const toStore = captures.slice(0, autoCaptureCfg.maxItemsPerTurn);
 
-            for (const capture of captures.slice(0, autoCaptureCfg.maxItemsPerTurn)) {
+            for (const capture of toStore) {
               const normalizedLabel = importanceLabel(capture.importance);
               const row: MemoryRow = {
                 id: randomUUID(),
@@ -2559,10 +2986,15 @@ const memoryPlugin = {
               await db.add(row);
             }
 
-            // receipt: strict autoCapture only stores user-origin preference/decision (todo optional), deduped + secret-scrubbed.
-            api.logger.info(
-              `openclaw-mem-engine: autoCapture stored ${captures.length} memories (${captures.map((c) => c.category).join(",")})`,
-            );
+            if (receiptsCfg.enabled) {
+              const receipt = buildAutoCaptureLifecycleReceipt({
+                cfg: receiptsCfg,
+                candidateExtractionCount,
+                filteredOut,
+                storedCount: toStore.length,
+              });
+              api.logger.info(`openclaw-mem-engine:autoCapture.receipt ${JSON.stringify(receipt)}`);
+            }
           } catch (err) {
             api.logger.warn(`openclaw-mem-engine: autoCapture failed: ${String(err)}`);
           }
@@ -2570,6 +3002,12 @@ const memoryPlugin = {
       }
     }
   },
+};
+
+export const __debugReceipts = {
+  resolveReceiptsConfig,
+  buildRecallLifecycleReceipt,
+  buildAutoCaptureLifecycleReceipt,
 };
 
 export default memoryPlugin;
