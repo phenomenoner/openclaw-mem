@@ -16,6 +16,24 @@
       "placeholder": "text-embedding-3-small",
       "help": "OpenAI embedding model to use"
     },
+    "embedding.maxChars": {
+      "label": "Embedding Max Chars",
+      "placeholder": "6000",
+      "help": "Clamp embedding input to maxChars before calling the provider (default 6000).",
+      "advanced": true
+    },
+    "embedding.headChars": {
+      "label": "Embedding Head Chars",
+      "placeholder": "500",
+      "help": "If clamping, keep the first headChars and the last tail (head + … + tail). Default 500.",
+      "advanced": true
+    },
+    "embedding.maxBytes": {
+      "label": "Embedding Max Bytes",
+      "placeholder": "(optional)",
+      "help": "Optional extra UTF-8 byte cap applied after maxChars.",
+      "advanced": true
+    },
     "dbPath": {
       "label": "Database Path",
       "placeholder": "~/.openclaw/memory/lancedb",
@@ -68,6 +86,23 @@
               "text-embedding-3-large"
             ],
             "default": "text-embedding-3-small"
+          },
+          "maxChars": {
+            "type": "integer",
+            "minimum": 200,
+            "maximum": 200000,
+            "default": 6000
+          },
+          "headChars": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20000,
+            "default": 500
+          },
+          "maxBytes": {
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 200000
           }
         }
       },

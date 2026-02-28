@@ -7,12 +7,12 @@
  * 2) Set the memory slot to this plugin:
  *    - plugins.slots.memory = "openclaw-mem-engine"
  * 3) Configure embeddings (either):
- *    - plugins.entries["openclaw-mem-engine"].embedding.apiKey = "${OPENAI_API_KEY}"
+ *    - plugins.entries["openclaw-mem-engine"].config.embedding.apiKey = "${OPENAI_API_KEY}"
  *    - or set env: OPENAI_API_KEY
  * 4) (Optional) Guardrail: clamp embedding input to avoid 400 "input too long":
- *    - plugins.entries["openclaw-mem-engine"].embedding.maxChars = 6000 (default)
- *    - plugins.entries["openclaw-mem-engine"].embedding.headChars = 500 (default; keep head + tail)
- *    - plugins.entries["openclaw-mem-engine"].embedding.maxBytes = 24000 (optional; no default)
+ *    - plugins.entries["openclaw-mem-engine"].config.embedding.maxChars = 6000 (default)
+ *    - plugins.entries["openclaw-mem-engine"].config.embedding.headChars = 500 (default; keep head + tail)
+ *    - plugins.entries["openclaw-mem-engine"].config.embedding.maxBytes = 24000 (optional; no default)
  *
  * Smoke:
  * - memory_store({ text: "I prefer dark mode", importance: 0.8, category: "preference" })
@@ -2304,24 +2304,6 @@ const memoryPlugin = {
             };
           }
 
-          if (!embeddings) {
-            const receipt = buildReceiptPayload({
-              skipped: true,
-              skipReason: "provider_unavailable",
-              rejected: ["provider_unavailable"],
-            });
-
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "openclaw-mem-engine is not configured (missing embedding.apiKey / OPENAI_API_KEY).",
-                },
-              ],
-              details: { error: "missing_api_key", receipt },
-            };
-          }
-
           const searchLimit = Math.max(normalizedLimit, normalizedLimit * 2);
           const plans: RecallTierPlan[] = [
             { tier: "must", labels: ["must_remember"], missReason: "no_results_must" },
@@ -2330,35 +2312,21 @@ const memoryPlugin = {
             { tier: "ignore", labels: ["ignore"] },
           ];
 
-          let vector: number[];
-          try {
-            vector = await embeddings.embed(normalizedQuery);
-          } catch (err) {
-            const tooLong = isEmbeddingInputTooLongError(err);
-            const reason: RecallRejectionReason = tooLong ? "embedding_input_too_long" : "provider_unavailable";
+          // Fail-open: if embeddings are missing/unavailable/over-limit, still run lexical (FTS) recall.
+          const preRejected: RecallRejectionReason[] = [];
+          let vector: number[] | null = null;
 
-            const receipt = buildReceiptPayload({
-              skipped: true,
-              skipReason: reason,
-              rejected: [reason],
-            });
-
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: tooLong
-                    ? "Recall query is too long for embeddings. Skipping vector recall."
-                    : "openclaw-mem-engine embeddings provider is unavailable right now.",
-                },
-              ],
-              details: {
-                error: reason,
-                count: 0,
-                memories: [],
-                receipt,
-              },
-            };
+          if (!embeddings) {
+            preRejected.push("provider_unavailable");
+          } else {
+            try {
+              vector = await embeddings.embed(normalizedQuery);
+            } catch (err) {
+              const tooLong = isEmbeddingInputTooLongError(err);
+              const reason: RecallRejectionReason = tooLong ? "embedding_input_too_long" : "provider_unavailable";
+              preRejected.push(reason);
+              vector = null;
+            }
           }
 
           const tiered = await runTieredRecall({
@@ -2368,10 +2336,12 @@ const memoryPlugin = {
             searchLimit: Math.min(searchLimit, MAX_RECALL_LIMIT),
             plans,
             search: async ({ query: textQuery, scope: targetScope, labels, searchLimit }) => {
-              const [ftsResults, vecResults] = await Promise.all([
-                db.fullTextSearch(textQuery, searchLimit, targetScope, labels).catch(() => []),
-                db.vectorSearch(vector, searchLimit, targetScope, labels).catch(() => []),
-              ]);
+              const ftsPromise = db.fullTextSearch(textQuery, searchLimit, targetScope, labels).catch(() => []);
+              const vecPromise = vector
+                ? db.vectorSearch(vector, searchLimit, targetScope, labels).catch(() => [])
+                : Promise.resolve([] as RecallResult[]);
+
+              const [ftsResults, vecResults] = await Promise.all([ftsPromise, vecPromise]);
               return { ftsResults, vecResults };
             },
           });
@@ -2394,9 +2364,11 @@ const memoryPlugin = {
             };
           });
 
+          const combinedRejected = uniqueReasons([...(preRejected ?? []), ...(tiered.rejected ?? [])]);
+
           const receipt = buildReceiptPayload({
             skipped: false,
-            rejected: tiered.rejected,
+            rejected: combinedRejected,
             tierCounts: tiered.tierCounts,
             ftsResults: tiered.ftsResults,
             vecResults: tiered.vecResults,
@@ -2404,9 +2376,19 @@ const memoryPlugin = {
             injectedCount: memories.length,
           });
 
+          const warningPrefix = (() => {
+            if (preRejected.includes("embedding_input_too_long")) {
+              return "⚠️ Vector recall skipped (embedding input too long). Showing lexical-only (FTS) results.\n\n";
+            }
+            if (preRejected.includes("provider_unavailable")) {
+              return "⚠️ Vector recall unavailable (embeddings). Showing lexical-only (FTS) results.\n\n";
+            }
+            return "";
+          })();
+
           if (memories.length === 0) {
             return {
-              content: [{ type: "text", text: "No relevant memories found." }],
+              content: [{ type: "text", text: `${warningPrefix}No relevant memories found.` }],
               details: {
                 count: 0,
                 memories: [],
@@ -2424,7 +2406,7 @@ const memoryPlugin = {
             .join("\n");
 
           return {
-            content: [{ type: "text", text: `Found ${memories.length} memories:\n\n${lines}` }],
+            content: [{ type: "text", text: `${warningPrefix}Found ${memories.length} memories:\n\n${lines}` }],
             details: {
               count: memories.length,
               memories,
@@ -2510,8 +2492,12 @@ const memoryPlugin = {
 
           const latencyMs = Math.round(performance.now() - t0);
 
+          const warning = embeddingSkipped
+            ? `\n⚠️ Embedding skipped (${embeddingSkipReason}). Stored with a zero vector; recall quality may degrade. Consider tightening embedding clamp (embedding.maxChars/headChars/maxBytes).`
+            : "";
+
           return {
-            content: [{ type: "text", text: `Stored memory (${row.category}, ${row.importance_label}): ${id}` }],
+            content: [{ type: "text", text: `Stored memory (${row.category}, ${row.importance_label}): ${id}${warning}` }],
             details: {
               action: "created",
               id,
