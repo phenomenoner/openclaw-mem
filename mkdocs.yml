@@ -36,6 +36,7 @@ nav:
       - Graphic memory (GraphRAG-lite PRD): specs/graphic-memory-graphrag-lite-prd.md
   - Reference:
       - Ecosystem fit: ecosystem-fit.md
+      - Completeness roadmap: completeness-roadmap.md
       - Engine (slot backend): mem-engine.md
       - Deployment: deployment.md
       - Auto-capture (sidecar plugin): auto-capture.md
