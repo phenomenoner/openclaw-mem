@@ -267,7 +267,7 @@ const SLASH_COMMAND_PATTERN = /^\/[-\w]+/;
 const GREETING_PATTERN =
   /^(?:hi|hello|hey|yo|morning|evening|good\s+(?:morning|afternoon|evening|night)|哈囉|你好|安安|早安|午安|晚安)$/i;
 const ACK_PATTERN =
-  /^(?:ok(?:ay)?|k+|kk+|got\s*it|roger|sure|thanks?|thx|ty|收到|好|好的|嗯|嗯嗯|了解|知道了|行|沒問題)$/i;
+  /^(?:ok(?:ay)?|k+|kk+|got\s*it|roger|sure|thanks?|thx|ty|nudge|收到|好|好的|嗯|嗯嗯|了解|知道了|行|沒問題)$/i;
 const EMOJI_ONLY_PATTERN = /^[\s\u{2600}-\u{27BF}\u{1F300}-\u{1FAFF}]+$/u;
 
 const SECRET_LIKE_PATTERNS: RegExp[] = [
@@ -438,10 +438,19 @@ function shouldSkipAutoRecallPrompt(prompt: string, cfg: AutoRecallConfig): bool
   if (SLASH_COMMAND_PATTERN.test(compact)) return true;
   if (/heartbeat/i.test(compact)) return true;
 
-  if (compact.length <= cfg.trivialMinChars) {
-    if (ACK_PATTERN.test(compact) || GREETING_PATTERN.test(compact) || EMOJI_ONLY_PATTERN.test(compact)) {
-      return true;
-    }
+  // Treat emoji-only as trivial regardless of length.
+  if (EMOJI_ONLY_PATTERN.test(compact)) return true;
+
+  // Some short prompts are acknowledgements/greetings with trailing emoji/punct.
+  // Normalize by stripping emoji + common punctuation, then re-check patterns.
+  const cleaned = compact
+    .replace(/[\u{2600}-\u{27BF}\u{1F300}-\u{1FAFF}]+/gu, " ")
+    .replace(/[!！。.,，?？…~～]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (cleaned.length <= cfg.trivialMinChars) {
+    if (ACK_PATTERN.test(cleaned) || GREETING_PATTERN.test(cleaned)) return true;
   }
 
   return false;
