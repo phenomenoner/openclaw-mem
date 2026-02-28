@@ -15,9 +15,17 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
 ## Gap backlog (fill-in plan)
 
 ### P0 — Operator parity (must be comparable)
-1) **Admin surfaces (comparable)**
-   - Add/verify: memory list / stats / export / import (CLI or tool wrappers) with receipts
-   - Acceptance: can audit counts by scope/category + export sanitized snapshot
+1) ✅ **Admin surfaces (comparable)**
+   - Shipped in `openclaw-mem-engine`:
+     - list memories (scope/category/limit filters)
+     - stats (counts by scope/category + size/age summaries)
+     - export (sanitized deterministic JSONL/JSON)
+     - import (append + dedupe + dry-run)
+   - Surfaces:
+     - tool API: `memory_list`, `memory_stats`, `memory_export`, `memory_import`
+     - CLI: `openclaw memory <list|stats|export|import>` when plugin CLI is loaded
+     - fallback namespace: `openclaw ltm <list|stats|export|import>`
+   - Acceptance met: operator can audit counts by scope/category and export a sanitized snapshot with receipts.
 
 2) **Receipts/debug transparency for recall**
    - Expose (configurable): ftsTop / vecTop / fusedTop summaries (no secrets)

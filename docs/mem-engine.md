@@ -58,7 +58,14 @@ Owned by `openclaw-mem-engine`:
   - `memory_store`
   - `memory_recall`
   - `memory_forget`
-  - (optional) `memory_stats` / `memory_count`
+- exposes operator/admin tools for parity workflows:
+  - `memory_list`
+  - `memory_stats`
+  - `memory_export`
+  - `memory_import`
+- CLI compatibility layer:
+  - `openclaw memory list|stats|export|import` (when plugin CLI wiring is available)
+  - fallback: `openclaw ltm list|stats|export|import`
 
 - uses LanceDB as the online store for fast retrieval & hybrid search.
 
@@ -258,6 +265,23 @@ We should treat index lifecycle as an operator concern with receipts.
 - Maintenance:
   - run `optimize()` periodically (or on thresholds)
   - expose “index status” in JSON receipts
+
+## Admin ops (P0-1 shipped)
+
+Admin surfaces are now implemented in the engine path with receipts:
+
+- list: filter by `scope` / `category`, bounded by `limit`
+- stats: counts by scope/category + size/age summaries
+- export: deterministic ordering + default text redaction
+- import: append mode + dedupe (`none|id|id_text`) + dry-run validation
+
+Each operation emits receipt/debug fields including:
+
+- applied filters
+- returned/imported counts
+- backend context (`dbPath`, `tableName`, latency)
+
+See [Engine admin ops (P0-1)](mem-engine-admin-ops.md) for examples.
 
 ---
 
