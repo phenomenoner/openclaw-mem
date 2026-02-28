@@ -38,7 +38,7 @@ To keep scope controlled for the current pilot:
 
 ### 0) OpenClaw Mem Engine (optional memory slot backend)
 
-Status: **ROADMAP**.
+Status: **DONE (M1 shipped)**.
 
 - Goal: replace `memory-lancedb` with a slot backend that supports **hybrid recall (FTS + vector)**, **scopes**, and **auditable policies**.
 - Why: the official backend currently uses LanceDB mostly as a basic vector store; it doesn’t expose hybrid/FTS/index lifecycle/versioning.
@@ -55,7 +55,7 @@ Acceptance criteria:
 
 ### 1.6) Sunrise rollout (Stage A→B→C)
 
-Status: **ROADMAP**.
+Status: **PARTIAL** (Stage A running; Stage B/C pending).
 
 - Stage A: background writeback cron (no slot switch)
 - Stage B: daily canary slot switch + golden-set recall check
@@ -68,7 +68,7 @@ Acceptance criteria:
 
 ### 1.5) Writeback + recall policy loop (M1.5)
 
-Status: **ROADMAP**.
+Status: **PARTIAL**.
 
 - Add a bounded `openclaw-mem writeback-lancedb` path that pushes graded metadata from SQLite into LanceDB by row ID.
 - Default recall policy for `memory_recall` is fail-open:

@@ -5,6 +5,7 @@
   "description": "Local deps for openclaw-mem-engine writeback helper (cron) — do not publish.",
   "license": "UNLICENSED",
   "dependencies": {
-    "@lancedb/lancedb": "^0.26.2"
+    "@lancedb/lancedb": "^0.26.2",
+    "@sinclair/typebox": "^0.34.48"
   }
 }

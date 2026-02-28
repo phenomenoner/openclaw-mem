@@ -50,6 +50,17 @@ uv run python -m openclaw_mem --db "$DB" --json get 2
 - `search` returns a JSON array of compact rows containing at least: `id`, `ts`, `kind`, `summary`, plus `snippet` and `score` (it does **not** include `detail_json`).
 - `timeline` and `get` return JSON arrays of full rows containing at least: `id`, `ts`, `kind`, `summary`, and `detail_json`.
 
+### 3) Engine receipt debug smoke (local-only, no memory text)
+
+```bash
+node --experimental-transform-types tools/mem-engine-receipts-debug.mjs
+```
+
+Expected:
+- prints one synthetic recall lifecycle receipt (`openclaw-mem-engine.recall.receipt.v1`)
+- prints one synthetic autoCapture lifecycle receipt (`openclaw-mem-engine.autoCapture.receipt.v1`)
+- payload contains IDs/scores/counts only (no memory content text)
+
 ---
 
 ## Status map (operator view)

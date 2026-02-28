@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openclaw-mem"
-version = "1.0.2"
+version = "1.0.3"
 description = "CLI-first memory store + search prototype for OpenClaw"
 requires-python = ">=3.10"
 readme = "README.md"

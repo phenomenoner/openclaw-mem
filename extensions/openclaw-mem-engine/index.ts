@@ -18,6 +18,7 @@
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import type * as LanceDB from "@lancedb/lancedb";
@@ -59,6 +60,14 @@ type AutoCaptureConfigInput = {
   duplicateSearchMinScore?: number;
 };
 
+type ReceiptsVerbosity = "low" | "high";
+
+type ReceiptsConfigInput = {
+  enabled?: boolean;
+  verbosity?: ReceiptsVerbosity;
+  maxItems?: number;
+};
+
 type PluginConfig = {
   embedding?: {
     apiKey?: string;
@@ -68,6 +77,7 @@ type PluginConfig = {
   tableName?: string;
   autoRecall?: boolean | AutoRecallConfigInput;
   autoCapture?: boolean | AutoCaptureConfigInput;
+  receipts?: boolean | ReceiptsConfigInput;
 };
 
 const DEFAULT_DB_PATH = "~/.openclaw/memory/lancedb";
@@ -99,6 +109,12 @@ type AutoCaptureConfig = {
   duplicateSearchMinScore: number;
 };
 
+type ReceiptsConfig = {
+  enabled: boolean;
+  verbosity: ReceiptsVerbosity;
+  maxItems: number;
+};
+
 type AutoCaptureCategory = "preference" | "decision" | "todo";
 
 const DEFAULT_AUTO_RECALL_CONFIG: AutoRecallConfig = {
@@ -121,6 +137,12 @@ const DEFAULT_AUTO_CAPTURE_CONFIG: AutoCaptureConfig = {
   duplicateSearchMinScore: 0.94,
 };
 
+const DEFAULT_RECEIPTS_CONFIG: ReceiptsConfig = {
+  enabled: true,
+  verbosity: "low",
+  maxItems: 3,
+};
+
 function vectorDimsForModel(model: string): number {
   switch (model) {
     case "text-embedding-3-large":
@@ -132,15 +154,31 @@ function vectorDimsForModel(model: string): number {
 }
 
 type ImportanceLabel = "must_remember" | "nice_to_have" | "ignore" | "unknown";
-type RecallPolicyTier = "must+nice" | "must+nice+unknown" | "must+nice+unknown+ignore";
 type ScopeMode = "explicit" | "inferred" | "global";
+
+type RecallRejectionReason =
+  | "trivial_prompt"
+  | "no_query"
+  | "no_results_must"
+  | "no_results_nice"
+  | "provider_unavailable"
+  | "budget_cap";
 
 const DEFAULT_RECALL_LIMIT = 5;
 const MAX_RECALL_LIMIT = 50;
 const RRF_K = 60;
-const DEFAULT_RECEIPT_TOP_HITS = 3;
-const MAX_RECEIPT_TOP_HITS = 5;
-const RECEIPT_TEXT_PREVIEW_MAX = 120;
+const MAX_RECEIPT_ITEMS = 10;
+
+const DEFAULT_ADMIN_LIMIT = 50;
+const MAX_ADMIN_LIMIT = 5000;
+
+type AdminExportFormat = "jsonl" | "json";
+type AdminImportDedupe = "none" | "id" | "id_text";
+
+type AdminFilters = {
+  scope?: string;
+  category?: MemoryCategory;
+};
 
 function normalizeImportance(raw: unknown): number | undefined {
   if (typeof raw === "number" && Number.isFinite(raw)) {
@@ -224,18 +262,12 @@ function buildRecallFilter(scope: string | undefined, labels: readonly Importanc
   return clauses.join(" AND ");
 }
 
-const RECALL_POLICY_TIERS: Array<{ tier: RecallPolicyTier; labels: ImportanceLabel[] }> = [
-  { tier: "must+nice", labels: ["must_remember", "nice_to_have"] },
-  { tier: "must+nice+unknown", labels: ["must_remember", "nice_to_have", "unknown"] },
-  { tier: "must+nice+unknown+ignore", labels: ["must_remember", "nice_to_have", "unknown", "ignore"] },
-];
-
 const HEARTBEAT_PATTERN = /^heartbeat(?:_ok)?$/i;
 const SLASH_COMMAND_PATTERN = /^\/[-\w]+/;
 const GREETING_PATTERN =
   /^(?:hi|hello|hey|yo|morning|evening|good\s+(?:morning|afternoon|evening|night)|哈囉|你好|安安|早安|午安|晚安)$/i;
 const ACK_PATTERN =
-  /^(?:ok(?:ay)?|k+|kk+|got\s*it|roger|sure|thanks?|thx|ty|收到|好|好的|嗯|嗯嗯|了解|知道了|行|沒問題)$/i;
+  /^(?:ok(?:ay)?|k+|kk+|got\s*it|roger|sure|thanks?|thx|ty|nudge|收到|好|好的|嗯|嗯嗯|了解|知道了|行|沒問題)$/i;
 const EMOJI_ONLY_PATTERN = /^[\s\u{2600}-\u{27BF}\u{1F300}-\u{1FAFF}]+$/u;
 
 const SECRET_LIKE_PATTERNS: RegExp[] = [
@@ -365,6 +397,34 @@ function resolveAutoCaptureConfig(input: PluginConfig["autoCapture"]): AutoCaptu
   };
 }
 
+function resolveReceiptsConfig(input: PluginConfig["receipts"]): ReceiptsConfig {
+  const defaults = DEFAULT_RECEIPTS_CONFIG;
+  if (input === false) {
+    return { ...defaults, enabled: false };
+  }
+
+  if (input === true || input == null) {
+    return { ...defaults };
+  }
+
+  if (typeof input !== "object") {
+    return { ...defaults };
+  }
+
+  const raw = input as ReceiptsConfigInput;
+  const verbosity = raw.verbosity === "high" ? "high" : defaults.verbosity;
+
+  return {
+    enabled: normalizeBoolean(raw.enabled, defaults.enabled),
+    verbosity,
+    maxItems: normalizeNumberInRange(raw.maxItems, defaults.maxItems, {
+      min: 1,
+      max: MAX_RECEIPT_ITEMS,
+      integer: true,
+    }),
+  };
+}
+
 function shouldSkipAutoRecallPrompt(prompt: string, cfg: AutoRecallConfig): boolean {
   if (!cfg.skipTrivialPrompts) return false;
 
@@ -378,10 +438,22 @@ function shouldSkipAutoRecallPrompt(prompt: string, cfg: AutoRecallConfig): bool
   if (SLASH_COMMAND_PATTERN.test(compact)) return true;
   if (/heartbeat/i.test(compact)) return true;
 
-  if (compact.length <= cfg.trivialMinChars) {
-    if (ACK_PATTERN.test(compact) || GREETING_PATTERN.test(compact) || EMOJI_ONLY_PATTERN.test(compact)) {
-      return true;
-    }
+  // Treat emoji-only as trivial regardless of length.
+  if (EMOJI_ONLY_PATTERN.test(compact)) return true;
+
+  // Some short prompts are acknowledgements/greetings with trailing emoji/punct.
+  // Normalize by stripping emoji + common punctuation, then re-check patterns.
+  const cleaned = compact
+    .replace(/[\u{2600}-\u{27BF}\u{1F300}-\u{1FAFF}]+/gu, " ")
+    .replace(/[!！。.,，?？…~～]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // If the prompt is just decorations (emoji/punct/whitespace), treat it as trivial.
+  if (!cleaned) return true;
+
+  if (cleaned.length <= cfg.trivialMinChars) {
+    if (ACK_PATTERN.test(cleaned) || GREETING_PATTERN.test(cleaned)) return true;
   }
 
   return false;
@@ -423,6 +495,117 @@ function looksLikeToolOutput(text: string): boolean {
   }
 
   return TOOL_OUTPUT_PATTERNS.some((pattern) => pattern.test(compact));
+}
+
+const EXPORT_REDACTION_PATTERNS: Array<[RegExp, string]> = [
+  [/\bsk-[A-Za-z0-9]{16,}\b/g, "sk-[REDACTED]"],
+  [/\bsk-proj-[A-Za-z0-9\-_]{16,}\b/g, "sk-proj-[REDACTED]"],
+  [/\bBearer\s+[A-Za-z0-9\-_.=]{8,}\b/g, "Bearer [REDACTED]"],
+  [/\bAuthorization:\s*Bearer\s+[A-Za-z0-9\-_.=]{8,}\b/gi, "Authorization: Bearer [REDACTED]"],
+  [/\b\d{8,12}:[A-Za-z0-9_-]{20,}\b/g, "[TELEGRAM_BOT_TOKEN_REDACTED]"],
+  [/-----BEGIN (?:RSA|EC|DSA|OPENSSH|PGP)?\s*PRIVATE KEY-----[\s\S]*?-----END (?:RSA|EC|DSA|OPENSSH|PGP)?\s*PRIVATE KEY-----/gi, "[PRIVATE_KEY_REDACTED]"],
+  [/\bAKIA[0-9A-Z]{16}\b/g, "[AWS_ACCESS_KEY_REDACTED]"],
+  [/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[GITHUB_TOKEN_REDACTED]"],
+  [/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, "[SLACK_TOKEN_REDACTED]"],
+];
+
+function redactSensitiveText(text: string): string {
+  let out = String(text ?? "");
+  for (const [pattern, replacement] of EXPORT_REDACTION_PATTERNS) {
+    out = out.replace(pattern, replacement);
+  }
+  return out;
+}
+
+function normalizeAdminScope(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function normalizeAdminCategory(raw: unknown): MemoryCategory | undefined {
+  if (typeof raw !== "string") return undefined;
+  const normalized = raw.trim().toLowerCase();
+  const categories = new Set<MemoryCategory>(["preference", "fact", "decision", "entity", "todo", "other"]);
+  if (categories.has(normalized as MemoryCategory)) {
+    return normalized as MemoryCategory;
+  }
+  return undefined;
+}
+
+function normalizeAdminLimit(raw: unknown, fallback: number = DEFAULT_ADMIN_LIMIT): number {
+  const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : Number.NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(MAX_ADMIN_LIMIT, Math.floor(parsed)));
+}
+
+function applyAdminFilters<T extends { scope?: string; category?: string }>(rows: T[], filters: AdminFilters): T[] {
+  return rows.filter((row) => {
+    if (filters.scope) {
+      if (filters.scope === "global") {
+        if (row.scope && row.scope !== "global") {
+          return false;
+        }
+      } else if ((row.scope ?? "") !== filters.scope) {
+        return false;
+      }
+    }
+
+    if (filters.category && (row.category ?? "") !== filters.category) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function compareByCreatedAtDesc(a: { createdAt?: number; id?: string }, b: { createdAt?: number; id?: string }): number {
+  const aCreatedAt = Number(a.createdAt ?? 0);
+  const bCreatedAt = Number(b.createdAt ?? 0);
+  if (bCreatedAt !== aCreatedAt) return bCreatedAt - aCreatedAt;
+  return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+}
+
+function compareByCreatedAtAsc(a: { createdAt?: number; id?: string }, b: { createdAt?: number; id?: string }): number {
+  const aCreatedAt = Number(a.createdAt ?? 0);
+  const bCreatedAt = Number(b.createdAt ?? 0);
+  if (aCreatedAt !== bCreatedAt) return aCreatedAt - bCreatedAt;
+  return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+}
+
+function parseAdminImportDedupe(raw: unknown): AdminImportDedupe {
+  if (typeof raw !== "string") return "id_text";
+  const normalized = raw.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (normalized === "none" || normalized === "id" || normalized === "id_text") {
+    return normalized;
+  }
+  if (normalized === "idtext") {
+    return "id_text";
+  }
+  return "id_text";
+}
+
+function isUuidLike(raw: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw);
+}
+
+function toIsoTime(raw: number): string {
+  if (!Number.isFinite(raw) || raw <= 0) return "";
+  try {
+    return new Date(raw).toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function detectAdminExportFormat(rawPath: string, rawFormat?: unknown): AdminExportFormat {
+  if (rawFormat === "json" || rawFormat === "jsonl") {
+    return rawFormat;
+  }
+  if (rawPath.toLowerCase().endsWith(".json")) {
+    return "json";
+  }
+  return "jsonl";
 }
 
 function normalizeForDedupe(text: string): string {
@@ -599,60 +782,223 @@ type MemoryRow = {
   trust_tier: string;
 };
 
-type RecallResult = {
-  row: Omit<MemoryRow, "vector">;
-  distance: number;
-  score: number;
-};
+type MemoryScalarRow = Omit<MemoryRow, "vector">;
 
-type RecallReceiptTopHit = {
+type MemoryExportRecord = {
   id: string;
-  score: number;
-  distance?: number;
+  text: string;
   category: MemoryCategory;
   importance: number | null;
   importance_label: ImportanceLabel;
   scope: string;
   trust_tier: string;
   createdAt: number;
-  textPreview: string;
+};
+
+type MemoryStats = {
+  count: number;
+  byScope: Record<string, number>;
+  byCategory: Record<string, number>;
+  size: {
+    minChars: number;
+    maxChars: number;
+    avgChars: number;
+    p50Chars: number;
+  };
+  ageDays: {
+    min: number;
+    max: number;
+    avg: number;
+  };
+  oldestCreatedAt: number | null;
+  newestCreatedAt: number | null;
+};
+
+type RecallResult = {
+  row: Omit<MemoryRow, "vector">;
+  distance: number;
+  score: number;
+};
+
+type RecallReceiptRankedHit = {
+  id: string;
+  score: number;
+  distance?: number;
+};
+
+type RecallTierReceipt = {
+  tier: string;
+  labels: ImportanceLabel[];
+  candidates: number;
+  selected: number;
+};
+
+type RecallLifecycleReceipt = {
+  schema: "openclaw-mem-engine.recall.receipt.v1";
+  verbosity: ReceiptsVerbosity;
+  skipped: boolean;
+  skipReason: RecallRejectionReason | null;
+  rejected: RecallRejectionReason[];
+  scope: string;
+  scopeMode: ScopeMode;
+  tiersSearched: string[];
+  tierCounts: RecallTierReceipt[];
+  ftsTop: RecallReceiptRankedHit[];
+  vecTop: RecallReceiptRankedHit[];
+  fusedTop: string[];
+  finalCount: number;
+  injectedCount: number;
+};
+
+type AutoCaptureLifecycleReceipt = {
+  schema: "openclaw-mem-engine.autoCapture.receipt.v1";
+  verbosity: ReceiptsVerbosity;
+  candidateExtractionCount: number;
+  filteredOut: {
+    tool_output: number;
+    secrets_like: number;
+    duplicate: number;
+  };
+  storedCount: number;
 };
 
 function toImportanceRecord(raw: unknown): number | undefined {
   return normalizeImportance(raw);
 }
 
-function textPreview(rawText: string, maxChars: number = RECEIPT_TEXT_PREVIEW_MAX): string {
-  const text = String(rawText ?? "");
-  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}…`;
+function clampReceiptItems(count: number, cfg: ReceiptsConfig): number {
+  return Math.max(1, Math.min(cfg.maxItems, MAX_RECEIPT_ITEMS, Math.floor(count)));
 }
 
-function toRecallTopHit(result: RecallResult, options: { includeDistance?: boolean } = {}): RecallReceiptTopHit {
-  const normalizedImportance = toImportanceRecord(result.row.importance);
-  const normalizedLabel = resolveImportanceLabel(normalizedImportance, result.row.importance_label);
+function roundScore(raw: number): number {
+  if (!Number.isFinite(raw)) return 0;
+  return Number(raw.toFixed(6));
+}
 
-  const hit: RecallReceiptTopHit = {
-    id: result.row.id,
-    score: result.score,
-    category: (result.row.category ?? "other") as MemoryCategory,
-    importance: normalizedImportance ?? null,
-    importance_label: normalizedLabel,
-    scope: String(result.row.scope ?? ""),
-    trust_tier: String(result.row.trust_tier ?? ""),
-    createdAt: Number(result.row.createdAt ?? 0),
-    textPreview: textPreview(String(result.row.text ?? "")),
-  };
+function buildRankedHits(
+  results: RecallResult[],
+  cfg: ReceiptsConfig,
+  options: { includeDistance?: boolean } = {},
+): RecallReceiptRankedHit[] {
+  const maxItems = clampReceiptItems(cfg.maxItems, cfg);
+  const ranked = new Map<string, RecallReceiptRankedHit>();
 
-  if (options.includeDistance && typeof result.distance === "number") {
-    hit.distance = result.distance;
+  for (const result of results) {
+    const id = String(result.row.id ?? "");
+    if (!id) continue;
+
+    const candidate: RecallReceiptRankedHit = {
+      id,
+      score: roundScore(result.score),
+    };
+
+    if (options.includeDistance) {
+      candidate.distance = roundScore(result.distance);
+    }
+
+    const existing = ranked.get(id);
+    if (!existing || candidate.score > existing.score) {
+      ranked.set(id, candidate);
+    }
   }
 
-  return hit;
+  return Array.from(ranked.values())
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.id.localeCompare(b.id);
+    })
+    .slice(0, maxItems);
 }
 
-function toRecallTopHits(results: RecallResult[], count: number, options: { includeDistance?: boolean } = {}): RecallReceiptTopHit[] {
-  const limit = Math.max(0, Math.min(MAX_RECEIPT_TOP_HITS, Math.floor(count)));
-  return results.slice(0, limit).map((result) => toRecallTopHit(result, options));
+function uniqueReasons(reasons: RecallRejectionReason[]): RecallRejectionReason[] {
+  const order: RecallRejectionReason[] = [
+    "trivial_prompt",
+    "no_query",
+    "no_results_must",
+    "no_results_nice",
+    "provider_unavailable",
+    "budget_cap",
+  ];
+  const set = new Set(reasons);
+  return order.filter((reason) => set.has(reason));
+}
+
+function buildRecallLifecycleReceipt(input: {
+  cfg: ReceiptsConfig;
+  skipped: boolean;
+  skipReason?: RecallRejectionReason;
+  rejected?: RecallRejectionReason[];
+  scope: string;
+  scopeMode: ScopeMode;
+  tierCounts: RecallTierReceipt[];
+  ftsResults: RecallResult[];
+  vecResults: RecallResult[];
+  fusedResults: RecallResult[];
+  injectedCount: number;
+}): RecallLifecycleReceipt {
+  const maxItems = clampReceiptItems(input.cfg.maxItems, input.cfg);
+  const tierCounts = input.tierCounts.slice(0, 6).map((item) => ({
+    tier: item.tier,
+    labels: input.cfg.verbosity === "high" ? item.labels.slice(0, 4) : [],
+    candidates: Math.max(0, Math.floor(item.candidates)),
+    selected: Math.max(0, Math.floor(item.selected)),
+  }));
+
+  return {
+    schema: "openclaw-mem-engine.recall.receipt.v1",
+    verbosity: input.cfg.verbosity,
+    skipped: input.skipped,
+    skipReason: input.skipReason ?? null,
+    rejected: uniqueReasons(input.rejected ?? []),
+    scope: input.scope,
+    scopeMode: input.scopeMode,
+    tiersSearched: tierCounts.map((item) => item.tier),
+    tierCounts,
+    ftsTop: buildRankedHits(input.ftsResults, input.cfg),
+    vecTop: buildRankedHits(input.vecResults, input.cfg, { includeDistance: true }),
+    fusedTop: input.fusedResults.slice(0, maxItems).map((item) => String(item.row.id ?? "")),
+    finalCount: input.fusedResults.length,
+    injectedCount: Math.max(0, Math.floor(input.injectedCount)),
+  };
+}
+
+function buildAutoCaptureLifecycleReceipt(input: {
+  cfg: ReceiptsConfig;
+  candidateExtractionCount: number;
+  filteredOut: {
+    tool_output: number;
+    secrets_like: number;
+    duplicate: number;
+  };
+  storedCount: number;
+}): AutoCaptureLifecycleReceipt {
+  return {
+    schema: "openclaw-mem-engine.autoCapture.receipt.v1",
+    verbosity: input.cfg.verbosity,
+    candidateExtractionCount: Math.max(0, Math.floor(input.candidateExtractionCount)),
+    filteredOut: {
+      tool_output: Math.max(0, Math.floor(input.filteredOut.tool_output)),
+      secrets_like: Math.max(0, Math.floor(input.filteredOut.secrets_like)),
+      duplicate: Math.max(0, Math.floor(input.filteredOut.duplicate)),
+    },
+    storedCount: Math.max(0, Math.floor(input.storedCount)),
+  };
+}
+
+function renderAutoRecallReceiptComment(receipt: RecallLifecycleReceipt, cfg: ReceiptsConfig): string {
+  if (!cfg.enabled) return "";
+
+  const compact = {
+    schema: receipt.schema,
+    verbosity: receipt.verbosity,
+    skipped: receipt.skipped,
+    skipReason: receipt.skipReason,
+    tiersSearched: receipt.tiersSearched,
+    fusedTop: receipt.fusedTop,
+    injectedCount: receipt.injectedCount,
+  };
+
+  return `<!-- openclaw-mem-engine:autoRecall ${JSON.stringify(compact)} -->`;
 }
 
 function scopeFilterExpr(scope: string): string {
@@ -769,6 +1115,177 @@ function fuseRecall(results: {
   return { order };
 }
 
+type RecallTierPlan = {
+  tier: string;
+  labels: ImportanceLabel[];
+  missReason?: RecallRejectionReason;
+};
+
+async function runTieredRecall(input: {
+  query: string;
+  scope: string;
+  limit: number;
+  searchLimit: number;
+  plans: RecallTierPlan[];
+  search: (args: {
+    query: string;
+    scope: string;
+    labels: ImportanceLabel[];
+    searchLimit: number;
+  }) => Promise<{ ftsResults: RecallResult[]; vecResults: RecallResult[] }>;
+}): Promise<{
+  selected: RecallResult[];
+  tierCounts: RecallTierReceipt[];
+  ftsResults: RecallResult[];
+  vecResults: RecallResult[];
+  rejected: RecallRejectionReason[];
+}> {
+  const selected: RecallResult[] = [];
+  const seen = new Set<string>();
+  const tierCounts: RecallTierReceipt[] = [];
+  const ftsResults: RecallResult[] = [];
+  const vecResults: RecallResult[] = [];
+  const rejected: RecallRejectionReason[] = [];
+
+  for (const plan of input.plans) {
+    const { ftsResults: tierFts, vecResults: tierVec } = await input.search({
+      query: input.query,
+      scope: input.scope,
+      labels: plan.labels,
+      searchLimit: input.searchLimit,
+    });
+
+    ftsResults.push(...tierFts);
+    vecResults.push(...tierVec);
+
+    const fused = fuseRecall({ vector: tierVec, fts: tierFts, limit: input.searchLimit }).order;
+
+    let added = 0;
+    for (const hit of fused) {
+      if (seen.has(hit.row.id)) continue;
+      seen.add(hit.row.id);
+      selected.push(hit);
+      added += 1;
+      if (selected.length >= input.limit) break;
+    }
+
+    tierCounts.push({
+      tier: plan.tier,
+      labels: plan.labels,
+      candidates: fused.length,
+      selected: added,
+    });
+
+    if (fused.length === 0 && plan.missReason) {
+      rejected.push(plan.missReason);
+    }
+
+    if (selected.length >= input.limit) {
+      rejected.push("budget_cap");
+      break;
+    }
+  }
+
+  return { selected, tierCounts, ftsResults, vecResults, rejected: uniqueReasons(rejected) };
+}
+
+const MEMORY_SCALAR_COLUMNS = [
+  "id",
+  "text",
+  "createdAt",
+  "category",
+  "importance",
+  "importance_label",
+  "scope",
+  "trust_tier",
+] as const;
+
+function toMemoryScalarRow(raw: any): MemoryScalarRow {
+  const importance = toImportanceRecord(raw?.importance);
+  const normalizedLabel = resolveImportanceLabel(importance, raw?.importance_label);
+  return {
+    id: String(raw?.id ?? ""),
+    text: String(raw?.text ?? ""),
+    createdAt: Number(raw?.createdAt ?? 0),
+    category: (normalizeAdminCategory(raw?.category) ?? "other") as MemoryCategory,
+    importance: importance ?? null,
+    importance_label: normalizedLabel,
+    scope: String(raw?.scope ?? "global") || "global",
+    trust_tier: String(raw?.trust_tier ?? "unknown") || "unknown",
+  };
+}
+
+function computeMemoryStats(rows: MemoryScalarRow[]): MemoryStats {
+  const byScope: Record<string, number> = {};
+  const byCategory: Record<string, number> = {};
+
+  let minChars = Number.POSITIVE_INFINITY;
+  let maxChars = 0;
+  let sumChars = 0;
+  const charLens: number[] = [];
+
+  let minAgeDays = Number.POSITIVE_INFINITY;
+  let maxAgeDays = 0;
+  let sumAgeDays = 0;
+
+  let oldestCreatedAt = Number.POSITIVE_INFINITY;
+  let newestCreatedAt = 0;
+
+  const now = Date.now();
+
+  for (const row of rows) {
+    const scope = row.scope || "global";
+    const category = row.category || "other";
+    byScope[scope] = (byScope[scope] ?? 0) + 1;
+    byCategory[category] = (byCategory[category] ?? 0) + 1;
+
+    const chars = row.text.length;
+    minChars = Math.min(minChars, chars);
+    maxChars = Math.max(maxChars, chars);
+    sumChars += chars;
+    charLens.push(chars);
+
+    if (row.createdAt > 0) {
+      oldestCreatedAt = Math.min(oldestCreatedAt, row.createdAt);
+      newestCreatedAt = Math.max(newestCreatedAt, row.createdAt);
+      const ageDays = Math.max(0, (now - row.createdAt) / (1000 * 60 * 60 * 24));
+      minAgeDays = Math.min(minAgeDays, ageDays);
+      maxAgeDays = Math.max(maxAgeDays, ageDays);
+      sumAgeDays += ageDays;
+    }
+  }
+
+  charLens.sort((a, b) => a - b);
+  const p50Chars =
+    charLens.length === 0
+      ? 0
+      : charLens.length % 2 === 1
+        ? charLens[(charLens.length - 1) / 2]
+        : Math.round((charLens[charLens.length / 2 - 1] + charLens[charLens.length / 2]) / 2);
+
+  return {
+    count: rows.length,
+    byScope: Object.fromEntries(Object.entries(byScope).sort((a, b) => a[0].localeCompare(b[0]))),
+    byCategory: Object.fromEntries(Object.entries(byCategory).sort((a, b) => a[0].localeCompare(b[0]))),
+    size: {
+      minChars: Number.isFinite(minChars) ? minChars : 0,
+      maxChars,
+      avgChars: rows.length > 0 ? Number((sumChars / rows.length).toFixed(2)) : 0,
+      p50Chars,
+    },
+    ageDays: {
+      min: Number.isFinite(minAgeDays) ? Number(minAgeDays.toFixed(2)) : 0,
+      max: Number.isFinite(maxAgeDays) ? Number(maxAgeDays.toFixed(2)) : 0,
+      avg:
+        rows.length > 0 && Number.isFinite(sumAgeDays)
+          ? Number((sumAgeDays / rows.length).toFixed(2))
+          : 0,
+    },
+    oldestCreatedAt: Number.isFinite(oldestCreatedAt) ? oldestCreatedAt : null,
+    newestCreatedAt: newestCreatedAt > 0 ? newestCreatedAt : null,
+  };
+}
+
 class MemoryDB {
   private db: LanceDB.Connection | null = null;
   private table: LanceDB.Table | null = null;
@@ -801,7 +1318,7 @@ class MemoryDB {
     const schemaRow: MemoryRow = {
       id: "__schema__",
       text: "",
-      vector: Array.from({ length: this.vectorDim }).fill(0),
+      vector: Array.from<number>({ length: this.vectorDim }).fill(0),
       createdAt: 0,
       category: "other",
       importance: 0,
@@ -817,6 +1334,27 @@ class MemoryDB {
   async add(row: MemoryRow): Promise<void> {
     await this.ensureInitialized();
     await this.table!.add([row]);
+  }
+
+  async addMany(rows: MemoryRow[]): Promise<void> {
+    if (rows.length === 0) return;
+    await this.ensureInitialized();
+    await this.table!.add(rows);
+  }
+
+  async listScalars(): Promise<MemoryScalarRow[]> {
+    await this.ensureInitialized();
+    const rows = await this.table!.query().select([...MEMORY_SCALAR_COLUMNS]).toArray();
+    return rows
+      .map((row) => toMemoryScalarRow(row))
+      .filter((row) => row.id && row.id !== "__schema__");
+  }
+
+  async hasId(id: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const safe = String(id ?? "").replace(/'/g, "''");
+    const rows = await this.table!.query().select(["id"]).where(`id = '${safe}'`).limit(1).toArray();
+    return rows.length > 0;
   }
 
   async vectorSearch(
@@ -997,17 +1535,185 @@ function resolveStateRelativePath(api: OpenClawPluginApi, input: string | undefi
   return api.resolvePath(raw);
 }
 
+function assertAllowedKeys(value: Record<string, unknown>, allowed: string[], label: string): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length === 0) return;
+  throw new Error(`${label} has unknown keys: ${unknown.join(", ")}`);
+}
+
+const memoryEngineConfigSchema = {
+  parse(value: unknown): PluginConfig {
+    if (value == null) {
+      return {};
+    }
+    if (typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("openclaw-mem-engine config must be an object");
+    }
+
+    const cfg = value as Record<string, unknown>;
+    assertAllowedKeys(cfg, ["embedding", "dbPath", "tableName", "autoRecall", "autoCapture", "receipts"], "openclaw-mem-engine config");
+
+    let embedding: PluginConfig["embedding"] | undefined;
+    if (cfg.embedding != null) {
+      if (typeof cfg.embedding !== "object" || Array.isArray(cfg.embedding)) {
+        throw new Error("embedding config must be an object");
+      }
+      const rawEmbedding = cfg.embedding as Record<string, unknown>;
+      assertAllowedKeys(rawEmbedding, ["apiKey", "model"], "embedding config");
+
+      embedding = {
+        apiKey: typeof rawEmbedding.apiKey === "string" ? rawEmbedding.apiKey : undefined,
+        model:
+          rawEmbedding.model === "text-embedding-3-small" || rawEmbedding.model === "text-embedding-3-large"
+            ? rawEmbedding.model
+            : undefined,
+      };
+    }
+
+    const parseAutoRecall = (raw: unknown): PluginConfig["autoRecall"] => {
+      if (raw == null) return undefined;
+      if (typeof raw === "boolean") return raw;
+      if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("autoRecall must be a boolean or object");
+      }
+      const obj = raw as Record<string, unknown>;
+      assertAllowedKeys(
+        obj,
+        ["enabled", "maxItems", "skipTrivialPrompts", "trivialMinChars", "includeUnknownFallback", "tierSearchMultiplier"],
+        "autoRecall config",
+      );
+      return {
+        enabled: typeof obj.enabled === "boolean" ? obj.enabled : undefined,
+        maxItems: typeof obj.maxItems === "number" ? obj.maxItems : undefined,
+        skipTrivialPrompts: typeof obj.skipTrivialPrompts === "boolean" ? obj.skipTrivialPrompts : undefined,
+        trivialMinChars: typeof obj.trivialMinChars === "number" ? obj.trivialMinChars : undefined,
+        includeUnknownFallback:
+          typeof obj.includeUnknownFallback === "boolean" ? obj.includeUnknownFallback : undefined,
+        tierSearchMultiplier:
+          typeof obj.tierSearchMultiplier === "number" ? obj.tierSearchMultiplier : undefined,
+      };
+    };
+
+    const parseAutoCapture = (raw: unknown): PluginConfig["autoCapture"] => {
+      if (raw == null) return undefined;
+      if (typeof raw === "boolean") return raw;
+      if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("autoCapture must be a boolean or object");
+      }
+      const obj = raw as Record<string, unknown>;
+      assertAllowedKeys(
+        obj,
+        [
+          "enabled",
+          "maxItemsPerTurn",
+          "maxCharsPerItem",
+          "capturePreference",
+          "captureDecision",
+          "captureTodo",
+          "dedupeSimilarityThreshold",
+          "duplicateSearchMinScore",
+        ],
+        "autoCapture config",
+      );
+      return {
+        enabled: typeof obj.enabled === "boolean" ? obj.enabled : undefined,
+        maxItemsPerTurn: typeof obj.maxItemsPerTurn === "number" ? obj.maxItemsPerTurn : undefined,
+        maxCharsPerItem: typeof obj.maxCharsPerItem === "number" ? obj.maxCharsPerItem : undefined,
+        capturePreference: typeof obj.capturePreference === "boolean" ? obj.capturePreference : undefined,
+        captureDecision: typeof obj.captureDecision === "boolean" ? obj.captureDecision : undefined,
+        captureTodo: typeof obj.captureTodo === "boolean" ? obj.captureTodo : undefined,
+        dedupeSimilarityThreshold:
+          typeof obj.dedupeSimilarityThreshold === "number" ? obj.dedupeSimilarityThreshold : undefined,
+        duplicateSearchMinScore:
+          typeof obj.duplicateSearchMinScore === "number" ? obj.duplicateSearchMinScore : undefined,
+      };
+    };
+
+    const parseReceipts = (raw: unknown): PluginConfig["receipts"] => {
+      if (raw == null) return undefined;
+      if (typeof raw === "boolean") return raw;
+      if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("receipts must be a boolean or object");
+      }
+      const obj = raw as Record<string, unknown>;
+      assertAllowedKeys(obj, ["enabled", "verbosity", "maxItems"], "receipts config");
+      return {
+        enabled: typeof obj.enabled === "boolean" ? obj.enabled : undefined,
+        verbosity: obj.verbosity === "high" || obj.verbosity === "low" ? obj.verbosity : undefined,
+        maxItems: typeof obj.maxItems === "number" ? obj.maxItems : undefined,
+      };
+    };
+
+    return {
+      embedding,
+      dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : undefined,
+      tableName: typeof cfg.tableName === "string" ? cfg.tableName : undefined,
+      autoRecall: parseAutoRecall(cfg.autoRecall),
+      autoCapture: parseAutoCapture(cfg.autoCapture),
+      receipts: parseReceipts(cfg.receipts),
+    };
+  },
+  uiHints: {
+    "embedding.apiKey": {
+      label: "OpenAI API Key",
+      sensitive: true,
+      placeholder: "sk-proj-...",
+      help: "API key for OpenAI embeddings (or use ${OPENAI_API_KEY})",
+    },
+    "embedding.model": {
+      label: "Embedding Model",
+      placeholder: "text-embedding-3-small",
+      help: "OpenAI embedding model to use",
+    },
+    dbPath: {
+      label: "Database Path",
+      placeholder: "~/.openclaw/memory/lancedb",
+      advanced: true,
+    },
+    tableName: {
+      label: "Table Name",
+      placeholder: "memories",
+      advanced: true,
+    },
+    "autoRecall.enabled": {
+      label: "Auto Recall",
+      help: "Inject a bounded, sanitized memory context before agent start",
+    },
+    "autoCapture.enabled": {
+      label: "Auto Capture",
+      help: "Capture strict user-origin preference/decision memories on agent end",
+    },
+    "receipts.enabled": {
+      label: "Lifecycle Receipts",
+      help: "Emit bounded recall/capture receipts for debug and audits",
+      advanced: true,
+    },
+    "receipts.verbosity": {
+      label: "Receipts Verbosity",
+      help: "low (default) keeps compact aggregates; high includes extended counters",
+      advanced: true,
+    },
+    "receipts.maxItems": {
+      label: "Receipt Max Items",
+      help: "Maximum item count for top-hit arrays and tier slices",
+      advanced: true,
+    },
+  },
+};
+
 const memoryPlugin = {
   id: "openclaw-mem-engine",
   name: "OpenClaw Mem Engine",
   description: "Optional memory slot backend (LanceDB + OpenAI embeddings)",
   kind: "memory" as const,
+  configSchema: memoryEngineConfigSchema,
 
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
 
     const autoRecallCfg = resolveAutoRecallConfig(cfg.autoRecall);
     const autoCaptureCfg = resolveAutoCaptureConfig(cfg.autoCapture);
+    const receiptsCfg = resolveReceiptsConfig(cfg.receipts);
 
     const model = cfg.embedding?.model ?? DEFAULT_MODEL;
     const vectorDim = vectorDimsForModel(model);
@@ -1021,7 +1727,420 @@ const memoryPlugin = {
     const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model) : null;
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, lazyInit=true)`,
+    );
+
+    const resolveAdminFilters = (input: {
+      scope?: unknown;
+      category?: unknown;
+    }): AdminFilters => {
+      const scope = normalizeAdminScope(input.scope);
+      const category = normalizeAdminCategory(input.category);
+      return { scope, category };
+    };
+
+    const listMemories = async (input: {
+      scope?: unknown;
+      category?: unknown;
+      limit?: unknown;
+    }) => {
+      const filters = resolveAdminFilters(input);
+      const limit = normalizeAdminLimit(input.limit);
+      const allRows = await db.listScalars();
+      const matched = applyAdminFilters(allRows, filters).sort(compareByCreatedAtDesc);
+      const rows = matched.slice(0, limit);
+
+      const items = rows.map((row) => ({
+        id: row.id,
+        category: row.category,
+        importance: row.importance ?? null,
+        importance_label: resolveImportanceLabel(row.importance ?? undefined, row.importance_label),
+        scope: row.scope || "global",
+        trust_tier: row.trust_tier || "unknown",
+        createdAt: row.createdAt,
+        createdAtIso: toIsoTime(row.createdAt),
+        text: redactSensitiveText(row.text),
+      }));
+
+      return {
+        items,
+        receipt: {
+          operation: "list",
+          filtersApplied: {
+            scope: filters.scope ?? null,
+            category: filters.category ?? null,
+            limit,
+          },
+          matchedCount: matched.length,
+          returnedCount: items.length,
+        },
+      };
+    };
+
+    const statsMemories = async (input: {
+      scope?: unknown;
+      category?: unknown;
+    }) => {
+      const filters = resolveAdminFilters(input);
+      const rows = applyAdminFilters(await db.listScalars(), filters);
+      const stats = computeMemoryStats(rows);
+
+      return {
+        stats,
+        receipt: {
+          operation: "stats",
+          filtersApplied: {
+            scope: filters.scope ?? null,
+            category: filters.category ?? null,
+          },
+          returnedCount: rows.length,
+        },
+      };
+    };
+
+    const exportMemories = async (input: {
+      outPath: string;
+      scope?: unknown;
+      category?: unknown;
+      limit?: unknown;
+      format?: unknown;
+      redact?: unknown;
+    }) => {
+      const filters = resolveAdminFilters(input);
+      const limit = normalizeAdminLimit(input.limit, MAX_ADMIN_LIMIT);
+      const outPath = resolveStateRelativePath(api, input.outPath, input.outPath);
+      const format = detectAdminExportFormat(outPath, input.format);
+      const redact = normalizeBoolean(input.redact, true);
+
+      const rows = applyAdminFilters(await db.listScalars(), filters)
+        .sort(compareByCreatedAtAsc)
+        .slice(0, limit);
+
+      const records: MemoryExportRecord[] = rows.map((row) => {
+        const normalizedImportance = toImportanceRecord(row.importance);
+        const normalizedLabel = resolveImportanceLabel(normalizedImportance, row.importance_label);
+        return {
+          id: row.id,
+          text: redact ? redactSensitiveText(row.text) : row.text,
+          category: row.category,
+          importance: normalizedImportance ?? null,
+          importance_label: normalizedLabel,
+          scope: row.scope || "global",
+          trust_tier: row.trust_tier || "unknown",
+          createdAt: Number(row.createdAt ?? 0),
+        };
+      });
+
+      await fsp.mkdir(path.dirname(outPath), { recursive: true });
+      const serialized =
+        format === "json"
+          ? `${JSON.stringify(records, null, 2)}\n`
+          : `${records.map((record) => JSON.stringify(record)).join("\n")}${records.length > 0 ? "\n" : ""}`;
+      await fsp.writeFile(outPath, serialized, "utf8");
+
+      return {
+        outPath,
+        format,
+        count: records.length,
+        receipt: {
+          operation: "export",
+          filtersApplied: {
+            scope: filters.scope ?? null,
+            category: filters.category ?? null,
+            limit,
+            redact,
+          },
+          returnedCount: records.length,
+          output: {
+            path: outPath,
+            format,
+          },
+        },
+      };
+    };
+
+    const importMemories = async (input: {
+      inPath: string;
+      dedupe?: unknown;
+      dryRun?: unknown;
+      validateOnly?: unknown;
+      scope?: unknown;
+      limit?: unknown;
+      format?: unknown;
+    }) => {
+      const inPath = resolveStateRelativePath(api, input.inPath, input.inPath);
+      const dedupe = parseAdminImportDedupe(input.dedupe);
+      const dryRun = normalizeBoolean(input.dryRun, false) || normalizeBoolean(input.validateOnly, false);
+      const scopeOverride = normalizeAdminScope(input.scope);
+      const limit = normalizeAdminLimit(input.limit, MAX_ADMIN_LIMIT);
+      const forcedFormat = input.format === "json" || input.format === "jsonl" ? input.format : undefined;
+      const format: AdminExportFormat = forcedFormat ?? (inPath.toLowerCase().endsWith(".json") ? "json" : "jsonl");
+
+      const raw = await fsp.readFile(inPath, "utf8");
+      let parsed: any[] = [];
+      if (format === "json") {
+        const json = JSON.parse(raw);
+        if (Array.isArray(json)) {
+          parsed = json;
+        } else if (json && typeof json === "object" && Array.isArray((json as any).items)) {
+          parsed = (json as any).items;
+        } else {
+          throw new Error("Import JSON must be an array (or object with items[]).");
+        }
+      } else {
+        parsed = raw
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => JSON.parse(line));
+      }
+
+      const toImport = parsed.slice(0, limit);
+      const existing = dedupe === "none" ? [] : await db.listScalars();
+      const existingIds = new Set(existing.map((row) => row.id));
+      const existingText = new Set(existing.map((row) => normalizeForDedupe(row.text)).filter(Boolean));
+      const pendingText = new Set<string>();
+      const pendingIds = new Set<string>();
+
+      const rowsToWrite: MemoryRow[] = [];
+      const failures: Array<{ index: number; reason: string }> = [];
+      let skipped = 0;
+
+      for (const [index, item] of toImport.entries()) {
+        const rawText = typeof item?.text === "string" ? item.text : "";
+        const text = rawText.trim();
+        if (!text) {
+          failures.push({ index, reason: "missing_text" });
+          continue;
+        }
+
+        const proposedId = typeof item?.id === "string" && isUuidLike(item.id) ? item.id : randomUUID();
+        const normalizedText = normalizeForDedupe(text);
+
+        if (dedupe !== "none") {
+          if (dedupe === "id" || dedupe === "id_text") {
+            if (existingIds.has(proposedId) || pendingIds.has(proposedId)) {
+              skipped += 1;
+              continue;
+            }
+          }
+          if (dedupe === "id_text") {
+            if ((normalizedText && existingText.has(normalizedText)) || (normalizedText && pendingText.has(normalizedText))) {
+              skipped += 1;
+              continue;
+            }
+          }
+        }
+
+        const category = normalizeAdminCategory(item?.category) ?? "other";
+        const normalizedImportance = toImportanceRecord(item?.importance);
+        const normalizedLabel = resolveImportanceLabel(normalizedImportance, item?.importance_label);
+        const createdAt =
+          typeof item?.createdAt === "number" && Number.isFinite(item.createdAt) && item.createdAt > 0
+            ? Math.floor(item.createdAt)
+            : Date.now();
+        const scope = scopeOverride ?? normalizeAdminScope(item?.scope) ?? "global";
+        const trustTier = typeof item?.trust_tier === "string" && item.trust_tier.trim() ? item.trust_tier.trim() : "import";
+
+        let vector: number[] | undefined;
+        if (Array.isArray(item?.vector)) {
+          const maybe = item.vector
+            .map((value: unknown) => (typeof value === "number" ? value : Number(value)))
+            .filter((value: number) => Number.isFinite(value));
+          if (maybe.length === vectorDim) {
+            vector = maybe;
+          }
+        }
+
+        if (!vector) {
+          if (!embeddings) {
+            failures.push({ index, reason: "missing_vector_and_embeddings" });
+            continue;
+          }
+          if (!dryRun) {
+            vector = await embeddings.embed(text);
+          } else {
+            vector = Array.from<number>({ length: vectorDim }).fill(0);
+          }
+        }
+
+        const row: MemoryRow = {
+          id: proposedId,
+          text,
+          vector,
+          createdAt,
+          category,
+          importance: normalizedImportance ?? null,
+          importance_label: normalizedLabel,
+          scope,
+          trust_tier: trustTier,
+        };
+
+        rowsToWrite.push(row);
+        pendingIds.add(row.id);
+        if (normalizedText) {
+          pendingText.add(normalizedText);
+        }
+      }
+
+      if (!dryRun) {
+        await db.addMany(rowsToWrite);
+      }
+
+      return {
+        imported: rowsToWrite.length,
+        skipped,
+        failed: failures.length,
+        failures: failures.slice(0, 20),
+        receipt: {
+          operation: "import",
+          source: inPath,
+          format,
+          dedupe,
+          dryRun,
+          validateOnly: dryRun,
+          parsedCount: toImport.length,
+          importedCount: rowsToWrite.length,
+          skippedCount: skipped,
+          failedCount: failures.length,
+          filtersApplied: {
+            scopeOverride: scopeOverride ?? null,
+            limit,
+          },
+        },
+      };
+    };
+
+    const registerAdminCli = (parent: any) => {
+      const ensure = (name: string, description: string) => {
+        const existing = Array.isArray(parent.commands)
+          ? parent.commands.find((cmd: any) => typeof cmd.name === "function" && cmd.name() === name)
+          : undefined;
+        if (existing) {
+          return existing;
+        }
+        return parent.command(name).description(description);
+      };
+
+      ensure("list", "List memories (openclaw-mem-engine)")
+        .option("--scope <scope>", "Filter by scope")
+        .option("--category <category>", "Filter by category")
+        .option("--limit <n>", "Max rows", (value: string) => Number(value), DEFAULT_ADMIN_LIMIT)
+        .option("--json", "Print JSON")
+        .action(async (opts: any) => {
+          const result = await listMemories(opts);
+          if (opts.json) {
+            console.log(JSON.stringify(result, null, 2));
+            return;
+          }
+          for (const item of result.items) {
+            console.log(
+              `- ${item.id} [${item.category}|${item.importance_label}] scope=${item.scope} createdAt=${item.createdAtIso || item.createdAt} ${item.text}`,
+            );
+          }
+          console.log(`\nreceipt=${JSON.stringify(result.receipt)}`);
+        });
+
+      ensure("stats", "Show memory stats (openclaw-mem-engine)")
+        .option("--scope <scope>", "Filter by scope")
+        .option("--category <category>", "Filter by category")
+        .option("--json", "Print JSON")
+        .action(async (opts: any) => {
+          const result = await statsMemories(opts);
+          if (opts.json) {
+            console.log(JSON.stringify(result, null, 2));
+            return;
+          }
+          console.log(`count=${result.stats.count}`);
+          console.log(`byScope=${JSON.stringify(result.stats.byScope)}`);
+          console.log(`byCategory=${JSON.stringify(result.stats.byCategory)}`);
+          console.log(
+            `size(chars): min=${result.stats.size.minChars} p50=${result.stats.size.p50Chars} avg=${result.stats.size.avgChars} max=${result.stats.size.maxChars}`,
+          );
+          console.log(
+            `age(days): min=${result.stats.ageDays.min} avg=${result.stats.ageDays.avg} max=${result.stats.ageDays.max}`,
+          );
+          if (result.stats.oldestCreatedAt) {
+            console.log(`oldest=${toIsoTime(result.stats.oldestCreatedAt)} newest=${toIsoTime(result.stats.newestCreatedAt ?? 0)}`);
+          }
+          console.log(`\nreceipt=${JSON.stringify(result.receipt)}`);
+        });
+
+      ensure("export", "Export memories (sanitized, deterministic)")
+        .requiredOption("--out <path>", "Output file path (.jsonl or .json)")
+        .option("--scope <scope>", "Filter by scope")
+        .option("--category <category>", "Filter by category")
+        .option("--limit <n>", "Max rows", (value: string) => Number(value), MAX_ADMIN_LIMIT)
+        .option("--format <fmt>", "jsonl or json")
+        .option("--no-redact", "Disable text redaction")
+        .option("--json", "Print JSON receipt")
+        .action(async (opts: any) => {
+          const result = await exportMemories({
+            outPath: opts.out,
+            scope: opts.scope,
+            category: opts.category,
+            limit: opts.limit,
+            format: opts.format,
+            redact: opts.redact,
+          });
+
+          if (opts.json) {
+            console.log(JSON.stringify(result, null, 2));
+            return;
+          }
+
+          console.log(`Exported ${result.count} memories to ${result.outPath} (${result.format})`);
+          console.log(`receipt=${JSON.stringify(result.receipt)}`);
+        });
+
+      ensure("import", "Import memories (append; dedupe supported)")
+        .requiredOption("--in <path>", "Input file path (.jsonl or .json)")
+        .option("--dedupe <mode>", "none | id | id_text", "id_text")
+        .option("--dry-run", "Validate/plan without writing")
+        .option("--validate-only", "Alias for --dry-run")
+        .option("--scope <scope>", "Override scope for all imported rows")
+        .option("--limit <n>", "Max rows", (value: string) => Number(value), MAX_ADMIN_LIMIT)
+        .option("--format <fmt>", "jsonl or json")
+        .option("--json", "Print JSON")
+        .action(async (opts: any) => {
+          const result = await importMemories({
+            inPath: opts.in,
+            dedupe: opts.dedupe,
+            dryRun: opts.dryRun,
+            validateOnly: opts.validateOnly,
+            scope: opts.scope,
+            limit: opts.limit,
+            format: opts.format,
+          });
+
+          if (opts.json) {
+            console.log(JSON.stringify(result, null, 2));
+            return;
+          }
+
+          console.log(
+            `Import ${result.receipt.dryRun ? "dry-run" : "done"}: imported=${result.imported} skipped=${result.skipped} failed=${result.failed}`,
+          );
+          console.log(`receipt=${JSON.stringify(result.receipt)}`);
+          if (result.failures.length > 0) {
+            console.log(`failures=${JSON.stringify(result.failures)}`);
+          }
+        });
+    };
+
+    api.registerCli(
+      ({ program }) => {
+        const ltm = program.command("ltm").description("openclaw-mem-engine admin commands");
+        registerAdminCli(ltm);
+
+        const existingMemory = Array.isArray((program as any).commands)
+          ? (program as any).commands.find((cmd: any) => typeof cmd.name === "function" && cmd.name() === "memory")
+          : undefined;
+        if (existingMemory) {
+          registerAdminCli(existingMemory);
+        }
+      },
+      { commands: ["ltm", "memory"] },
     );
 
     // ----------------------------------------------------------------------
@@ -1047,7 +2166,86 @@ const memoryPlugin = {
             scope: scopeInput,
           } = params as { query: string; limit?: number; scope?: string };
 
+          const normalizedQuery = String(query ?? "").trim();
+          const normalizedLimit = clampLimit(limit);
+          const { scope, scopeMode } = resolveScope({ explicitScope: scopeInput, text: normalizedQuery });
+          const scopeFilterApplied = scopeMode === "global" || scopeMode === "inferred" || scopeMode === "explicit";
+
+          const buildReceiptPayload = (input: {
+            skipped: boolean;
+            skipReason?: RecallRejectionReason;
+            rejected?: RecallRejectionReason[];
+            tierCounts?: RecallTierReceipt[];
+            ftsResults?: RecallResult[];
+            vecResults?: RecallResult[];
+            fusedResults?: RecallResult[];
+            injectedCount?: number;
+            latencyMs?: number;
+            policyTier?: string;
+          }) => {
+            const tierCounts = input.tierCounts ?? [];
+            const ftsResults = input.ftsResults ?? [];
+            const vecResults = input.vecResults ?? [];
+            const fusedResults = input.fusedResults ?? [];
+            const latencyMs = input.latencyMs ?? Math.round(performance.now() - t0);
+
+            const lifecycle = receiptsCfg.enabled
+              ? buildRecallLifecycleReceipt({
+                  cfg: receiptsCfg,
+                  skipped: input.skipped,
+                  skipReason: input.skipReason,
+                  rejected: input.rejected,
+                  scope,
+                  scopeMode,
+                  tierCounts,
+                  ftsResults,
+                  vecResults,
+                  fusedResults,
+                  injectedCount: input.injectedCount ?? 0,
+                })
+              : undefined;
+
+            return {
+              dbPath: resolvedDbPath,
+              tableName,
+              model,
+              limit: normalizedLimit,
+              latencyMs,
+              ftsCount: ftsResults.length,
+              vecCount: vecResults.length,
+              fusedCount: fusedResults.length,
+              policyTier: input.policyTier ?? (tierCounts.length > 0 ? tierCounts[tierCounts.length - 1]!.tier : null),
+              scopeMode,
+              scope,
+              scopeFilterApplied,
+              lifecycle,
+            };
+          };
+
+          if (!normalizedQuery) {
+            const receipt = buildReceiptPayload({
+              skipped: true,
+              skipReason: "no_query",
+              rejected: ["no_query"],
+            });
+
+            return {
+              content: [{ type: "text", text: "No recall query provided." }],
+              details: {
+                count: 0,
+                memories: [],
+                receipt,
+              },
+            };
+          }
+
           if (!embeddings) {
+            const receipt = buildReceiptPayload({
+              skipped: true,
+              skipReason: "provider_unavailable",
+              rejected: ["provider_unavailable"],
+            });
+
             return {
               content: [
                 {
@@ -1055,71 +2253,58 @@ const memoryPlugin = {
                   text: "openclaw-mem-engine is not configured (missing embedding.apiKey / OPENAI_API_KEY).",
                 },
               ],
-              details: { error: "missing_api_key" },
+              details: { error: "missing_api_key", receipt },
             };
           }
 
-          const normalizedLimit = clampLimit(limit);
-          const { scope, scopeMode } = resolveScope({ explicitScope: scopeInput, text: query });
           const searchLimit = Math.max(normalizedLimit, normalizedLimit * 2);
+          const plans: RecallTierPlan[] = [
+            { tier: "must", labels: ["must_remember"], missReason: "no_results_must" },
+            { tier: "nice", labels: ["nice_to_have"], missReason: "no_results_nice" },
+            { tier: "unknown", labels: ["unknown"] },
+            { tier: "ignore", labels: ["ignore"] },
+          ];
 
-          const vector = await embeddings.embed(query);
-
-          const scopeFilterApplied = scopeMode === "global" || scopeMode === "inferred" || scopeMode === "explicit";
-
-          let ftsResults: RecallResult[] = [];
-          let vecResults: RecallResult[] = [];
-          let policyTier: RecallPolicyTier = RECALL_POLICY_TIERS[0].tier;
-
-          for (const plan of RECALL_POLICY_TIERS) {
-            policyTier = plan.tier;
-
-            [ftsResults, vecResults] = await Promise.all([
-              db.fullTextSearch(query, Math.min(searchLimit, MAX_RECALL_LIMIT), scope, plan.labels).catch(() => []),
-              db.vectorSearch(vector, Math.min(searchLimit, MAX_RECALL_LIMIT), scope, plan.labels).catch(() => []),
-            ]);
-
-            if (ftsResults.length > 0 || vecResults.length > 0) {
-              break;
-            }
-          }
-
-          const topHitLimit = Math.min(MAX_RECEIPT_TOP_HITS, Math.max(1, DEFAULT_RECEIPT_TOP_HITS));
-          const receiptTopHits = {
-            ftsTop: toRecallTopHits(ftsResults, topHitLimit),
-            vecTop: toRecallTopHits(vecResults, topHitLimit, { includeDistance: true }),
-          };
-
-          let fused: { order: RecallResult[] };
+          let vector: number[];
           try {
-            fused = fuseRecall({ vector: vecResults, fts: ftsResults, limit: normalizedLimit });
-          } catch (err) {
-            const message = err instanceof Error ? err.stack ?? err.message : String(err);
+            vector = await embeddings.embed(normalizedQuery);
+          } catch {
+            const receipt = buildReceiptPayload({
+              skipped: true,
+              skipReason: "provider_unavailable",
+              rejected: ["provider_unavailable"],
+            });
+
             return {
-              content: [{ type: "text", text: `memory_recall failed: ${message}` }],
-              details: {
-                error: String(err),
-                stack: message,
-                receipt: {
-                  dbPath: resolvedDbPath,
-                  tableName,
-                  limit: normalizedLimit,
-                  model,
-                  ftsCount: ftsResults.length,
-                  vecCount: vecResults.length,
-                  policyTier,
-                  scopeMode,
-                  scope,
-                  scopeFilterApplied,
-                  ftsTop: receiptTopHits.ftsTop,
-                  vecTop: receiptTopHits.vecTop,
+              content: [
+                {
+                  type: "text",
+                  text: "openclaw-mem-engine embeddings provider is unavailable right now.",
                 },
+              ],
+              details: {
+                error: "provider_unavailable",
+                receipt,
               },
             };
           }
-          const latencyMs = Math.round(performance.now() - t0);
 
-          const memories = fused.order.map((r) => {
+          const tiered = await runTieredRecall({
+            query: normalizedQuery,
+            scope,
+            limit: normalizedLimit,
+            searchLimit: Math.min(searchLimit, MAX_RECALL_LIMIT),
+            plans,
+            search: async ({ query: textQuery, scope: targetScope, labels, searchLimit }) => {
+              const [ftsResults, vecResults] = await Promise.all([
+                db.fullTextSearch(textQuery, searchLimit, targetScope, labels).catch(() => []),
+                db.vectorSearch(vector, searchLimit, targetScope, labels).catch(() => []),
+              ]);
+              return { ftsResults, vecResults };
+            },
+          });
+
+          const memories = tiered.selected.map((r) => {
             const normalizedImportance = toImportanceRecord(r.row.importance);
             const normalizedLabel = resolveImportanceLabel(normalizedImportance, r.row.importance_label);
 
@@ -1137,28 +2322,23 @@ const memoryPlugin = {
             };
           });
 
+          const receipt = buildReceiptPayload({
+            skipped: false,
+            rejected: tiered.rejected,
+            tierCounts: tiered.tierCounts,
+            ftsResults: tiered.ftsResults,
+            vecResults: tiered.vecResults,
+            fusedResults: tiered.selected,
+            injectedCount: memories.length,
+          });
+
           if (memories.length === 0) {
             return {
               content: [{ type: "text", text: "No relevant memories found." }],
               details: {
                 count: 0,
                 memories: [],
-                receipt: {
-                  dbPath: resolvedDbPath,
-                  tableName,
-                  limit: normalizedLimit,
-                  model,
-                  latencyMs,
-                  ftsCount: ftsResults.length,
-                  vecCount: vecResults.length,
-                  fusedCount: 0,
-                  policyTier,
-                  scopeMode,
-                  scope,
-                  scopeFilterApplied,
-                  ftsTop: receiptTopHits.ftsTop,
-                  vecTop: receiptTopHits.vecTop,
-                },
+                receipt,
               },
             };
           }
@@ -1176,22 +2356,7 @@ const memoryPlugin = {
             details: {
               count: memories.length,
               memories,
-              receipt: {
-                dbPath: resolvedDbPath,
-                tableName,
-                limit: normalizedLimit,
-                model,
-                latencyMs,
-                ftsCount: ftsResults.length,
-                vecCount: vecResults.length,
-                fusedCount: memories.length,
-                policyTier,
-                scopeMode,
-                scope,
-                scopeFilterApplied,
-                ftsTop: receiptTopHits.ftsTop,
-                vecTop: receiptTopHits.vecTop,
-              },
+              receipt,
             },
           };
         },
@@ -1383,6 +2548,193 @@ const memoryPlugin = {
     );
 
     // ----------------------------------------------------------------------
+    // Tools: memory_list / memory_stats / memory_export / memory_import
+    // ----------------------------------------------------------------------
+
+    api.registerTool(
+      {
+        name: "memory_list",
+        label: "Memory List",
+        description: "List stored memories with optional scope/category filters.",
+        parameters: Type.Object({
+          scope: Type.Optional(Type.String({ description: "Scope filter" })),
+          category: Type.Optional(MemoryCategorySchema),
+          limit: Type.Optional(Type.Number({ description: `Max results (default: ${DEFAULT_ADMIN_LIMIT})` })),
+        }),
+        async execute(_toolCallId: string, params: unknown) {
+          const t0 = performance.now();
+          const parsed = params as { scope?: string; category?: MemoryCategory; limit?: number };
+          const result = await listMemories(parsed);
+          const latencyMs = Math.round(performance.now() - t0);
+
+          const lines = result.items
+            .map(
+              (item, idx) =>
+                `${idx + 1}. [${item.category}|${item.importance_label}] ${item.text.length > 200 ? `${item.text.slice(0, 200)}…` : item.text}`,
+            )
+            .join("\n");
+
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  result.items.length > 0
+                    ? `Listed ${result.items.length} memories:\n\n${lines}`
+                    : "No memories matched the current filters.",
+              },
+            ],
+            details: {
+              count: result.items.length,
+              items: result.items,
+              receipt: {
+                ...result.receipt,
+                dbPath: resolvedDbPath,
+                tableName,
+                latencyMs,
+              },
+            },
+          };
+        },
+      },
+      { name: "memory_list" },
+    );
+
+    api.registerTool(
+      {
+        name: "memory_stats",
+        label: "Memory Stats",
+        description: "Show memory counts by scope/category plus size/age summaries.",
+        parameters: Type.Object({
+          scope: Type.Optional(Type.String({ description: "Scope filter" })),
+          category: Type.Optional(MemoryCategorySchema),
+        }),
+        async execute(_toolCallId: string, params: unknown) {
+          const t0 = performance.now();
+          const parsed = params as { scope?: string; category?: MemoryCategory };
+          const result = await statsMemories(parsed);
+          const latencyMs = Math.round(performance.now() - t0);
+
+          return {
+            content: [{ type: "text", text: `Memory stats ready (count=${result.stats.count}).` }],
+            details: {
+              stats: result.stats,
+              receipt: {
+                ...result.receipt,
+                dbPath: resolvedDbPath,
+                tableName,
+                latencyMs,
+              },
+            },
+          };
+        },
+      },
+      { name: "memory_stats" },
+    );
+
+    api.registerTool(
+      {
+        name: "memory_export",
+        label: "Memory Export",
+        description: "Export memories to sanitized deterministic JSONL/JSON.",
+        parameters: Type.Object({
+          outPath: Type.String({ description: "Output path (.jsonl or .json)" }),
+          scope: Type.Optional(Type.String({ description: "Scope filter" })),
+          category: Type.Optional(MemoryCategorySchema),
+          limit: Type.Optional(Type.Number({ description: `Max rows (default: ${MAX_ADMIN_LIMIT})` })),
+          format: Type.Optional(Type.Union([Type.Literal("jsonl"), Type.Literal("json")])),
+          redact: Type.Optional(Type.Boolean({ description: "Redact secrets in text (default true)" })),
+        }),
+        async execute(_toolCallId: string, params: unknown) {
+          const t0 = performance.now();
+          const parsed = params as {
+            outPath: string;
+            scope?: string;
+            category?: MemoryCategory;
+            limit?: number;
+            format?: AdminExportFormat;
+            redact?: boolean;
+          };
+
+          const result = await exportMemories(parsed);
+          const latencyMs = Math.round(performance.now() - t0);
+
+          return {
+            content: [{ type: "text", text: `Exported ${result.count} memories to ${result.outPath}.` }],
+            details: {
+              path: result.outPath,
+              format: result.format,
+              count: result.count,
+              receipt: {
+                ...result.receipt,
+                dbPath: resolvedDbPath,
+                tableName,
+                latencyMs,
+              },
+            },
+          };
+        },
+      },
+      { name: "memory_export" },
+    );
+
+    api.registerTool(
+      {
+        name: "memory_import",
+        label: "Memory Import",
+        description: "Import memories from JSONL/JSON (append; optional dedupe, dry-run).",
+        parameters: Type.Object({
+          inPath: Type.String({ description: "Input path (.jsonl or .json)" }),
+          dedupe: Type.Optional(
+            Type.Union([Type.Literal("none"), Type.Literal("id"), Type.Literal("id_text")]),
+          ),
+          dryRun: Type.Optional(Type.Boolean({ description: "Validate only, no writes" })),
+          validateOnly: Type.Optional(Type.Boolean({ description: "Alias of dryRun" })),
+          scope: Type.Optional(Type.String({ description: "Override scope" })),
+          limit: Type.Optional(Type.Number({ description: `Max rows (default: ${MAX_ADMIN_LIMIT})` })),
+          format: Type.Optional(Type.Union([Type.Literal("jsonl"), Type.Literal("json")])),
+        }),
+        async execute(_toolCallId: string, params: unknown) {
+          const t0 = performance.now();
+          const parsed = params as {
+            inPath: string;
+            dedupe?: AdminImportDedupe;
+            dryRun?: boolean;
+            validateOnly?: boolean;
+            scope?: string;
+            limit?: number;
+            format?: AdminExportFormat;
+          };
+
+          const result = await importMemories(parsed);
+          const latencyMs = Math.round(performance.now() - t0);
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${result.receipt.dryRun ? "Validated" : "Imported"} memories: imported=${result.imported}, skipped=${result.skipped}, failed=${result.failed}.`,
+              },
+            ],
+            details: {
+              imported: result.imported,
+              skipped: result.skipped,
+              failed: result.failed,
+              failures: result.failures,
+              receipt: {
+                ...result.receipt,
+                dbPath: resolvedDbPath,
+                tableName,
+                latencyMs,
+              },
+            },
+          };
+        },
+      },
+      { name: "memory_import" },
+    );
+
+    // ----------------------------------------------------------------------
     // Lifecycle hooks (M1)
     // ----------------------------------------------------------------------
 
@@ -1392,54 +2744,125 @@ const memoryPlugin = {
       } else {
         api.on("before_agent_start", async (event) => {
           const prompt = typeof event.prompt === "string" ? event.prompt : "";
-          if (!prompt) return;
-          if (shouldSkipAutoRecallPrompt(prompt, autoRecallCfg)) return;
+          const trimmedPrompt = prompt.trim();
+          const scopeInfo = resolveScope({ text: trimmedPrompt });
+
+          const emitAutoRecallReceipt = (input: {
+            skipped: boolean;
+            skipReason?: RecallRejectionReason;
+            rejected?: RecallRejectionReason[];
+            tierCounts?: RecallTierReceipt[];
+            ftsResults?: RecallResult[];
+            vecResults?: RecallResult[];
+            fusedResults?: RecallResult[];
+            injectedCount?: number;
+          }) => {
+            if (!receiptsCfg.enabled) return undefined;
+            return buildRecallLifecycleReceipt({
+              cfg: receiptsCfg,
+              skipped: input.skipped,
+              skipReason: input.skipReason,
+              rejected: input.rejected,
+              scope: scopeInfo.scope,
+              scopeMode: scopeInfo.scopeMode,
+              tierCounts: input.tierCounts ?? [],
+              ftsResults: input.ftsResults ?? [],
+              vecResults: input.vecResults ?? [],
+              fusedResults: input.fusedResults ?? [],
+              injectedCount: input.injectedCount ?? 0,
+            });
+          };
+
+          if (!trimmedPrompt) {
+            const receipt = emitAutoRecallReceipt({
+              skipped: true,
+              skipReason: "no_query",
+              rejected: ["no_query"],
+            });
+            if (receipt) {
+              api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
+            }
+            return;
+          }
+
+          if (shouldSkipAutoRecallPrompt(trimmedPrompt, autoRecallCfg)) {
+            const receipt = emitAutoRecallReceipt({
+              skipped: true,
+              skipReason: "trivial_prompt",
+              rejected: ["trivial_prompt"],
+            });
+            if (receipt) {
+              api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
+            }
+            return;
+          }
 
           try {
             const limit = Math.max(1, Math.min(AUTO_RECALL_MAX_ITEMS, autoRecallCfg.maxItems));
-            const scopeInfo = resolveScope({ text: prompt });
-            const scope = scopeInfo.scope;
             const searchLimit = Math.max(
               limit,
               Math.min(MAX_RECALL_LIMIT, limit * Math.max(1, autoRecallCfg.tierSearchMultiplier)),
             );
 
-            const vector = await embeddings.embed(prompt);
-
-            const tiers: ImportanceLabel[][] = [["must_remember"], ["nice_to_have"]];
-            if (autoRecallCfg.includeUnknownFallback) {
-              tiers.push(["unknown"]);
-            }
-
-            const selected: RecallResult[] = [];
-            const seenIds = new Set<string>();
-            const tierReceipts: Array<{ tier: string; added: number }> = [];
-
-            for (const labels of tiers) {
-              const [ftsResults, vecResults] = await Promise.all([
-                db.fullTextSearch(prompt, searchLimit, scope, labels).catch(() => []),
-                db.vectorSearch(vector, searchLimit, scope, labels).catch(() => []),
-              ]);
-
-              const fused = fuseRecall({ vector: vecResults, fts: ftsResults, limit: searchLimit }).order;
-              let added = 0;
-
-              for (const hit of fused) {
-                if (seenIds.has(hit.row.id)) continue;
-                seenIds.add(hit.row.id);
-                selected.push(hit);
-                added += 1;
-                if (selected.length >= limit) break;
+            let vector: number[];
+            try {
+              vector = await embeddings.embed(trimmedPrompt);
+            } catch {
+              const receipt = emitAutoRecallReceipt({
+                skipped: true,
+                skipReason: "provider_unavailable",
+                rejected: ["provider_unavailable"],
+              });
+              if (receipt) {
+                api.logger.warn(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
               }
-
-              tierReceipts.push({ tier: labels.join("+"), added });
-              if (selected.length >= limit) break;
+              return;
             }
 
-            if (selected.length === 0) return;
+            const plans: RecallTierPlan[] = [
+              { tier: "must", labels: ["must_remember"], missReason: "no_results_must" },
+              { tier: "nice", labels: ["nice_to_have"], missReason: "no_results_nice" },
+            ];
+            if (autoRecallCfg.includeUnknownFallback) {
+              plans.push({ tier: "unknown", labels: ["unknown"] });
+            }
+
+            const tiered = await runTieredRecall({
+              query: trimmedPrompt,
+              scope: scopeInfo.scope,
+              limit,
+              searchLimit,
+              plans,
+              search: async ({ query: textQuery, scope, labels, searchLimit }) => {
+                const [ftsResults, vecResults] = await Promise.all([
+                  db.fullTextSearch(textQuery, searchLimit, scope, labels).catch(() => []),
+                  db.vectorSearch(vector, searchLimit, scope, labels).catch(() => []),
+                ]);
+                return { ftsResults, vecResults };
+              },
+            });
+
+            const selected = tiered.selected.slice(0, limit);
+            const receipt = emitAutoRecallReceipt({
+              skipped: false,
+              rejected: tiered.rejected,
+              tierCounts: tiered.tierCounts,
+              ftsResults: tiered.ftsResults,
+              vecResults: tiered.vecResults,
+              fusedResults: tiered.selected,
+              injectedCount: selected.length,
+            });
+
+            if (receipt) {
+              api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
+            }
+
+            if (selected.length === 0) {
+              return;
+            }
 
             const context = formatRelevantMemoriesContext(
-              selected.slice(0, limit).map((hit) => {
+              selected.map((hit) => {
                 const normalizedImportance = toImportanceRecord(hit.row.importance);
                 const normalizedLabel = resolveImportanceLabel(normalizedImportance, hit.row.importance_label);
                 return {
@@ -1450,12 +2873,10 @@ const memoryPlugin = {
               }),
             );
 
-            // receipt: conservative autoRecall injects sanitized, bounded context only (<=5 lines; must→nice→unknown fallback).
-            api.logger.info(
-              `openclaw-mem-engine: autoRecall injected ${selected.length} memories (scope=${scope}, tiers=${tierReceipts.map((r) => `${r.tier}:${r.added}`).join(",")})`,
-            );
+            const receiptComment = receipt ? renderAutoRecallReceiptComment(receipt, receiptsCfg) : "";
+            const prependContext = receiptComment ? `${receiptComment}\n${context}` : context;
 
-            return { prependContext: context };
+            return { prependContext };
           } catch (err) {
             api.logger.warn(`openclaw-mem-engine: autoRecall failed: ${String(err)}`);
           }
@@ -1479,6 +2900,14 @@ const memoryPlugin = {
             const userTexts = extractUserTextMessages(event.messages);
             if (userTexts.length === 0) return;
 
+            const filteredOut = {
+              tool_output: 0,
+              secrets_like: 0,
+              duplicate: 0,
+            };
+
+            let candidateExtractionCount = 0;
+
             const captures: Array<{
               text: string;
               vector: number[];
@@ -1488,15 +2917,30 @@ const memoryPlugin = {
             }> = [];
 
             for (const userText of userTexts) {
-              if (looksLikeSecret(userText) || looksLikeToolOutput(userText)) continue;
+              const splitCandidates = splitCaptureCandidates(userText);
+              candidateExtractionCount += splitCandidates.length;
 
-              for (const rawCandidate of splitCaptureCandidates(userText)) {
-                if (captures.length >= autoCaptureCfg.maxItemsPerTurn) break;
+              const messageLooksSecret = looksLikeSecret(userText);
+              const messageLooksToolOutput = looksLikeToolOutput(userText);
+
+              for (const rawCandidate of splitCandidates) {
+                if (captures.length >= autoCaptureCfg.maxItemsPerTurn) {
+                  break;
+                }
 
                 const candidate = normalizeCaptureText(rawCandidate, autoCaptureCfg.maxCharsPerItem);
                 if (!candidate || candidate.length < 12) continue;
                 if (SLASH_COMMAND_PATTERN.test(candidate) || HEARTBEAT_PATTERN.test(candidate)) continue;
-                if (looksLikeSecret(candidate) || looksLikeToolOutput(candidate)) continue;
+
+                if (messageLooksSecret || looksLikeSecret(candidate)) {
+                  filteredOut.secrets_like += 1;
+                  continue;
+                }
+
+                if (messageLooksToolOutput || looksLikeToolOutput(candidate)) {
+                  filteredOut.tool_output += 1;
+                  continue;
+                }
 
                 const category = detectAutoCaptureCategory(candidate);
                 if (!category || !allowedCategories.has(category)) continue;
@@ -1504,7 +2948,10 @@ const memoryPlugin = {
                 const duplicateInTurn = captures.some((existing) =>
                   isNearDuplicateText(existing.text, candidate, autoCaptureCfg.dedupeSimilarityThreshold),
                 );
-                if (duplicateInTurn) continue;
+                if (duplicateInTurn) {
+                  filteredOut.duplicate += 1;
+                  continue;
+                }
 
                 const scopeInfo = resolveScope({ text: candidate });
                 const vector = await embeddings.embed(candidate);
@@ -1516,6 +2963,7 @@ const memoryPlugin = {
                   (existing.score >= autoCaptureCfg.duplicateSearchMinScore ||
                     isNearDuplicateText(existing.row.text, candidate, autoCaptureCfg.dedupeSimilarityThreshold))
                 ) {
+                  filteredOut.duplicate += 1;
                   continue;
                 }
 
@@ -1531,9 +2979,9 @@ const memoryPlugin = {
               if (captures.length >= autoCaptureCfg.maxItemsPerTurn) break;
             }
 
-            if (captures.length === 0) return;
+            const toStore = captures.slice(0, autoCaptureCfg.maxItemsPerTurn);
 
-            for (const capture of captures.slice(0, autoCaptureCfg.maxItemsPerTurn)) {
+            for (const capture of toStore) {
               const normalizedLabel = importanceLabel(capture.importance);
               const row: MemoryRow = {
                 id: randomUUID(),
@@ -1550,10 +2998,15 @@ const memoryPlugin = {
               await db.add(row);
             }
 
-            // receipt: strict autoCapture only stores user-origin preference/decision (todo optional), deduped + secret-scrubbed.
-            api.logger.info(
-              `openclaw-mem-engine: autoCapture stored ${captures.length} memories (${captures.map((c) => c.category).join(",")})`,
-            );
+            if (receiptsCfg.enabled) {
+              const receipt = buildAutoCaptureLifecycleReceipt({
+                cfg: receiptsCfg,
+                candidateExtractionCount,
+                filteredOut,
+                storedCount: toStore.length,
+              });
+              api.logger.info(`openclaw-mem-engine:autoCapture.receipt ${JSON.stringify(receipt)}`);
+            }
           } catch (err) {
             api.logger.warn(`openclaw-mem-engine: autoCapture failed: ${String(err)}`);
           }
@@ -1561,6 +3014,12 @@ const memoryPlugin = {
       }
     }
   },
+};
+
+export const __debugReceipts = {
+  resolveReceiptsConfig,
+  buildRecallLifecycleReceipt,
+  buildAutoCaptureLifecycleReceipt,
 };
 
 export default memoryPlugin;

@@ -21,6 +21,11 @@
       "placeholder": "~/.openclaw/memory/lancedb",
       "advanced": true
     },
+    "tableName": {
+      "label": "Table Name",
+      "placeholder": "memories",
+      "advanced": true
+    },
     "autoRecall.enabled": {
       "label": "Auto Recall",
       "help": "Inject a bounded, sanitized memory context before agent start"
@@ -28,6 +33,21 @@
     "autoCapture.enabled": {
       "label": "Auto Capture",
       "help": "Capture strict user-origin preference/decision memories on agent end"
+    },
+    "receipts.enabled": {
+      "label": "Lifecycle Receipts",
+      "help": "Emit bounded recall/capture receipts for debug and audits",
+      "advanced": true
+    },
+    "receipts.verbosity": {
+      "label": "Receipts Verbosity",
+      "help": "low (default) keeps compact aggregates; high includes extended counters",
+      "advanced": true
+    },
+    "receipts.maxItems": {
+      "label": "Receipt Max Items",
+      "help": "Maximum item count for top-hit arrays and tier slices",
+      "advanced": true
     }
   },
   "configSchema": {
@@ -60,86 +80,131 @@
         "default": "memories"
       },
       "autoRecall": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": true
+        "oneOf": [
+          {
+            "type": "boolean"
           },
-          "maxItems": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 5,
-            "default": 4
-          },
-          "skipTrivialPrompts": {
-            "type": "boolean",
-            "default": true
-          },
-          "trivialMinChars": {
-            "type": "integer",
-            "minimum": 2,
-            "maximum": 40,
-            "default": 8
-          },
-          "includeUnknownFallback": {
-            "type": "boolean",
-            "default": true
-          },
-          "tierSearchMultiplier": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 6,
-            "default": 2
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "maxItems": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "default": 4
+              },
+              "skipTrivialPrompts": {
+                "type": "boolean",
+                "default": true
+              },
+              "trivialMinChars": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 40,
+                "default": 8
+              },
+              "includeUnknownFallback": {
+                "type": "boolean",
+                "default": true
+              },
+              "tierSearchMultiplier": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 6,
+                "default": 2
+              }
+            }
           }
-        }
+        ]
       },
       "autoCapture": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "type": "boolean",
-            "default": true
+        "oneOf": [
+          {
+            "type": "boolean"
           },
-          "maxItemsPerTurn": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 3,
-            "default": 2
-          },
-          "maxCharsPerItem": {
-            "type": "integer",
-            "minimum": 40,
-            "maximum": 320,
-            "default": 240
-          },
-          "capturePreference": {
-            "type": "boolean",
-            "default": true
-          },
-          "captureDecision": {
-            "type": "boolean",
-            "default": true
-          },
-          "captureTodo": {
-            "type": "boolean",
-            "default": false
-          },
-          "dedupeSimilarityThreshold": {
-            "type": "number",
-            "minimum": 0.7,
-            "maximum": 0.99,
-            "default": 0.92
-          },
-          "duplicateSearchMinScore": {
-            "type": "number",
-            "minimum": 0.8,
-            "maximum": 0.999,
-            "default": 0.94
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "maxItemsPerTurn": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3,
+                "default": 2
+              },
+              "maxCharsPerItem": {
+                "type": "integer",
+                "minimum": 40,
+                "maximum": 320,
+                "default": 240
+              },
+              "capturePreference": {
+                "type": "boolean",
+                "default": true
+              },
+              "captureDecision": {
+                "type": "boolean",
+                "default": true
+              },
+              "captureTodo": {
+                "type": "boolean",
+                "default": false
+              },
+              "dedupeSimilarityThreshold": {
+                "type": "number",
+                "minimum": 0.7,
+                "maximum": 0.99,
+                "default": 0.92
+              },
+              "duplicateSearchMinScore": {
+                "type": "number",
+                "minimum": 0.8,
+                "maximum": 0.999,
+                "default": 0.94
+              }
+            }
           }
-        }
+        ]
+      },
+      "receipts": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "verbosity": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "high"
+                ],
+                "default": "low"
+              },
+              "maxItems": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "default": 3
+              }
+            }
+          }
+        ]
       }
     }
   }
