@@ -9,6 +9,10 @@
  * 3) Configure embeddings (either):
  *    - plugins.entries["openclaw-mem-engine"].embedding.apiKey = "${OPENAI_API_KEY}"
  *    - or set env: OPENAI_API_KEY
+ * 4) (Optional) Guardrail: clamp embedding input to avoid 400 "input too long":
+ *    - plugins.entries["openclaw-mem-engine"].embedding.maxChars = 6000 (default)
+ *    - plugins.entries["openclaw-mem-engine"].embedding.headChars = 500 (default; keep head + tail)
+ *    - plugins.entries["openclaw-mem-engine"].embedding.maxBytes = 24000 (optional; no default)
  *
  * Smoke:
  * - memory_store({ text: "I prefer dark mode", importance: 0.8, category: "preference" })
@@ -24,6 +28,13 @@ import { performance } from "node:perf_hooks";
 import type * as LanceDB from "@lancedb/lancedb";
 import { Type } from "@sinclair/typebox";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import {
+  clampEmbeddingInput,
+  resolveEmbeddingClampConfig,
+  EmbeddingInputTooLongError,
+  isEmbeddingInputTooLongError,
+  looksLikeEmbeddingInputTooLongMessage,
+} from "./embeddingClamp.js";
 
 // ============================================================================
 // Config
@@ -72,6 +83,11 @@ type PluginConfig = {
   embedding?: {
     apiKey?: string;
     model?: "text-embedding-3-small" | "text-embedding-3-large";
+    // Clamp embedding input deterministically before calling the provider.
+    // Note: tokens != chars; this is a best-effort guardrail.
+    maxChars?: number; // default 6000
+    headChars?: number; // default 500 (keep a short head, preserve tail)
+    maxBytes?: number; // optional extra UTF-8 cap
   };
   dbPath?: string;
   tableName?: string;
@@ -159,6 +175,7 @@ type ScopeMode = "explicit" | "inferred" | "global";
 type RecallRejectionReason =
   | "trivial_prompt"
   | "no_query"
+  | "embedding_input_too_long"
   | "no_results_must"
   | "no_results_nice"
   | "provider_unavailable"
@@ -914,6 +931,7 @@ function uniqueReasons(reasons: RecallRejectionReason[]): RecallRejectionReason[
   const order: RecallRejectionReason[] = [
     "trivial_prompt",
     "no_query",
+    "embedding_input_too_long",
     "no_results_must",
     "no_results_nice",
     "provider_unavailable",
@@ -1446,23 +1464,43 @@ class MemoryDB {
 // ============================================================================
 
 class OpenAIEmbeddings {
+  private readonly clampCfg: any;
+
   constructor(
     private readonly apiKey: string,
     private readonly model: string,
-  ) {}
+    clampCfg: any,
+  ) {
+    this.clampCfg = clampCfg;
+  }
 
   async embed(input: string): Promise<number[]> {
+    const clamped = clampEmbeddingInput(input, this.clampCfg);
+
     const resp = await fetch("https://api.openai.com/v1/embeddings", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({ model: this.model, input }),
+      body: JSON.stringify({ model: this.model, input: clamped.text }),
     });
 
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
+
+      if (resp.status === 400 && looksLikeEmbeddingInputTooLongMessage(body)) {
+        throw new EmbeddingInputTooLongError(
+          `openclaw-mem-engine: embeddings rejected input as too long (chars=${clamped.originalChars} clamped=${clamped.clampedChars})`,
+          {
+            status: resp.status,
+            statusText: resp.statusText,
+            bodyPreview: body.slice(0, 500),
+            clamp: clamped,
+          },
+        );
+      }
+
       throw new Error(
         `openclaw-mem-engine: embeddings failed (${resp.status} ${resp.statusText}) ${body.slice(0, 500)}`,
       );
@@ -1559,7 +1597,7 @@ const memoryEngineConfigSchema = {
         throw new Error("embedding config must be an object");
       }
       const rawEmbedding = cfg.embedding as Record<string, unknown>;
-      assertAllowedKeys(rawEmbedding, ["apiKey", "model"], "embedding config");
+      assertAllowedKeys(rawEmbedding, ["apiKey", "model", "maxChars", "headChars", "maxBytes"], "embedding config");
 
       embedding = {
         apiKey: typeof rawEmbedding.apiKey === "string" ? rawEmbedding.apiKey : undefined,
@@ -1567,6 +1605,9 @@ const memoryEngineConfigSchema = {
           rawEmbedding.model === "text-embedding-3-small" || rawEmbedding.model === "text-embedding-3-large"
             ? rawEmbedding.model
             : undefined,
+        maxChars: typeof rawEmbedding.maxChars === "number" ? rawEmbedding.maxChars : undefined,
+        headChars: typeof rawEmbedding.headChars === "number" ? rawEmbedding.headChars : undefined,
+        maxBytes: typeof rawEmbedding.maxBytes === "number" ? rawEmbedding.maxBytes : undefined,
       };
     }
 
@@ -1665,6 +1706,24 @@ const memoryEngineConfigSchema = {
       placeholder: "text-embedding-3-small",
       help: "OpenAI embedding model to use",
     },
+    "embedding.maxChars": {
+      label: "Embedding Max Chars",
+      placeholder: "6000",
+      help: "Clamp embedding input to maxChars before calling the provider (default 6000).",
+      advanced: true,
+    },
+    "embedding.headChars": {
+      label: "Embedding Head Chars",
+      placeholder: "500",
+      help: "If clamping, keep the first headChars and the last tail (head+...+tail). Default 500.",
+      advanced: true,
+    },
+    "embedding.maxBytes": {
+      label: "Embedding Max Bytes",
+      placeholder: "(optional)",
+      help: "Optional extra UTF-8 byte cap applied after maxChars.",
+      advanced: true,
+    },
     dbPath: {
       label: "Database Path",
       placeholder: "~/.openclaw/memory/lancedb",
@@ -1724,10 +1783,11 @@ const memoryPlugin = {
     const tableName = (cfg.tableName ?? DEFAULT_TABLE_NAME).trim() || DEFAULT_TABLE_NAME;
 
     const db = new MemoryDB(resolvedDbPath, tableName, vectorDim);
-    const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model) : null;
+    const embeddingClampCfg = resolveEmbeddingClampConfig(cfg.embedding);
+    const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model, embeddingClampCfg) : null;
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, lazyInit=true)`,
     );
 
     const resolveAdminFilters = (input: {
@@ -1940,7 +2000,7 @@ const memoryPlugin = {
             ? Math.floor(item.createdAt)
             : Date.now();
         const scope = scopeOverride ?? normalizeAdminScope(item?.scope) ?? "global";
-        const trustTier = typeof item?.trust_tier === "string" && item.trust_tier.trim() ? item.trust_tier.trim() : "import";
+        let trustTier = typeof item?.trust_tier === "string" && item.trust_tier.trim() ? item.trust_tier.trim() : "import";
 
         let vector: number[] | undefined;
         if (Array.isArray(item?.vector)) {
@@ -1958,7 +2018,12 @@ const memoryPlugin = {
             continue;
           }
           if (!dryRun) {
-            vector = await embeddings.embed(text);
+            try {
+              vector = await embeddings.embed(text);
+            } catch {
+              vector = Array.from<number>({ length: vectorDim }).fill(0);
+              trustTier = `${trustTier}_noembed`;
+            }
           } else {
             vector = Array.from<number>({ length: vectorDim }).fill(0);
           }
@@ -2268,22 +2333,29 @@ const memoryPlugin = {
           let vector: number[];
           try {
             vector = await embeddings.embed(normalizedQuery);
-          } catch {
+          } catch (err) {
+            const tooLong = isEmbeddingInputTooLongError(err);
+            const reason: RecallRejectionReason = tooLong ? "embedding_input_too_long" : "provider_unavailable";
+
             const receipt = buildReceiptPayload({
               skipped: true,
-              skipReason: "provider_unavailable",
-              rejected: ["provider_unavailable"],
+              skipReason: reason,
+              rejected: [reason],
             });
 
             return {
               content: [
                 {
                   type: "text",
-                  text: "openclaw-mem-engine embeddings provider is unavailable right now.",
+                  text: tooLong
+                    ? "Recall query is too long for embeddings. Skipping vector recall."
+                    : "openclaw-mem-engine embeddings provider is unavailable right now.",
                 },
               ],
               details: {
-                error: "provider_unavailable",
+                error: reason,
+                count: 0,
+                memories: [],
                 receipt,
               },
             };
@@ -2403,7 +2475,19 @@ const memoryPlugin = {
           const { scope, scopeMode } = resolveScope({ explicitScope: scopeInput, text });
           const normalizedImportance = toImportanceRecord(importance);
           const normalizedLabel = importanceLabel(normalizedImportance);
-          const vector = await embeddings.embed(text);
+          let vector: number[];
+          let embeddingSkipped = false;
+          let embeddingSkipReason: RecallRejectionReason | null = null;
+
+          try {
+            vector = await embeddings.embed(text);
+          } catch (err) {
+            embeddingSkipped = true;
+            embeddingSkipReason = isEmbeddingInputTooLongError(err)
+              ? "embedding_input_too_long"
+              : "provider_unavailable";
+            vector = Array.from<number>({ length: vectorDim }).fill(0);
+          }
           const id = randomUUID();
           const createdAt = Date.now();
 
@@ -2444,6 +2528,8 @@ const memoryPlugin = {
                 scope,
                 scopeMode,
                 scopeFilterApplied: true,
+                embeddingSkipped,
+                embeddingSkipReason,
               },
             },
           };
@@ -2497,7 +2583,30 @@ const memoryPlugin = {
               };
             }
 
-            const vector = await embeddings.embed(query);
+            let vector: number[];
+            try {
+              vector = await embeddings.embed(query);
+            } catch (err) {
+              const tooLong = isEmbeddingInputTooLongError(err);
+              const latencyMs = Math.round(performance.now() - t0);
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: tooLong
+                      ? "Forget query is too long for embeddings. Cannot search deletion candidates."
+                      : "openclaw-mem-engine embeddings provider is unavailable right now.",
+                  },
+                ],
+                details: {
+                  action: "candidates",
+                  found: 0,
+                  error: tooLong ? "embedding_input_too_long" : "provider_unavailable",
+                  receipt: { dbPath: resolvedDbPath, tableName, model, latencyMs },
+                },
+              };
+            }
+
             const results = await db.vectorSearch(vector, 5);
             const latencyMs = Math.round(performance.now() - t0);
 
@@ -2807,11 +2916,14 @@ const memoryPlugin = {
             let vector: number[];
             try {
               vector = await embeddings.embed(trimmedPrompt);
-            } catch {
+            } catch (err) {
+              const tooLong = isEmbeddingInputTooLongError(err);
+              const reason: RecallRejectionReason = tooLong ? "embedding_input_too_long" : "provider_unavailable";
+
               const receipt = emitAutoRecallReceipt({
                 skipped: true,
-                skipReason: "provider_unavailable",
-                rejected: ["provider_unavailable"],
+                skipReason: reason,
+                rejected: [reason],
               });
               if (receipt) {
                 api.logger.warn(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
@@ -2954,7 +3066,12 @@ const memoryPlugin = {
                 }
 
                 const scopeInfo = resolveScope({ text: candidate });
-                const vector = await embeddings.embed(candidate);
+                let vector: number[];
+                try {
+                  vector = await embeddings.embed(candidate);
+                } catch {
+                  continue;
+                }
 
                 const maybeExisting = await db.vectorSearch(vector, 1, scopeInfo.scope).catch(() => []);
                 const existing = maybeExisting[0];
