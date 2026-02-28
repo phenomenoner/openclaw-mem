@@ -68,7 +68,7 @@ Source (external, medium trust; small repo, concept clear):
 - `openclaw-supermemory`: <https://github.com/yedanyagamiai/openclaw-supermemory>
 
 **What we take:**
-- **Local-first lexical fallback**: SQLite + **FTS5/BM25** is a solid “zero-embedding / zero-provider” baseline for recall + debugging.
+- **Local-first lexical fallback**: SQLite **FTS5 (BM25 scoring)** is a solid “zero-embedding / zero-provider” baseline for recall + debugging.
 - **Strict config contract**: `additionalProperties: false` in plugin schema reduces silent misconfig during cron/long-run ops.
 - **Anti-echo hygiene**: explicitly tag injected context blocks (e.g. `<supermemory-context>…</supermemory-context>`) and strip them during capture to avoid infinite self-ingest loops.
 - **Ops-first tools**: a `memory_profile`-style command (counts, categories, size, recent) is disproportionately useful for diagnosing drift.
@@ -88,14 +88,14 @@ Source (external; high concept clarity):
 - `tobi/qmd`: <https://github.com/tobi/qmd>
 
 **What it is (in one line):**
-A local “docs-first” search engine for markdown/transcripts that does **FTS5/BM25 + vector + (optional) query expansion + LLM reranking**, with agent-friendly `--json/--files` outputs and an MCP surface.
+A local “docs-first” search engine for markdown/transcripts that does **FTS5 (BM25 scoring) + vector + (optional) query expansion + LLM reranking**, with agent-friendly `--json/--files` outputs and an MCP surface.
 
 **How it relates to us:**
 - As a retrieval backend, QMD is best seen as an **alternative** to a pure vector store like `memory-lancedb`.
 - As a system component, it can be a **supplement** to `openclaw-mem` (we still need capture/governance/receipts/importance; QMD doesn’t replace that).
 
 **What we take (replicable modules):**
-- **Hybrid candidate generation**: lexical anchors first (FTS/BM25), then semantic recall.
+- **Hybrid candidate generation**: lexical anchors first (FTS; BM25-scored), then semantic recall.
 - **Fusion**: RRF-style merging is a pragmatic default.
 - **Budgeting**: keep a small candidate set (top-N) before reranking.
 - **Agent I/O contract**: stable JSON/file outputs + multi-get for “fetch the actual evidence”.
@@ -172,7 +172,7 @@ Source (external; concept clarity high):
   - **Skill Manual/Templates = L2** (heavy, deferred): step-by-step SOP, checklists, examples.
 
 **Actionable roadmap hooks (candidates):**
-- Add a **lexical index lane** (FTS5/BM25) for *skill cards / SOP cards* so agents can search first and only load the manual they need.
+- Add a **lexical index lane** (FTS5; BM25 scoring) for *skill cards / SOP cards* so agents can search first and only load the manual they need.
 - Add a minimal “skill discovery” contract:
   - naming conventions (regex-friendly)
   - `keywords`/`anti-keywords`

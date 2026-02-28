@@ -24,7 +24,7 @@ Rollback remains trivial: switch `plugins.slots.memory` back to `memory-lancedb`
 Observed gap:
 
 - The official `memory-lancedb` plugin uses LanceDB mostly as a basic vector store (`vectorSearch`) and does not expose:
-  - full-text (BM25) search,
+  - full-text search (FTS; BM25 scoring),
   - hybrid fusion/rerank,
   - scope-aware metadata filtering + scalar indexes,
   - index lifecycle/optimize,
@@ -187,7 +187,7 @@ Notes:
    - choose policy defaults (limit, min score, recency window)
 
 2) **Hybrid retrieval**
-   - **FTS/BM25** path: exact-ish keyword matching for names/paths/ids
+   - **FTS (BM25-scored)** path: exact-ish keyword matching for names/paths/ids
    - **Vector** path: semantic similarity
    - Fuse results with a deterministic strategy (e.g., RRF), optionally rerank.
 

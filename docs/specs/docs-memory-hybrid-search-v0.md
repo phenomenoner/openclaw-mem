@@ -1,6 +1,11 @@
 # Docs memory (decisions/roadmaps/specs) — Hybrid search v0 (no local LLM)
 
-Goal: make operator-authored repo docs (especially **DECISIONS**, roadmaps, and specs) **reliably retrievable without prompt-hints**, using **hybrid retrieval** (FTS/BM25 + embeddings) and auditable receipts.
+Goal: make operator-authored repo docs (especially **DECISIONS**, roadmaps, and specs) **reliably retrievable without prompt-hints**, using **hybrid retrieval** (FTS, BM25-scored + embeddings) and auditable receipts.
+
+Terminology note:
+- **FTS** = full-text search (lexical / keyword retrieval).
+- **BM25** = a relevance scoring/ranking function commonly used *inside* FTS systems.
+- When we say "FTS/BM25" in this repo, we mean **FTS with BM25-style scoring**, not a separate engine.
 
 This spec is intentionally *LLM-minimal*: **no local query-expansion models** and no local rerank models. If reranking is needed later, we use a **remote API** over a bounded candidate set.
 
@@ -85,9 +90,10 @@ Keep a strict upper bound per chunk (so retrieval snippets stay safe).
 
 ## Retrieval pipeline (v0)
 
-### 1) Lexical retrieval (FTS/BM25)
+### 1) Lexical retrieval (FTS; BM25-scored)
 
-- `docs_search_fts(query, top_k)` → candidates with bm25 rank.
+- `docs_search_fts(query, top_k)` → lexical candidates, ranked by the FTS engine’s `_score` (often BM25-like).
+- Implementation detail (if using SQLite FTS5): ranking is typically BM25 via the built-in `bm25()` helper.
 
 ### 2) Vector retrieval (optional)
 
