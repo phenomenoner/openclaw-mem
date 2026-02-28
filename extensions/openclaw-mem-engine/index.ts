@@ -449,6 +449,9 @@ function shouldSkipAutoRecallPrompt(prompt: string, cfg: AutoRecallConfig): bool
     .replace(/\s+/g, " ")
     .trim();
 
+  // If the prompt is just decorations (emoji/punct/whitespace), treat it as trivial.
+  if (!cleaned) return true;
+
   if (cleaned.length <= cfg.trivialMinChars) {
     if (ACK_PATTERN.test(cleaned) || GREETING_PATTERN.test(cleaned)) return true;
   }

@@ -79,7 +79,9 @@ Key stance: **sidecar governs; engine serves**.
 - Hook: `before_agent_start`
 - Default: **on** (but gated by heuristics)
 - Behavior:
-  - skip trivial prompts (greetings/emojis/HEARTBEAT/slash commands)
+  - skip trivial prompts (greetings/ack/emojis/HEARTBEAT/slash commands)
+    - robust to trailing emoji/punctuation (e.g. `好的👌`, `ok👍`, `hi～`, `收到!!`)
+    - punctuation-only prompts also skip (e.g. `？`, `…`)
   - recall tiers: `must_remember` → `nice_to_have` → (optional) `unknown` fallback
   - cap: <=5 memories
   - escapes memory text to reduce prompt-injection risk

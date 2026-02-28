@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - (nothing yet)
 
+## [1.0.3] - 2026-02-28
+
+### Changed
+- `openclaw-mem-engine` autoRecall trivial-prompt gating is now more robust to *decorations*:
+  - acknowledgements / greetings with trailing emoji or punctuation now skip recall (e.g. `好的👌`, `ok👍`, `hi～`, `收到!!`).
+  - punctuation-only prompts now skip recall (e.g. `？`, `...`).
+
+### Docs
+- Clarified autoRecall trivial-prompt policy + examples in `docs/mem-engine.md`.
+- Updated roadmap status to reflect shipped mem-engine M1 and partial sunrise/writeback progress.
+
+### Testing
+- Added contract-style regression coverage for the trivial-prompt skip behavior.
+
 ## [1.0.2] - 2026-02-28
 
 ### Changed
