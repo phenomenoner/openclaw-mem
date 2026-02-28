@@ -14,7 +14,7 @@ See: [Mem Engine →](mem-engine.md).
 
 - **Always-fresh recall:** keep “what just happened?” searchable in minutes (or less).
 - **Cheap progressive recall:** `search → timeline → get` keeps most lookups local.
-- **Docs memory (decisions/specs):** treat your repos as a recall surface (hybrid: FTS + optional embeddings), so “we already decided this” is retrievable without hints.
+- **Docs memory (decisions/specs):** treat your repos as a recall surface (hybrid: lexical FTS (BM25-scored) + optional embeddings), so “we already decided this” is retrievable without hints.
 - **Auditability:** one SQLite ledger you can grep, backup, diff, and export.
 - **Safe boundaries:** default posture stays sidecar; slot ownership remains optional and rollbackable.
 
