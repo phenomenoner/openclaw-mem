@@ -85,8 +85,12 @@ def _is_task_like(text: str, kind: str) -> bool:
     tl = t.lower()
     if (kind or "").strip().lower() == "task":
         return True
-    if tl.startswith(("todo:", "task:", "reminder:")):
+
+    # Handle observations formatted as "tool: summary" and bare summaries.
+    summary_part = tl.split(":", 1)[-1].strip() if ":" in tl else tl
+    if re.match(r"^(todo|task|reminder)(?:[:：\s-]|$)", summary_part):
         return True
+
     if "要做" in t or "待辦" in t:
         return True
     return False

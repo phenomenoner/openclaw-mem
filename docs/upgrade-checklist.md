@@ -65,6 +65,12 @@ Think of each node as a “system test point”.
 - `/compact` still behaves; no duplicate replies.
 - cron delivery/wake behavior is stable (no duplicate notifications).
 
+**Receipt validity rule (operator policy):**
+- Node 5 receipts are valid for **7 days**, OR must be re-verified immediately after any:
+  - gateway/Telegram config change
+  - gateway restart
+  - observed duplicate/noisy deliveries
+
 ---
 
 ## Upgrade gates (when it’s “safe to upgrade”)
@@ -114,6 +120,18 @@ uv run python -m openclaw_mem triage \
   --state-path ~/.openclaw/memory/openclaw-mem/triage-state.json \
   --json
 ```
+
+Task extraction is deterministic and picks rows when either:
+- `kind == "task"`, or
+- `summary` starts with `TODO`, `TASK`, or `REMINDER` (case-insensitive; width-normalized via NFKC, so `ＴＯＤＯ`/`ＴＡＳＫ`/`ＲＥＭＩＮＤＥＲ` are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`), followed by:
+  - `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
+  - Example formats: `TODO`, `TODO: rotate runbook`, `【TODO】 rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`.
+  - Example run:
+
+    ```bash
+    uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
+    ```
+
 
 ### 3) Retrieval smoke test
 ```bash

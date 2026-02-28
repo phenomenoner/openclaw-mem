@@ -20,6 +20,21 @@ How we apply this:
 - Slow-cook playbooks keep stable templates (`PROJECT/STATUS/DECISIONS` + digest template).
 - `openclaw-mem` stores a stable, auditable record in SQLite rather than re-sending everything each turn.
 
+## 1.5) Structured bundles (hybrid text + JSON) beat prose for “relevant state”
+When the agent needs to reliably *use* facts/constraints (not just read a story), structured key/value blocks reduce ambiguity and speed up “where is the thing?” scanning.
+
+Practical rules:
+- Prefer a **hybrid**: a short natural-language preface + a shallow JSON object.
+- Keep JSON **shallow** (flat objects + arrays); deep nesting wastes tokens and becomes brittle.
+- Serialize deterministically (stable key ordering/formatting) to preserve cache behavior and enable diff/bench comparisons.
+- Every packed item must carry a stable provenance key (e.g., `recordRef`).
+
+How we apply this:
+- `openclaw-mem pack` already emits structured JSON (`items[]`, `citations[]`) and can emit a redaction-safe trace receipt.
+- Roadmap direction: formalize a `ContextPack.v1` schema so structure remains stable and injection-friendly.
+
+See: `docs/context-pack.md`.
+
 ## 2) Mask, don’t remove (avoid dynamic tool sets)
 Dynamically adding/removing tool definitions mid-loop can:
 - break prefix stability (cache hit rate drops)

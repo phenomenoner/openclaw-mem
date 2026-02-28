@@ -1,6 +1,10 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
 [project]
 name = "openclaw-mem"
-version = "1.0.1"
+version = "1.0.2"
 description = "CLI-first memory store + search prototype for OpenClaw"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -9,6 +13,9 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "License :: OSI Approved :: Apache Software License",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["openclaw_mem"]
 
 [project.optional-dependencies]
 # Build the (free) GitHub Pages documentation site locally or in CI.

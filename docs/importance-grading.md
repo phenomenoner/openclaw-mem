@@ -52,6 +52,9 @@ By default, do **not** drop/filter ungraded items unless a caller explicitly req
 - legacy numeric: `importance: 0.86`
 - canonical object: `importance: {"score": 0.86, ...}`
 
+Additional best-effort compatibility in parsers:
+- numeric-string score forms are accepted (`{"score": "0.86"}`), including NFKC width-normalized digits (`{"score": "０.８６"}`).
+
 See `openclaw_mem.importance.parse_importance_score()`.
 
 ## Writing importance
@@ -94,6 +97,8 @@ You can optionally have `ingest` / `harvest` run `heuristic-v1` and write `detai
 - Enable via env var:
   - `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1`
 - Or override per-run:
+
+  - CLI override takes precedence over env var for the same run (for one-off dry-run behavior, use `--importance-scorer off`).
   - `--importance-scorer {heuristic-v1|off}`
 
 Notes:
@@ -138,3 +143,37 @@ Example JSON output:
   }
 }
 ```
+
+### Minimal run summary contract (v0)
+
+To keep scheduled receipts deterministic and redaction-safe, treat `ingest`/`harvest` JSON output as an aggregate-only contract.
+
+Recommended text form (for logs/channels):
+
+```text
+harvest-receipt: total_seen=<int>, graded_filled=<int>, skipped_existing=<int>, skipped_disabled=<int>, scorer_errors=<int>, labels=<json>, optional_embedded=<int>
+```
+
+Recommended JSON skeleton (subset that should remain stable):
+
+```json
+{
+  "total_seen": 0,
+  "graded_filled": 0,
+  "skipped_existing": 0,
+  "skipped_disabled": 0,
+  "scorer_errors": 0,
+  "label_counts": {
+    "must_remember": 0,
+    "nice_to_have": 0,
+    "ignore": 0,
+    "unknown": 0
+  }
+}
+```
+
+Keep receipts to counts/ratios only:
+- no raw observation content
+- no full file paths (prefer labels like `source=harvest-dir` when sharing)
+- no raw payload snippets or user traces
+

@@ -6,6 +6,13 @@ Sources (trusted by CK):
 - Mastra — *Announcing Observational Memory*: <https://mastra.ai/blog/observational-memory>
 - LongMemEval (ICLR 2025): <https://github.com/xiaowu0162/LongMemEval>
 
+Additional trusted references (for lifecycle/decay):
+- Cepeda et al. (2006) — *Distributed Practice in Verbal Recall Tasks: A Review and Quantitative Synthesis* (Psychological Bulletin)
+  - <https://doi.org/10.1037/0033-2909.132.3.354>
+- Megiddo & Modha (2003) — *ARC: A Self-Tuning, Low Overhead Replacement Cache*
+  - <https://www.usenix.org/legacy/publications/library/proceedings/fast03/tech/full_papers/megiddo/megiddo.pdf>
+  (Used as an engineering analogy: retention should be driven by **recency + frequency**, not timestamps alone.)
+
 ## 1) Observational Memory → design constraints we adopt
 
 **What we take (pattern, not branding):**
@@ -75,74 +82,163 @@ Source (external, medium trust; small repo, concept clear):
 - Add an explicit injected-context marker + ignore-list in capture/harvest.
 - Add an optional FTS5 lexical fallback lane for `--no-embed` runs.
 
-## 6) Zvec (Alibaba Proxima) → embedded vector engine candidate (future watch)
+## 6) QMD (hybrid local search engine) → retrieval router + benchmark hooks
 
-Source (external, medium trust):
-- `alibaba/zvec`: <https://github.com/alibaba/zvec>
+Source (external; high concept clarity):
+- `tobi/qmd`: <https://github.com/tobi/qmd>
 
-**Why it’s interesting:**
-- **In-process vector DB** (no separate server) matches our local-first, owner-operated bias.
-- Mentions **dense + sparse + hybrid search + filters**, which lines up with our “hybrid retrieval” direction.
-- Apache-2.0.
+**What it is (in one line):**
+A local “docs-first” search engine for markdown/transcripts that does **FTS5/BM25 + vector + (optional) query expansion + LLM reranking**, with agent-friendly `--json/--files` outputs and an MCP surface.
 
-**Caveats / why it’s not an immediate dependency:**
-- Python support is advertised as **3.10–3.12**; our stack is moving on **Python 3.13 + uv**, so we’d need either a compatibility plan or isolate it behind an adapter.
-- Platform/packaging constraints likely matter more than raw speed for our use.
+**How it relates to us:**
+- As a retrieval backend, QMD is best seen as an **alternative** to a pure vector store like `memory-lancedb`.
+- As a system component, it can be a **supplement** to `openclaw-mem` (we still need capture/governance/receipts/importance; QMD doesn’t replace that).
 
-**How we might use it later (if at all):**
-- As an optional backend behind a stable adapter interface (so swapping engines is cheap).
-- As a performance baseline to compare against LanceDB/FAISS/etc. in `openclaw-memory-bench`.
+**What we take (replicable modules):**
+- **Hybrid candidate generation**: lexical anchors first (FTS/BM25), then semantic recall.
+- **Fusion**: RRF-style merging is a pragmatic default.
+- **Budgeting**: keep a small candidate set (top-N) before reranking.
+- **Agent I/O contract**: stable JSON/file outputs + multi-get for “fetch the actual evidence”.
 
-## 7) “Skill as a book” (progressive disclosure) → pilot surface: Diary/Meeting Refinery
+**Quality-first hybrid design we adopt (for openclaw-mem + memory backends):**
+- Stage 1: QMD/FTS5 for exact anchors (names, APIs, error strings, dates)
+- Stage 2: LanceDB vector search for paraphrase recall
+- Stage 3: rerank **only when needed** (ambiguity/close scores) + cap budgets (`must` first, then `nice` with a cap)
 
-Source (external, high-level idea): CabLate Agent Skill talk notes (skills as 3 layers).
+**Benchmarking hooks (where this lands):**
+- `openclaw-memory-bench`: add a QMD adapter and a “hybrid router” arm so we can compare:
+  - QMD-only vs LanceDB-only vs Hybrid (QMD→LanceDB fallback)
+  - metrics: hit/recall + p95 latency + must-coverage gate
 
-**What we take:**
-- Skills should be designed as **progressive disclosure**:
-  1) router metadata (name/description)
-  2) workflow body (principles + stable steps)
-  3) appendices/tools (scripts/templates)
-- This keeps the **default context lean**, while allowing deterministic reliability via scripts when needed.
+**What to watch (risks):**
+- Local GGUF model downloads + rerank latency can be heavy; quality-first is fine, but we need hard caps and a clear “disable rerank” path.
+- “Docs-first” indexing is great for markdown, but we must ensure redaction-safe exports when sourcing from private session transcripts.
 
-**Where this lands (current pilot):**
-- Decision: `lyria-working-ledger/DECISIONS/2026-02-18.md`
-- Pilot contract: `openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-02-18_refinery_pilot_diary_meeting_extraction.md`
+## 7) OpenViking (context database / filesystem paradigm) → observability + layered loading reference
 
-**Why we pilot on diary/meeting notes:** high value density (decisions/people/money/tasks), stable schema, and measurable noise reduction without risky always-on capture.
+Source (external; concept clarity high):
+- `volcengine/OpenViking`: <https://github.com/volcengine/OpenViking>
 
-## 8) memory-lancedb-pro → hybrid retrieval “kitchen sink” (feature scout)
+**What it is (in one line):**
+A “context database” for agents that models **resources + memory + skills** as a **virtual filesystem** (URI + directories), with **layered context loading (L0/L1/L2)** and **observable retrieval trajectories**.
 
-Source (external, medium trust; not audited):
-- `win4r/memory-lancedb-pro`: <https://github.com/win4r/memory-lancedb-pro>
+**What we take (design patterns, not adoption commitment):**
+- **Filesystem-as-context mental model**: context should be *browsable and targetable* (by scope/path), not just a flat embedding blob.
+- **Layer contract (L0/L1/L2)**:
+  - L0: ultra-short abstract for fast filtering
+  - L1: overview + navigation ("how to get details")
+  - L2: original detail, loaded only when necessary
+- **Retrieval observability**: a first-class “trajectory/trace” for *why* something was retrieved (debuggable receipts).
+- **Typed lanes**: distinguishing **Resource / Memory / Skill** as separate context types aligns with our governance goals.
 
-### What it is (in one line)
-A drop-in replacement for OpenClaw’s built-in `memory-lancedb` that adds **BM25 FTS + hybrid fusion + cross-encoder rerank + multi-scope isolation + management CLI**.
+**How it relates to openclaw-mem:**
+- `openclaw-mem` remains the **governance/control-plane** (importance, trust tiers, redaction, receipts, packing policy).
+- OpenViking is a strong reference for how to make context **structured, layered, and observable**.
 
-### Wedge / positioning (what it optimizes for)
-- **Retrieval quality + ops tooling** inside a single memory plugin.
-- It’s deliberately “feature-rich memory backend”, not a sidecar governance layer.
+**Scope note (CK decision):**
+- Treat OpenViking as **thought-link only** for now (we are not committing to it as a backend/adapter arm yet).
 
-### Killer demo flow (we can steal)
-1) Store a few similar memories (some noisy, some important).
-2) Show **vector-only** misses keyword-ish queries (names/paths/ids).
-3) Turn on **hybrid (vector+BM25)** → results immediately improve.
-4) Turn on **rerank + recency + MMR** → top-3 becomes cleaner, less duplicate.
-5) Show `memory stats` / `export` / `reembed` as an operator loop.
+## 8) Reference-based decay ("forgetting curve") → lifecycle governance hook
 
-### Before/after metrics we can actually claim (today)
-- The repo itself mostly lists features; it doesn’t ship a reproducible benchmark we can cite as “proved”.
-- For us: translate this into a **golden set + hit@k + wrong-scope rate + latency** (already in our mem-engine acceptance criteria).
+Key takeaway:
+- Retention should be governed by **use** (recency/frequency), not a fixed “delete after N days since write” rule.
 
-### Packaging / distribution notes (practical ops)
-- NPM-style plugin w/ Node deps (`@lancedb/lancedb`, `@sinclair/typebox`, OpenAI-compatible embedding endpoints).
-- Heavy use of env vars for keys; service processes can miss env → needs explicit config discipline.
+How this maps to openclaw-mem:
+- Track `last_used_at` (ref) for durable records.
+- Update ref only when a record is **actually used** (default: included in the final `pack` bundle with a citation), not when it’s merely preloaded.
+- Apply **archive-first** lifecycle management (soft delete) so mistakes are reversible.
 
-### Engineering takeaways (actionable for openclaw-mem)
-1) **Rerank must be optional + fail-open** (timeout + fallback to fused score).
-2) **Adaptive retrieval + noise filter** matter as much as better scoring (skip greetings/acks; filter low-quality capture/store).
-3) **Scope is the real guardrail**: multi-scope isolation + per-agent access control prevents “wrong-project” recall even when similarity is high.
+Trusted references:
+- Cepeda et al. (2006) distributed practice / spaced repetition: <https://doi.org/10.1037/0033-2909.132.3.354>
+- ARC cache replacement (engineering analogy: recency+frequency beats timestamps): <https://www.usenix.org/legacy/publications/library/proceedings/fast03/tech/full_papers/megiddo/megiddo.pdf>
 
-### How we fold this into *our* design (without becoming a black box)
-- Put scoring layers (hybrid → RRF → optional rerank/MMR/recency) in **`openclaw-mem-engine`**, with receipts for each stage.
-- Keep governance (trust tiers/provenance/citations + promotion policy) in **`openclaw-mem` sidecar**.
-- Treat every “smart” feature as a **toggleable policy** with deterministic receipts.
+Untrusted inspiration (idea source; treat as a field note):
+- X thread (xiyu): <https://x.com/ohxiyu/status/2022924956594806821>
+
+## 9) MCP Tool Search (Claude Code) → dynamic discovery + “Skill Card / Manual” split
+
+Source (external; concept clarity high):
+- 好豪：*MCP Tool Search：Claude Code 如何終結 Token 消耗大爆炸* <https://haosquare.com/mcp-tool-search-claude-code/>
+
+**Core idea (portable pattern):**
+- Don’t preload the whole “tool dictionary” (all schemas) into context.
+- Keep a **small always-on core set**.
+- Everything else is **discover → inspect → execute** (search first; load details only when needed).
+
+**Why it matters to openclaw-mem (and our workflow design):**
+- SOP/skills behave like *tools*: when the library grows, “stuff all SOPs into prompt” becomes a self-inflicted context bomb.
+- This complements our layered-loading references (e.g., OpenViking L0/L1/L2):
+  - **Skill Card = L0/L1** (tiny, searchable): when to use, outputs, risks, keywords.
+  - **Skill Manual/Templates = L2** (heavy, deferred): step-by-step SOP, checklists, examples.
+
+**Actionable roadmap hooks (candidates):**
+- Add a **lexical index lane** (FTS5/BM25) for *skill cards / SOP cards* so agents can search first and only load the manual they need.
+- Add a minimal “skill discovery” contract:
+  - naming conventions (regex-friendly)
+  - `keywords`/`anti-keywords`
+  - explicit `outputs` + receipt rules
+- Provide a small helper surface (CLI or adapter) that returns top-N card matches as JSON, then fetches the chosen manual on demand.
+
+## 10) Trait / interface-first (systems kernel mindset) → contracts over vibes
+
+Source (external; concept clarity high):
+- `theonlyhennygod/zeroclaw`: <https://github.com/theonlyhennygod/zeroclaw>
+
+**What we take (portable pattern):**
+- Treat core subsystems (provider/channel/memory/tools) as **interfaces** with explicit contracts.
+- Prefer **fail-fast** validation for configs and outputs (surface misconfig early).
+- Keep operator surfaces **machine-readable** (stable JSON) so cron/receipts don’t depend on prompt parsing.
+
+**How this maps to openclaw-mem:**
+- “Memory governance” is our control-plane; backends remain swappable behind adapters.
+- Roadmap candidates: strict config (`additionalProperties:false`), stable JSON schemas for receipts, and a `profile`/stats surface.
+
+## 11) PAI (continuous learning + self-upgrade loop) → "learning records" as a first-class memory type
+
+Source (external; concept clarity high):
+- Daniel Miessler — *Personal AI Infrastructure (PAI)*: <https://github.com/danielmiessler/Personal_AI_Infrastructure>
+  - v3.0 notes (self-upgrade loop, constraint extraction, drift prevention):
+    <https://raw.githubusercontent.com/danielmiessler/Personal_AI_Infrastructure/main/Releases/v3.0/README.md>
+
+**What we take (portable patterns, not code):**
+- **Structured reflections** (not just free-form notes): mistakes → fixes → recurring themes.
+- **Mining the loop outputs**: cluster repeated failure modes and turn them into targeted upgrades.
+- **Constraint extraction + drift prevention**: treat “rules” as extractable artifacts and re-check them before/after producing outputs.
+
+**How we go beyond it (openclaw-mem flavor):**
+- **Governance-first**: every learning record gets provenance + trust tier + redaction rules by default.
+- **Importance-aware learnings**: learning records can be auto-labeled (`must_remember`/`nice_to_have`/`ignore`) using our importance pipeline.
+- **Receipts**: the learning loop must emit aggregate, diffable receipts (counts, top recurring error patterns, and what changed).
+
+**Concrete integration plan (scope-safe):**
+- Keep runtime hooks/handlers (e.g. `.learnings/` writing) *outside* openclaw-mem core.
+- Add a **learning-record ingestion + query surface** inside openclaw-mem:
+  - ingest `.learnings/{LEARNINGS,ERRORS,FEATURE_REQUESTS}.md` (or JSONL) into the warm SQLite ledger
+  - make them searchable + packable with citations
+
+**Risk to watch (and mitigation):**
+- Infinite self-ingest loops (context blocks re-captured as learnings).
+  - Mitigate with explicit injected-context markers + ignore-lists (see SuperMemory takeaways above).
+
+## 12) Lossless Context Management (LCM) / lossless-claw → fresh-tail protection + provenance + “expand” tooling reference
+
+Source (external; concept clarity high):
+- `martian-engineering/lossless-claw`: <https://github.com/martian-engineering/lossless-claw>
+- LCM paper: <https://voltropy.com/LCM>
+
+**What it is (in one line):**
+A pluggable context engine for OpenClaw that stores all session messages in SQLite, compacts via a **summary DAG**, and provides tools to **grep/describe/expand** compacted history.
+
+**What we take (portable patterns):**
+- **Protected “fresh tail”**: always keep the last N raw messages un-compacted for continuity.
+- **Evictable prefix**: fill remaining budget with older summaries; drop oldest first.
+- **Provenance by construction**: summaries link back to source messages; expansion is possible.
+- **Ops safety belts**: best-effort compaction with deterministic fallback so the loop doesn’t stall.
+
+**How it maps to openclaw-mem (without adopting an engine fork):**
+- Our **Context Packer** can adopt the same *assembly policy* (fresh tail + evictable prefix) even if we don’t own compaction.
+- We should treat a pack as a **hybrid text + JSON object** (stable anchors) with explicit provenance (`recordRef`) and trace receipts.
+
+See also:
+- `docs/context-pack.md` (ContextPack v1 direction)
+- `docs/architecture.md` (Context Packer)

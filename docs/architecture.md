@@ -67,7 +67,28 @@ OpenClaw tool results
   - else ignore
 - Unset/legacy importance is treated as **unknown** (do not auto-filter by default).
 
-### 4) Context Packer — **ROADMAP**
+### 4) Lifecycle manager (retain / decay / archive / revive) — **ROADMAP**
+
+Goal: keep memory **high-signal** over long horizons via *use-based* retention.
+
+Core mechanism:
+- Each durable record maintains a **reference timestamp** (`last_used_at`) updated only when the record is **actually used**.
+- Default “used” signal (cheap + auditable): the record is selected into the final Context Packer bundle (cited as `recordRef`).
+- A scheduled lifecycle job applies **soft archive** (reversible) instead of hard delete.
+
+Design notes:
+- Do **not** count bulk preload as “use” (otherwise everything stays forever).
+- Consider tracking two signals later:
+  - `last_retrieved_at` (candidate hit)
+  - `last_included_at` (final bundle inclusion; default)
+- Decay policy should be tiered (example): `P0` never auto-archive, `P1` 90d, `P2` 30d — but thresholds are tunable.
+- Trust is independent: frequent use does **not** promote `untrusted → trusted`.
+
+Receipts:
+- `pack --trace` should report which records were “refreshed” this run.
+- Lifecycle job should emit an aggregate-only summary (archived counts by tier/trust/importance + reasons).
+
+### 5) Context Packer — **ROADMAP**
 
 Problem: multi-project operation tends to send **too much irrelevant context** to the LLM.
 
@@ -88,8 +109,44 @@ Proposed output (to the LLM):
 - up to N short summaries (not raw logs)
 - 1–3 citations (record IDs / URLs), **no private paths**
 
+Preferred encoding (hybrid):
+- **bundle_text** for direct injection (human/LLM readable)
+- a shallow **ContextPack JSON** object for deterministic anchors (keys/arrays, provenance)
+
+See: [Context packing (ContextPack) →](context-pack.md)
+
+### Layered context contract (L0/L1/L2) — design hook
+
+Borrow the *pattern* (not the implementation) of layered loading:
+
+- **L0 (abstract)**: 1 line, cheap filtering ("what is this?")
+- **L1 (overview)**: short summary + navigation hints ("what’s inside + where to look next")
+- **L2 (detail)**: raw record / full tool output / original artifact
+
+The packer should prefer:
+1) retrieve/filter by L0/L1,
+2) include mostly L1 in the bundle,
+3) only pull L2 when strictly necessary (and still bounded + redaction-safe).
+
+This keeps bundles small, reduces token noise, and makes results easier to debug.
+
+Fresh-tail protection (design hook):
+- Keep a small protected tail of the most recent raw turns (continuity).
+- Treat older packed items/summaries as an evictable prefix under strict budgets.
+- This assembly policy is inspired by LCM-style context engines, but can be applied even when `openclaw-mem` stays a sidecar.
+
+### Retrieval trajectory receipts (trace) — non-negotiable for ops
+
+Packing must be observable. Every `pack` run should be able to emit a trace that answers:
+- what lanes were searched (hot/warm/cold; and "resources/memory/skills" when applicable)
+- which candidates were considered
+- why each item was **included/excluded** (importance, trust tier, score, cap, recency, scope)
+
 Proposed interface (draft):
-- `openclaw-mem pack --query "..." --budget-tokens <n> --json`
+- `openclaw-mem pack --query "..." --budget-tokens <n> --json --trace`
+  - `--json` returns the bundle
+  - `--trace` returns a machine-readable receipt for audits/debugging (redaction-safe; no raw content)
+  - Receipt should include per-candidate include/exclude rationale and a stable `recordRef` (e.g. `obs:123`) citation trail.
 
 #### Observational-memory mode (derived, cache-friendly)
 
@@ -106,7 +163,7 @@ See also: [Thought-links →](thought-links.md)
 
 This module is the bridge between “memory governance” and “prompt cleanliness”.
 
-### 5) Graph semantic memory — **ROADMAP**
+### 6) Graph semantic memory — **ROADMAP**
 
 Goal: support **idea → project matching** and path-justified recommendations.
 

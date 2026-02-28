@@ -352,7 +352,7 @@ wheels = [
 [[package]]
 name = "openclaw-mem"
 version = "1.0.1"
-source = { virtual = "." }
+source = { editable = "." }
 
 [package.optional-dependencies]
 docs = [

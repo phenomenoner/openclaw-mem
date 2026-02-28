@@ -60,12 +60,23 @@ def rank_cosine(
         return []
 
     scored: List[Tuple[int, float]] = []
+    q_dim = len(q)
     for obs_id, blob, norm in items:
         if not blob or not norm:
             continue
         if norm == 0.0:
             continue
-        v = unpack_f32(blob)
+
+        try:
+            v = unpack_f32(blob)
+        except Exception:
+            # Skip malformed blobs instead of failing vector retrieval.
+            continue
+
+        if len(v) != q_dim:
+            # Skip stale/mismatched embeddings to prevent invalid comparisons.
+            continue
+
         s = dot(q, v) / (qn * norm)
         scored.append((obs_id, float(s)))
 

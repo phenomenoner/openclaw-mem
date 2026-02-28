@@ -1,0 +1,146 @@
+{
+  "id": "openclaw-mem-engine",
+  "name": "OpenClaw Mem Engine",
+  "description": "Optional memory slot backend (LanceDB + OpenAI embeddings)",
+  "kind": "memory",
+  "version": "0.0.1",
+  "uiHints": {
+    "embedding.apiKey": {
+      "label": "OpenAI API Key",
+      "sensitive": true,
+      "placeholder": "sk-proj-...",
+      "help": "API key for OpenAI embeddings (or use ${OPENAI_API_KEY})"
+    },
+    "embedding.model": {
+      "label": "Embedding Model",
+      "placeholder": "text-embedding-3-small",
+      "help": "OpenAI embedding model to use"
+    },
+    "dbPath": {
+      "label": "Database Path",
+      "placeholder": "~/.openclaw/memory/lancedb",
+      "advanced": true
+    },
+    "autoRecall.enabled": {
+      "label": "Auto Recall",
+      "help": "Inject a bounded, sanitized memory context before agent start"
+    },
+    "autoCapture.enabled": {
+      "label": "Auto Capture",
+      "help": "Capture strict user-origin preference/decision memories on agent end"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "embedding": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "apiKey": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "text-embedding-3-small",
+              "text-embedding-3-large"
+            ],
+            "default": "text-embedding-3-small"
+          }
+        }
+      },
+      "dbPath": {
+        "type": "string",
+        "default": "~/.openclaw/memory/lancedb"
+      },
+      "tableName": {
+        "type": "string",
+        "default": "memories"
+      },
+      "autoRecall": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "maxItems": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 4
+          },
+          "skipTrivialPrompts": {
+            "type": "boolean",
+            "default": true
+          },
+          "trivialMinChars": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 40,
+            "default": 8
+          },
+          "includeUnknownFallback": {
+            "type": "boolean",
+            "default": true
+          },
+          "tierSearchMultiplier": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "default": 2
+          }
+        }
+      },
+      "autoCapture": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "maxItemsPerTurn": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3,
+            "default": 2
+          },
+          "maxCharsPerItem": {
+            "type": "integer",
+            "minimum": 40,
+            "maximum": 320,
+            "default": 240
+          },
+          "capturePreference": {
+            "type": "boolean",
+            "default": true
+          },
+          "captureDecision": {
+            "type": "boolean",
+            "default": true
+          },
+          "captureTodo": {
+            "type": "boolean",
+            "default": false
+          },
+          "dedupeSimilarityThreshold": {
+            "type": "number",
+            "minimum": 0.7,
+            "maximum": 0.99,
+            "default": 0.92
+          },
+          "duplicateSearchMinScore": {
+            "type": "number",
+            "minimum": 0.8,
+            "maximum": 0.999,
+            "default": 0.94
+          }
+        }
+      }
+    }
+  }
+}

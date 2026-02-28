@@ -10,8 +10,9 @@
 
 `openclaw-mem-engine` becomes an optional **slot owner** (replaces `memory-lancedb` when enabled) so we can:
 
-- do **hybrid recall** (FTS/BM25 + vector) with **scopes & metadata filters**,
+- do **hybrid recall** (FTS + vector) with **scopes & metadata filters**,
 - make recall behavior **auditable + tunable** (receipts, knobs, policies),
+- add **safe M1 automation**: conservative `autoRecall` + strict `autoCapture` (configurable),
 - and actually exploit LanceDB features that the official `memory-lancedb` backend doesn’t surface.
 
 Rollback remains trivial: switch `plugins.slots.memory` back to `memory-lancedb` or `memory-core`.
@@ -62,6 +63,32 @@ Owned by `openclaw-mem-engine`:
 - uses LanceDB as the online store for fast retrieval & hybrid search.
 
 Key stance: **sidecar governs; engine serves**.
+
+---
+
+## M1 automation (what is safe to ship now)
+
+### autoRecall (conservative)
+- Hook: `before_agent_start`
+- Default: **on** (but gated by heuristics)
+- Behavior:
+  - skip trivial prompts (greetings/emojis/HEARTBEAT/slash commands)
+  - recall tiers: `must_remember` → `nice_to_have` → (optional) `unknown` fallback
+  - cap: <=5 memories
+  - escapes memory text to reduce prompt-injection risk
+
+### autoCapture (strict)
+- Hook: `agent_end`
+- Default: **on** (but strict allowlist)
+- Behavior:
+  - capture only a small number of items (1–3 per turn)
+  - default categories: `preference`, `decision`
+  - skip tool outputs; prefer user text; skip secrets-like strings
+  - dedupe near-identical items
+
+### Rollback
+One line:
+- set `plugins.slots.memory` back to `memory-lancedb` (or `memory-core`) and restart gateway.
 
 ---
 
@@ -145,13 +172,14 @@ Notes:
 
 3) **Metadata filtering** (before or during query)
    - `scope` filter (most important)
-   - `importance_label` filter (e.g., prefer must/nice)
+   - `importance_label` filter (default policy): prefer `must_remember + nice_to_have`, then fallback to `unknown`, then `ignore` if still empty.
    - recency bias (soft)
    - trust gating (prefer trusted; allow untrusted when recall would be empty)
 
 4) **Return**
    - bounded list (K)
    - include lightweight explanations: score components + why it passed filters
+   - return **structured JSON objects** with stable ids + governance metadata so a packer can wrap results into an injection-ready ContextPack (see `docs/context-pack.md`)
 
 ### Why hybrid is MVP-critical
 
@@ -164,6 +192,15 @@ Notes:
 
 Hybrid is the minimum that makes “concept→decisions/preferences” feel reliable.
 
+### Docs memory (decisions/roadmaps/specs) as a cold lane
+
+Operators feel recall failure most painfully on: “we already decided this.”
+
+So the engine path should be able to **optionally** search an operator-authored docs corpus (DECISIONS / roadmaps / specs) using the same hybrid recipe (FTS + embeddings) and return bounded citations.
+
+- Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
+- Stance: **no local LLM**; rerank (if needed) is remote + bounded.
+
 ---
 
 ## Write path + governance writeback
@@ -173,15 +210,41 @@ Hybrid is the minimum that makes “concept→decisions/preferences” feel reli
 - Engine writes the primary record to LanceDB.
 - Sidecar may later write back computed governance fields:
   - `importance` / `importance_label`
+  - `scope`
   - `trust_tier`
+  - `category`
   - additional provenance
+- Command used for writeback: `openclaw-mem writeback-lancedb --db <sqlite> --lancedb <path> --table <name> [--limit N] [--batch N] [--dry-run] [--force] [--force-fields <fields>]`
+  - `--force`/`--overwrite` (default off): allow overwriting existing values when incoming values are present.
+  - `--force-fields` (comma-separated): restrict overwrite to selected fields (default safe subset: `importance,importance_label,scope,category`; `trust_tier` must be explicit).
+- Writeback receipts should report: `forceOverwrite`, `forceFields`, `updated`, `skipped`, `overwritten`, `overwrittenFields`, and missing IDs.
 
 ### Importance grading integration
 
 - The **heuristic-v1** scorer (and later scorers) live in the sidecar.
-- Engine uses the graded fields for filtering defaults.
+- `memory_recall` defaults to must+nice (`must_remember` + `nice_to_have`), then fail-open includes `unknown`, then `ignore`.
+- Engine uses graded fields for filtering defaults and includes `policyTier` in recall receipts.
 
 ---
+
+## Sunrise rollout (slow-cook lane + cron “日出條款”)
+
+We roll this out in **three stages** to keep the system safe and rollbackable.
+
+- **Stage A (background, 0-risk)**: keep `plugins.slots.memory` on `memory-lancedb`.
+  - Run periodic **writeback** from sidecar SQLite → LanceDB (metadata governance).
+  - Silent-on-success; only notify on anomalies (errors/missing IDs).
+
+- **Stage B (canary, short window)**: off-peak *temporary* slot switch.
+  - Backup config → switch slot to `openclaw-mem-engine` → run a small golden-set recall check → rollback.
+  - Goal: prove `policyTier` + `ftsTop/vecTop` behave as expected under real traffic.
+
+- **Stage C (live)**: switch default slot to `openclaw-mem-engine`.
+  - Keep an auto-downgrade path (switch back to `memory-lancedb`) if recall error-rate/latency spikes.
+
+Recommended cron alignment (Asia/Taipei):
+- Importance grading slow-cook runs `0 */4 * * *`.
+- Stage A writeback runs at **`20 */4 * * *`** (20 minutes after) to avoid overlap.
 
 ## Indexing & performance (making LanceDB “actually fast”)
 
@@ -215,6 +278,7 @@ Deliverables:
   - `memory_recall(query, limit?, scope?, …)`
   - `memory_forget(id)`
 - JSON receipts for every tool call (at least: counts, filters applied, latency ms)
+- `memory_recall` receipts now include compact `ftsTop` / `vecTop` arrays (top candidate hits from each channel before fusion) for audit/debugging.
 
 Definition of done:
 
@@ -246,60 +310,20 @@ Definition of done:
 - For a golden set of “concept→decision/preference” queries, hybrid beats vector-only baseline.
 - Query results show scope & importance in the returned payload (auditable).
 
-### M1.5 — Retrieval quality layer (optional, fail-open)
+### M1.5 — Sidecar writeback + policy-tiered recall defaults
 
-Goal: raise precision on long/ambiguous queries **without** making ops brittle.
-
-Inspiration (external): `win4r/memory-lancedb-pro`.
+Goal: close the loop between graded SQLite ledger artifacts and runtime recall behavior.
 
 Deliverables:
 
-- Optional **cross-encoder rerank** (e.g., Jina or any OpenAI-compatible rerank endpoint)
-  - strict timeout (e.g., 3–5s)
-  - **fail-open** fallback: keep fused order if reranker fails
-- Optional scoring refinements (cheap, deterministic):
-  - recency boost / time decay
-  - length normalization (avoid long entries dominating)
-  - hard minimum score threshold
-- Optional **diversity** (MMR-style) to reduce near-duplicate hits
-- Optional **adaptive retrieval** heuristic (skip memory lookup for greetings/acks/emoji; force for “remember/previously/decision” intents)
-- Receipts:
-  - show which stages ran (fts/vector/fuse/rerank/diversify)
-  - include rerank provider + fallback reason when applicable
-
-Definition of done:
-
-- Every optional layer is gated by config and can be turned off with a single change.
-- With all optional layers OFF, M1 behavior remains unchanged.
-- With layers ON, golden-set precision improves measurably (and latency stays within a defined budget).
-
-### M1.6 — Lifecycle hooks + management surface (optional)
-
-Goal: match the “it just works” feel of a full memory backend **without** collapsing our split (sidecar governs; engine serves).
-
-Inspiration (external): `win4r/memory-lancedb-pro`.
-
-Deliverables:
-
-- **Auto-recall hook** (`before_agent_start`):
-  - run retrieval only when `adaptive_retrieval` says it’s worth it
-  - inject a bounded block (top-K) with an explicit marker (so capture can ignore it)
-  - include lightweight receipts (count + scope/trust filters)
-- **Auto-capture hook** (if we add it at all):
-  - default OFF; must be deduped + fail-open
-  - recommended posture: keep durable capture in the sidecar; engine hook only forwards *candidates*
-- **Management CLI / tools** (operator loop):
-  - `memory_stats` (counts, label dist, scopes, recent)
-  - `memory_list` (paged)
-  - `export/import` (JSONL)
-  - `reembed` (batch) with receipts + rate limits
-  - `migrate` helpers (from built-in `memory-lancedb` table)
-
-Definition of done:
-
-- Hooks are **toggleable** and safe-by-default (OFF unless explicitly enabled).
-- Injected context is clearly marked and can be excluded from capture (anti-echo).
-- Management operations emit trend-friendly receipts and never dump secrets.
+- Sidecar command for bounded, dry-run safe metadata writeback into LanceDB:
+  - `openclaw-mem writeback-lancedb --db <sqlite> --lancedb <path> --table <name> [--limit N] [--batch N] [--dry-run] [--force] [--force-fields <fields>]`
+  - fields: `importance`, `importance_label`, `scope`, `trust_tier` (if available), `category`
+- `memory_recall` default policy sequence:
+  1. `must_remember + nice_to_have`
+  2. fallback `unknown`
+  3. fallback `ignore`
+- Recall receipts include which policy tier was selected (e.g., `must+nice`, `must+nice+unknown`, `must+nice+unknown+ignore`).
 
 ### M2 — Ops hardening (index lifecycle + optimize + drift)
 
