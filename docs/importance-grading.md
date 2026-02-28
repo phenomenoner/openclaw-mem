@@ -97,6 +97,8 @@ You can optionally have `ingest` / `harvest` run `heuristic-v1` and write `detai
 - Enable via env var:
   - `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1`
 - Or override per-run:
+
+  - CLI override takes precedence over env var for the same run (for one-off dry-run behavior, use `--importance-scorer off`).
   - `--importance-scorer {heuristic-v1|off}`
 
 Notes:
