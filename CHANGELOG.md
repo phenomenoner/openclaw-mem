@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- (nothing yet)
+### Changed
+- `triage --mode tasks` bracket-wrapped task markers now also accept Japanese corner-quote forms (`「TODO」 ...`, `『TASK』 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
+
+### Docs
+- Extended task-marker docs/examples in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md` to include Japanese corner-quote marker forms and compact examples.
+
+### Testing
+- Added regression coverage for Japanese corner-quote task markers in parser-level and triage task flows.
 
 ## [1.0.3] - 2026-02-28
 
