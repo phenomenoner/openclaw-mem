@@ -3453,7 +3453,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             try:
                 client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
                 model = args.model
-                limit = 500
+                limit = max(1, int(getattr(args, "embed_limit", 1000)))
                 batch = 64
                 now = _utcnow_iso()
 
@@ -6017,6 +6017,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-update-index", dest="update_index", action="store_false", help="Skip index update")
     sp.add_argument("--index-to", default=None, help=f"Index output path (default: {DEFAULT_INDEX_PATH})")
     sp.add_argument("--index-limit", type=int, default=5000, help="Index: max observations to include")
+    sp.add_argument(
+        "--embed-limit",
+        type=int,
+        default=1000,
+        help="Max embeddings to compute during harvest (default: 1000)",
+    )
     sp.set_defaults(func=cmd_harvest)
 
     sp = sub.add_parser("writeback-lancedb", help="Write graded metadata back into LanceDB rows")
