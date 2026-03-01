@@ -9,14 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `triage --mode tasks` bracket-wrapped task markers now also accept Japanese corner-quote forms (`「TODO」 ...`, `『TASK』 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
+- `triage --mode tasks` bracket-wrapped task markers now also accept CJK double-angle quote forms (`《TODO》 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
+- `ingest --json` and `harvest --json` now emit deterministic `label_counts` receipts that always include canonical importance keys (`must_remember`, `nice_to_have`, `ignore`, `unknown`) with zero defaults.
 
 ### Docs
+- Clarified deterministic `triage --mode tasks` docs to include CJK double-angle quote bracket markers (`《TODO》 ...`, `《TODO》buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 - Clarified deterministic `triage --mode tasks` docs to include curly-brace bracket markers (`{TODO} ...`, `{TODO}buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 - Extended task-marker docs/examples in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md` to include Japanese corner-quote marker forms and compact examples.
 - Clarified compact no-space examples to explicitly include 『TODO』... marker forms across README/QUICKSTART/upgrade-checklist and triage docstrings.
 - Clarified deterministic `triage --mode tasks` docs to explicitly list `[☐]` and `[☑]` checklist wrappers in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 
 ### Testing
+- Added triage-flow regression coverage for compact CJK double-angle quote bracket markers (for example `《TODO》buy coffee this afternoon`).
 - Added triage-flow regression coverage for compact curly-brace bracket markers (for example `{TODO}buy coffee this afternoon`).
 - Added regression coverage for Japanese corner-quote task markers in parser-level and triage task flows.
 - Added regression coverage for compact no-space 『TODO』... task markers in parser-level and triage task flows.

@@ -66,6 +66,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("{TODO} rotate runbook"))
         self.assertTrue(_summary_has_task_marker("{TASK}: renew reminders"))
         self.assertTrue(_summary_has_task_marker("「TODO」 rotate runbook"))
+        self.assertTrue(_summary_has_task_marker("《TASK》 renew reminders"))
         self.assertTrue(_summary_has_task_marker("『task』renew reminders"))
 
     def test_summary_has_task_marker_accepts_list_and_checkbox_prefixes(self):
@@ -100,6 +101,8 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("·[ ]TASK sync branch"))
         self.assertTrue(_summary_has_task_marker("- (I)[ ] TODO reorder docs"))
         self.assertTrue(_summary_has_task_marker(">>‣TODO audit logs"))
+        self.assertTrue(_summary_has_task_marker(">>『TASK』rotate notes"))
+        self.assertTrue(_summary_has_task_marker("{TODO}clean old notes"))
 
     def test_summary_has_task_marker_accepts_nested_prefix_combinations(self):
         self.assertTrue(_summary_has_task_marker("* (1) [ ] TODO: clean desk"))
@@ -117,9 +120,11 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("taskforce sync tomorrow"))
         self.assertFalse(_summary_has_task_marker("[TODOLIST] clean old notes"))
         self.assertFalse(_summary_has_task_marker("「TODOLIST」 clean old notes"))
+        self.assertFalse(_summary_has_task_marker("《TODOLIST》 clean old notes"))
         self.assertTrue(_summary_has_task_marker("[TODO]clean old notes"))
         self.assertTrue(_summary_has_task_marker("「TODO」clean old notes"))
         self.assertTrue(_summary_has_task_marker("『TODO』clean old notes"))
+        self.assertTrue(_summary_has_task_marker("《TODO》clean old notes"))
         self.assertTrue(_summary_has_task_marker("【TODO】clean old notes"))
         self.assertTrue(_summary_has_task_marker("-TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("+TODO clean old notes"))
@@ -1515,6 +1520,7 @@ class TestCliM0(unittest.TestCase):
             "「TODO」rotate on-call notes",
             "『TODO』rotate on-call notes",
             "『TASK』rotate on-call notes",
+            "《TODO》rotate on-call notes",
             "[☑]TODO: rotate on-call notes",
         )
 

@@ -100,6 +100,7 @@ DEFAULT_GRAPH_CAPTURE_MD_EXCLUDES = (
     "**/dist/**",
 )
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_IMPORTANCE_LABEL_KEYS = ("must_remember", "nice_to_have", "ignore", "unknown")
 
 
 def _utcnow_iso() -> str:
@@ -125,6 +126,20 @@ class IngestRunSummary:
     def bump_label(self, label: str) -> None:
         key = (label or "").strip().lower() or "unknown"
         self.label_counts[key] = int(self.label_counts.get(key, 0)) + 1
+
+    def normalized_label_counts(self) -> Dict[str, int]:
+        """Return deterministic label counts for receipts.
+
+        Always includes the canonical importance labels with zero defaults, and
+        preserves any non-canonical labels (sorted for deterministic output).
+        """
+
+        out: Dict[str, int] = {k: int(self.label_counts.get(k, 0)) for k in _IMPORTANCE_LABEL_KEYS}
+        for key in sorted(self.label_counts):
+            if key in out:
+                continue
+            out[key] = int(self.label_counts.get(key, 0))
+        return out
 
 
 def _apply_importance_scorer_override(args: argparse.Namespace) -> None:
@@ -800,7 +815,7 @@ def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "skipped_existing": summary.skipped_existing,
             "skipped_disabled": summary.skipped_disabled,
             "scorer_errors": summary.scorer_errors,
-            "label_counts": summary.label_counts,
+            "label_counts": summary.normalized_label_counts(),
         },
         args.json,
     )
@@ -2894,7 +2909,7 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     Accepted forms:
     - plain marker: `TODO ...`
-    - bracketed marker: `[TODO] ...`, `(TODO) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, or `『TODO』 ...`
+    - bracketed marker: `[TODO] ...`, `(TODO) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, or `《TODO》 ...`
 
     Optional leading markdown wrappers are tolerated before markers:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
@@ -2944,7 +2959,7 @@ def _summary_has_task_marker(summary: str) -> bool:
         if not text:
             return False
 
-        close_by_open = {"[": "]", "(": ")", "【": "】", "〔": "〕", "{": "}", "「": "」", "『": "』"}
+        close_by_open = {"[": "]", "(": ")", "【": "】", "〔": "〕", "{": "}", "「": "」", "『": "』", "《": "》"}
         close = close_by_open.get(text[0])
         if close is None:
             return False
@@ -3136,7 +3151,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - kind == 'task' OR
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; supports plain or
-      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`「TODO」buy milk`/`『TODO』buy milk`), plus optional leading
+      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』`/`《TODO》` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`「TODO」buy milk`/`『TODO』buy milk`/`《TODO》buy milk`), plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
       (`-`/`*`/`+`/`•`/`‣`/`∙`/`·`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`), and ordered-list prefixes like
       `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
@@ -3401,7 +3416,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 "skipped_existing": summary.skipped_existing,
                 "skipped_disabled": summary.skipped_disabled,
                 "scorer_errors": summary.scorer_errors,
-                "label_counts": summary.label_counts,
+                "label_counts": summary.normalized_label_counts(),
             },
             args.json,
         )
@@ -3529,7 +3544,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "skipped_existing": summary.skipped_existing,
         "skipped_disabled": summary.skipped_disabled,
         "scorer_errors": summary.scorer_errors,
-        "label_counts": summary.label_counts,
+        "label_counts": summary.normalized_label_counts(),
         "embedded": embedded,
     }
     if embed_error:
