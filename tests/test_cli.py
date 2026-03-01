@@ -43,6 +43,7 @@ class TestCliM0(unittest.TestCase):
     def test_summary_has_task_marker_accepts_example_formats(self):
         self.assertTrue(_summary_has_task_marker("TODO: rotate runbook"))
         self.assertTrue(_summary_has_task_marker("task- check alerts"))
+        self.assertTrue(_summary_has_task_marker("TODO. rotate runbook"))
         self.assertTrue(_summary_has_task_marker("(TASK): review PR"))
         self.assertTrue(_summary_has_task_marker("- [ ] TODO file patch"))
 
@@ -89,6 +90,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("a) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("(a) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("（ａ） TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("（1） TODO clean desk"))
         self.assertTrue(_summary_has_task_marker("B. [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("iv) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("IX. [ ] TASK: clean desk"))
