@@ -2905,7 +2905,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
     - whitespace
-    - '-' / '.' / '－' / '–' / '—' / '−'
+    - '-' / '.' / '。' / '－' / '–' / '—' / '−'
     - end-of-string
 
     Example formats:
@@ -2921,7 +2921,7 @@ def _summary_has_task_marker(summary: str) -> bool:
         return False
 
     markers = ("TODO", "TASK", "REMINDER")
-    separators = {":", "：", "-", ".", "－", "–", "—", "−"}
+    separators = {":", "：", "-", ".", "。", "－", "–", "—", "−"}
     bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·", "◦"}
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
 

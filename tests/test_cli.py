@@ -34,6 +34,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("Task–follow up on release checklist"))
         self.assertTrue(_summary_has_task_marker("Task—follow up on release checklist"))
         self.assertTrue(_summary_has_task_marker("Task−follow up on release checklist"))
+        self.assertTrue(_summary_has_task_marker("TODO。rotate docs update"))
 
     def test_summary_has_task_marker_accepts_lowercase_marker_with_separator(self):
         self.assertTrue(_summary_has_task_marker("todo buy milk"))
