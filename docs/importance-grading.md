@@ -115,7 +115,7 @@ Fields:
 - `skipped_existing`: observations that already had `detail_json.importance` (left untouched)
 - `skipped_disabled`: observations with missing importance when autograde is disabled
 - `scorer_errors`: autograde failures (ingest still succeeds; fail-open)
-- `label_counts`: aggregate label distribution for observations that had importance (existing + newly graded)
+- `label_counts`: aggregate label distribution for observations that had importance (existing + newly graded). Receipts always include canonical keys (`must_remember`, `nice_to_have`, `ignore`, `unknown`) with zero defaults for deterministic dashboards.
 
 Example:
 
