@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- (nothing yet)
+### Docs
+- Clarified deterministic `triage --mode tasks` docs to include curly-brace bracket markers (`{TODO} ...`, `{TODO}buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
+
+### Testing
+- Added triage-flow regression coverage for compact curly-brace bracket markers (for example `{TODO}buy coffee this afternoon`).
+- Fixed JSON contract test to accept `triage` exit code `10` (attention needed) while still validating the JSON payload.
 
 ## [1.0.3] - 2026-02-28
 
