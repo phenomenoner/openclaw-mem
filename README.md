@@ -45,9 +45,10 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - Sidecar capture plugin: `docs/auto-capture.md`
 - Ecosystem fit / comparisons: `docs/ecosystem-fit.md`
 
-## What’s new (v1.0.4)
-- **Safer production posture** for the optional `openclaw-mem-engine`: embedding failures/limits won’t hard-break memory flows (fail-open with lexical fallback + explicit warnings).
+## What’s new (v1.0.4, since v1.0.1)
+- **More reliable mem-engine in real chats**: long prompts + embedding hiccups are less likely to break memory flows (fail-open + lexical fallback + warnings).
 - **Embedding clamp knobs** (`embedding.maxChars/headChars/maxBytes`) to control how long prompts are trimmed before embedding.
+- Release notes: https://github.com/phenomenoner/openclaw-mem/releases/tag/v1.0.4
 
 ## Status map (DONE / PARTIAL / ROADMAP)
 
