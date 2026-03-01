@@ -89,6 +89,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("a) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("(a) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("（ａ） TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("（1） TODO clean desk"))
         self.assertTrue(_summary_has_task_marker("B. [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("iv) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("IX. [ ] TASK: clean desk"))
