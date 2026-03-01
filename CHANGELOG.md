@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- (nothing yet)
+### Changed
+- `openclaw-mem-engine` now supports configurable embedding clamp knobs (`embedding.maxChars`, `embedding.headChars`, `embedding.maxBytes`) and enforces them in both recall/store paths.
+- Memory recall/store now fail-open when embeddings are unavailable, provider errors, or input is over long:
+  - `memory_recall` still returns lexical (FTS) results when vector path is skipped.
+  - `memory_store` still stores the memory with a zero vector fallback so ingest never blocks on embedding failure.
+- `memory_recall` and `memory_store` now emit explicit warnings when recall/store quality is degraded due to embedding skip.
+- Expanded memory-engine tunables for recall/capture/receipts behavior and harden-config parsing in plugin schema/normalization (`autoRecall`, `autoCapture`, `receipts`).
+
+### Testing
+- `test_triage_json_contract_v0` now writes a temporary cron jobs fixture and passes `--cron-jobs-path`, preventing host-state coupling to `~/.openclaw/cron/jobs.json`.
 
 ## [1.0.3] - 2026-02-28
 

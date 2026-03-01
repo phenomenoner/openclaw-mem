@@ -14,6 +14,8 @@ class TestJsonContracts(unittest.TestCase):
         self.db_path = Path(self.tmpdir.name) / "test.sqlite"
         self.source = Path(self.tmpdir.name) / "openclaw-mem-observations.jsonl"
         self.state_path = Path(self.tmpdir.name) / "triage-state.json"
+        self.cron_jobs_path = Path(self.tmpdir.name) / "jobs.json"
+        self.cron_jobs_path.write_text("{\"jobs\": []}", encoding="utf-8")
 
     def tearDown(self):
         self.tmpdir.cleanup()
@@ -92,6 +94,8 @@ class TestJsonContracts(unittest.TestCase):
             "heartbeat",
             "--state-path",
             str(self.state_path),
+            "--cron-jobs-path",
+            str(self.cron_jobs_path),
         )
 
         self.assertEqual(out["kind"], "openclaw-mem.triage.v0")
