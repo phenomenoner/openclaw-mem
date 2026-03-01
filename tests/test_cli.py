@@ -118,6 +118,7 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("「TODOLIST」 clean old notes"))
         self.assertTrue(_summary_has_task_marker("[TODO]clean old notes"))
         self.assertTrue(_summary_has_task_marker("「TODO」clean old notes"))
+        self.assertTrue(_summary_has_task_marker("『TODO』clean old notes"))
         self.assertTrue(_summary_has_task_marker("【TODO】clean old notes"))
         self.assertTrue(_summary_has_task_marker("-TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("+TODO clean old notes"))
@@ -1511,6 +1512,7 @@ class TestCliM0(unittest.TestCase):
             "(1)TODO: rotate on-call notes",
             "a)TODO: rotate on-call notes",
             "「TODO」rotate on-call notes",
+            "『TODO』rotate on-call notes",
             "『TASK』rotate on-call notes",
             "[☑]TODO: rotate on-call notes",
         )
