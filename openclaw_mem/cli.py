@@ -2922,7 +2922,7 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     markers = ("TODO", "TASK", "REMINDER")
     separators = {":", "：", "-", ".", "－", "–", "—", "−"}
-    bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·"}
+    bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·", "◦"}
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
 
     def _has_valid_suffix(text: str, idx: int, *, allow_compact: bool = False) -> bool:
