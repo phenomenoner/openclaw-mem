@@ -1511,6 +1511,7 @@ class TestCliM0(unittest.TestCase):
             "a)TODO: rotate on-call notes",
             "「TODO」rotate on-call notes",
             "『TASK』rotate on-call notes",
+            "[☑]TODO: rotate on-call notes",
         )
 
         for summary in summaries:
@@ -1580,6 +1581,7 @@ class TestCliM0(unittest.TestCase):
             "‣ TODO: rotate on-call notes",
             "∙ [ ] TASK: rotate on-call notes",
             "· [x] [REMINDER] rotate on-call notes",
+            "• [☐] TASK: rotate on-call notes",
         )
 
         for summary in summaries:
