@@ -39,9 +39,15 @@ uv run python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
 Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_ts`, and `ingest` prints `{inserted, ids}`.
 
 ## Quick links
+- Docs site: https://phenomenoner.github.io/openclaw-mem/
+- Releases: https://github.com/phenomenoner/openclaw-mem/releases
 - Engine: `docs/mem-engine.md` (what it is + how to enable + knobs)
 - Sidecar capture plugin: `docs/auto-capture.md`
 - Ecosystem fit / comparisons: `docs/ecosystem-fit.md`
+
+## What’s new (v1.0.4)
+- **Safer production posture** for the optional `openclaw-mem-engine`: embedding failures/limits won’t hard-break memory flows (fail-open with lexical fallback + explicit warnings).
+- **Embedding clamp knobs** (`embedding.maxChars/headChars/maxBytes`) to control how long prompts are trimmed before embedding.
 
 ## Status map (DONE / PARTIAL / ROADMAP)
 
