@@ -66,6 +66,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("〔REMINDER〕: sync notes"))
         self.assertTrue(_summary_has_task_marker("{TODO} rotate runbook"))
         self.assertTrue(_summary_has_task_marker("{TASK}: renew reminders"))
+        self.assertTrue(_summary_has_task_marker("《task》 clean notes"))
         self.assertTrue(_summary_has_task_marker("「TODO」 rotate runbook"))
         self.assertTrue(_summary_has_task_marker("『task』renew reminders"))
 
