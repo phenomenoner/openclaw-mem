@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `triage --mode tasks` bracket-wrapped task markers now also accept Japanese corner-quote forms (`「TODO」 ...`, `『TASK』 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
+
 ### Docs
 - Clarified deterministic `triage --mode tasks` docs to include curly-brace bracket markers (`{TODO} ...`, `{TODO}buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
+- Extended task-marker docs/examples in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md` to include Japanese corner-quote marker forms and compact examples.
+- Clarified deterministic `triage --mode tasks` docs to explicitly list `[☐]` and `[☑]` checklist wrappers in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 
 ### Testing
 - Added triage-flow regression coverage for compact curly-brace bracket markers (for example `{TODO}buy coffee this afternoon`).
+- Added regression coverage for Japanese corner-quote task markers in parser-level and triage task flows.
+- Added triage-flow regression coverage for `[☐]` and `[☑]` checklist-wrapped task markers (including compact no-space forms).
 - Fixed JSON contract test to accept `triage` exit code `10` (attention needed) while still validating the JSON payload.
+
 
 ## [1.0.3] - 2026-02-28
 

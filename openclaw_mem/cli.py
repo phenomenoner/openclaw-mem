@@ -2894,7 +2894,7 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     Accepted forms:
     - plain marker: `TODO ...`
-    - bracketed marker: `[TODO] ...`, `(TODO) ...`, `【TODO】 ...`, `〔TODO〕 ...`, or `{TODO} ...`
+    - bracketed marker: `[TODO] ...`, `(TODO) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, or `『TODO』 ...`
 
     Optional leading markdown wrappers are tolerated before markers:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
@@ -2943,7 +2943,7 @@ def _summary_has_task_marker(summary: str) -> bool:
         if not text:
             return False
 
-        close_by_open = {"[": "]", "(": ")", "【": "】", "〔": "〕", "{": "}"}
+        close_by_open = {"[": "]", "(": ")", "【": "】", "〔": "〕", "{": "}", "「": "」", "『": "』"}
         close = close_by_open.get(text[0])
         if close is None:
             return False
@@ -3135,9 +3135,9 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - kind == 'task' OR
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; supports plain or
-      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`), plus optional leading
+      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`「TODO」buy milk`), plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
-      (`-`/`*`/`+`/`•`, `[ ]`/`[x]`/`[✓]`/`[✔]`), and ordered-list prefixes like
+      (`-`/`*`/`+`/`•`/`‣`/`∙`/`·`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`), and ordered-list prefixes like
       `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
       between wrappers and the next wrapper/marker;
       accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
