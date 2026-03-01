@@ -62,7 +62,15 @@ uv run python -m openclaw_mem --json search "gateway timeout" --limit 10
 uv run python -m openclaw_mem pack --query "gateway timeout" --limit 8 --trace --json
 ```
 
+## What’s new (v1.0.4)
+
+- **More reliable Mem Engine**: long prompts + embedding hiccups are less likely to break memory flows (fail-open + lexical fallback + warnings).
+- **Configurable embedding clamping**: `embedding.maxChars`, `embedding.headChars`, `embedding.maxBytes`.
+
+See full release notes: <https://github.com/phenomenoner/openclaw-mem/releases>
+
 ## Links
 
 - Repo: <https://github.com/phenomenoner/openclaw-mem>
+- Releases: <https://github.com/phenomenoner/openclaw-mem/releases>
 - Issues: <https://github.com/phenomenoner/openclaw-mem/issues>

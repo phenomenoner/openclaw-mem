@@ -31,6 +31,7 @@ nav:
   - Home: index.md
   - Reality check & status: reality-check.md
   - Quickstart: quickstart.md
+  - Releases: https://github.com/phenomenoner/openclaw-mem/releases
   - Specs:
       - Docs memory (hybrid search v0): specs/docs-memory-hybrid-search-v0.md
       - Graphic memory (GraphRAG-lite PRD): specs/graphic-memory-graphrag-lite-prd.md
