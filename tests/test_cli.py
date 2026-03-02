@@ -135,6 +135,10 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("— TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("− TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("・ TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("1- TODO rotate runbook"))
+        self.assertTrue(_summary_has_task_marker("1-TODO rotate runbook"))
+        self.assertTrue(_summary_has_task_marker("iv- TODO rotate runbook"))
+        self.assertTrue(_summary_has_task_marker("iv- TASK: clean desk"))
 
     def test_summary_has_task_marker_accepts_compact_wrapper_chaining(self):
         self.assertTrue(_summary_has_task_marker("•[x]TODO fix pipeline"))
