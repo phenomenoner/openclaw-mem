@@ -5,7 +5,7 @@ Get `openclaw-mem` up and running in ~5 minutes.
 ## Prerequisites
 
 - Python 3.10+ (recommended: Python 3.13)
-- [uv](https://github.com/astral-sh/uv)
+- [uv](https:/github.com/astral-sh/uv)
 - OpenClaw gateway running (only needed for the plugin / Route A)
 
 ---
@@ -13,7 +13,7 @@ Get `openclaw-mem` up and running in ~5 minutes.
 ## Step 1: Install
 
 ```bash
-git clone https://github.com/phenomenoner/openclaw-mem.git
+git clone https:/github.com/phenomenoner/openclaw-mem.git
 cd openclaw-mem
 uv sync --locked
 ```
@@ -148,8 +148,7 @@ uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --j
 
 Task matching rules in `--mode tasks` are deterministic:
 - `kind == "task"`, or
-- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`, `«TODO»buy milk`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
-- Example formats: `TODO: rotate runbook`, `{TODO}: rotate runbook`, `【TODO】 rotate runbook`, `「TODO」 rotate runbook`, `『TODO』 rotate runbook`, `《TODO》 rotate runbook`, `«TODO» rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`.
+- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·` / `・`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`, `«TODO»buy milk`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
 
 
   - More accepted compact examples: `> - (1) [ ] TASK: clean desk`, `>> (iv) [ ] TODO: clean desk`.

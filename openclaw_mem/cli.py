@@ -1481,7 +1481,7 @@ def _get_gateway_config(args: argparse.Namespace, *, want_v1: bool = True) -> Di
     if not url:
         # Construct from config port
         port = config.get("gateway", {}).get("http", {}).get("port") or config.get("gateway", {}).get("port", 18789)
-        url = f"http://127.0.0.1:{port}"
+        url = f"http:/127.0.0.1:{port}"
 
     url = url.rstrip("/")
     if want_v1 and not url.endswith("/v1"):
@@ -2001,9 +2001,9 @@ def _resolve_rerank_api_key(provider: str, args: argparse.Namespace) -> Optional
 
 def _default_rerank_url(provider: str) -> str:
     if provider == "jina":
-        return "https://api.jina.ai/v1/rerank"
+        return "https:/api.jina.ai/v1/rerank"
     if provider == "cohere":
-        return "https://api.cohere.com/v2/rerank"
+        return "https:/api.cohere.com/v2/rerank"
     raise ValueError(f"unsupported rerank provider: {provider}")
 
 
@@ -2441,7 +2441,7 @@ def _pack_trust_tier(detail_obj: Dict[str, Any]) -> str:
 
 
 def _estimate_tokens(text: str) -> int:
-    return max(1, (len(text) + 3) // 4)
+    return max(1, (len(text) + 3) / 4)
 
 
 def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -2913,7 +2913,7 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     Optional leading markdown wrappers are tolerated before markers:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
-    - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (whitespace optional before nested wrappers/marker)
+    - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·`, `・` (whitespace optional before nested wrappers/marker)
     - markdown checkboxes: `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` (whitespace optional before nested wrappers/marker)
     - ordered-list prefixes: `1.` / `1)` / `1-` / `（1）` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (whitespace optional before nested wrappers/marker)
 
@@ -2936,8 +2936,8 @@ def _summary_has_task_marker(summary: str) -> bool:
         return False
 
     markers = ("TODO", "TASK", "REMINDER")
-    separators = {":", "：", ";", "；", "-", ".", "－", "–", "—", "−"}
-    bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·"}
+      (`-`/`*`/`+`/`•`/`‣`/`∙`/`·`/`・`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`), and ordered-list prefixes like
+      `1.`/`1)`/`1-`/`（1）`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
     ordered_prefix_sep = {".", ")", "-", "－", "–", "—", "−"}
 
@@ -3154,7 +3154,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
       (case-insensitive; width-normalized via NFKC; supports plain or
       bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』`/`《TODO》`/`«TODO»` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`「TODO」buy milk`/`『TODO』buy milk`/`《TODO》buy milk`/`«TODO»buy milk`), plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
-      (`-`/`*`/`+`/`•`/`‣`/`∙`/`·`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`), and ordered-list prefixes like
+      (`-`/`*`/`+`/`•`/`‣`/`∙`/`·`/`・`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`), and ordered-list prefixes like
       `1.`/`1)`/`1-`/`（1）`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
       between wrappers and the next wrapper/marker;
       accepts ':', whitespace, ';', '；', '-', '－', '–', '—', '−', or marker-only)

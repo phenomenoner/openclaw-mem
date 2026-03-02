@@ -83,6 +83,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("‣ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("∙ [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("· [x] [REMINDER] renew domain"))
+        self.assertTrue(_summary_has_task_marker("・ TODO: renew domain"))
         self.assertTrue(_summary_has_task_marker("- [✓] TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("- [☑] TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("- [☐] TODO buy milk"))
@@ -122,6 +123,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("- (iv) [ ] TODO: clean desk"))
         self.assertTrue(_summary_has_task_marker(">> [x]TODO: compact wrappers"))
         self.assertTrue(_summary_has_task_marker(">>[x]TODO: compact wrappers"))
+        self.assertTrue(_summary_has_task_marker("・[x]TODO: compact wrappers"))
         self.assertTrue(_summary_has_task_marker("-1)TODO compact ordered marker"))
 
     def test_summary_has_task_marker_rejects_non_marker_prefixes_and_requires_plain_marker_boundaries(self):

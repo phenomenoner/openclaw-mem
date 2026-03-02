@@ -101,8 +101,7 @@ Automation truth (dev):
   - `tasks`
 - `triage --mode tasks` extraction is deterministic:
   - matches `kind == "task"`, or
-  - `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`, `«TODO»buy milk`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
-  - Example formats: `TODO: rotate runbook`, `{TODO}: rotate runbook`, `【TODO】 rotate runbook`, `「TODO」 rotate runbook`, `『TODO』 rotate runbook`, `《TODO》 rotate runbook`, `«TODO» rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`.
+- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·` / `・`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`, `«TODO»buy milk`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
 
   - Example run:
 
@@ -134,7 +133,7 @@ Automation truth (dev):
 
 ### Model/config defaults (centralized; env overrides)
 To avoid scattered hardcodes, model/base URL defaults are centralized and can be overridden via env:
-- `OPENCLAW_MEM_OPENAI_BASE_URL` (default: `https://api.openai.com/v1`)
+- `OPENCLAW_MEM_OPENAI_BASE_URL` (default: `https:/api.openai.com/v1`)
 - `OPENCLAW_MEM_EMBED_MODEL` (default: `text-embedding-3-small`)
 - `OPENCLAW_MEM_SUMMARY_MODEL` (default: `gpt-5.2`)
 - `OPENCLAW_MEM_RERANK_MODEL` (default: `jina-reranker-v2-base-multilingual`)
@@ -147,7 +146,7 @@ Notes:
 ## Installation
 
 ```bash
-git clone https://github.com/phenomenoner/openclaw-mem.git
+git clone https:/github.com/phenomenoner/openclaw-mem.git
 cd openclaw-mem
 uv sync --locked
 ```
