@@ -2915,7 +2915,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
     - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (whitespace optional before nested wrappers/marker)
     - markdown checkboxes: `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` (whitespace optional before nested wrappers/marker)
-    - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (whitespace optional before nested wrappers/marker)
+    - ordered-list prefixes: `1.` / `1)` / `1-` / `（1）` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (whitespace optional before nested wrappers/marker)
 
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
@@ -2939,6 +2939,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     separators = {":", "：", "-", ".", "－", "–", "—", "−"}
     bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·"}
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
+    ordered_prefix_sep = {".", ")", "-", "－", "–", "—", "−"}
 
     def _has_valid_suffix(text: str, idx: int, *, allow_compact: bool = False) -> bool:
         if len(text) == idx:
@@ -3014,13 +3015,13 @@ def _summary_has_task_marker(summary: str) -> bool:
             i = 0
             while i < len(value) and value[i].isdigit():
                 i += 1
-            if i > 0 and i < len(value) and value[i] in {".", ")"} and i + 1 < len(value):
+            if i > 0 and i < len(value) and value[i] in ordered_prefix_sep and i + 1 < len(value):
                 return True
 
             j = 0
             while j < len(value) and ("a" <= value[j] <= "z" or "A" <= value[j] <= "Z"):
                 j += 1
-            if j > 0 and j < len(value) and value[j] in {".", ")"} and j + 1 < len(value):
+            if j > 0 and j < len(value) and value[j] in ordered_prefix_sep and j + 1 < len(value):
                 token = value[:j]
                 if len(token) == 1 or _is_roman_token(token):
                     return True
@@ -3067,7 +3068,7 @@ def _summary_has_task_marker(summary: str) -> bool:
             i = 0
             while i < len(value) and value[i].isdigit():
                 i += 1
-            if i > 0 and i < len(value) and value[i] in {".", ")"} and i + 1 < len(value):
+            if i > 0 and i < len(value) and value[i] in ordered_prefix_sep and i + 1 < len(value):
                 next_part = value[i + 1 :]
                 if next_part and next_part[0].isspace():
                     return next_part.lstrip()
@@ -3077,7 +3078,7 @@ def _summary_has_task_marker(summary: str) -> bool:
             j = 0
             while j < len(value) and ("a" <= value[j] <= "z" or "A" <= value[j] <= "Z"):
                 j += 1
-            if j > 0 and j < len(value) and value[j] in {".", ")"} and j + 1 < len(value):
+            if j > 0 and j < len(value) and value[j] in ordered_prefix_sep and j + 1 < len(value):
                 token = value[:j]
                 if len(token) == 1 or _is_roman_token(token):
                     next_part = value[j + 1 :]
@@ -3154,7 +3155,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
       bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』`/`《TODO》` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`「TODO」buy milk`/`『TODO』buy milk`/`《TODO》buy milk`), plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
       (`-`/`*`/`+`/`•`/`‣`/`∙`/`·`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`), and ordered-list prefixes like
-      `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
+      `1.`/`1)`/`1-`/`（1）`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
       between wrappers and the next wrapper/marker;
       accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
 
