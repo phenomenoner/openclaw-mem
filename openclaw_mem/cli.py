@@ -2936,8 +2936,8 @@ def _summary_has_task_marker(summary: str) -> bool:
         return False
 
     markers = ("TODO", "TASK", "REMINDER")
-      (`-`/`*`/`+`/`•`/`‣`/`∙`/`·`/`・`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`), and ordered-list prefixes like
-      `1.`/`1)`/`1-`/`（1）`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
+    separators = {":", "：", ";", "；", "-", ".", "－", "–", "—", "−"}
+    bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·", "・"}
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
     ordered_prefix_sep = {".", ")", "-", "－", "–", "—", "−"}
 
