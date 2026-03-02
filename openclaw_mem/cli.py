@@ -2979,7 +2979,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
     - whitespace
-    - '-' / '.' / '。' / '－' / '–' / '—' / '−'
+    - ';' / '；' / '-' / '.' / '。' / '－' / '–' / '—' / '−'
     - end-of-string
 
     Rejected forms (examples):
@@ -3001,7 +3001,7 @@ def _summary_has_task_marker(summary: str) -> bool:
         return False
 
     markers = ("TODO", "TASK", "REMINDER")
-    separators = {":", "：", "-", ".", "。", "－", "–", "—", "−"}
+    separators = {":", "：", ";", "；", "-", ".", "。", "－", "–", "—", "−"}
     bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·", "◦", "・", "–", "—", "−"}
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
     ordered_prefix_sep = {".", ")", "-", "－", "–", "—", "−"}
@@ -3222,7 +3222,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
       (`-`/`*`/`+`/`•`/`‣`/`∙`/`·`/`◦`/`・`/`–`/`—`/`−`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`), and ordered-list prefixes like
       `1.`/`1)`/`1-`/`（1）`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
       between wrappers and the next wrapper/marker;
-      accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
+      accepts ':', whitespace, ';', '；', '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
     """
