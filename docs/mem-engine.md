@@ -83,7 +83,7 @@ Key stance: **sidecar governs; engine serves**.
     - robust to trailing emoji/punctuation (e.g. `好的👌`, `ok👍`, `hi～`, `收到!!`)
     - punctuation-only prompts also skip (e.g. `？`, `…`)
   - recall tiers: `must_remember` → `nice_to_have` → (optional) `unknown` fallback
-  - cap: <=5 memories
+  - cap: <=6 memories
   - escapes memory text to reduce prompt-injection risk
   - emits bounded lifecycle receipt (`openclaw-mem-engine.recall.receipt.v1`) with skip reason / tier counts / top IDs
   - injects a compact autoRecall wrapper comment (IDs only; no memory text in receipt)
@@ -92,7 +92,7 @@ Key stance: **sidecar governs; engine serves**.
 - Hook: `agent_end`
 - Default: **on** (but strict allowlist)
 - Behavior:
-  - capture only a small number of items (1–3 per turn)
+  - capture only a small number of items (1–4 per turn)
   - default categories: `preference`, `decision`
   - skip tool outputs; prefer user text; skip secrets-like strings
   - dedupe near-identical items

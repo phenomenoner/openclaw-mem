@@ -101,8 +101,8 @@ const DEFAULT_TABLE_NAME = "memories";
 const DEFAULT_MODEL: NonNullable<NonNullable<PluginConfig["embedding"]>["model"]> =
   "text-embedding-3-small";
 
-const AUTO_RECALL_MAX_ITEMS = 5;
-const AUTO_CAPTURE_MAX_ITEMS_PER_TURN = 3;
+const AUTO_RECALL_MAX_ITEMS = 6;
+const AUTO_CAPTURE_MAX_ITEMS_PER_TURN = 4;
 const AUTO_CAPTURE_MAX_CHARS_PER_ITEM = 320;
 
 type AutoRecallConfig = {
@@ -135,7 +135,7 @@ type AutoCaptureCategory = "preference" | "decision" | "todo";
 
 const DEFAULT_AUTO_RECALL_CONFIG: AutoRecallConfig = {
   enabled: true,
-  maxItems: 4,
+  maxItems: 5,
   skipTrivialPrompts: true,
   trivialMinChars: 8,
   includeUnknownFallback: true,
@@ -144,7 +144,7 @@ const DEFAULT_AUTO_RECALL_CONFIG: AutoRecallConfig = {
 
 const DEFAULT_AUTO_CAPTURE_CONFIG: AutoCaptureConfig = {
   enabled: true,
-  maxItemsPerTurn: 2,
+  maxItemsPerTurn: 3,
   maxCharsPerItem: 240,
   capturePreference: true,
   captureDecision: true,
