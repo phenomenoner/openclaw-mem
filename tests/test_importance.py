@@ -51,7 +51,7 @@ class TestImportance(unittest.TestCase):
         self.assertEqual(parse_importance_score(" 92 %"), 0.92)
         self.assertEqual(parse_importance_score({"score": " 95％ "}), 0.95)
         self.assertEqual(parse_importance_score("150%"), 1.0)
-
+        self.assertEqual(parse_importance_score(" 42.5% "), 0.425)
 
     def test_parse_importance_score_invalid_returns_zero(self):
         self.assertEqual(parse_importance_score(None), 0.0)
