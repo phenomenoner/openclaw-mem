@@ -47,8 +47,13 @@ class TestImportance(unittest.TestCase):
         self.assertEqual(parse_importance_score({"score": " ０.９５ "}), 0.95)
 
     def test_parse_importance_score_supports_percent_and_ratio_strings(self):
+        self.assertEqual(parse_importance_score("85%"), 0.85)
         self.assertEqual(parse_importance_score("86%"), 0.86)
+        self.assertEqual(parse_importance_score(" 92 %"), 0.92)
         self.assertEqual(parse_importance_score(" ８６％ "), 0.86)
+        self.assertEqual(parse_importance_score({"score": " 95％ "}), 0.95)
+        self.assertEqual(parse_importance_score("150%"), 1.0)
+        self.assertEqual(parse_importance_score(" 42.5% "), 0.425)
         self.assertEqual(parse_importance_score("86/100"), 0.86)
         self.assertEqual(parse_importance_score({"score": "86/100"}), 0.86)
         self.assertEqual(parse_importance_score("43/50"), 0.86)
