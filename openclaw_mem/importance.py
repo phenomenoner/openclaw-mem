@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import math
+import re
 from typing import Any, Dict
 import unicodedata
 
@@ -72,6 +73,13 @@ def _parse_score_like(value: Any) -> float | None:
         normalized = unicodedata.normalize("NFKC", value).strip()
         if not normalized:
             return None
+
+        percent_match = re.fullmatch(r"(?:\d+(?:\.\d+)?|\.\d+)\s*%", normalized)
+        if percent_match is not None:
+            score = float(normalized[:-1].strip())
+            if math.isfinite(score):
+                return score / 100.0
+
         try:
             score = float(normalized)
         except Exception:

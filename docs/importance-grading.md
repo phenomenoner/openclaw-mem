@@ -54,6 +54,7 @@ By default, do **not** drop/filter ungraded items unless a caller explicitly req
 
 Additional best-effort compatibility in parsers:
 - numeric-string score forms are accepted (`{"score": "0.86"}`), including NFKC width-normalized digits (`{"score": "０.８６"}`).
+- percentage-style scores are also accepted (`{"score": "85%"}`), normalized to [0,1]
 
 See `openclaw_mem.importance.parse_importance_score()`.
 

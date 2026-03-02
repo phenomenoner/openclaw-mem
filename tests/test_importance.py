@@ -46,6 +46,13 @@ class TestImportance(unittest.TestCase):
         self.assertEqual(parse_importance_score({"score": "0.86"}), 0.86)
         self.assertEqual(parse_importance_score({"score": " ０.９５ "}), 0.95)
 
+    def test_parse_importance_score_supports_percent_scores(self):
+        self.assertEqual(parse_importance_score("85%"), 0.85)
+        self.assertEqual(parse_importance_score(" 92 %"), 0.92)
+        self.assertEqual(parse_importance_score({"score": " 95％ "}), 0.95)
+        self.assertEqual(parse_importance_score("150%"), 1.0)
+
+
     def test_parse_importance_score_invalid_returns_zero(self):
         self.assertEqual(parse_importance_score(None), 0.0)
         self.assertEqual(parse_importance_score({"score": "high"}), 0.0)
@@ -60,6 +67,8 @@ class TestImportance(unittest.TestCase):
         self.assertTrue(is_parseable_importance("0.7"))
         self.assertTrue(is_parseable_importance({"score": 0.7}))
         self.assertTrue(is_parseable_importance({"score": "0.7"}))
+        self.assertTrue(is_parseable_importance("88%"))
+        self.assertTrue(is_parseable_importance({"score": " 93％ "}))
         self.assertTrue(is_parseable_importance({"label": "must remember"}))
         self.assertTrue(is_parseable_importance({"label": "ＭＵＳＴ＿ＲＥＭＥＭＢＥＲ"}))
         self.assertFalse(is_parseable_importance({"score": True}))
