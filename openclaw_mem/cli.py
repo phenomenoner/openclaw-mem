@@ -108,6 +108,9 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_IMPORTANCE_LABEL_KEYS = ("must_remember", "nice_to_have", "ignore", "unknown")
+
+
 @dataclass
 class IngestRunSummary:
     """Aggregate ingest/harvest stats for importance autograde.
@@ -125,6 +128,20 @@ class IngestRunSummary:
     def bump_label(self, label: str) -> None:
         key = (label or "").strip().lower() or "unknown"
         self.label_counts[key] = int(self.label_counts.get(key, 0)) + 1
+
+    def normalized_label_counts(self) -> Dict[str, int]:
+        """Return deterministic label counts for receipts.
+
+        Always includes the canonical importance labels with zero defaults, and
+        preserves any non-canonical labels (sorted for deterministic output).
+        """
+
+        out: Dict[str, int] = {k: int(self.label_counts.get(k, 0)) for k in _IMPORTANCE_LABEL_KEYS}
+        for key in sorted(self.label_counts):
+            if key in out:
+                continue
+            out[key] = int(self.label_counts.get(key, 0))
+        return out
 
 
 def _apply_importance_scorer_override(args: argparse.Namespace) -> None:
@@ -800,7 +817,7 @@ def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "skipped_existing": summary.skipped_existing,
             "skipped_disabled": summary.skipped_disabled,
             "scorer_errors": summary.scorer_errors,
-            "label_counts": summary.label_counts,
+            "label_counts": summary.normalized_label_counts(),
         },
         args.json,
     )
@@ -3402,7 +3419,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 "skipped_existing": summary.skipped_existing,
                 "skipped_disabled": summary.skipped_disabled,
                 "scorer_errors": summary.scorer_errors,
-                "label_counts": summary.label_counts,
+                "label_counts": summary.normalized_label_counts(),
             },
             args.json,
         )
@@ -3530,7 +3547,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "skipped_existing": summary.skipped_existing,
         "skipped_disabled": summary.skipped_disabled,
         "scorer_errors": summary.scorer_errors,
-        "label_counts": summary.label_counts,
+        "label_counts": summary.normalized_label_counts(),
         "embedded": embedded,
     }
     if embed_error:
