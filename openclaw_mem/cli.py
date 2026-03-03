@@ -2911,8 +2911,8 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     Accepted forms:
     - plain marker: `TODO ...`
-    - bracketed marker: `[TODO] ...`, `(TODO) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, or `《TODO》 ...`
-    - compact no-space bracketed marker: `[TODO]buy milk`, `【TODO】buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`
+    - bracketed marker: `[TODO] ...`, `(TASK) ...`, `【REMINDER】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, or `《TODO》 ...`
+    - compact no-space bracketed marker: `[TODO]buy milk`, `(TASK)review PR`, `【REMINDER】pay rent`, `【TODO】buy milk`, `{TODO}buy milk`
 
     Optional leading markdown wrappers are tolerated before markers:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
