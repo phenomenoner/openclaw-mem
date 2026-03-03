@@ -525,7 +525,14 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summa
     if run_summary is not None:
         run_summary.total_seen += 1
 
-    had_importance = "importance" in detail_obj
+    try:
+        from openclaw_mem.importance import is_parseable_importance
+
+        had_importance = is_parseable_importance(detail_obj.get("importance"))
+    except Exception:
+        # Conservative fallback: if the helper import fails for any reason,
+        # preserve prior behavior (treat presence of the field as 'existing').
+        had_importance = "importance" in detail_obj
     if run_summary is not None and had_importance:
         run_summary.skipped_existing += 1
         try:
