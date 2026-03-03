@@ -347,7 +347,7 @@ fi
 
 # Check observation count
 cd /opt/openclaw-mem
-COUNT=$(uv run --python 3.13 -- python -m openclaw_mem status --json | jq -r '.count')
+COUNT=$(uv run --python 3.13 -- python -m openclaw_mem status --json | python3 -c 'import sys, json; print(json.load(sys.stdin).get("count", 0))')
 if [ "$COUNT" -lt 10 ]; then
     echo "WARNING: Low observation count ($COUNT). Check plugin is capturing."
 fi
