@@ -2116,50 +2116,61 @@ def _hybrid_retrieve(
         # Keep a wider candidate pool before final rerank.
         candidate_limit = max(candidate_limit, rerank_topn * 3)
 
-    api_key = _get_api_key()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json")
-
-    client = OpenAIEmbeddingsClient(
-        api_key=api_key,
-        base_url=getattr(args, "base_url", defaults.openai_base_url()),
-    )
-    try:
-        embed_inputs = [query] + ([query_en] if query_en else [])
-        embed_vecs = client.embed(embed_inputs, model=model)
-        query_vec = embed_vecs[0]
-        query_en_vec = embed_vecs[1] if query_en else None
-    except Exception as e:
-        raise RuntimeError(str(e)) from e
+    # Vector lane is optional: if no API key (or no stored embeddings), we
+    # fall back to FTS-only retrieval.
+    vec_ids: List[int] = []
+    vec_en_ids: List[int] = []
 
     vec_rows = conn.execute(
         "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ?",
         (model,),
     ).fetchall()
 
-    vec_ranked = rank_cosine(
-        query_vec=query_vec,
-        items=((int(r[0]), r[1], float(r[2])) for r in vec_rows),
-        limit=candidate_limit,
-    )
-    vec_ids = [rid for rid, _ in vec_ranked]
-
-    vec_en_ids: List[int] = []
-    if query_en_vec is not None:
+    vec_en_rows = []
+    if query_en:
         vec_en_rows = conn.execute(
             "SELECT observation_id, vector, norm FROM observation_embeddings_en WHERE model = ?",
             (model,),
         ).fetchall()
 
-        # Backward-compatible fallback when dedicated EN table is not populated.
-        search_rows = vec_en_rows if vec_en_rows else vec_rows
+    need_vec = bool(vec_rows)
+    need_vec_en = bool(query_en and (vec_en_rows or vec_rows))
 
-        vec_en_ranked = rank_cosine(
-            query_vec=query_en_vec,
-            items=((int(r[0]), r[1], float(r[2])) for r in search_rows),
-            limit=candidate_limit,
+    api_key = _get_api_key()
+    if api_key and (need_vec or need_vec_en):
+        client = OpenAIEmbeddingsClient(
+            api_key=api_key,
+            base_url=getattr(args, "base_url", defaults.openai_base_url()),
         )
-        vec_en_ids = [rid for rid, _ in vec_en_ranked]
+        try:
+            embed_inputs = [query] + ([query_en] if query_en else [])
+            embed_vecs = client.embed(embed_inputs, model=model)
+            query_vec = embed_vecs[0]
+            query_en_vec = embed_vecs[1] if query_en else None
+        except Exception as e:
+            raise RuntimeError(str(e)) from e
+
+        if need_vec:
+            vec_ranked = rank_cosine(
+                query_vec=query_vec,
+                items=((int(r[0]), r[1], float(r[2])) for r in vec_rows),
+                limit=candidate_limit,
+            )
+            vec_ids = [rid for rid, _ in vec_ranked]
+
+        if query_en_vec is not None and need_vec_en:
+            # Backward-compatible fallback when dedicated EN table is not populated.
+            search_rows = vec_en_rows if vec_en_rows else vec_rows
+
+            vec_en_ranked = rank_cosine(
+                query_vec=query_en_vec,
+                items=((int(r[0]), r[1], float(r[2])) for r in search_rows),
+                limit=candidate_limit,
+            )
+            vec_en_ids = [rid for rid, _ in vec_en_ranked]
+    else:
+        if not api_key and (need_vec or need_vec_en):
+            print("Warning: No API key, skipping vector retrieval", file=sys.stderr)
 
     fts_rows = []
     try:
@@ -2173,16 +2184,61 @@ def _hybrid_retrieve(
             """,
             (query, candidate_limit),
         ).fetchall()
-    except sqlite3.OperationalError as e:
-        # FTS syntax can fail for edge-case query strings (e.g. hyphens/operators).
-        if "no such column: matches" in str(e):
+    except sqlite3.OperationalError:
+        # FTS syntax can fail for edge-case query strings (hyphens/operators/punctuation).
+        # Prefer fail-open behavior:
+        # 1) retry once with a best-effort sanitized query
+        # 2) if it still fails, skip the FTS lane (instead of crashing)
+        sanitized = re.sub(r"[^\w\s]", " ", query, flags=re.UNICODE)
+        sanitized = " ".join(sanitized.split())
+        retry_query = sanitized if sanitized else query
+
+        if retry_query != query:
+            try:
+                fts_rows = conn.execute(
+                    """
+                    SELECT rowid
+                    FROM observations_fts
+                    WHERE observations_fts MATCH ?
+                    ORDER BY bm25(observations_fts) ASC
+                    LIMIT ?;
+                    """,
+                    (retry_query, candidate_limit),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                print(
+                    f"[openclaw-mem] FTS query parse failed; skipping FTS lane (query={query!r}).",
+                    file=sys.stderr,
+                )
+        else:
             print(
                 f"[openclaw-mem] FTS query parse failed; skipping FTS lane (query={query!r}).",
                 file=sys.stderr,
             )
-        else:
-            raise
     fts_ids = [int(r["rowid"]) for r in fts_rows]
+
+    # If the query is a multi-token natural-language string, FTS5 MATCH defaults
+    # to an implicit AND, which can easily yield zero hits. As a best-effort
+    # fallback (especially when vector search is unavailable), retry with an OR
+    # query to recover some signal.
+    if not fts_ids:
+        tokens = [t for t in re.sub(r"[^\w\s]", " ", query, flags=re.UNICODE).split() if t]
+        if len(tokens) > 1:
+            or_query = " OR ".join(tokens)
+            try:
+                fts_rows = conn.execute(
+                    """
+                    SELECT rowid
+                    FROM observations_fts
+                    WHERE observations_fts MATCH ?
+                    ORDER BY bm25(observations_fts) ASC
+                    LIMIT ?;
+                    """,
+                    (or_query, candidate_limit),
+                ).fetchall()
+                fts_ids = [int(r["rowid"]) for r in fts_rows]
+            except sqlite3.OperationalError:
+                pass
 
     ranked_lists = [fts_ids, vec_ids]
     if vec_en_ids:

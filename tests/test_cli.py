@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
+from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
 
 
 class TestCliM0(unittest.TestCase):
@@ -25,6 +25,39 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertIn("embeddings_en", out)
         self.assertEqual(out["embeddings_en"]["count"], 0)
+        conn.close()
+
+    def test_pack_falls_back_to_fts_when_no_api_key(self):
+        conn = _connect(":memory:")
+        _insert_observation(
+            conn,
+            {
+                "kind": "preference",
+                "summary": "Prefers using Asia/Taipei (UTC+8) timezone for time displays.",
+                "tool_name": "memory_store",
+                "detail": {"importance": {"score": 0.8, "label": "must_remember"}},
+            },
+        )
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "timezone",
+                "query_en": None,
+                "limit": 12,
+                "budget_tokens": 400,
+                "trace": False,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_pack(conn, args)
+        payload = json.loads(buf.getvalue())
+        texts = [it.get("summary") for it in payload.get("items", [])]
+        self.assertTrue(any("UTC+8" in (t or "") for t in texts))
         conn.close()
 
     def test_summary_has_task_marker_accepts_full_width_colon_and_unicode_dashes(self):

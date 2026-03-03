@@ -1,0 +1,26 @@
+flowchart LR
+  subgraph User
+    U[Human]
+  end
+
+  subgraph Agent
+    A[OpenClaw main session
+(prompt + tools)]
+  end
+
+  subgraph MemoryLayer[openclaw-mem]
+    W[store
+(category/importance/text)]
+    S[(SQLite store)]
+    R[pack/query
+(cited bundle + optional trace)]
+  end
+
+  U -->|chat| A
+  A -->|memory_store| W
+  W --> S
+  A -->|recall request
+(query)| R
+  R --> S
+  R -->|bundle_text + citations| A
+  A -->|answer + receipts| U
