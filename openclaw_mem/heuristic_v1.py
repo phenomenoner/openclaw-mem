@@ -80,6 +80,30 @@ def _has_cli_command(text: str) -> bool:
     )
 
 
+def _strip_md_task_prefix(text: str) -> str:
+    """Strip common Markdown task prefixes.
+
+    Examples this should handle:
+      - "- [ ] TODO: ..."
+      - "> - [x] Task: ..."
+      - "* TODO ..."
+
+    This helper is intentionally conservative: it only removes formatting
+    prefixes, not semantic content.
+    """
+
+    t = (text or "").strip()
+    prev = None
+    # Peel layers like blockquotes, bullets, and checkboxes.
+    while prev != t:
+        prev = t
+        t = re.sub(r"^>+\s*", "", t).lstrip()
+        t = re.sub(r"^(?:[-*+•]|\d+\.)\s+", "", t).lstrip()
+        t = re.sub(r"^\[(?: |x|X)\]\s*", "", t).lstrip()
+        t = re.sub(r"^[☐☑✅✔]\s*", "", t).lstrip()
+    return t
+
+
 def _is_task_like(text: str, kind: str) -> bool:
     t = (text or "").strip()
     tl = t.lower()
@@ -88,10 +112,13 @@ def _is_task_like(text: str, kind: str) -> bool:
 
     # Handle observations formatted as "tool: summary" and bare summaries.
     summary_part = tl.split(":", 1)[-1].strip() if ":" in tl else tl
+    summary_part = _strip_md_task_prefix(summary_part)
     if re.match(r"^(todo|task|reminder)(?:[:：\s-]|$)", summary_part):
         return True
 
-    if "要做" in t or "待辦" in t:
+    # Chinese task markers (also accept markdown/bullet prefixes).
+    t_stripped = _strip_md_task_prefix(t)
+    if "要做" in t_stripped or "待辦" in t_stripped:
         return True
     return False
 
