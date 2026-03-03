@@ -39,6 +39,8 @@ uv run python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
 Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_ts`, and `ingest` prints `{inserted, ids}`.
 
 ## Quick links
+- **5-minute synthetic demo (Inside-Out Memory)**: `docs/showcase/inside-out-demo.md` (run: `./scripts/inside_out_demo.sh`)
+- **For AI coding agents**: `AGENTS.md`
 - Engine: `docs/mem-engine.md` (what it is + how to enable + knobs)
 - Sidecar capture plugin: `docs/auto-capture.md`
 - Ecosystem fit / comparisons: `docs/ecosystem-fit.md`
