@@ -1013,6 +1013,76 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_triage_tasks_mode_no_dedupe_does_not_write_state(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "task",
+                        "tool_name": "memory_store",
+                        "summary": "TODO: buy coffee this afternoon",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type("Args", (), {
+            "mode": "tasks",
+            "since_minutes": 60,
+            "limit": 10,
+            "keywords": None,
+            "cron_jobs_path": None,
+            "tasks_since_minutes": 1440,
+            "importance_min": 0.7,
+            "state_path": state_path,
+            "dedupe": False,
+            "json": True,
+        })()
+
+        buf1 = io.StringIO()
+        with redirect_stdout(buf1):
+            with self.assertRaises(SystemExit) as cm1:
+                cmd_triage(conn, args)
+        self.assertEqual(cm1.exception.code, 10)
+        out1 = json.loads(buf1.getvalue())
+        self.assertEqual(out1["dedupe"], False)
+        self.assertEqual(out1["tasks"]["found_total"], 1)
+        self.assertEqual(out1["tasks"]["found_new"], 1)
+
+        # no-dedupe should not write state
+        with open(state_path, "r", encoding="utf-8") as fp:
+            self.assertEqual(fp.read().strip(), "")
+
+        buf2 = io.StringIO()
+        with redirect_stdout(buf2):
+            with self.assertRaises(SystemExit) as cm2:
+                cmd_triage(conn, args)
+        self.assertEqual(cm2.exception.code, 10)
+        out2 = json.loads(buf2.getvalue())
+        self.assertEqual(out2["tasks"]["found_new"], 1)
+
+        conn.close()
+
     def test_triage_tasks_accepts_task_marker_without_colon(self):
         import tempfile
         from datetime import datetime, timezone

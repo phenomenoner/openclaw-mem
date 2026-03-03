@@ -3258,6 +3258,8 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     since_minutes = max(0, since_minutes)
     limit = max(1, min(200, limit))
 
+    dedupe = bool(getattr(args, "dedupe", True))
+
     kw_raw = getattr(args, "keywords", None)
     if kw_raw:
         keywords = [k.strip().lower() for k in str(kw_raw).split(",") if k.strip()]
@@ -3282,7 +3284,7 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     importance_min = float(getattr(args, "importance_min", 0.7))
 
     state_path = Path(os.path.expanduser(getattr(args, "state_path", None) or "~/.openclaw/memory/openclaw-mem/triage-state.json"))
-    state = _load_triage_state(state_path)
+    state = _load_triage_state(state_path) if dedupe else {}
 
     last_obs_id = int(((state.get("observations") or {}).get("last_alerted_id") or 0))
     last_task_id = int(((state.get("tasks") or {}).get("last_alerted_id") or 0))
@@ -3310,10 +3312,15 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if mode in {"heartbeat", "tasks"}:
         tasks_all = _triage_tasks(conn, since_ts=tasks_since_utc, importance_min=importance_min, limit=limit)
 
-    # Dedupe: only alert on *new* items
-    obs_new = [m for m in obs_all if int(m.get("id") or 0) > last_obs_id]
-    tasks_new = [m for m in tasks_all if int(m.get("id") or 0) > last_task_id]
-    cron_new = [m for m in cron_all if int(m.get("lastRunAtMs") or 0) > last_cron_ms]
+    if dedupe:
+        # Dedupe: only alert on *new* items
+        obs_new = [m for m in obs_all if int(m.get("id") or 0) > last_obs_id]
+        tasks_new = [m for m in tasks_all if int(m.get("id") or 0) > last_task_id]
+        cron_new = [m for m in cron_all if int(m.get("lastRunAtMs") or 0) > last_cron_ms]
+    else:
+        obs_new = list(obs_all)
+        tasks_new = list(tasks_all)
+        cron_new = list(cron_all)
 
     needs_attention = (len(obs_new) > 0) or (len(cron_new) > 0) or (len(tasks_new) > 0)
 
@@ -3323,6 +3330,7 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "version": {"openclaw_mem": __version__, "schema": "v0"},
         "ok": True,
         "mode": mode,
+        "dedupe": dedupe,
         "since_minutes": since_minutes,
         "since_utc": since_utc,
         "keywords": keywords,
@@ -3349,7 +3357,7 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         },
     }
 
-    if needs_attention:
+    if needs_attention and dedupe:
         # Update state maxima
         if obs_new:
             last_obs_id = max(last_obs_id, max(int(m.get("id") or 0) for m in obs_new))
@@ -5988,6 +5996,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--state-path",
         dest="state_path",
         help="State file for dedupe (default: ~/.openclaw/memory/openclaw-mem/triage-state.json)",
+    )
+    sp.add_argument(
+        "--no-dedupe",
+        dest="dedupe",
+        action="store_false",
+        default=True,
+        help="Disable state dedupe; return all matches (manual debugging)",
     )
     sp.set_defaults(func=cmd_triage)
 
