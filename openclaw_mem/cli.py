@@ -2984,7 +2984,7 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     Accepted forms:
     - plain marker: `TODO ...`
-    - bracketed marker: `[TODO] ...`, `(TASK) ...`, `【REMINDER】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, or `«TODO» ...`
+    - bracketed marker: `[TODO] ...`, `(TASK) ...`, `【REMINDER】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`, `〈TODO〉 ...`, or `‹TODO› ...`
     - compact no-space bracketed marker: `[TODO]buy milk`, `(TASK)review PR`, `【REMINDER】pay rent`, `【TODO】buy milk`, `{TODO}buy milk`
 
     Optional leading markdown wrappers are tolerated before markers:
@@ -3042,7 +3042,7 @@ def _summary_has_task_marker(summary: str) -> bool:
         if not text:
             return False
 
-        close_by_open = {"[": "]", "(": ")", "【": "】", "〔": "〕", "{": "}", "「": "」", "『": "』", "《": "》", "«": "»"}
+        close_by_open = {"[": "]", "(": ")", "【": "】", "〔": "〕", "{": "}", "「": "」", "『": "』", "《": "》", "〈": "〉", "«": "»", "‹": "›"}
         close = close_by_open.get(text[0])
         if close is None:
             return False
