@@ -100,13 +100,15 @@ DEFAULT_GRAPH_CAPTURE_MD_EXCLUDES = (
     "**/dist/**",
 )
 _CONFIG_CACHE: Optional[Dict[str, Any]] = None
-_IMPORTANCE_LABEL_KEYS = ("must_remember", "nice_to_have", "ignore", "unknown")
 
 
 def _utcnow_iso() -> str:
     """Return UTC timestamp in ISO format with timezone info."""
 
     return datetime.now(timezone.utc).isoformat()
+
+
+_IMPORTANCE_LABEL_KEYS = ("must_remember", "nice_to_have", "ignore", "unknown")
 
 
 @dataclass
@@ -2910,6 +2912,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     Accepted forms:
     - plain marker: `TODO ...`
     - bracketed marker: `[TODO] ...`, `(TODO) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, or `《TODO》 ...`
+    - compact no-space bracketed marker: `[TODO]buy milk`, `【TODO】buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`
 
     Optional leading markdown wrappers are tolerated before markers:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
@@ -2920,7 +2923,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
     - whitespace
-    - '-' / '.' / '－' / '–' / '—' / '−'
+    - '-' / '.' / '。' / '－' / '–' / '—' / '−'
     - end-of-string
 
     Example formats:
@@ -2936,8 +2939,8 @@ def _summary_has_task_marker(summary: str) -> bool:
         return False
 
     markers = ("TODO", "TASK", "REMINDER")
-    separators = {":", "：", "-", ".", "－", "–", "—", "−"}
-    bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·"}
+    separators = {":", "：", "-", ".", "。", "－", "–", "—", "−"}
+    bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·", "◦"}
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
 
     def _has_valid_suffix(text: str, idx: int, *, allow_compact: bool = False) -> bool:
@@ -3151,7 +3154,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - kind == 'task' OR
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; supports plain or
-      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』`/`《TODO》` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`「TODO」buy milk`/`『TODO』buy milk`/`《TODO》buy milk`), plus optional leading
+      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`「TODO」buy milk`/`『TODO』buy milk`), plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
       (`-`/`*`/`+`/`•`/`‣`/`∙`/`·`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`), and ordered-list prefixes like
       `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
