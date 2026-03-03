@@ -152,21 +152,21 @@ tail -f ~/.openclaw/memory/openclaw-mem-observations.jsonl
 
 ```bash
 cd /path/to/openclaw-mem
-uv run python -m openclaw_mem ingest \
+uv run --python 3.13 --frozen -- python -m openclaw_mem ingest \
   --file ~/.openclaw/memory/openclaw-mem-observations.jsonl --json
 ```
 
 ### 3) Search
 
 ```bash
-uv run python -m openclaw_mem search "web_search" --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem search "web_search" --json
 ```
 
 ### 4) Explicit memory write/read (CLI)
 
 ```bash
-uv run python -m openclaw_mem store "Prefer dark theme" --category preference --importance 0.8 --json
-uv run python -m openclaw_mem hybrid "theme preference" --limit 5 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem store "Prefer dark theme" --category preference --importance 0.8 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "theme preference" --limit 5 --json
 ```
 
 ---
