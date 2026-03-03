@@ -126,7 +126,19 @@ class IngestRunSummary:
     label_counts: Dict[str, int] = field(default_factory=dict)
 
     def bump_label(self, label: str) -> None:
-        key = (label or "").strip().lower() or "unknown"
+        raw = label or ""
+        try:
+            from openclaw_mem.importance import normalize_label
+
+            normalized = normalize_label(raw)
+        except Exception:
+            normalized = None
+
+        if normalized:
+            key = normalized
+        else:
+            key = unicodedata.normalize("NFKC", raw).strip().lower() or "unknown"
+
         self.label_counts[key] = int(self.label_counts.get(key, 0)) + 1
 
     def normalized_label_counts(self) -> Dict[str, int]:

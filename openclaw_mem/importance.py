@@ -58,6 +58,16 @@ def _normalize_label(value: Any) -> str | None:
     return None
 
 
+def normalize_label(value: Any) -> str | None:
+    """Public wrapper for label normalization.
+
+    Keeps CLI receipts and any external callers aligned with the
+    same backward-compatible aliases used by the importance parser.
+    """
+
+    return _normalize_label(value)
+
+
 def _parse_score_like(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
