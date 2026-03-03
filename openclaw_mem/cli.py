@@ -142,6 +142,23 @@ class IngestRunSummary:
         return out
 
 
+def _normalize_importance_scorer_value(value: str) -> str:
+    """Normalize importance autograde scorer values.
+
+    Accepts minor aliases (e.g., heuristic_v1) while keeping a
+    single canonical value for storage/receipts.
+    """
+
+    v = unicodedata.normalize("NFKC", str(value)).strip().lower()
+    if not v:
+        return ""
+
+    v = v.replace("_", "-").replace(" ", "")
+    if v in {"heuristicv1", "heuristic-v1"}:
+        return "heuristic-v1"
+    return v
+
+
 def _apply_importance_scorer_override(args: argparse.Namespace) -> None:
     """Optionally override importance autograde scorer for this process.
 
@@ -162,7 +179,7 @@ def _apply_importance_scorer_override(args: argparse.Namespace) -> None:
     if raw is None:
         return
 
-    v = str(raw).strip().lower()
+    v = _normalize_importance_scorer_value(str(raw))
     if not v:
         return
 
@@ -515,7 +532,7 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summa
     # - default OFF
     # - only populate missing `detail_json.importance`
     # - fail-open on any grading error
-    scorer = (os.environ.get("OPENCLAW_MEM_IMPORTANCE_SCORER") or "").strip().lower()
+    scorer = _normalize_importance_scorer_value(os.environ.get("OPENCLAW_MEM_IMPORTANCE_SCORER") or "")
 
     if scorer == "heuristic-v1":
         if not had_importance:
