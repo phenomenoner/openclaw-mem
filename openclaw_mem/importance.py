@@ -72,6 +72,39 @@ def _parse_score_like(value: Any) -> float | None:
         normalized = unicodedata.normalize("NFKC", value).strip()
         if not normalized:
             return None
+
+        # Explicit percent form: '86%' -> 0.86
+        if normalized.endswith('%'):
+            raw = normalized[:-1].strip()
+            if not raw:
+                return None
+            try:
+                score = float(raw) / 100.0
+            except Exception:
+                return None
+            if math.isfinite(score):
+                return score
+            return None
+
+        # Explicit ratio form: '86/100' -> 0.86
+        if '/' in normalized:
+            left, right = normalized.split('/', 1)
+            left = left.strip()
+            right = right.strip()
+            if not left or not right:
+                return None
+            try:
+                num = float(left)
+                den = float(right)
+            except Exception:
+                return None
+            if not math.isfinite(num) or not math.isfinite(den) or den == 0.0:
+                return None
+            score = num / den
+            if math.isfinite(score):
+                return score
+            return None
+
         try:
             score = float(normalized)
         except Exception:
