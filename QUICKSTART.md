@@ -44,6 +44,19 @@ uv run --python 3.13 -- python -m openclaw_mem --json backend
 
 ---
 
+## Step 2.1: 5-minute synthetic demo (Inside-Out Memory)
+
+This demo is **synthetic** (no private/user data) and is designed to run even
+without `OPENAI_API_KEY` (FTS-only fail-open).
+
+```bash
+./scripts/inside_out_demo.sh
+```
+
+See: `docs/showcase/inside-out-demo.md`.
+
+---
+
 ## Step 3: Ingest sample data
 
 ```bash
