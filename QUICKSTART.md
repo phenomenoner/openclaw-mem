@@ -47,7 +47,11 @@ uv run --python 3.13 -- python -m openclaw_mem --json backend
 ## Step 3: Ingest sample data
 
 ```bash
-python -c "from pathlib import Path; Path('/tmp/sample.jsonl').write_text('{\"ts\":\"2026-02-05T10:00:00Z\",\"kind\":\"tool\",\"tool_name\":\"web_search\",\"summary\":\"searched for OpenClaw\",\"detail\":{\"results\":5}}\\n{\"ts\":\"2026-02-05T10:01:00Z\",\"kind\":\"tool\",\"tool_name\":\"web_fetch\",\"summary\":\"fetched openclaw.ai\",\"detail\":{\"ok\":true}}\\n{\"ts\":\"2026-02-05T10:02:00Z\",\"kind\":\"tool\",\"tool_name\":\"exec\",\"summary\":\"ran git status\",\"detail\":{\"exit_code\":0}}\\n', encoding='utf-8')"
+cat > /tmp/sample.jsonl <<'JSONL'
+{"ts":"2026-02-05T10:00:00Z","kind":"tool","tool_name":"web_search","summary":"searched for OpenClaw","detail":{"results":5}}
+{"ts":"2026-02-05T10:01:00Z","kind":"tool","tool_name":"web_fetch","summary":"fetched openclaw.ai","detail":{"ok":true}}
+{"ts":"2026-02-05T10:02:00Z","kind":"tool","tool_name":"exec","summary":"ran git status","detail":{"exit_code":0}}
+JSONL
 
 uv run --python 3.13 -- python -m openclaw_mem ingest --file /tmp/sample.jsonl --json
 ```
