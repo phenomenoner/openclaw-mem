@@ -2972,7 +2972,7 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     Optional leading markdown wrappers are tolerated before markers:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
-    - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·`, `◦` (whitespace optional before nested wrappers/marker)
+    - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·`, `◦`, `・`, `–`, `—`, `−` (whitespace optional before nested wrappers/marker)
     - markdown checkboxes: `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` (whitespace optional before nested wrappers/marker)
     - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (whitespace optional before nested wrappers/marker)
 
@@ -3002,7 +3002,7 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     markers = ("TODO", "TASK", "REMINDER")
     separators = {":", "：", "-", ".", "。", "－", "–", "—", "−"}
-    bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·", "◦"}
+    bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·", "◦", "・", "–", "—", "−"}
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
 
     def _has_valid_suffix(text: str, idx: int, *, allow_compact: bool = False) -> bool:

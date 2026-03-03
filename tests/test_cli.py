@@ -131,6 +131,10 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("iv) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("IX. [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("(iv) TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("– TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("— TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("− TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("・ TODO buy milk"))
 
     def test_summary_has_task_marker_accepts_compact_wrapper_chaining(self):
         self.assertTrue(_summary_has_task_marker("•[x]TODO fix pipeline"))
@@ -138,6 +142,9 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("◦[x]TODO compact pipeline"))
         self.assertTrue(_summary_has_task_marker("- (I)[ ] TODO reorder docs"))
         self.assertTrue(_summary_has_task_marker(">>‣TODO audit logs"))
+        self.assertTrue(_summary_has_task_marker("—TODO audit logs"))
+        self.assertTrue(_summary_has_task_marker("–TODO audit logs"))
+        self.assertTrue(_summary_has_task_marker("・TODO audit logs"))
 
     def test_summary_has_task_marker_accepts_nested_prefix_combinations(self):
         self.assertTrue(_summary_has_task_marker("* (1) [ ] TODO: clean desk"))
