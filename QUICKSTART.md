@@ -21,7 +21,7 @@ uv sync --locked
 **Invocation note (truthful):** from a source checkout, run the CLI as:
 
 ```bash
-uv run python -m openclaw_mem ...
+uv run --python 3.13 -- python -m openclaw_mem ...
 ```
 
 If you have a packaged install that provides the console script, you can use:
@@ -36,10 +36,10 @@ openclaw-mem ...
 
 ```bash
 # Creates/opens a DB and prints stats
-uv run python -m openclaw_mem --json status
+uv run --python 3.13 -- python -m openclaw_mem --json status
 
 # Inspect active OpenClaw memory backend + fallback posture
-uv run python -m openclaw_mem --json backend
+uv run --python 3.13 -- python -m openclaw_mem --json backend
 ```
 
 ---
@@ -49,7 +49,7 @@ uv run python -m openclaw_mem --json backend
 ```bash
 python -c "from pathlib import Path; Path('/tmp/sample.jsonl').write_text('{\"ts\":\"2026-02-05T10:00:00Z\",\"kind\":\"tool\",\"tool_name\":\"web_search\",\"summary\":\"searched for OpenClaw\",\"detail\":{\"results\":5}}\\n{\"ts\":\"2026-02-05T10:01:00Z\",\"kind\":\"tool\",\"tool_name\":\"web_fetch\",\"summary\":\"fetched openclaw.ai\",\"detail\":{\"ok\":true}}\\n{\"ts\":\"2026-02-05T10:02:00Z\",\"kind\":\"tool\",\"tool_name\":\"exec\",\"summary\":\"ran git status\",\"detail\":{\"exit_code\":0}}\\n', encoding='utf-8')"
 
-uv run python -m openclaw_mem ingest --file /tmp/sample.jsonl --json
+uv run --python 3.13 -- python -m openclaw_mem ingest --file /tmp/sample.jsonl --json
 ```
 
 ---
@@ -57,9 +57,9 @@ uv run python -m openclaw_mem ingest --file /tmp/sample.jsonl --json
 ## Step 4: Progressive recall (search → timeline → get)
 
 ```bash
-uv run python -m openclaw_mem search "OpenClaw" --limit 10 --json
-uv run python -m openclaw_mem timeline 2 --window 2 --json
-uv run python -m openclaw_mem get 1 --json
+uv run --python 3.13 -- python -m openclaw_mem search "OpenClaw" --limit 10 --json
+uv run --python 3.13 -- python -m openclaw_mem timeline 2 --window 2 --json
+uv run --python 3.13 -- python -m openclaw_mem get 1 --json
 ```
 
 ---
@@ -67,11 +67,11 @@ uv run python -m openclaw_mem get 1 --json
 ## Step 4.5: Dual-language memory (optional)
 
 ```bash
-uv run python -m openclaw_mem store "<original non-English text>" \
+uv run --python 3.13 -- python -m openclaw_mem store "<original non-English text>" \
   --text-en "Preference: run integration tests before release" \
   --lang zh --category preference --importance 0.9 --json
 
-uv run python -m openclaw_mem hybrid "<original query>" \
+uv run --python 3.13 -- python -m openclaw_mem hybrid "<original query>" \
   --query-en "pre-release process" \
   --limit 5 --json
 ```
@@ -133,7 +133,7 @@ tail -f ~/.openclaw/memory/openclaw-mem-observations.jsonl
 Ingest captured observations:
 
 ```bash
-uv run python -m openclaw_mem ingest \
+uv run --python 3.13 -- python -m openclaw_mem ingest \
   --file ~/.openclaw/memory/openclaw-mem-observations.jsonl --json
 ```
 
@@ -142,8 +142,8 @@ uv run python -m openclaw_mem ingest \
 ## Step 6: Deterministic triage (optional)
 
 ```bash
-uv run python -m openclaw_mem triage --mode heartbeat --json
-uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --json
+uv run --python 3.13 -- python -m openclaw_mem triage --mode heartbeat --json
+uv run --python 3.13 -- python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --json
 ```
 
 Task matching rules in `--mode tasks` are deterministic:
@@ -156,7 +156,7 @@ Task matching rules in `--mode tasks` are deterministic:
 - Example run:
 
 ```bash
-uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
+uv run --python 3.13 -- python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
 ```
 
 ---
@@ -169,19 +169,19 @@ uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --i
 Enable per-command:
 
 ```bash
-OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run --python 3.13 -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 ```
 
 Disable for a one-off run (kill-switch):
 
 ```bash
-OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run --python 3.13 -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 ```
 
 Or override only this command:
 
 ```bash
-uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
+uv run --python 3.13 -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
 ```
 
 ## Step 8: Graphic Memory automation knobs (optional, dev)
@@ -195,20 +195,20 @@ Graphic Memory automation toggles are opt-in (default OFF):
 Inspect effective toggle state:
 
 ```bash
-uv run python -m openclaw_mem graph auto-status --json
+uv run --python 3.13 -- python -m openclaw_mem graph auto-status --json
 ```
 
 Examples:
 
 ```bash
 # Preflight recall pack (bounded context bundle)
-OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
+OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run --python 3.13 -- python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
 
 # Capture recent repo commits as observations
-OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run --python 3.13 -- python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
 
 # Capture markdown heading sections (index-only)
-OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run --python 3.13 -- python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
 ```
 
 Spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
