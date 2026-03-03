@@ -2926,6 +2926,12 @@ def _summary_has_task_marker(summary: str) -> bool:
     - '-' / '.' / '。' / '－' / '–' / '—' / '−'
     - end-of-string
 
+    Rejected forms (examples):
+    - inline markers not at the beginning: `We should TODO: fix this later`
+    - words that merely start with a marker: `TODOLIST ...`, `taskforce ...`
+    - punctuation-only suffix: `TODO! ...` (must be followed by a separator/space/end)
+    - mismatched wrappers: `[TODO) ...`
+
     Example formats:
     - TODO: rotate runbook
     - task- check alerts
