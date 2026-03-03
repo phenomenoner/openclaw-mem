@@ -3810,6 +3810,74 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["trace"]["output"]["excludedCount"], 1)
         conn.close()
 
+    def test_triage_cron_errors_coerces_numeric_strings(self):
+        import tempfile
+
+        # Fake cron jobs store: timestamps/durations may be stored as strings.
+        jobs = {
+            "jobs": [
+                {
+                    "id": "job1",
+                    "name": "Job 1",
+                    "enabled": True,
+                    "state": {"lastStatus": "ok", "lastRunAtMs": "9999999999999"},
+                },
+                {
+                    "id": "job2",
+                    "name": "Job 2",
+                    "enabled": True,
+                    "state": {
+                        "lastStatus": "error",
+                        "lastRunAtMs": "9999999999999",
+                        "lastDurationMs": "1234",
+                        "nextRunAtMs": "9999999999999",
+                        "lastError": "boom first line\nboom second line",
+                    },
+                },
+            ]
+        }
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as tmp:
+            json.dump(jobs, tmp)
+            tmp_path = tmp.name
+
+        conn = _connect(":memory:")
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "cron-errors",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": tmp_path,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+
+        self.assertEqual(out["cron"]["found_new"], 1)
+        match = out["cron"]["matches"][0]
+        self.assertEqual(match["id"], "job2")
+        self.assertEqual(match["lastRunAtMs"], 9999999999999)
+        self.assertEqual(match["lastDurationMs"], 1234)
+        self.assertEqual(match["nextRunAtMs"], 9999999999999)
+        self.assertEqual(match["lastErrorLine"], "boom first line")
+
+        conn.close()
+
+
 
 if __name__ == "__main__":
     unittest.main()

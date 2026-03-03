@@ -126,7 +126,19 @@ class IngestRunSummary:
     label_counts: Dict[str, int] = field(default_factory=dict)
 
     def bump_label(self, label: str) -> None:
-        key = (label or "").strip().lower() or "unknown"
+        raw = label or ""
+        try:
+            from openclaw_mem.importance import normalize_label
+
+            normalized = normalize_label(raw)
+        except Exception:
+            normalized = None
+
+        if normalized:
+            key = normalized
+        else:
+            key = unicodedata.normalize("NFKC", raw).strip().lower() or "unknown"
+
         self.label_counts[key] = int(self.label_counts.get(key, 0)) + 1
 
     def normalized_label_counts(self) -> Dict[str, int]:
@@ -513,7 +525,14 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summa
     if run_summary is not None:
         run_summary.total_seen += 1
 
-    had_importance = "importance" in detail_obj
+    try:
+        from openclaw_mem.importance import is_parseable_importance
+
+        had_importance = is_parseable_importance(detail_obj.get("importance"))
+    except Exception:
+        # Conservative fallback: if the helper import fails for any reason,
+        # preserve prior behavior (treat presence of the field as 'existing').
+        had_importance = "importance" in detail_obj
     if run_summary is not None and had_importance:
         run_summary.skipped_existing += 1
         try:
@@ -2929,11 +2948,18 @@ def _triage_observations(conn: sqlite3.Connection, since_ts: str, keywords: List
     return [dict(r) for r in rows]
 
 
+
+
 def _triage_cron_errors(*, since_ms: int, cron_jobs_path: str, limit: int) -> List[Dict[str, Any]]:
     """Detect cron jobs whose lastStatus != ok.
 
     Reads OpenClaw cron store (jobs.json). Deterministic and no LLM calls.
+
+    Notes:
+    - Coerces numeric timestamps/durations that may be stored as strings.
+    - Emits a bounded `lastErrorLine` when available (best-effort).
     """
+
     p = Path(os.path.expanduser(cron_jobs_path))
     if not p.exists():
         return []
@@ -2947,17 +2973,65 @@ def _triage_cron_errors(*, since_ms: int, cron_jobs_path: str, limit: int) -> Li
     if not isinstance(jobs, list):
         return []
 
+    def _as_int(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return int(value)
+        if isinstance(value, float):
+            try:
+                return int(value)
+            except Exception:
+                return None
+        if isinstance(value, str):
+            s = value.strip()
+            if not s:
+                return None
+            if s.isdigit() or (s.startswith("-") and s[1:].isdigit()):
+                try:
+                    return int(s)
+                except Exception:
+                    return None
+            try:
+                f = float(s)
+            except Exception:
+                return None
+            if f != f or f in (float("inf"), float("-inf")):
+                return None
+            try:
+                return int(f)
+            except Exception:
+                return None
+        return None
+
+    def _first_line(value: Any, *, max_chars: int = 400) -> str | None:
+        if not isinstance(value, str):
+            return None
+        s = value.strip("\n")
+        if not s:
+            return None
+        line = s.splitlines()[0].strip()
+        if not line:
+            return None
+        if len(line) > max_chars:
+            return line[: max_chars - 1] + "…"
+        return line
+
     bad: List[Dict[str, Any]] = []
     for j in jobs:
         if not isinstance(j, dict):
             continue
         state = j.get("state") if isinstance(j.get("state"), dict) else {}
-        last_status = state.get("lastStatus")
-        last_run = state.get("lastRunAtMs")
-        if last_status in (None, "ok"):
+
+        last_status_raw = state.get("lastStatus")
+        last_status = (str(last_status_raw).strip() if last_status_raw is not None else None)
+
+        last_run = _as_int(state.get("lastRunAtMs"))
+        if last_status is None or last_status.lower() == "ok":
             continue
-        if isinstance(last_run, (int, float)) and int(last_run) < int(since_ms):
+        if last_run is not None and int(last_run) < int(since_ms):
             continue
+
         bad.append(
             {
                 "id": j.get("id"),
@@ -2965,13 +3039,20 @@ def _triage_cron_errors(*, since_ms: int, cron_jobs_path: str, limit: int) -> Li
                 "enabled": j.get("enabled"),
                 "lastStatus": last_status,
                 "lastRunAtMs": last_run,
-                "lastDurationMs": state.get("lastDurationMs"),
-                "nextRunAtMs": (state.get("nextRunAtMs") if isinstance(state, dict) else None),
+                "lastDurationMs": _as_int(state.get("lastDurationMs")),
+                "nextRunAtMs": _as_int(state.get("nextRunAtMs")),
+                "lastErrorLine": _first_line(
+                    state.get("lastError")
+                    or state.get("lastErrorLine")
+                    or state.get("lastErrorMessage")
+                    or state.get("error")
+                ),
             }
         )
 
     bad.sort(key=lambda x: (-(int(x.get("lastRunAtMs") or 0)), str(x.get("name") or "")))
     return bad[:limit]
+
 
 
 def _summary_has_task_marker(summary: str) -> bool:

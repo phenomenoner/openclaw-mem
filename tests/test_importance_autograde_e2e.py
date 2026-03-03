@@ -106,6 +106,37 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         self.assertEqual(int(detail["importance"].get("version")), 1)
         self.assertIn(detail["importance"].get("label"), {"ignore", "nice_to_have", "must_remember"})
 
+
+    def test_ingest_autogrades_when_importance_present_but_null(self):
+        jsonl_path = Path(self.tmpdir.name) / "obs.jsonl"
+        obs = {
+            "ts": "2026-02-11T08:00:00Z",
+            "kind": "tool",
+            "tool_name": "cron.add",
+            "summary": "Created cron job jobId=00000000-0000-0000-0000-000000000000 for importance grading; set OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1",
+            "detail": {"source": "cli", "importance": None},
+        }
+        jsonl_path.write_text(json.dumps(obs, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        out = self._run_cli(
+            "ingest",
+            "--file",
+            str(jsonl_path),
+            "--importance-scorer",
+            "heuristic-v1",
+        )
+        self.assertEqual(out["inserted"], 1)
+        self.assertEqual(out["total_seen"], 1)
+        self.assertEqual(out["graded_filled"], 1)
+        self.assertEqual(out["skipped_existing"], 0)
+        self.assertEqual(out["scorer_errors"], 0)
+
+        row = self._read_only_row()
+        detail = json.loads(row["detail_json"])
+        self.assertIn("importance", detail)
+        self.assertIsInstance(detail["importance"], dict)
+        self.assertEqual(detail["importance"].get("method"), "heuristic-v1")
+
     def test_ingest_env_fallback_still_autogrades_when_flag_absent(self):
         jsonl_path = Path(self.tmpdir.name) / "obs.jsonl"
         obs = {
@@ -166,6 +197,34 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         row = self._read_only_row()
         detail = json.loads(row["detail_json"])
         self.assertNotIn("importance", detail)
+
+    def test_ingest_existing_importance_label_alias_is_normalized_in_receipts(self):
+        jsonl_path = Path(self.tmpdir.name) / "obs.jsonl"
+        obs = {
+            "ts": "2026-02-11T08:00:00Z",
+            "kind": "note",
+            "tool_name": "chat",
+            "summary": "Legacy importance label alias should normalize in receipts",
+            "detail": {
+                "importance": {
+                    "label": "must remember",
+                    "score": 0.9,
+                    "method": "manual",
+                    "version": 1,
+                    "graded_at": "2026-02-11T08:00:00Z",
+                }
+            },
+        }
+        jsonl_path.write_text(json.dumps(obs, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        out = self._run_cli("ingest", "--file", str(jsonl_path))
+        self.assertEqual(out["inserted"], 1)
+        self.assertEqual(out["total_seen"], 1)
+        self.assertEqual(out["graded_filled"], 0)
+        self.assertEqual(out["skipped_existing"], 1)
+        self.assertEqual(out["scorer_errors"], 0)
+        self.assertEqual(out["label_counts"]["must_remember"], 1)
+        self.assertNotIn("must remember", out["label_counts"])
 
     def test_ingest_fail_open_counts_scorer_errors_and_still_inserts(self):
         jsonl_path = Path(self.tmpdir.name) / "obs.jsonl"
