@@ -84,6 +84,10 @@ class TestJsonContracts(unittest.TestCase):
         self.assertIn("skipped_disabled", out)
         self.assertIn("scorer_errors", out)
         self.assertIn("label_counts", out)
+        self.assertEqual(
+            out["label_counts"],
+            {"must_remember": 0, "nice_to_have": 0, "ignore": 0, "unknown": 0},
+        )
 
     def test_triage_json_contract_v0(self):
         # triage uses exit codes for automation:

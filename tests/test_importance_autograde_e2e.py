@@ -158,7 +158,10 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         self.assertEqual(out["skipped_existing"], 0)
         self.assertEqual(out["skipped_disabled"], 1)
         self.assertEqual(out["scorer_errors"], 0)
-        self.assertEqual(out["label_counts"], {})
+        self.assertEqual(
+            out["label_counts"],
+            {"must_remember": 0, "nice_to_have": 0, "ignore": 0, "unknown": 0},
+        )
 
         row = self._read_only_row()
         detail = json.loads(row["detail_json"])
