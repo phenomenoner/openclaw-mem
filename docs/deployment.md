@@ -171,7 +171,7 @@ Add to OpenClaw config:
           "kind": "agentTurn",
           "model": "google-antigravity/gemini-3-flash",
           "thinking": "minimal",
-          "message": "Run exactly one exec, then output ONLY NO_REPLY:\n\nbash -lc 'cd /opt/openclaw-mem && set -euo pipefail && uv run --python 3.13 -- python -m openclaw_mem harvest --source ~/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --no-update-index --json'"
+          "message": "Run exactly one exec, then output ONLY NO_REPLY:\n\ncd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source $HOME/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --no-update-index --json"
         },
         "delivery": { "mode": "none" }
       },
@@ -184,7 +184,7 @@ Add to OpenClaw config:
           "kind": "agentTurn",
           "model": "google-antigravity/gemini-3-flash",
           "thinking": "minimal",
-          "message": "Run exactly one exec, then output ONLY NO_REPLY:\n\nbash -lc 'cd /opt/openclaw-mem && set -euo pipefail && uv run --python 3.13 -- python -m openclaw_mem harvest --source ~/.openclaw/memory/openclaw-mem-observations.jsonl --embed --update-index --json'"
+          "message": "Run exactly one exec, then output ONLY NO_REPLY:\n\ncd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source $HOME/.openclaw/memory/openclaw-mem-observations.jsonl --embed --update-index --json"
         },
         "delivery": { "mode": "none" }
       }
@@ -200,7 +200,7 @@ Add to OpenClaw config:
 crontab -e
 
 # Add line (runs every 5 minutes)
-*/5 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source ~/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --no-update-index --json >> ~/.openclaw/logs/openclaw-mem-harvest.log 2>&1
+*/5 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source $HOME/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --no-update-index --json >> $HOME/.openclaw/logs/openclaw-mem-harvest.log 2>&1
 ```
 
 ## 3. Log Rotation
