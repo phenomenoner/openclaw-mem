@@ -167,6 +167,15 @@ def make_importance(
     }
 
 
+def _coerce_percent_if_intlike(score: float) -> float:
+    """Coerce common integer-ish 0-100 scores into 0-1 percent form."""
+
+    s = float(score)
+    if s > 1.0 and s <= 100.0 and s.is_integer():
+        return s / 100.0
+    return s
+
+
 def parse_importance_score(value: Any) -> float:
     """Best-effort parse of an importance score from detail_json.importance.
 
@@ -179,12 +188,12 @@ def parse_importance_score(value: Any) -> float:
     """
     score = _parse_score_like(value)
     if score is not None:
-        return _clamp01(score)
+        return _clamp01(_coerce_percent_if_intlike(score))
 
     if isinstance(value, dict):
         score = _parse_score_like(value.get("score"))
         if score is not None:
-            return _clamp01(score)
+            return _clamp01(_coerce_percent_if_intlike(score))
 
         key = _normalize_label(value.get("label"))
         if key is not None:
