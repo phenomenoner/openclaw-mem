@@ -153,6 +153,14 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("(iiv) TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("* (1)TODO clean old notes"))
 
+    def test_summary_has_task_marker_rejects_inline_markers_and_mismatched_wrappers(self):
+        self.assertFalse(_summary_has_task_marker("We should TODO: fix this later"))
+        self.assertFalse(_summary_has_task_marker("Meeting notes - TODO: fix this later"))
+        self.assertFalse(_summary_has_task_marker("I think [TODO] fix this later"))
+        self.assertFalse(_summary_has_task_marker("TODO! fix this later"))
+        self.assertFalse(_summary_has_task_marker("[TODO) fix this later"))
+        self.assertFalse(_summary_has_task_marker("TODOs: plural shouldn't match"))
+
     def test_parser_merges_global_and_command_json_flags(self):
         before_args = build_parser().parse_args(["--json", "status"])
         after_args = build_parser().parse_args(["status", "--json"])
