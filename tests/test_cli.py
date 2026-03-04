@@ -3124,6 +3124,88 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(buf.getvalue(), "- [obs:1] plain summary\n")
         conn.close()
 
+
+    def test_pack_use_graph_on_adds_graph_payload_and_trace_extensions(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "plain summary",
+                    "summary_en": "plain summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        # Force graph on; we patch graph internals to keep the test deterministic.
+        args = build_parser().parse_args(["pack", "--query", "something", "--json", "--trace", "--use-graph", "on"])
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [
+                {
+                    "recordRef": "obs:1",
+                    "id": 1,
+                    "ts": "2026-02-04T13:00:00Z",
+                    "kind": "fact",
+                    "tool_name": "memory_store",
+                    "score": -9.0,
+                    "title": "stub",
+                    "why_relevant": "fts_match",
+                }
+            ],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\\n",
+        }
+
+        fake_graph_pack_payload = {
+            "kind": "openclaw-mem.graph.pack.v0",
+            "ts": "2026-02-04T13:00:00Z",
+            "budget": {"budgetTokens": 1200, "estimatedTokens": 20},
+            "items": [
+                {
+                    "recordRef": "obs:1",
+                    "id": 1,
+                    "ts": "2026-02-04T13:00:00Z",
+                    "kind": "fact",
+                    "tool_name": "memory_store",
+                    "summary": "plain summary",
+                }
+            ],
+            "bundle_text": "[GRAPH_CONTEXT v0]\\nItems: 1\\n\\n1) obs:1 :: plain summary\\n",
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
+        ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertIn("graph", out)
+        self.assertTrue(out["graph"]["triggered"])
+        self.assertIn("bundle_text_with_graph", out)
+        self.assertIn("[GRAPH_CONTEXT v0]", out["bundle_text_with_graph"])
+
+        self.assertIn("trace", out)
+        self.assertIn("extensions", out["trace"])
+        self.assertIn("graph", out["trace"]["extensions"])
+        self.assertTrue(out["trace"]["extensions"]["graph"]["triggered"])
+
+        conn.close()
+
     def test_pack_budget_tokens_clamped_to_minimum_one(self):
         conn = _connect(":memory:")
 
@@ -3280,6 +3362,7 @@ class TestCliM0(unittest.TestCase):
                 "candidates",
                 "output",
                 "timing",
+                "extensions",
             },
         )
 

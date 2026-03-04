@@ -2538,6 +2538,340 @@ def _estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
 
 
+
+
+_ACK_RE = re.compile(r"^(yes|no|y|n|ok|done|lgtm|k|thx|thanks|👍)$", re.IGNORECASE)
+
+
+def _pack_graph_stage0_anti_trigger(query: str) -> str | None:
+    """Return anti-trigger reason or None.
+
+    Keep this conservative: we only skip when it is *very* likely not a retrieval request.
+    """
+    q = (query or "").strip()
+    if not q:
+        return "empty"
+
+    # Token count heuristic.
+    toks = [t for t in re.split(r"\s+", q) if t]
+    if len(toks) < 3:
+        if _ACK_RE.match(q):
+            return "ack_pattern"
+        return "too_short"
+
+    # If user pasted tool output / stack traces, treat as "not asking".
+    if q.startswith("```") or q.startswith("Traceback") or q.startswith("Error:"):
+        return "paste_detect"
+
+    return None
+
+
+def _pack_graph_stage1_keywords(query: str) -> dict:
+    q = (query or "").lower()
+
+    buckets = {
+        "A": [
+            "spec",
+            "docs",
+            "documentation",
+            "roadmap",
+            "decision",
+            "tech note",
+            "design",
+            "architecture",
+            "prd",
+            "sop",
+            "runbook",
+            "文件",
+            "文檔",
+            "規格",
+            "決策",
+            "紀錄",
+            "技術筆記",
+            "架構",
+            "設計",
+            "流程",
+        ],
+        "B": [
+            "where is",
+            "where are",
+            "find",
+            "locate",
+            "which file",
+            "link to",
+            "point me to",
+            "在哪",
+            "哪裡",
+            "搜尋",
+            "定位",
+            "哪個檔",
+            "連結",
+            "指到",
+            "出處",
+        ],
+        "C": [
+            "dependency",
+            "depends on",
+            "related",
+            "relationship",
+            "connect",
+            "tie to",
+            "依賴",
+            "關聯",
+            "之間關係",
+            "相關",
+            "影響範圍",
+            "串起來",
+        ],
+        "D": [
+            "confirm",
+            "verify",
+            "is it true",
+            "did we",
+            "current status",
+            "latest",
+            "what changed",
+            "changelog",
+            "確認",
+            "驗證",
+            "是不是真的",
+            "我們有沒有",
+            "目前狀態",
+            "最新",
+            "改了什麼",
+            "變更",
+        ],
+        "E": [
+            "decisions",
+            "tech_notes",
+            "tech notes",
+            "pm",
+            "status",
+            "index",
+            "quickstart",
+            "changelog",
+            "docs/specs/",
+            "projects/",
+        ],
+    }
+
+    categories = []
+    matched = []
+
+    for cat, toks in buckets.items():
+        for t in toks:
+            if t and t in q:
+                if cat not in categories:
+                    categories.append(cat)
+                if len(matched) < 5:
+                    matched.append(t)
+
+    return {
+        "hit": bool(categories),
+        "categories": categories,
+        "matched_keywords": matched,
+    }
+
+
+def _pack_graph_probe_observations(conn: sqlite3.Connection, query: str, *, probe_limit: int) -> dict:
+    """Lightweight deterministic FTS probe (semantic-by-retrieval).
+
+    Returns redaction-safe aggregate-only stats.
+    """
+    q = (query or "").strip()
+
+    # Keep probe robust to pasted code fences / URLs.
+    q = q.replace("```", " ")
+    q = re.sub(r"https?://\S+", " ", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    if not q:
+        return {"ran": False, "reason": "empty_after_strip"}
+
+    started = time.perf_counter()
+    rows = _graph_search_rows(conn, q, int(max(1, probe_limit)))
+    dt_ms = int((time.perf_counter() - started) * 1000)
+
+    scores = []
+    for r in rows:
+        s = r["score"] if isinstance(r, sqlite3.Row) else None
+        if isinstance(s, (int, float)) and not isinstance(s, bool):
+            scores.append(float(s))
+
+    best = min(scores) if scores else None
+
+    return {
+        "ran": True,
+        "latency_ms": dt_ms,
+        "hit_count": len(rows),
+        "best_score": best,
+        "scores": scores,
+    }
+
+
+def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args: argparse.Namespace) -> dict:
+    """Optional Graphic Memory preflight for `pack` (default OFF; fail-open).
+
+    Returns:
+    - triggered + reason
+    - preflight payload (if triggered)
+    - trace extension (redaction-safe)
+    """
+
+    use_graph = str(getattr(args, "use_graph", "off") or "off").strip().lower()
+
+    # Default: no-op
+    out = {
+        "use_graph": use_graph,
+        "triggered": False,
+        "trigger_reason": "off",
+        "fail_open": True,
+        "error_first_line": None,
+        "selection_count": 0,
+        "budget_tokens": int(max(1, int(getattr(args, "graph_budget_tokens", 1200) or 1200))),
+        "take": int(max(1, int(getattr(args, "graph_take", 12) or 12))),
+        "scope": (str(getattr(args, "graph_scope", "") or "").strip() or None),
+        "probe": {"ran": False},
+        "stage0": {"fired": False, "reason": None},
+        "stage1": {"hit": False, "categories": [], "matched_keywords": []},
+        "probe_decision": None,
+        "payload": None,
+    }
+
+    if use_graph not in {"off", "auto", "on"}:
+        return out
+
+    if use_graph == "off":
+        return out
+
+    # Stage 0
+    anti = _pack_graph_stage0_anti_trigger(query)
+    if anti:
+        out["stage0"] = {"fired": True, "reason": anti}
+        if use_graph != "on":
+            out["triggered"] = False
+            out["trigger_reason"] = f"anti:{anti}"
+            return out
+
+    # Stage 1
+    stage1 = _pack_graph_stage1_keywords(query)
+    out["stage1"] = stage1
+
+    # Forced
+    if use_graph == "on":
+        out["triggered"] = True
+        out["trigger_reason"] = "forced_on"
+    elif bool(stage1.get("hit")):
+        out["triggered"] = True
+        out["trigger_reason"] = "keyword:" + "+".join(stage1.get("categories") or [])
+    else:
+        # Stage 2 probe (auto only)
+        probe_flag = getattr(args, "graph_probe", None)
+        probe_enabled = True if probe_flag is None else (str(probe_flag).strip().lower() == "on")
+        if not probe_enabled:
+            out["triggered"] = False
+            out["trigger_reason"] = "auto_probe_off"
+            return out
+
+        probe_limit = int(max(1, int(getattr(args, "graph_probe_limit", 5) or 5)))
+        t_high = float(getattr(args, "graph_probe_t_high", -5.0) or -5.0)
+        t_marginal = float(getattr(args, "graph_probe_t_marginal", -2.0) or -2.0)
+        n_min = int(max(1, int(getattr(args, "graph_probe_n_min", 3) or 3)))
+
+        probe = _pack_graph_probe_observations(conn, query, probe_limit=probe_limit)
+        out["probe"] = {
+            "ran": bool(probe.get("ran")),
+            "latency_ms": int(probe.get("latency_ms") or 0),
+            "hit_count": int(probe.get("hit_count") or 0),
+            "best_score": probe.get("best_score"),
+        }
+
+        scores = list(probe.get("scores") or [])
+        best = probe.get("best_score")
+        marginal_count = sum(1 for s in scores if isinstance(s, (int, float)) and float(s) <= float(t_marginal))
+
+        if not scores:
+            out["triggered"] = False
+            out["trigger_reason"] = "probe_empty"
+            out["probe_decision"] = "skip_empty"
+        elif isinstance(best, (int, float)) and float(best) <= float(t_high):
+            out["triggered"] = True
+            out["trigger_reason"] = "probe_strong"
+            out["probe_decision"] = "fire_probe_strong"
+        elif isinstance(best, (int, float)) and float(best) <= float(t_marginal) and marginal_count >= n_min:
+            out["triggered"] = True
+            out["trigger_reason"] = "probe_breadth"
+            out["probe_decision"] = "fire_probe_breadth"
+        else:
+            out["triggered"] = False
+            out["trigger_reason"] = "probe_weak"
+            out["probe_decision"] = "skip_weak"
+
+    if not out["triggered"]:
+        return out
+
+    # If triggered: run preflight (fail-open)
+    try:
+        index_payload = _graph_index_payload(
+            conn,
+            query=query,
+            scope=out["scope"],
+            limit=12,
+            window=2,
+            suggest_limit=6,
+            budget_tokens=int(out["budget_tokens"]),
+        )
+        selected_refs = _graph_preflight_selection(index_payload, take=int(out["take"]))
+        pack_payload = _graph_pack_payload(
+            conn,
+            raw_ids=selected_refs,
+            budget_tokens=int(out["budget_tokens"]),
+            max_items=int(out["take"]),
+            allow_empty=True,
+        )
+
+        out["selection_count"] = len(selected_refs)
+        out["payload"] = {
+            "kind": "openclaw-mem.graph.preflight.v0",
+            "query": {"text": query, "scope": out["scope"]},
+            "selection": {"take": int(out["take"]), "selectedCount": len(selected_refs), "recordRefs": selected_refs},
+            "budget": {"budgetTokens": int(out["budget_tokens"]), "estimatedTokens": _estimate_tokens(pack_payload.get("bundle_text", "") or "")},
+            "pack": pack_payload,
+            "items": pack_payload.get("items", []),
+            "bundle_text": pack_payload.get("bundle_text", "") or "",
+        }
+
+        out["fail_open"] = False
+    except Exception as e:
+        line = (str(e).splitlines() or [str(e)])[:1][0]
+        out["error_first_line"] = line[:200]
+        out["fail_open"] = True
+
+    return out
+
+
+def _pack_graph_trace_extension(graph_state: dict) -> dict:
+    """Redaction-safe graph trigger/probe receipt for pack --trace."""
+    if not isinstance(graph_state, dict):
+        return {}
+
+    pre = graph_state.get("payload") or {}
+    return {
+        "triggered": bool(graph_state.get("triggered")),
+        "trigger_reason": graph_state.get("trigger_reason"),
+        "stage0": graph_state.get("stage0"),
+        "stage1": graph_state.get("stage1"),
+        "probe": graph_state.get("probe"),
+        "probe_decision": graph_state.get("probe_decision"),
+        "selected_refs_count": int(graph_state.get("selection_count") or 0),
+        "budget_tokens": int(graph_state.get("budget_tokens") or 0),
+        "take": int(graph_state.get("take") or 0),
+        "scope": graph_state.get("scope"),
+        "fail_open": bool(graph_state.get("fail_open")),
+        "error_first_line": graph_state.get("error_first_line"),
+        "preflight_kind": pre.get("kind"),
+    }
+
+
 def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Build a compact, cited L1-style bundle from hybrid retrieval."""
     query = (args.query or "").strip()
@@ -2551,6 +2885,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     nice_cap = 100
 
     started = time.perf_counter()
+
+    graph_state = _pack_graph_preflight_optional(conn, query=query, args=args)
 
     retrieval_args = argparse.Namespace(
         query=query,
@@ -2669,6 +3005,33 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "citations": citations,
     }
 
+    # Optional graph output (kept separate for safety; consumer may choose to inject).
+    if (graph_state or {}).get("use_graph") != "off":
+        payload["graph"] = {
+            "use_graph": graph_state.get("use_graph"),
+            "triggered": bool(graph_state.get("triggered")),
+            "trigger_reason": graph_state.get("trigger_reason"),
+            "fail_open": bool(graph_state.get("fail_open")),
+            "error_first_line": graph_state.get("error_first_line"),
+            "stage0": graph_state.get("stage0"),
+            "stage1": graph_state.get("stage1"),
+            "probe": graph_state.get("probe"),
+            "probe_decision": graph_state.get("probe_decision"),
+            "selection_count": int(graph_state.get("selection_count") or 0),
+            "budget_tokens": int(graph_state.get("budget_tokens") or 0),
+            "take": int(graph_state.get("take") or 0),
+            "scope": graph_state.get("scope"),
+            "preflight": graph_state.get("payload"),
+        }
+
+        graph_bundle = ((graph_state.get("payload") or {}).get("bundle_text") or "").strip()
+        if graph_bundle:
+            combined = (graph_bundle + "\n" + bundle_text).strip() + "\n"
+            max_chars = max(0, int(budget_tokens + int(graph_state.get("budget_tokens") or 0)) * 4 - 3)
+            if max_chars and len(combined) > max_chars:
+                combined = combined[:max_chars].rstrip() + "\n"
+            payload["bundle_text_with_graph"] = combined
+
     if bool(args.trace):
         duration_ms = int((time.perf_counter() - started) * 1000)
         included_refs = [item["recordRef"] for item in selected_items]
@@ -2731,13 +3094,14 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 ),
             ),
             timing=pack_trace_v1.PackTraceV1Timing(durationMs=duration_ms),
+            extensions={"graph": _pack_graph_trace_extension(graph_state)} if (graph_state or {}).get("use_graph") != "off" else {},
         )
         payload["trace"] = pack_trace_v1.to_dict(trace)
 
     if bool(args.json):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        print(bundle_text)
+        print((payload.get("bundle_text_with_graph") or bundle_text))
 
 
 
@@ -6012,6 +6376,25 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--query-en", help="Optional English query for bilingual retrieval")
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
+
+    # Optional: Graphic Memory preflight integration (default OFF; fail-open)
+    sp.add_argument(
+        "--use-graph",
+        choices=["off", "auto", "on"],
+        default="off",
+        help="Graphic Memory integration: off (default) | auto (deterministic trigger+probe) | on (always run preflight).",
+    )
+    sp.add_argument("--graph-scope", default=None, help="Optional scope hint for graph preflight (default: unset)")
+    sp.add_argument("--graph-budget-tokens", type=int, default=1200, help="Token budget for graph preflight bundle_text (default: 1200)")
+    sp.add_argument("--graph-take", type=int, default=12, help="Max selected refs to pack for graph preflight (default: 12)")
+
+    # Probe knobs (used in --use-graph=auto)
+    sp.add_argument("--graph-probe", choices=["on", "off"], default=None, help="Enable index-probe stage in auto mode (default: on)")
+    sp.add_argument("--graph-probe-limit", type=int, default=5, help="Max FTS rows to fetch in probe (default: 5)")
+    sp.add_argument("--graph-probe-t-high", type=float, default=-5.0, help="Probe trigger threshold for best bm25() score (default: -5.0)")
+    sp.add_argument("--graph-probe-t-marginal", type=float, default=-2.0, help="Probe marginal threshold (default: -2.0)")
+    sp.add_argument("--graph-probe-n-min", type=int, default=3, help="Breadth minimum count for marginal probe hits (default: 3)")
+
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)
 

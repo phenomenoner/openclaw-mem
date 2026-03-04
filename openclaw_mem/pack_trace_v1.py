@@ -126,6 +126,10 @@ class PackTraceV1:
     output: PackTraceV1Output
     timing: PackTraceV1Timing
 
+    # Forward-compatible extension point (redaction-safe only).
+    # Example: graph trigger/probe receipts for `--use-graph=auto`.
+    extensions: Dict[str, Any] = field(default_factory=dict)
+
 
 def to_dict(trace: PackTraceV1) -> Dict[str, Any]:
     """Serialize the trace to plain JSON-safe types."""
