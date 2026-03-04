@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Docs
 - Clarified deterministic `triage --mode tasks` docs to include curly-brace bracket markers (`{TODO} ...`, `{TODO}buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
-- Extended task-marker docs/examples in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md` to include Japanese corner-quote marker forms and compact examples.
+- Extended task-marker docs/examples in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md` to include Japanese corner-quote plus angle-quote marker forms (`«TODO» ...`, `〈TODO〉 ...`, `‹TODO› ...`) and compact examples.
 - Clarified compact no-space examples to explicitly include 『TODO』... marker forms across README/QUICKSTART/upgrade-checklist and triage docstrings.
 - Clarified deterministic `triage --mode tasks` docs to explicitly list `[☐]` and `[☑]` checklist wrappers in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 
