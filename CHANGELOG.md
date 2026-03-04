@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `triage --mode tasks` bracket-wrapped task markers now also accept Japanese corner-quote forms
 - `triage --mode tasks` bracket-wrapped task markers now also accept CJK double-angle quote forms (`《TODO》 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
 - `triage --mode tasks` bracket-wrapped task markers now also accept lenticular bracket forms (`〖TODO〗 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
+- `heuristic-v1` task-like marker detection now also accepts lenticular bracket forms (`〖TASK〗 ...` / `〖REMINDER〗 ...`) so importance autograding matches triage marker coverage.
 
 ### Docs
 - Clarified deterministic `triage --mode tasks` docs to include curly-brace bracket markers (`{TODO} ...`, `{TODO}buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regression coverage for compact no-space `〔TODO〕...` task markers in parser-level and triage task flows.
 - Added triage-flow regression coverage for `[☐]` and `[☑]` checklist-wrapped task markers (including compact no-space forms).
 - Added regression coverage for lenticular bracket task markers (`〖TODO〗 ...`, `〖TODO〗...`) in parser-level and triage task flows.
+- Added heuristic-v1 testcase coverage for lenticular bracket markers (`〖TASK〗...`) in `tests/data/HEURISTIC_TESTCASES.jsonl`.
 - Fixed JSON contract test to accept `triage` exit code `10` (attention needed) while still validating the JSON payload.
 
 
