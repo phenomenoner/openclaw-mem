@@ -124,6 +124,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker(">> TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("• [x] [REMINDER] renew domain"))
         self.assertTrue(_summary_has_task_marker("‣ TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("▪ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("◦ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("∙ [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("· [x] [REMINDER] renew domain"))
@@ -154,6 +155,7 @@ class TestCliM0(unittest.TestCase):
     def test_summary_has_task_marker_accepts_compact_wrapper_chaining(self):
         self.assertTrue(_summary_has_task_marker("•[x]TODO fix pipeline"))
         self.assertTrue(_summary_has_task_marker("‣[x]TODO clean pipeline"))
+        self.assertTrue(_summary_has_task_marker("▪[x]TODO clean pipeline"))
         self.assertTrue(_summary_has_task_marker("·[ ]TASK sync branch"))
         self.assertTrue(_summary_has_task_marker("◦[x]TODO compact pipeline"))
         self.assertTrue(_summary_has_task_marker("- (I)[ ] TODO reorder docs"))
@@ -198,6 +200,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker(">>TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker(">>>TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("‣TODO clean old notes"))
+        self.assertTrue(_summary_has_task_marker("▪TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("·TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("[x]TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("[✓]TODO clean old notes"))

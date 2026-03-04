@@ -103,7 +103,7 @@ def _strip_md_task_prefix(text: str) -> str:
         t = re.sub(r"^>+\s*", "", t).lstrip()
 
         # Common bullet glyphs (including unicode dashes used as bullets).
-        t = re.sub(r"^(?:[-*+•‣∙·◦・–—−])\s*", "", t).lstrip()
+        t = re.sub(r"^(?:[-*+•▪‣∙·◦・–—−])\s*", "", t).lstrip()
 
         # Ordered list prefixes.
         t = re.sub(r"^\(\s*\d+\s*\)\s*", "", t).lstrip()
