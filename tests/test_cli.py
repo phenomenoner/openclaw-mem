@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
+from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
 
 
 class TestCliM0(unittest.TestCase):
@@ -59,6 +59,14 @@ class TestCliM0(unittest.TestCase):
         texts = [it.get("summary") for it in payload.get("items", [])]
         self.assertTrue(any("UTC+8" in (t or "") for t in texts))
         conn.close()
+
+    def test_normalize_importance_scorer_value_accepts_common_aliases(self):
+        self.assertEqual(_normalize_importance_scorer_value("heuristic_v1"), "heuristic-v1")
+        self.assertEqual(_normalize_importance_scorer_value("Heuristic v1"), "heuristic-v1")
+        self.assertEqual(_normalize_importance_scorer_value(" heuristic-v1 "), "heuristic-v1")
+        self.assertEqual(_normalize_importance_scorer_value("heuristic-v2"), "heuristic-v2")
+        self.assertEqual(_normalize_importance_scorer_value("off"), "off")
+        self.assertEqual(_normalize_importance_scorer_value(""), "")
 
     def test_summary_has_task_marker_accepts_full_width_colon_and_unicode_dashes(self):
         self.assertTrue(_summary_has_task_marker("reminder：pay rent"))

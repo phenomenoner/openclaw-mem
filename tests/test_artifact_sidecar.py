@@ -84,10 +84,8 @@ class TestArtifactSidecar(unittest.TestCase):
             tmp_path = Path(td)
             root = tmp_path / "artifacts"
 
-            good = "GOOD
-"
-            secret = "SECRET
-"
+            good = "GOOD\n"
+            secret = "SECRET\n"
 
             stash = stash_artifact(good.encode("utf-8"), root=root)
             _blob, meta = _artifact_paths(root, stash["sha256"], gzip_blob=False)
@@ -99,8 +97,7 @@ class TestArtifactSidecar(unittest.TestCase):
             # Tamper metadata to point outside root; fetch must NOT follow it.
             obj = json.loads(meta.read_text(encoding="utf-8"))
             obj["blob"] = "../secret.txt"
-            meta.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "
-", encoding="utf-8")
+            meta.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
             fetched = fetch_artifact(stash["handle"], root=root, mode="head", max_chars=1000)
             self.assertEqual(fetched["text"], good)
