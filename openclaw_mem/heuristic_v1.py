@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
@@ -114,22 +115,66 @@ def _strip_md_task_prefix(text: str) -> str:
         t = re.sub(r"^\d{1,3}(?:-|－|–|—|−)(?=[^0-9\s])", "", t).lstrip()
 
         # Markdown checkboxes.
-        t = re.sub(r"^\[(?: |x|X)\]\s*", "", t).lstrip()
+        t = re.sub(r"^\[(?: |x|X|✓|✔|☐|☑)\]\s*", "", t).lstrip()
         t = re.sub(r"^[☐☑✅✔]\s*", "", t).lstrip()
 
     return t
 
 
 def _is_task_like(text: str, kind: str) -> bool:
-    t = (text or "").strip()
-    tl = t.lower()
-    if (kind or "").strip().lower() == "task":
+    """Best-effort task detection for heuristic scoring.
+
+    This intentionally accepts common TODO/TASK/REMINDER marker styles used
+    in OpenClaw receipts, including width-normalized (NFKC) variants and
+    bracket-wrapped forms like [TODO]/(TASK)/【REMINDER】.
+    """
+
+    t = unicodedata.normalize("NFKC", (text or "")).strip()
+    kind_norm = (kind or "").strip().lower()
+    if kind_norm == "task":
         return True
 
+    markers = ("TODO", "TASK", "REMINDER")
+    separators = {":", "：", ";", "；", "-", ".", "。", "－", "–", "—", "−"}
+    close_by_open = {"[": "]", "(": ")", "{": "}", "【": "】", "〔": "〕", "「": "」", "『": "』", "《": "》", "〈": "〉", "«": "»", "‹": "›"}
+
+    def _has_valid_suffix(text_: str, idx: int, *, allow_compact: bool = False) -> bool:
+        if len(text_) == idx:
+            return True
+        nxt = text_[idx]
+        if nxt in separators or nxt.isspace():
+            return True
+        return allow_compact
+
+    def _matches_marker_prefix(text_: str) -> bool:
+        s = (text_ or "").lstrip()
+        if not s:
+            return False
+
+        up = s.upper()
+        for m in markers:
+            if up.startswith(m) and _has_valid_suffix(s, len(m)):
+                return True
+
+        close = close_by_open.get(s[0])
+        if close is None:
+            return False
+
+        rest_up = s[1:].upper()
+        for m in markers:
+            if not rest_up.startswith(m):
+                continue
+            close_idx = 1 + len(m)
+            if close_idx >= len(s) or s[close_idx] != close:
+                continue
+            if _has_valid_suffix(s, close_idx + 1, allow_compact=True):
+                return True
+        return False
+
     # Handle observations formatted as "tool: summary" and bare summaries.
-    summary_part = tl.split(":", 1)[-1].strip() if ":" in tl else tl
+    summary_part = t.split(":", 1)[-1].strip() if ":" in t else t
     summary_part = _strip_md_task_prefix(summary_part)
-    if re.match(r"^(todo|task|reminder)(?:[:：\s-]|$)", summary_part):
+    if _matches_marker_prefix(summary_part):
         return True
 
     # Chinese task markers (also accept markdown/bullet prefixes).
@@ -137,7 +182,6 @@ def _is_task_like(text: str, kind: str) -> bool:
     if "要做" in t_stripped or "待辦" in t_stripped:
         return True
     return False
-
 
 def grade_observation(obs: Dict[str, Any]) -> GradeResult:
     """Deterministic heuristic importance grading (heuristic-v1).
