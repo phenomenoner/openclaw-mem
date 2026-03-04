@@ -107,7 +107,7 @@ Status: **PARTIAL** (baseline shipped; benchmark pass pending).
 - [x] Deterministic `heuristic-v1` + unit tests
 - [x] Feature flag for autograde: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1`
 - [x] Ingest wiring: only fill missing importance; never overwrite; fail-open
-- [x] CLI override: `--importance-scorer {heuristic-v1|off}` for `ingest`/`harvest` (env fallback remains)
+- [x] CLI override: `--importance-scorer {heuristic-v1|heuristic_v1|off}` for `ingest`/`harvest` (env fallback remains)
 - [x] **E2E safety belt**: prove flag-off = no change; flag-on fills missing; fail-open doesn’t break ingest
 - [x] **Ingest summary (text + JSON)** with at least:
   - `total_seen`, `graded_filled`, `skipped_existing`, `skipped_disabled`, `scorer_errors`, `label_counts`

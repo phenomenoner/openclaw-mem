@@ -95,11 +95,11 @@ python3 -m unittest -q tests/test_heuristic_v1.py
 You can optionally have `ingest` / `harvest` run `heuristic-v1` and write `detail_json.importance` during import.
 
 - Enable via env var:
-  - `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1`
+  - `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (alias `heuristic_v1`)
 - Or override per-run:
 
   - CLI override takes precedence over env var for the same run (for one-off dry-run behavior, use `--importance-scorer off`).
-  - `--importance-scorer {heuristic-v1|off}`
+  - `--importance-scorer {heuristic-v1|heuristic_v1|off}`
 
 Notes:
 - This is designed to be safe + reversible: set the env/flag to `off` to stop grading.

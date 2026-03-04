@@ -102,7 +102,7 @@ uv run python -m openclaw_mem --db "$DB" --json status
 
 ### 1) Harvest (production paths are operator-specific)
 ```bash
-export OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1  # optional
+export OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1  # optional (alias: heuristic_v1)
 
 uv run python -m openclaw_mem harvest \
   --source ~/.openclaw/memory/openclaw-mem-observations.jsonl \

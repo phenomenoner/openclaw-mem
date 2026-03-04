@@ -186,6 +186,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --ta
 Enable per-command:
 
 ```bash
+# alias accepted: heuristic_v1
 OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 ```
 

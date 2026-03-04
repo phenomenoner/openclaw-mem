@@ -131,7 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - new documentation: `docs/importance-grading.md`
 - Feature-flagged importance autograde on import:
   - enable via `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1`
-  - per-run override via `--importance-scorer {heuristic-v1|off}` for `ingest` / `harvest`
+  - per-run override via `--importance-scorer {heuristic-v1|heuristic_v1|off}` for `ingest` / `harvest`
 
 ### Changed
 - `store` now writes canonical importance objects (method=`manual-via-cli`) instead of legacy numeric-only.
