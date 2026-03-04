@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `triage --mode tasks` bracket-wrapped task markers now also accept Japanese corner-quote forms
 - `triage --mode tasks` bracket-wrapped task markers now also accept CJK double-angle quote forms (`《TODO》 ...`) with the same separator and compact no-space suffix rules as other bracketed markers. (`「TODO」 ...`, `『TASK』 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
+- `triage --mode tasks` bracket-wrapped task markers now also accept lenticular bracket forms (`〖TODO〗 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
 
 ### Docs
 - Clarified deterministic `triage --mode tasks` docs to include curly-brace bracket markers (`{TODO} ...`, `{TODO}buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
@@ -17,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clarified compact no-space examples to explicitly include 『TODO』... marker forms across README/QUICKSTART/upgrade-checklist and triage docstrings.
 - Clarified compact no-space examples to explicitly include `〔TODO〕...` marker forms across README/QUICKSTART/upgrade-checklist and triage docstrings.
 - Clarified deterministic `triage --mode tasks` docs to explicitly list `[☐]` and `[☑]` checklist wrappers in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
+- Extended deterministic task-marker docs/examples to include lenticular bracket marker forms (`〖TODO〗 ...`, `〖TODO〗buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 
 ### Testing
 - Added triage-flow regression coverage for compact curly-brace bracket markers (for example `{TODO}buy coffee this afternoon`).
@@ -24,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regression coverage for compact no-space 『TODO』... task markers in parser-level and triage task flows.
 - Added regression coverage for compact no-space `〔TODO〕...` task markers in parser-level and triage task flows.
 - Added triage-flow regression coverage for `[☐]` and `[☑]` checklist-wrapped task markers (including compact no-space forms).
+- Added regression coverage for lenticular bracket task markers (`〖TODO〗 ...`, `〖TODO〗...`) in parser-level and triage task flows.
 - Fixed JSON contract test to accept `triage` exit code `10` (attention needed) while still validating the JSON payload.
 
 
