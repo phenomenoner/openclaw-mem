@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `triage --mode tasks` bracket-wrapped task markers now also accept Japanese corner-quote forms
-- `triage --mode tasks` bracket-wrapped task markers now also accept CJK double-angle quote forms (`《TODO》 ...`) with the same separator and compact no-space suffix rules as other bracketed markers. (`「TODO」 ...`, `『TASK』 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
+- `triage --mode tasks` bracket-wrapped task markers now also accept CJK double-angle quote forms (`《TODO》 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
 - `triage --mode tasks` bracket-wrapped task markers now also accept lenticular bracket forms (`〖TODO〗 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
 
 ### Docs
