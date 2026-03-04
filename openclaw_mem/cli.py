@@ -31,6 +31,12 @@ from typing import Iterable, Dict, Any, List, Optional, Tuple
 from openclaw_mem import __version__
 from openclaw_mem import defaults
 from openclaw_mem import pack_trace_v1
+from openclaw_mem.artifact_sidecar import (
+    fetch_artifact,
+    parse_artifact_handle,
+    peek_artifact,
+    stash_artifact,
+)
 from openclaw_mem.docs_memory import (
     chunk_content_hash,
     chunk_markdown,
@@ -4797,6 +4803,80 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit({"ok": True, "id": rowid, "file": stored_path, "embedded": bool(api_key)}, args.json)
 
 
+def cmd_artifact_stash(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    if getattr(args, "from_path", None):
+        data = Path(str(args.from_path)).expanduser().read_bytes()
+    else:
+        data = sys.stdin.buffer.read()
+
+    meta_obj: Dict[str, Any] = {}
+    raw_meta_json = (getattr(args, "meta_json", None) or "").strip()
+    if raw_meta_json:
+        try:
+            parsed = json.loads(raw_meta_json)
+        except json.JSONDecodeError as e:
+            _emit({"error": f"invalid --meta-json: {e}"}, True)
+            sys.exit(2)
+        if not isinstance(parsed, dict):
+            _emit({"error": "--meta-json must be a JSON object"}, True)
+            sys.exit(2)
+        meta_obj = parsed
+
+    receipt = stash_artifact(
+        data,
+        kind=str(getattr(args, "kind", "tool_output") or "tool_output"),
+        meta=meta_obj,
+        compress=bool(getattr(args, "gzip", False)),
+    )
+    _emit(receipt, bool(args.json))
+
+
+def cmd_artifact_fetch(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    handle = str(getattr(args, "handle", "") or "").strip()
+    try:
+        parse_artifact_handle(handle)
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    try:
+        receipt = fetch_artifact(
+            handle,
+            mode=str(getattr(args, "mode", "headtail") or "headtail"),
+            max_chars=max(1, int(getattr(args, "max_chars", 8000) or 8000)),
+        )
+    except FileNotFoundError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    if bool(args.json):
+        _emit(receipt, True)
+        return
+
+    sys.stdout.write(str(receipt.get("text") or ""))
+
+
+def cmd_artifact_peek(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    handle = str(getattr(args, "handle", "") or "").strip()
+    try:
+        parse_artifact_handle(handle)
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    try:
+        receipt = peek_artifact(
+            handle,
+            preview_chars=max(1, int(getattr(args, "preview_chars", 240) or 240)),
+        )
+    except FileNotFoundError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+
+    _emit(receipt, bool(args.json))
 
 
 # --- Graphic memory (GraphRAG-lite) — v0 skeleton (index-first + progressive disclosure) ---
@@ -6465,6 +6545,40 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--window", type=int, default=2)
     g.set_defaults(func=cmd_graph_export)
 
+    sp = sub.add_parser("artifact", help="Context Budget Sidecar artifact store (stash/fetch/peek)")
+    sp.add_argument("--db", default=None, help="SQLite DB path")
+    sp.add_argument("--json", action="store_true", help="Structured JSON output")
+    asub = sp.add_subparsers(dest="artifact_cmd", required=True)
+
+    a = asub.add_parser("stash", help="Store raw tool output from --from PATH or stdin")
+    a.add_argument("--db", default=None, help="SQLite DB path")
+    a.add_argument("--json", action="store_true", help="Structured JSON output")
+    a.add_argument("--from", dest="from_path", help="Read raw payload bytes from file path (default: stdin)")
+    a.add_argument("--kind", default="tool_output", help="Artifact kind label (default: tool_output)")
+    a.add_argument("--meta-json", default=None, help="Optional metadata JSON object (small, non-raw)")
+    a.add_argument("--gzip", action="store_true", help="Compress blob as .txt.gz")
+    a.set_defaults(func=cmd_artifact_stash)
+
+    a = asub.add_parser("fetch", help="Fetch bounded artifact text by handle")
+    a.add_argument("--db", default=None, help="SQLite DB path")
+    a.add_argument(
+        "--json",
+        dest="json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true). Use --no-json for raw bounded text only.",
+    )
+    a.add_argument("handle", help="Artifact handle: ocm_artifact:v1:sha256:<64hex>")
+    a.add_argument("--mode", choices=["headtail", "head", "tail"], default="headtail", help="Bounded extraction mode (default: headtail)")
+    a.add_argument("--max-chars", dest="max_chars", type=int, default=8000, help="Maximum characters to return (default: 8000)")
+    a.set_defaults(func=cmd_artifact_fetch)
+
+    a = asub.add_parser("peek", help="Show artifact metadata + tiny preview")
+    a.add_argument("--db", default=None, help="SQLite DB path")
+    a.add_argument("--json", action="store_true", help="Structured JSON output")
+    a.add_argument("handle", help="Artifact handle: ocm_artifact:v1:sha256:<64hex>")
+    a.add_argument("--preview-chars", dest="preview_chars", type=int, default=240, help="Preview character budget (default: 240)")
+    a.set_defaults(func=cmd_artifact_peek)
 
     sp = sub.add_parser("store", help="Proactively store a memory")
     add_common(sp)
