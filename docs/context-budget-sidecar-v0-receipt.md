@@ -27,9 +27,6 @@ openclaw-mem artifact fetch ocm_artifact:v1:sha256:<64hex> --mode headtail --max
 ## Validation
 
 ```bash
-# Requested command (fails in this env if pytest is not preinstalled)
-uv run pytest
-
-# Executed equivalent (installs pytest transiently):
-uv run --with pytest pytest
+# Run unit tests (no pytest dependency)
+uv run --python 3.13 --frozen -- python -m unittest discover -s tests -q
 ```
