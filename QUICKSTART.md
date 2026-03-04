@@ -60,11 +60,11 @@ See: `docs/showcase/inside-out-demo.md`.
 ## Step 3: Ingest sample data
 
 ```bash
-cat > /tmp/sample.jsonl <<'JSONL'
-{"ts":"2026-02-05T10:00:00Z","kind":"tool","tool_name":"web_search","summary":"searched for OpenClaw","detail":{"results":5}}
-{"ts":"2026-02-05T10:01:00Z","kind":"tool","tool_name":"web_fetch","summary":"fetched openclaw.ai","detail":{"ok":true}}
-{"ts":"2026-02-05T10:02:00Z","kind":"tool","tool_name":"exec","summary":"ran git status","detail":{"exit_code":0}}
-JSONL
+printf '%s\n' \
+  '{"ts":"2026-02-05T10:00:00Z","kind":"tool","tool_name":"web_search","summary":"searched for OpenClaw","detail":{"results":5}}' \
+  '{"ts":"2026-02-05T10:01:00Z","kind":"tool","tool_name":"web_fetch","summary":"fetched openclaw.ai","detail":{"ok":true}}' \
+  '{"ts":"2026-02-05T10:02:00Z","kind":"tool","tool_name":"exec","summary":"ran git status","detail":{"exit_code":0}}' \
+  > /tmp/sample.jsonl
 
 uv run --python 3.13 --frozen -- python -m openclaw_mem ingest --file /tmp/sample.jsonl --json
 ```
