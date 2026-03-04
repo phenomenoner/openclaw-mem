@@ -1,4 +1,5 @@
 import stat
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -76,6 +77,33 @@ class TestArtifactSidecar(unittest.TestCase):
 
             fetched = fetch_artifact(stash["handle"], root=root, mode="head", max_chars=10_000)
             self.assertEqual(fetched["text"], text)
+
+
+    def test_meta_blob_path_cannot_escape_root(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp_path = Path(td)
+            root = tmp_path / "artifacts"
+
+            good = "GOOD
+"
+            secret = "SECRET
+"
+
+            stash = stash_artifact(good.encode("utf-8"), root=root)
+            _blob, meta = _artifact_paths(root, stash["sha256"], gzip_blob=False)
+
+            # Write a secret file outside artifacts_root.
+            secret_path = tmp_path / "secret.txt"
+            secret_path.write_text(secret, encoding="utf-8")
+
+            # Tamper metadata to point outside root; fetch must NOT follow it.
+            obj = json.loads(meta.read_text(encoding="utf-8"))
+            obj["blob"] = "../secret.txt"
+            meta.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "
+", encoding="utf-8")
+
+            fetched = fetch_artifact(stash["handle"], root=root, mode="head", max_chars=1000)
+            self.assertEqual(fetched["text"], good)
 
 
 if __name__ == "__main__":

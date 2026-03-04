@@ -94,8 +94,14 @@ def _locate_blob(root: Path, sha256_hex: str, meta: Optional[Dict[str, Any]] = N
         rel = meta.get("blob")
 
     if isinstance(rel, str) and rel.strip():
-        p = (root / rel).resolve()
-        if p.exists():
+        root_abs = root.resolve()
+        p = (root_abs / rel).resolve()
+        try:
+            p.relative_to(root_abs)
+        except ValueError:
+            p = None
+
+        if p is not None and p.exists():
             return p, p.suffix == ".gz"
 
     txt = blob_dir / f"{sha256_hex}.txt"
