@@ -94,13 +94,29 @@ def _strip_md_task_prefix(text: str) -> str:
 
     t = (text or "").strip()
     prev = None
-    # Peel layers like blockquotes, bullets, and checkboxes.
+
+    # Peel layers like blockquotes, bullets, ordered list markers, and checkboxes.
+    # Keep the patterns conservative to avoid stripping leading timestamps/dates.
     while prev != t:
         prev = t
         t = re.sub(r"^>+\s*", "", t).lstrip()
-        t = re.sub(r"^(?:[-*+•]|\d+\.)\s+", "", t).lstrip()
+
+        # Common bullet glyphs (including unicode dashes used as bullets).
+        t = re.sub(r"^(?:[-*+•‣∙·◦・–—−])\s*", "", t).lstrip()
+
+        # Ordered list prefixes.
+        t = re.sub(r"^\(\s*\d+\s*\)\s*", "", t).lstrip()
+        t = re.sub(r"^（\s*\d+\s*）\s*", "", t).lstrip()
+        t = re.sub(r"^\d{1,3}\)\s*", "", t).lstrip()
+        t = re.sub(r"^\d{1,3}\.\s+", "", t).lstrip()
+        t = re.sub(r"^\d{1,3}\.(?=[^0-9\s])", "", t).lstrip()
+        t = re.sub(r"^\d{1,3}(?:-|－|–|—|−)\s+", "", t).lstrip()
+        t = re.sub(r"^\d{1,3}(?:-|－|–|—|−)(?=[^0-9\s])", "", t).lstrip()
+
+        # Markdown checkboxes.
         t = re.sub(r"^\[(?: |x|X)\]\s*", "", t).lstrip()
         t = re.sub(r"^[☐☑✅✔]\s*", "", t).lstrip()
+
     return t
 
 
