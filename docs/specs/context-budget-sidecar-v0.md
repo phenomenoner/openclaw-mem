@@ -68,6 +68,24 @@ All commands should support JSON output for deterministic automation.
 
 ## 5) Today-doable (v0) implementation plan (no upstream required)
 
+## 4.3 Adoption rule-of-thumb (v0, binding)
+This is the mechanism that makes the feature **systemic**, not ad hoc.
+
+If a tool output / state dump is likely to exceed **8k chars** OR **200 lines** OR is structured JSON/HTML/PDF:
+1) **stash first** (`artifact stash`)
+2) keep only: `handle` + tiny preview + 1–3 line human summary in the prompt/report
+3) fetch details only with explicit caps (`artifact fetch --max-chars ...`)
+
+Default caps (suggested):
+- `peek.previewChars`: 300–800
+- `fetch.maxChars`: 8k (interactive) / 20k (rare, explicitly justified)
+
+Ban list (v0):
+- Never paste raw `openclaw ... --json` blobs into PM briefs.
+- Never paste full HTML/PDF extraction into chat; stash and fetch bounded excerpts.
+
+Future automation hook (planned): a linter that greps playbook/cron specs for banned patterns (e.g., `--json` dumps) and requires a wrapper/handle path.
+
 ### 5.1 CLI surface
 Add a new command group:
 - `openclaw-mem artifact stash`
