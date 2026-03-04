@@ -111,7 +111,7 @@ For explicit memory writes/reads, use CLI commands (`store`, `hybrid`, etc.).
 
 ```bash
 # Symlink plugin into OpenClaw
-ln -s "$(pwd)/extensions/openclaw-mem" ~/.openclaw/plugins/openclaw-mem
+ln -s ./extensions/openclaw-mem ~/.openclaw/plugins/openclaw-mem
 
 # Restart gateway
 openclaw gateway restart
