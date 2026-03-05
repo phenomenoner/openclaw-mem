@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regression coverage for white lenticular bracket task markers (`〘TODO〙 ...`, `〘TODO〙...`) in parser-level, triage task flows, and heuristic testcase fixtures.
 - Added heuristic-v1 testcase coverage for lenticular bracket markers (`〖TASK〗...`) in `tests/data/HEURISTIC_TESTCASES.jsonl`.
 - Added heuristic-v1 testcase coverage for CJK double-angle marker forms (`《TODO》...`) in `tests/data/HEURISTIC_TESTCASES.jsonl`.
+- Added regression coverage for full-width angle quote marker forms (`＜TODO＞...`) in triage task flows and heuristic testcase fixtures.
 - Added regression coverage for black-square bullet wrappers (`▪ TODO ...`, `▪[x]TODO ...`) in parser-level and heuristic testcase flows.
 - Fixed JSON contract test to accept `triage` exit code `10` (attention needed) while still validating the JSON payload.
 
