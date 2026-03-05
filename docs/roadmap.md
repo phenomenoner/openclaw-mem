@@ -127,6 +127,10 @@ Goal: turn the implicit pipeline into an explicit policy.
 - Warm = SQLite ledger (hours → days)
 - Cold = durable summaries / curated files (weeks → months)
 
+Add-on (debuggability + governance):
+- **Episodic events ledger** (append-only session timeline; summary-first; scope-isolated)
+  - Spec: [Episodic events ledger (v0) →](specs/episodic-events-ledger-v0.md)
+
 Deliverables:
 - A short spec of promotion rules (what moves up tiers, and why)
 - A default operator workflow: `search → timeline → get → store/promote`

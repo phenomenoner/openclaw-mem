@@ -94,3 +94,83 @@ The same admin operations are also exposed as tools:
 - `memory_import`
 
 This keeps admin functionality available in agent/tool workflows even if CLI wiring differs across OpenClaw versions.
+
+## Docs Memory cold lane (installable)
+
+`openclaw-mem-engine` now includes an optional **docs cold lane** for operator-authored markdown (DECISIONS/roadmaps/specs) without writing those chunks into hot memory rows.
+
+### New tools
+
+- `memory_docs_ingest` — bounded ingest into `openclaw-mem docs` SQLite index
+- `memory_docs_search` — bounded docs snippets (`operator` provenance)
+
+`memory_recall` and `autoRecall` can consult docs cold lane **only when hot recall is insufficient** (`minHotItems` threshold).
+
+### Config knobs
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem-engine": {
+        "enabled": true,
+        "config": {
+          "docsColdLane": {
+            "enabled": true,
+            "sqlitePath": "~/.openclaw/memory/openclaw-mem.sqlite",
+            "sourceRoots": [
+              "/root/.openclaw/workspace/lyria-working-ledger/DECISIONS",
+              "/root/.openclaw/workspace/openclaw-async-coding-playbook/projects"
+            ],
+            "sourceGlobs": ["**/*.md", "**/ROADMAP*.md", "**/*SPEC*.md"],
+            "scopeMappingStrategy": "repo_prefix", // none|repo_prefix|path_prefix|map
+            "scopeMap": {
+              "openclaw-mem": ["openclaw-mem/docs", "openclaw-mem/specs"]
+            },
+            "maxChunkChars": 1400,
+            "embedOnIngest": true,
+            "ingestOnStart": false,
+            "maxItems": 2,
+            "maxSnippetChars": 280,
+            "minHotItems": 2,
+            "searchFtsK": 20,
+            "searchVecK": 20,
+            "searchRrfK": 60
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Verification commands
+
+```bash
+# 1) Ingest allowlisted docs
+openclaw tools invoke memory_docs_ingest --json '{}'
+
+# 2) Query docs lane directly
+openclaw tools invoke memory_docs_search --json '{"query":"status code decision","scope":"openclaw-mem"}'
+
+# 3) Verify cold-lane marker in recall receipt/logs
+# expect: openclaw-mem-engine:docsColdLane.search
+# and autoRecall receipt field: coldLane.{consulted,returned,strategy}
+```
+
+### Log markers / receipts
+
+- ingest: `openclaw-mem-engine:docsColdLane.ingest`
+- search: `openclaw-mem-engine:docsColdLane.search`
+- recall receipt (`openclaw-mem-engine.recall.receipt.v1`) now carries optional `coldLane` summary
+
+### Rollback
+
+Fast rollback (no code revert):
+
+```bash
+openclaw config set plugins.entries.openclaw-mem-engine.config.docsColdLane.enabled false
+openclaw gateway restart
+```
+
+Hard rollback (remove lane tools as well): revert to previous commit and restart gateway.

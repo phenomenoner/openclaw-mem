@@ -52,6 +52,26 @@
       "label": "Auto Capture",
       "help": "Capture strict user-origin preference/decision memories on agent end"
     },
+    "autoCapture.captureTodo": {
+      "label": "Capture TODO",
+      "help": "Off by default; enable guarded TODO capture",
+      "advanced": true
+    },
+    "autoCapture.maxTodoPerTurn": {
+      "label": "TODO Max Per Turn",
+      "help": "Per-turn TODO capture cap (default 1)",
+      "advanced": true
+    },
+    "autoCapture.todoDedupeWindowHours": {
+      "label": "TODO Dedupe Window (hours)",
+      "help": "Only dedupe TODOs against same-scope items within this recent window",
+      "advanced": true
+    },
+    "autoCapture.todoStaleTtlDays": {
+      "label": "TODO Stale TTL (days)",
+      "help": "Recall-time TTL for TODO memories to avoid injecting stale tasks forever",
+      "advanced": true
+    },
     "receipts.enabled": {
       "label": "Lifecycle Receipts",
       "help": "Emit bounded recall/capture receipts for debug and audits",
@@ -65,6 +85,101 @@
     "receipts.maxItems": {
       "label": "Receipt Max Items",
       "help": "Maximum item count for top-hit arrays and tier slices",
+      "advanced": true
+    },
+    "scopePolicy.enabled": {
+      "label": "Scope Policy",
+      "help": "Default-on namespace isolation policy for read/write scope resolution",
+      "advanced": true
+    },
+    "scopePolicy.defaultScope": {
+      "label": "Default Scope",
+      "help": "Fallback scope when no explicit/inferred scope exists (default: global)",
+      "advanced": true
+    },
+    "scopePolicy.fallbackScopes": {
+      "label": "Fallback Scopes",
+      "help": "Ordered allowlist used only when primary scope recall is insufficient",
+      "advanced": true
+    },
+    "scopePolicy.validationMode": {
+      "label": "Scope Validation",
+      "help": "Write-time scope validation mode: strict (default), normalize, or none",
+      "advanced": true
+    },
+    "budget.enabled": {
+      "label": "Context Budget",
+      "help": "Hard ceiling for final injected autoRecall prependContext",
+      "advanced": true
+    },
+    "budget.maxChars": {
+      "label": "Context Budget Max Chars",
+      "help": "Maximum characters allowed in final injected prependContext",
+      "advanced": true
+    },
+    "budget.minRecentSlots": {
+      "label": "Budget Min Recent Slots",
+      "help": "Keep at least N most-recent memory slots before dropping older slots",
+      "advanced": true
+    },
+    "budget.overflowAction": {
+      "label": "Budget Overflow Action",
+      "help": "truncate_oldest (default) or truncate_tail",
+      "advanced": true
+    },
+    "scopePolicy.fallbackMarker": {
+      "label": "Scope Fallback Marker",
+      "help": "Emit scope fallback marker when fallback scopes are consulted",
+      "advanced": true
+    },
+    "scopePolicy.maxScopeLength": {
+      "label": "Scope Max Length",
+      "help": "Maximum allowed scope length after normalization/validation",
+      "advanced": true
+    },
+    "docsColdLane.enabled": {
+      "label": "Docs Cold Lane",
+      "help": "Enable bounded docs ingest/search lane for operator-authored markdown",
+      "advanced": true
+    },
+    "docsColdLane.sqlitePath": {
+      "label": "Docs SQLite Path",
+      "help": "SQLite file used by openclaw-mem docs ingest/search",
+      "advanced": true
+    },
+    "docsColdLane.sourceRoots": {
+      "label": "Docs Source Roots",
+      "help": "Allowlisted roots for docs ingest (repeatable)",
+      "advanced": true
+    },
+    "docsColdLane.sourceGlobs": {
+      "label": "Docs Source Globs",
+      "help": "Allowlisted markdown globs relative to each root",
+      "advanced": true
+    },
+    "docsColdLane.scopeMappingStrategy": {
+      "label": "Docs Scope Mapping",
+      "help": "none | repo_prefix | path_prefix | map",
+      "advanced": true
+    },
+    "docsColdLane.maxChunkChars": {
+      "label": "Docs Chunk Max Chars",
+      "help": "Chunk size passed to docs ingest (bounded)",
+      "advanced": true
+    },
+    "docsColdLane.maxItems": {
+      "label": "Docs Max Recall Items",
+      "help": "Maximum docs snippets returned per recall/search",
+      "advanced": true
+    },
+    "docsColdLane.maxSnippetChars": {
+      "label": "Docs Snippet Max Chars",
+      "help": "Maximum snippet chars per returned docs hit",
+      "advanced": true
+    },
+    "docsColdLane.minHotItems": {
+      "label": "Docs Trigger Hot Threshold",
+      "help": "Consult docs lane only when hot memories are below this count",
       "advanced": true
     }
   },
@@ -194,6 +309,24 @@
                 "type": "boolean",
                 "default": false
               },
+              "maxTodoPerTurn": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3,
+                "default": 1
+              },
+              "todoDedupeWindowHours": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 168,
+                "default": 24
+              },
+              "todoStaleTtlDays": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 90,
+                "default": 7
+              },
               "dedupeSimilarityThreshold": {
                 "type": "number",
                 "minimum": 0.7,
@@ -236,6 +369,197 @@
                 "minimum": 1,
                 "maximum": 10,
                 "default": 3
+              }
+            }
+          }
+        ]
+      },
+      "scopePolicy": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "defaultScope": {
+                "type": "string",
+                "default": "global"
+              },
+              "fallbackScopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "fallbackMarker": {
+                "type": "boolean",
+                "default": true
+              },
+              "validationMode": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "normalize",
+                  "strict"
+                ],
+                "default": "strict"
+              },
+              "maxScopeLength": {
+                "type": "integer",
+                "minimum": 8,
+                "maximum": 256,
+                "default": 64
+              }
+            }
+          }
+        ]
+      },
+      "budget": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "maxChars": {
+                "type": "integer",
+                "minimum": 300,
+                "maximum": 12000,
+                "default": 1800
+              },
+              "minRecentSlots": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5,
+                "default": 1
+              },
+              "overflowAction": {
+                "type": "string",
+                "enum": [
+                  "truncate_oldest",
+                  "truncate_tail"
+                ],
+                "default": "truncate_oldest"
+              }
+            }
+          }
+        ]
+      },
+      "docsColdLane": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "sqlitePath": {
+                "type": "string",
+                "default": "~/.openclaw/memory/openclaw-mem.sqlite"
+              },
+              "sourceRoots": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "sourceGlobs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [
+                  "**/*.md"
+                ]
+              },
+              "maxChunkChars": {
+                "type": "integer",
+                "minimum": 200,
+                "maximum": 4000,
+                "default": 1400
+              },
+              "embedOnIngest": {
+                "type": "boolean",
+                "default": true
+              },
+              "ingestOnStart": {
+                "type": "boolean",
+                "default": false
+              },
+              "maxItems": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "default": 2
+              },
+              "maxSnippetChars": {
+                "type": "integer",
+                "minimum": 80,
+                "maximum": 600,
+                "default": 280
+              },
+              "minHotItems": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5,
+                "default": 2
+              },
+              "searchFtsK": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 20
+              },
+              "searchVecK": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 20
+              },
+              "searchRrfK": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "default": 60
+              },
+              "scopeMappingStrategy": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "repo_prefix",
+                  "path_prefix",
+                  "map"
+                ],
+                "default": "repo_prefix"
+              },
+              "scopeMap": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "default": {}
               }
             }
           }

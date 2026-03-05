@@ -111,6 +111,126 @@ Design constraints:
 - receipts are bounded/deterministic by default
 - no memory text is emitted in receipt payloads by default (IDs + scores only)
 
+### Scope policy + context budget knobs (Rollout Step 1/2)
+
+`openclaw-mem-engine` now exposes two rollbackable control planes:
+
+1) **Scope policy** (default-on namespace isolation)
+- `scopePolicy.enabled` (default `true`; kill-switch)
+- `scopePolicy.defaultScope` (default `"global"`)
+- `scopePolicy.fallbackScopes` (default `[]`; ordered allowlist, only consulted if primary scope is insufficient)
+- `scopePolicy.fallbackMarker` (default `true`; emit observable fallback marker in logs/receipts)
+- `scopePolicy.validationMode` (`strict` default; `normalize` / `none` optional)
+- `scopePolicy.maxScopeLength` (default `64`)
+
+Write-path hardening:
+- scope values are validated/normalized at write-time (`memory_store`, `autoCapture`, `memory_import`)
+- invalid strict scopes fall back to `defaultScope` and emit a scope-validation warning receipt/log marker
+
+2) **Final prepend context budget** (hard ceiling at packing tail)
+- `budget.enabled` (default `true`; kill-switch)
+- `budget.maxChars` (default `1800`)
+- `budget.minRecentSlots` (default `1`)
+- `budget.overflowAction` (`truncate_oldest` default; `truncate_tail` optional)
+
+Packing semantics:
+- budget is enforced at the **very end** of autoRecall packing (`prependContext`) independent of `maxItems`
+- if overflow occurs:
+  - `truncate_oldest`: drop **oldest-by-createdAt** slots first, while protecting the `minRecentSlots` most-recent slots
+  - `truncate_tail`: drop from the **tail of the selected/relevance-ordered list** first (least relevant), still protecting `minRecentSlots`
+- if still above cap (e.g. receiptComment itself is large), final tail slicing is applied to guarantee a deterministic hard ceiling
+- when truncation happens and `budget.enabled=true`, emit `openclaw-mem-engine:contextBudget` marker (before/after chars + dropped ids/count)
+
+Example config snippet:
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem-engine": {
+        "enabled": true,
+        "config": {
+          "scopePolicy": {
+            "enabled": true,
+            "defaultScope": "global",
+            "fallbackScopes": ["openclaw-mem", "personal"],
+            "fallbackMarker": true,
+            "validationMode": "strict",
+            "maxScopeLength": 64
+          },
+          "budget": {
+            "enabled": true,
+            "maxChars": 1800,
+            "minRecentSlots": 1,
+            "overflowAction": "truncate_oldest"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Rollback (single-line posture):
+- disable either feature without code changes:
+  - `scopePolicy.enabled = false`
+  - `budget.enabled = false`
+
+### Rollout Step 3 — guarded TODO capture (default off)
+
+Step 3 keeps the default behavior unchanged (`autoCapture.captureTodo = false`) and adds explicit TODO guardrails that can be enabled/rolled back via config only.
+
+New knobs under `autoCapture`:
+- `captureTodo` (default `false`)
+- `maxTodoPerTurn` (default `1`, min `0`, max `3`)
+- `todoDedupeWindowHours` (default `24`, min `1`, max `168`)
+- `todoStaleTtlDays` (default `7`, min `1`, max `90`)
+
+Guardrail behavior when `captureTodo=true`:
+- TODO capture is capped by `maxTodoPerTurn` per agent turn.
+- TODO dedupe is **scope-scoped + time-bounded**: only same-scope TODOs within `todoDedupeWindowHours` are considered duplicates.
+- TODO injection obeys a deterministic recall-time TTL: TODO memories older than `todoStaleTtlDays` are dropped from autoRecall injection.
+- Drops emit bounded markers/receipts (`openclaw-mem-engine:todoGuardrail`, plus `autoCapture` receipt counters).
+
+Operational note (Telegram / injected metadata):
+- Some deployments include autoRecall receipts (e.g. `<relevant-memories>…</relevant-memories>`) and code-fenced metadata blocks in the *same* inbound message.
+- autoCapture strips these injected artifacts before candidate extraction, and filters tool-like content **per candidate line**, so a real user TODO line (e.g. `TODO: …`) can still be captured.
+- Scope tags can be on the same line or on the previous line:
+  - `TODO: ...` preceded by `[SCOPE: openclaw-mem]` on its own line is still captured into that scope.
+- Keep TODO lines outside code fences for best results.
+
+Recommended enable snippet (Step 3):
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem-engine": {
+        "enabled": true,
+        "config": {
+          "autoCapture": {
+            "enabled": true,
+            "captureTodo": true,
+            "maxTodoPerTurn": 1,
+            "todoDedupeWindowHours": 24,
+            "todoStaleTtlDays": 7
+          },
+          "budget": {
+            "enabled": true,
+            "maxChars": 1800,
+            "minRecentSlots": 1,
+            "overflowAction": "truncate_oldest"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Rollback:
+- immediate kill switch: `autoCapture.captureTodo = false`
+
 ---
 
 ## Architecture overview
@@ -219,7 +339,15 @@ Operators feel recall failure most painfully on: “we already decided this.”
 
 So the engine path should be able to **optionally** search an operator-authored docs corpus (DECISIONS / roadmaps / specs) using the same hybrid recipe (FTS + embeddings) and return bounded citations.
 
+Status (current):
+- shipped as `docsColdLane` in `openclaw-mem-engine` config
+- installable tools: `memory_docs_ingest`, `memory_docs_search`
+- `memory_recall` + `autoRecall` can consult cold lane only after hot lane is insufficient (`minHotItems`)
+- results are marked `source_kind=operator`, `trust_tier=trusted`
+- embeddings are optional/fail-open (FTS-only still works)
+
 - Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
+- Ops guide: [mem-engine-admin-ops.md](mem-engine-admin-ops.md#docs-memory-cold-lane-installable)
 - Stance: **no local LLM**; rerank (if needed) is remote + bounded.
 
 ---
@@ -409,6 +537,8 @@ Deliverables (coarse):
 
 - tag versions before large auto-capture or regrading changes
 - ability to revert/checkout a tagged version
+
+Spec (v0): `docs/specs/mem-engine-versioning-safety-net-v0.md`
 
 ### M4 — Multimodal (optional)
 

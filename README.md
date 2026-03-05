@@ -31,19 +31,24 @@ See: `docs/reality-check.md` (commands + expected JSON shapes).
 uv sync --locked
 DB=/tmp/openclaw-mem.sqlite
 
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json status
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json ingest --file /tmp/sample.jsonl
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
+uv run python -m openclaw_mem --db "$DB" --json status
+uv run python -m openclaw_mem --db "$DB" --json ingest --file /tmp/sample.jsonl
+uv run python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
 ```
 
 Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_ts`, and `ingest` prints `{inserted, ids}`.
 
 ## Quick links
-- **5-minute synthetic demo (Inside-Out Memory)**: `docs/showcase/inside-out-demo.md` (run: `./scripts/inside_out_demo.sh`)
-- **For AI coding agents**: `AGENTS.md`
+- Docs site: https://phenomenoner.github.io/openclaw-mem/
+- Releases: https://github.com/phenomenoner/openclaw-mem/releases
 - Engine: `docs/mem-engine.md` (what it is + how to enable + knobs)
 - Sidecar capture plugin: `docs/auto-capture.md`
 - Ecosystem fit / comparisons: `docs/ecosystem-fit.md`
+
+## What’s new (v1.0.4, since v1.0.1)
+- **More reliable mem-engine in real chats**: long prompts + embedding hiccups are less likely to break memory flows (fail-open + lexical fallback + warnings).
+- **Embedding clamp knobs** (`embedding.maxChars/headChars/maxBytes`) to control how long prompts are trimmed before embedding.
+- Release notes: https://github.com/phenomenoner/openclaw-mem/releases/tag/v1.0.4
 
 ## Status map (DONE / PARTIAL / ROADMAP)
 
@@ -103,29 +108,17 @@ Automation truth (dev):
   - `tasks`
 - `triage --mode tasks` extraction is deterministic:
   - matches `kind == "task"`, or
-  - `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`, `〈TODO〉 ...`, `〖TODO〗 ...`, `〘TODO〙 ...`, `‹TODO› ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `▪` / `‣` / `∙` / `·` / `◦` / `・` / `–` / `—` / `−`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`, `〔TODO〕buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`, `«TODO»buy milk`, `〈TODO〉buy milk`, `〖TODO〗buy milk`, `〘TODO〙buy milk`, `‹TODO›buy milk`), followed by `:`, `：`, `;`, `；`, whitespace, `-`, `.`, `。`, `－`, `–`, `—`, `−`, or end-of-string.
-  - Example formats: `TODO: rotate runbook`, `{TODO}: rotate runbook`, `【TODO】 rotate runbook`, `「TODO」 rotate runbook`, `『TODO』 rotate runbook`, `《TODO》 rotate runbook`, `«TODO» rotate runbook`, `〈TODO〉 rotate runbook`, `〖TODO〗 rotate runbook`, `〘TODO〙 rotate runbook`, `‹TODO› rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`, `TODO; rotate runbook`, `TASK；follow up on release checklist`.
-
+  - `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
+  - Example formats: `TODO: rotate runbook`, `【TODO】 rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`.
   - Example run:
 
     ```bash
     uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
     ```
-  - Example run:
-
-    ```bash
-    uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
-    ```
-
-  - Example run:
-
-    ```bash
-    uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
-    ```
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
 - **Ops profile surface (DONE)**: `profile --json` for quick state snapshots (counts, importance labels, top tools/kinds, recent rows, embedding stats).
 - **Importance grading (MVP v1 baseline shipped)**: canonical `detail_json.importance` objects + deterministic `heuristic-v1` scorer + regression tests.
-  - Enable autograde on `ingest`/`harvest`: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (alias `heuristic_v1`; or `--importance-scorer {heuristic-v1|heuristic_v1|off}`)
+  - Enable autograde on `ingest`/`harvest`: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (or `--importance-scorer {heuristic-v1|off}`)
   - Ingest/harvest JSON receipts include grading counters + `label_counts` for ops trend tracking.
   - Notes: `docs/importance-grading.md`
   - Canonical ingest/harvest receipt contract (aggregate-only): `docs/importance-grading.md`
@@ -133,13 +126,13 @@ Automation truth (dev):
 - **Autograde switch (copy/paste)**:
   ```bash
   # Enable heuristic autograde for ingest/harvest
-  OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+  OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 
   # Run a one-off no-autograde harvest (kill-switch)
-  OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+  OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 
   # Force CLI-only kill switch (per command)
-  uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
+  uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
   ```
 
 - **Lifecycle manager (ROADMAP)**: ref/last_used_at-based decay + archive-first retention.
@@ -166,7 +159,7 @@ uv sync --locked
 ```
 
 After syncing, run from this source checkout with:
-- `uv run --python 3.13 --frozen -- python -m openclaw_mem ...` (recommended)
+- `uv run python -m openclaw_mem ...` (recommended)
 
 If you have a packaged install that provides a console script, you can also use:
 - `openclaw-mem ...`
@@ -177,43 +170,43 @@ If you have a packaged install that provides a console script, you can also use:
 
 ```bash
 # 1) Create/open DB and show counts
-uv run --python 3.13 --frozen -- python -m openclaw_mem status --json
+uv run python -m openclaw_mem status --json
 
 # 1.5) Snapshot ops profile (counts, importance labels, top tools, recent rows)
-uv run --python 3.13 --frozen -- python -m openclaw_mem profile --json --recent-limit 15
+uv run python -m openclaw_mem profile --json --recent-limit 15
 
 # 1.6) Check active OpenClaw memory backend + fallback posture
-uv run --python 3.13 --frozen -- python -m openclaw_mem backend --json
+uv run python -m openclaw_mem backend --json
 
 # 2) Ingest JSONL observations
-uv run --python 3.13 --frozen -- python -m openclaw_mem ingest --file observations.jsonl --json
+uv run python -m openclaw_mem ingest --file observations.jsonl --json
 
 # 3) Layer 1 recall (compact)
-uv run --python 3.13 --frozen -- python -m openclaw_mem search "gateway timeout" --limit 10 --json
+uv run python -m openclaw_mem search "gateway timeout" --limit 10 --json
 
 # 4) Layer 2 recall (nearby context)
-uv run --python 3.13 --frozen -- python -m openclaw_mem timeline 42 --window 3 --json
+uv run python -m openclaw_mem timeline 42 --window 3 --json
 
 # 5) Layer 3 recall (full rows)
-uv run --python 3.13 --frozen -- python -m openclaw_mem get 42 --json
+uv run python -m openclaw_mem get 42 --json
 
 # 6) (Dev) Build a compact, cited context bundle
-uv run --python 3.13 --frozen -- python -m openclaw_mem pack --query "gateway timeout" --limit 12 --budget-tokens 1200 --trace --json
+uv run python -m openclaw_mem pack --query "gateway timeout" --limit 12 --budget-tokens 1200 --trace --json
 # With --trace, this returns a redaction-safe `openclaw-mem.pack.trace.v1` receipt plus the packed `bundle_text` and citations.
 # `--query-en` can be used when you want an English retrieval lane in addition to the main query.
 
 # 6a) Optional: skip JSON wrapper for pure L1 text payload
-uv run --python 3.13 --frozen -- python -m openclaw_mem pack --query "gateway timeout" --no-json
+uv run python -m openclaw_mem pack --query "gateway timeout" --no-json
 ```
 
 ### Proactive memory (explicit “remember this”)
 
 ```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem store "Prefer tabs over spaces" \
+uv run python -m openclaw_mem store "Prefer tabs over spaces" \
   --category preference --importance 0.9 --json
 
-uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "tabs or spaces preference" --limit 5 --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "tabs or spaces preference" \
+uv run python -m openclaw_mem hybrid "tabs or spaces preference" --limit 5 --json
+uv run python -m openclaw_mem hybrid "tabs or spaces preference" \
   --rerank-provider jina --rerank-topn 20 --json
 ```
 
@@ -266,15 +259,15 @@ See detailed deployment patterns:
 
 ```bash
 # Store original text + optional English companion
-uv run --python 3.13 --frozen -- python -m openclaw_mem store "<original non-English text>" \
+uv run python -m openclaw_mem store "<original non-English text>" \
   --text-en "Preference: run integration tests before release" \
   --lang zh --category preference --importance 0.9 --json
 
 # Build embeddings (original + English)
-uv run --python 3.13 --frozen -- python -m openclaw_mem embed --field both --limit 500 --json
+uv run python -m openclaw_mem embed --field both --limit 500 --json
 
 # Hybrid recall with optional EN assist query
-uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "<original query>" \
+uv run python -m openclaw_mem hybrid "<original query>" \
   --query-en "pre-release process" \
   --limit 5 --json
 ```
@@ -325,7 +318,7 @@ More detail:
 
 ```bash
 # 0: no new issues, 10: attention needed
-uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode heartbeat --json
+uv run python -m openclaw_mem triage --mode heartbeat --json
 ```
 
 This is designed to be safe for heartbeat automation: fast, local, and deterministic.
@@ -343,17 +336,17 @@ Graphic Memory automation toggles are opt-in (default OFF):
 Inspect effective toggle state:
 
 ```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem graph auto-status --json
+uv run python -m openclaw_mem graph auto-status --json
 ```
 
 Automation examples:
 
 ```bash
-OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
+OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
 
-OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
 
-OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
 ```
 
 Design notes: `docs/specs/graphic-memory-auto-capture-auto-recall.md`

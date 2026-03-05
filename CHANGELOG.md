@@ -8,37 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- `triage --mode tasks` bracket-wrapped task markers now also accept Japanese corner-quote forms
-- `triage --mode tasks` bracket-wrapped task markers now also accept CJK double-angle quote forms (`《TODO》 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
-- `triage --mode tasks` bracket-wrapped task markers now also accept lenticular bracket forms (`〖TODO〗 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
-- `triage --mode tasks` bracket-wrapped task markers now also accept white lenticular bracket forms (`〘TODO〙 ...`) with the same separator and compact no-space suffix rules as other bracketed markers.
-- `heuristic-v1` task-like marker detection now also accepts lenticular bracket forms (`〖TASK〗 ...` / `〖REMINDER〗 ...`) so importance autograding matches triage marker coverage.
-- `triage --mode tasks` and `heuristic-v1` task-like marker detection now also accept black-square bullet wrappers (`▪ TODO ...`, `▪TODO ...`) with the same separator and compact-wrapper rules as other markdown bullets.
-
-### Docs
-- Clarified deterministic `triage --mode tasks` docs to include curly-brace bracket markers (`{TODO} ...`, `{TODO}buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
-- Extended task-marker docs/examples in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md` to include Japanese corner-quote plus angle-quote marker forms (`«TODO» ...`, `〈TODO〉 ...`, `‹TODO› ...`) and compact examples.
-- Clarified compact no-space examples to explicitly include 『TODO』... marker forms across README/QUICKSTART/upgrade-checklist and triage docstrings.
-- Clarified compact no-space examples to explicitly include `〔TODO〕...` marker forms across README/QUICKSTART/upgrade-checklist and triage docstrings.
-- Clarified deterministic `triage --mode tasks` docs to explicitly list `[☐]` and `[☑]` checklist wrappers in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
-- Extended deterministic task-marker docs/examples to include lenticular bracket marker forms (`〖TODO〗 ...`, `〖TODO〗buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
-- Extended deterministic task-marker docs/examples to include white lenticular bracket marker forms (`〘TODO〙 ...`, `〘TODO〙buy milk`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
-- Clarified deterministic triage docs to include black-square bullet wrappers (`▪ TODO ...`, `▪[x]TODO ...`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
+- `openclaw-mem-engine` now supports configurable embedding clamp knobs (`embedding.maxChars`, `embedding.headChars`, `embedding.maxBytes`) and enforces them in both recall/store paths.
+- Memory recall/store now fail-open when embeddings are unavailable, provider errors, or input is over long:
+  - `memory_recall` still returns lexical (FTS) results when vector path is skipped.
+  - `memory_store` still stores the memory with a zero vector fallback so ingest never blocks on embedding failure.
+- `memory_recall` and `memory_store` now emit explicit warnings when recall/store quality is degraded due to embedding skip.
+- Expanded memory-engine tunables for recall/capture/receipts behavior and harden-config parsing in plugin schema/normalization (`autoRecall`, `autoCapture`, `receipts`).
+- Added Rollout Step 3 TODO guardrails to `openclaw-mem-engine` autoCapture/autoRecall:
+  - new `autoCapture` knobs: `maxTodoPerTurn`, `todoDedupeWindowHours`, `todoStaleTtlDays` (with `captureTodo` still defaulting to `false`)
+  - same-scope, time-bounded TODO dedupe window
+  - deterministic recall-time stale TODO TTL filtering
+  - bounded `openclaw-mem-engine:todoGuardrail` drop markers and receipt counters for TODO rate-limit/dedupe drops.
+- Added installable **Docs Memory cold lane** to `openclaw-mem-engine`:
+  - new config surface `docsColdLane` (`enabled`, `sourceRoots`, `sourceGlobs`, `scopeMappingStrategy`, `maxChunkChars`, bounded recall knobs)
+  - new tools: `memory_docs_ingest`, `memory_docs_search`
+  - `memory_recall` + `autoRecall` now optionally consult docs cold lane only when hot lane is insufficient (`minHotItems`)
+  - bounded receipt/log markers: `openclaw-mem-engine:docsColdLane.ingest`, `openclaw-mem-engine:docsColdLane.search`, plus optional `coldLane` block in recall lifecycle receipts.
 
 ### Testing
-- Added triage-flow regression coverage for compact curly-brace bracket markers (for example `{TODO}buy coffee this afternoon`).
-- Added regression coverage for Japanese corner-quote task markers in parser-level and triage task flows.
-- Added regression coverage for compact no-space 『TODO』... task markers in parser-level and triage task flows.
-- Added regression coverage for compact no-space `〔TODO〕...` task markers in parser-level and triage task flows.
-- Added triage-flow regression coverage for `[☐]` and `[☑]` checklist-wrapped task markers (including compact no-space forms).
-- Added regression coverage for lenticular bracket task markers (`〖TODO〗 ...`, `〖TODO〗...`) in parser-level and triage task flows.
-- Added regression coverage for white lenticular bracket task markers (`〘TODO〙 ...`, `〘TODO〙...`) in parser-level, triage task flows, and heuristic testcase fixtures.
-- Added heuristic-v1 testcase coverage for lenticular bracket markers (`〖TASK〗...`) in `tests/data/HEURISTIC_TESTCASES.jsonl`.
-- Added heuristic-v1 testcase coverage for CJK double-angle marker forms (`《TODO》...`) in `tests/data/HEURISTIC_TESTCASES.jsonl`.
-- Added regression coverage for full-width angle quote marker forms (`＜TODO＞...`) in triage task flows and heuristic testcase fixtures.
-- Added regression coverage for black-square bullet wrappers (`▪ TODO ...`, `▪[x]TODO ...`) in parser-level and heuristic testcase flows.
-- Fixed JSON contract test to accept `triage` exit code `10` (attention needed) while still validating the JSON payload.
-
+- `test_triage_json_contract_v0` now writes a temporary cron jobs fixture and passes `--cron-jobs-path`, preventing host-state coupling to `~/.openclaw/cron/jobs.json`.
+- Added docs-cold-lane contract tests (`test_mem_engine_docs_cold_lane.py`) for config schema defaults, trust/provenance markers, and runtime marker wiring.
 
 ## [1.0.3] - 2026-02-28
 
@@ -139,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - new documentation: `docs/importance-grading.md`
 - Feature-flagged importance autograde on import:
   - enable via `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1`
-  - per-run override via `--importance-scorer {heuristic-v1|heuristic_v1|off}` for `ingest` / `harvest`
+  - per-run override via `--importance-scorer {heuristic-v1|off}` for `ingest` / `harvest`
 
 ### Changed
 - `store` now writes canonical importance objects (method=`manual-via-cli`) instead of legacy numeric-only.

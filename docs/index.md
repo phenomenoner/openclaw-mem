@@ -42,6 +42,7 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 - Importance grading (MVP v1): [Go →](importance-grading.md)
 - Context engineering lessons (local-first): [Go →](context-engineering-lessons.md)
 - Roadmap (engineering): [Go →](roadmap.md)
+- Context bloat mitigation rollout plan (down‑N minimal changes): [Go →](context-bloat-mitigation-rollout.md)
 - Mem Engine (optional slot backend): [Go →](mem-engine.md)
 - Docs memory (spec): [Go →](specs/docs-memory-hybrid-search-v0.md)
 - Graphic memory (spec/PRD, dev): [Go →](specs/graphic-memory-graphrag-lite-prd.md)
@@ -62,7 +63,17 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --json search "gateway t
 uv run --python 3.13 --frozen -- python -m openclaw_mem pack --query "gateway timeout" --limit 8 --trace --json
 ```
 
+## What’s new (v1.0.4, since v1.0.1)
+
+- **More reliable Mem Engine**: long prompts + embedding hiccups are less likely to break memory flows (fail-open + lexical fallback + warnings).
+- **Configurable embedding clamping**: `embedding.maxChars`, `embedding.headChars`, `embedding.maxBytes`.
+
+See release notes:
+- v1.0.4: <https://github.com/phenomenoner/openclaw-mem/releases/tag/v1.0.4>
+- all releases: <https://github.com/phenomenoner/openclaw-mem/releases>
+
 ## Links
 
 - Repo: <https://github.com/phenomenoner/openclaw-mem>
+- Releases: <https://github.com/phenomenoner/openclaw-mem/releases>
 - Issues: <https://github.com/phenomenoner/openclaw-mem/issues>
