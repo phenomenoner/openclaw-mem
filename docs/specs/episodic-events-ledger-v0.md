@@ -152,8 +152,9 @@ Default posture:
 - `refs_json` also bounded.
 
 3) **Redaction**
-- Provide a redaction path that overwrites `payload_json` (and optionally `summary`) with `[REDACTED]` and sets `redacted=1`.
+- Redaction overwrites `summary` with `[REDACTED]`, clears `refs_json`, and replaces `payload_json` with either `NULL` or a `[REDACTED]` placeholder (per `--replacement`).
 - Keep the event row for audit continuity.
+- Scope posture: `--event-id` redaction requires `--scope` (or explicit `--global`).
 
 4) **Scope isolation**
 - Every query must include a scope (or be explicitly `scope=global`).

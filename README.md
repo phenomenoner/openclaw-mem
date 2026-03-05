@@ -34,6 +34,8 @@ DB=/tmp/openclaw-mem.sqlite
 uv run python -m openclaw_mem --db "$DB" --json status
 uv run python -m openclaw_mem --db "$DB" --json ingest --file /tmp/sample.jsonl
 uv run python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
+uv run python -m openclaw_mem --db "$DB" --json episodes append --scope demo --session-id s1 --agent-id demo --type ops.alert --summary "hello" 
+uv run python -m openclaw_mem --db "$DB" --json episodes query --scope demo --session-id s1
 ```
 
 Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_ts`, and `ingest` prints `{inserted, ids}`.
@@ -52,7 +54,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 
 ## Status map (DONE / PARTIAL / ROADMAP)
 
-- **DONE**: local SQLite ledger + FTS5; `ingest/search/timeline/get`; deterministic `triage`.
+- **DONE**: local SQLite ledger + FTS5; `ingest/search/timeline/get`; deterministic `triage`; **episodic events ledger** (`episodes append/query/replay/redact/gc`).
 - **PARTIAL**: embeddings/hybrid/rerank; AI compression (LLM-assisted, hard caps + rollback; see `docs/ai-compression.md`); dual-language fields.
 - **PARTIAL**: OpenClaw plugin capture + backend annotations; Route A semantic recall (`index`, `semantic`).
 - **PARTIAL (dev)**: Context Packer (`pack`) with redaction-safe `--trace` receipts (exists, not yet auto-wired; see `docs/automation-status.md`).
@@ -69,6 +71,9 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **Observation store**: SQLite + FTS5
 - **Progressive disclosure recall**:
   - `search` → `timeline` → `get`
+- **Episodic events ledger (v0)**: append-only session timeline
+  - `episodes append/query/replay/redact/gc`
+  - query is **summary-only by default**; payload opt-in via `--include-payload`
 - **Context Packer (dev)**: `pack` builds a compact, cited bundle (summary-only). Use `--no-json` for plain-text payloads, or `--trace --json` for redaction-safe `openclaw-mem.pack.trace.v1` receipts that list refreshed `recordRef`s.
 - **Export**: `export` (with safety confirmation)
 - **Auto-ingest helper**: `harvest` (ingest + optional embeddings)
