@@ -176,6 +176,54 @@ Rollback (single-line posture):
   - `scopePolicy.enabled = false`
   - `budget.enabled = false`
 
+### Rollout Step 3 — guarded TODO capture (default off)
+
+Step 3 keeps the default behavior unchanged (`autoCapture.captureTodo = false`) and adds explicit TODO guardrails that can be enabled/rolled back via config only.
+
+New knobs under `autoCapture`:
+- `captureTodo` (default `false`)
+- `maxTodoPerTurn` (default `1`, min `0`, max `3`)
+- `todoDedupeWindowHours` (default `24`, min `1`, max `168`)
+- `todoStaleTtlDays` (default `7`, min `1`, max `90`)
+
+Guardrail behavior when `captureTodo=true`:
+- TODO capture is capped by `maxTodoPerTurn` per agent turn.
+- TODO dedupe is **scope-scoped + time-bounded**: only same-scope TODOs within `todoDedupeWindowHours` are considered duplicates.
+- TODO injection obeys a deterministic recall-time TTL: TODO memories older than `todoStaleTtlDays` are dropped from autoRecall injection.
+- Drops emit bounded markers/receipts (`openclaw-mem-engine:todoGuardrail`, plus `autoCapture` receipt counters).
+
+Recommended enable snippet (Step 3):
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem-engine": {
+        "enabled": true,
+        "config": {
+          "autoCapture": {
+            "enabled": true,
+            "captureTodo": true,
+            "maxTodoPerTurn": 1,
+            "todoDedupeWindowHours": 24,
+            "todoStaleTtlDays": 7
+          },
+          "budget": {
+            "enabled": true,
+            "maxChars": 1800,
+            "minRecentSlots": 1,
+            "overflowAction": "truncate_oldest"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Rollback:
+- immediate kill switch: `autoCapture.captureTodo = false`
+
 ---
 
 ## Architecture overview

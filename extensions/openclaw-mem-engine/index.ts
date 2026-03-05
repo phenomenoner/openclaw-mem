@@ -35,6 +35,12 @@ import {
   isEmbeddingInputTooLongError,
   looksLikeEmbeddingInputTooLongMessage,
 } from "./embeddingClamp.js";
+import {
+  todoDedupeCutoffMs,
+  isTodoWithinDedupeWindow,
+  todoStaleCutoffMs,
+  isTodoStale,
+} from "./todoGuardrails.js";
 
 // ============================================================================
 // Config
@@ -67,6 +73,9 @@ type AutoCaptureConfigInput = {
   capturePreference?: boolean;
   captureDecision?: boolean;
   captureTodo?: boolean;
+  maxTodoPerTurn?: number;
+  todoDedupeWindowHours?: number;
+  todoStaleTtlDays?: number;
   dedupeSimilarityThreshold?: number;
   duplicateSearchMinScore?: number;
 };
@@ -125,6 +134,9 @@ const DEFAULT_MODEL: NonNullable<NonNullable<PluginConfig["embedding"]>["model"]
 const AUTO_RECALL_MAX_ITEMS = 5;
 const AUTO_CAPTURE_MAX_ITEMS_PER_TURN = 3;
 const AUTO_CAPTURE_MAX_CHARS_PER_ITEM = 320;
+const AUTO_CAPTURE_MAX_TODO_PER_TURN = 3;
+const AUTO_CAPTURE_MAX_TODO_DEDUPE_WINDOW_HOURS = 24 * 7;
+const AUTO_CAPTURE_MAX_TODO_STALE_TTL_DAYS = 90;
 
 type AutoRecallConfig = {
   enabled: boolean;
@@ -142,6 +154,9 @@ type AutoCaptureConfig = {
   capturePreference: boolean;
   captureDecision: boolean;
   captureTodo: boolean;
+  maxTodoPerTurn: number;
+  todoDedupeWindowHours: number;
+  todoStaleTtlDays: number;
   dedupeSimilarityThreshold: number;
   duplicateSearchMinScore: number;
 };
@@ -186,6 +201,9 @@ const DEFAULT_AUTO_CAPTURE_CONFIG: AutoCaptureConfig = {
   capturePreference: true,
   captureDecision: true,
   captureTodo: false,
+  maxTodoPerTurn: 1,
+  todoDedupeWindowHours: 24,
+  todoStaleTtlDays: 7,
   dedupeSimilarityThreshold: 0.92,
   duplicateSearchMinScore: 0.94,
 };
@@ -456,6 +474,21 @@ function resolveAutoCaptureConfig(input: PluginConfig["autoCapture"]): AutoCaptu
     capturePreference: normalizeBoolean(raw.capturePreference, defaults.capturePreference),
     captureDecision: normalizeBoolean(raw.captureDecision, defaults.captureDecision),
     captureTodo: normalizeBoolean(raw.captureTodo, defaults.captureTodo),
+    maxTodoPerTurn: normalizeNumberInRange(raw.maxTodoPerTurn, defaults.maxTodoPerTurn, {
+      min: 0,
+      max: AUTO_CAPTURE_MAX_TODO_PER_TURN,
+      integer: true,
+    }),
+    todoDedupeWindowHours: normalizeNumberInRange(raw.todoDedupeWindowHours, defaults.todoDedupeWindowHours, {
+      min: 1,
+      max: AUTO_CAPTURE_MAX_TODO_DEDUPE_WINDOW_HOURS,
+      integer: true,
+    }),
+    todoStaleTtlDays: normalizeNumberInRange(raw.todoStaleTtlDays, defaults.todoStaleTtlDays, {
+      min: 1,
+      max: AUTO_CAPTURE_MAX_TODO_STALE_TTL_DAYS,
+      integer: true,
+    }),
     dedupeSimilarityThreshold: normalizeNumberInRange(
       raw.dedupeSimilarityThreshold,
       defaults.dedupeSimilarityThreshold,
@@ -1182,6 +1215,8 @@ type AutoCaptureLifecycleReceipt = {
     tool_output: number;
     secrets_like: number;
     duplicate: number;
+    todo_rate_limit: number;
+    todo_dedupe_window: number;
   };
   storedCount: number;
 };
@@ -1298,6 +1333,8 @@ function buildAutoCaptureLifecycleReceipt(input: {
     tool_output: number;
     secrets_like: number;
     duplicate: number;
+    todo_rate_limit: number;
+    todo_dedupe_window: number;
   };
   storedCount: number;
 }): AutoCaptureLifecycleReceipt {
@@ -1309,6 +1346,8 @@ function buildAutoCaptureLifecycleReceipt(input: {
       tool_output: Math.max(0, Math.floor(input.filteredOut.tool_output)),
       secrets_like: Math.max(0, Math.floor(input.filteredOut.secrets_like)),
       duplicate: Math.max(0, Math.floor(input.filteredOut.duplicate)),
+      todo_rate_limit: Math.max(0, Math.floor(input.filteredOut.todo_rate_limit)),
+      todo_dedupe_window: Math.max(0, Math.floor(input.filteredOut.todo_dedupe_window)),
     },
     storedCount: Math.max(0, Math.floor(input.storedCount)),
   };
@@ -1891,6 +1930,29 @@ class MemoryDB {
       .filter((row) => row.id && row.id !== "__schema__");
   }
 
+  async listRecentTodosByScope(scope: string, minCreatedAt: number, limit = 64): Promise<MemoryScalarRow[]> {
+    await this.ensureInitialized();
+
+    const safeLimit = Math.max(1, Math.min(256, Math.floor(limit)));
+    const safeMinCreatedAt = Number.isFinite(minCreatedAt) ? Math.max(0, Math.floor(minCreatedAt)) : 0;
+    const where = `${scopeFilterExpr(scope)} AND category = 'todo' AND createdAt >= ${safeMinCreatedAt}`;
+
+    const rows = await this.table!
+      .query()
+      .select([...MEMORY_SCALAR_COLUMNS])
+      .where(where)
+      .limit(safeLimit)
+      .toArray();
+
+    return rows
+      .map((row) => toMemoryScalarRow(row))
+      .filter((row) => row.id && row.id !== "__schema__")
+      .sort((a, b) => {
+        if (b.createdAt !== a.createdAt) return b.createdAt - a.createdAt;
+        return a.id.localeCompare(b.id);
+      });
+  }
+
   async hasId(id: string): Promise<boolean> {
     await this.ensureInitialized();
     const safe = String(id ?? "").replace(/'/g, "''");
@@ -2178,6 +2240,9 @@ const memoryEngineConfigSchema = {
           "capturePreference",
           "captureDecision",
           "captureTodo",
+          "maxTodoPerTurn",
+          "todoDedupeWindowHours",
+          "todoStaleTtlDays",
           "dedupeSimilarityThreshold",
           "duplicateSearchMinScore",
         ],
@@ -2190,6 +2255,10 @@ const memoryEngineConfigSchema = {
         capturePreference: typeof obj.capturePreference === "boolean" ? obj.capturePreference : undefined,
         captureDecision: typeof obj.captureDecision === "boolean" ? obj.captureDecision : undefined,
         captureTodo: typeof obj.captureTodo === "boolean" ? obj.captureTodo : undefined,
+        maxTodoPerTurn: typeof obj.maxTodoPerTurn === "number" ? obj.maxTodoPerTurn : undefined,
+        todoDedupeWindowHours:
+          typeof obj.todoDedupeWindowHours === "number" ? obj.todoDedupeWindowHours : undefined,
+        todoStaleTtlDays: typeof obj.todoStaleTtlDays === "number" ? obj.todoStaleTtlDays : undefined,
         dedupeSimilarityThreshold:
           typeof obj.dedupeSimilarityThreshold === "number" ? obj.dedupeSimilarityThreshold : undefined,
         duplicateSearchMinScore:
@@ -2316,6 +2385,26 @@ const memoryEngineConfigSchema = {
     "autoCapture.enabled": {
       label: "Auto Capture",
       help: "Capture strict user-origin preference/decision memories on agent end",
+    },
+    "autoCapture.captureTodo": {
+      label: "Capture TODO",
+      help: "Off by default; enable guarded TODO capture",
+      advanced: true,
+    },
+    "autoCapture.maxTodoPerTurn": {
+      label: "TODO Max Per Turn",
+      help: "Per-turn TODO capture cap (default 1)",
+      advanced: true,
+    },
+    "autoCapture.todoDedupeWindowHours": {
+      label: "TODO Dedupe Window (hours)",
+      help: "Only dedupe TODOs against same-scope items within this recent window",
+      advanced: true,
+    },
+    "autoCapture.todoStaleTtlDays": {
+      label: "TODO Stale TTL (days)",
+      help: "Recall-time TTL for TODO memories to avoid injecting stale tasks forever",
+      advanced: true,
     },
     "scopePolicy.enabled": {
       label: "Scope Policy",
@@ -3649,14 +3738,42 @@ const memoryPlugin = {
             }
 
             const selected = tiered.selected.slice(0, limit);
-            if (selected.length === 0) {
+            const recallNowMs = Date.now();
+            const staleTodoDropCount = selected.filter(
+              (hit) =>
+                hit.row.category === "todo" &&
+                isTodoStale(hit.row.createdAt, recallNowMs, autoCaptureCfg.todoStaleTtlDays),
+            ).length;
+            const selectedForInjection =
+              staleTodoDropCount > 0
+                ? selected.filter(
+                    (hit) =>
+                      !(
+                        hit.row.category === "todo" &&
+                        isTodoStale(hit.row.createdAt, recallNowMs, autoCaptureCfg.todoStaleTtlDays)
+                      ),
+                  )
+                : selected;
+
+            if (staleTodoDropCount > 0) {
+              api.logger.info(
+                `openclaw-mem-engine:todoGuardrail ${JSON.stringify({
+                  phase: "recall",
+                  reason: "ttl",
+                  dropped: staleTodoDropCount,
+                  ttlDays: autoCaptureCfg.todoStaleTtlDays,
+                })}`,
+              );
+            }
+
+            if (selectedForInjection.length === 0) {
               const receipt = emitAutoRecallReceipt({
                 skipped: false,
                 rejected: tiered.rejected,
                 tierCounts: tiered.tierCounts,
                 ftsResults: tiered.ftsResults,
                 vecResults: tiered.vecResults,
-                fusedResults: tiered.selected,
+                fusedResults: selectedForInjection,
                 injectedCount: 0,
                 fallback: tiered.fallback,
               });
@@ -3666,7 +3783,7 @@ const memoryPlugin = {
               return;
             }
 
-            const slots: PackedMemorySlot[] = selected.map((hit) => {
+            const slots: PackedMemorySlot[] = selectedForInjection.map((hit) => {
               const normalizedImportance = toImportanceRecord(hit.row.importance);
               const normalizedLabel = resolveImportanceLabel(normalizedImportance, hit.row.importance_label);
               return {
@@ -3684,7 +3801,7 @@ const memoryPlugin = {
               tierCounts: tiered.tierCounts,
               ftsResults: tiered.ftsResults,
               vecResults: tiered.vecResults,
-              fusedResults: tiered.selected,
+              fusedResults: selectedForInjection,
               injectedCount: slots.length,
               fallback: tiered.fallback,
             });
@@ -3705,7 +3822,7 @@ const memoryPlugin = {
                 tierCounts: tiered.tierCounts,
                 ftsResults: tiered.ftsResults,
                 vecResults: tiered.vecResults,
-                fusedResults: tiered.selected,
+                fusedResults: selectedForInjection,
                 injectedCount: finalBudget.keptSlots,
                 fallback: tiered.fallback,
                 budget: finalBudget.budget,
@@ -3779,9 +3896,16 @@ const memoryPlugin = {
               tool_output: 0,
               secrets_like: 0,
               duplicate: 0,
+              todo_rate_limit: 0,
+              todo_dedupe_window: 0,
             };
 
             let candidateExtractionCount = 0;
+            let todoAcceptedInTurn = 0;
+
+            const dedupeNowMs = Date.now();
+            const todoDedupeCutoff = todoDedupeCutoffMs(dedupeNowMs, autoCaptureCfg.todoDedupeWindowHours);
+            const recentTodoTextsByScope = new Map<string, string[]>();
 
             const captures: Array<{
               text: string;
@@ -3820,19 +3944,51 @@ const memoryPlugin = {
                 const category = detectAutoCaptureCategory(candidate);
                 if (!category || !allowedCategories.has(category)) continue;
 
-                const duplicateInTurn = captures.some((existing) =>
-                  isNearDuplicateText(existing.text, candidate, autoCaptureCfg.dedupeSimilarityThreshold),
-                );
-                if (duplicateInTurn) {
-                  filteredOut.duplicate += 1;
-                  continue;
-                }
-
                 const scopeInfo = resolveScope({ text: candidate, policy: scopePolicyCfg });
                 if (scopePolicyCfg.enabled && scopeInfo.invalid) {
                   api.logger.warn(
                     `openclaw-mem-engine:scopeValidation write=autoCapture invalid scope; fallback=${scopePolicyCfg.defaultScope}`,
                   );
+                }
+
+                const duplicateInTurn = captures.some((existing) => {
+                  if (category === "todo") {
+                    return (
+                      existing.category === "todo" &&
+                      existing.scope === scopeInfo.scope &&
+                      isNearDuplicateText(existing.text, candidate, autoCaptureCfg.dedupeSimilarityThreshold)
+                    );
+                  }
+                  return isNearDuplicateText(existing.text, candidate, autoCaptureCfg.dedupeSimilarityThreshold);
+                });
+                if (duplicateInTurn) {
+                  filteredOut.duplicate += 1;
+                  continue;
+                }
+
+                if (category === "todo") {
+                  if (todoAcceptedInTurn >= autoCaptureCfg.maxTodoPerTurn) {
+                    filteredOut.todo_rate_limit += 1;
+                    continue;
+                  }
+
+                  let recentTodoTexts = recentTodoTextsByScope.get(scopeInfo.scope);
+                  if (!recentTodoTexts) {
+                    const recentTodos = await db.listRecentTodosByScope(scopeInfo.scope, todoDedupeCutoff, 64).catch(() => []);
+                    recentTodoTexts = recentTodos
+                      .filter((row) => isTodoWithinDedupeWindow(row.createdAt, dedupeNowMs, autoCaptureCfg.todoDedupeWindowHours))
+                      .map((row) => row.text)
+                      .filter((text) => Boolean(text));
+                    recentTodoTextsByScope.set(scopeInfo.scope, recentTodoTexts);
+                  }
+
+                  const duplicateInWindow = recentTodoTexts.some((text) =>
+                    isNearDuplicateText(text, candidate, autoCaptureCfg.dedupeSimilarityThreshold),
+                  );
+                  if (duplicateInWindow) {
+                    filteredOut.todo_dedupe_window += 1;
+                    continue;
+                  }
                 }
 
                 let vector: number[];
@@ -3842,15 +3998,17 @@ const memoryPlugin = {
                   continue;
                 }
 
-                const maybeExisting = await db.vectorSearch(vector, 1, scopeInfo.scope).catch(() => []);
-                const existing = maybeExisting[0];
-                if (
-                  existing &&
-                  (existing.score >= autoCaptureCfg.duplicateSearchMinScore ||
-                    isNearDuplicateText(existing.row.text, candidate, autoCaptureCfg.dedupeSimilarityThreshold))
-                ) {
-                  filteredOut.duplicate += 1;
-                  continue;
+                if (category !== "todo") {
+                  const maybeExisting = await db.vectorSearch(vector, 1, scopeInfo.scope).catch(() => []);
+                  const existing = maybeExisting[0];
+                  if (
+                    existing &&
+                    (existing.score >= autoCaptureCfg.duplicateSearchMinScore ||
+                      isNearDuplicateText(existing.row.text, candidate, autoCaptureCfg.dedupeSimilarityThreshold))
+                  ) {
+                    filteredOut.duplicate += 1;
+                    continue;
+                  }
                 }
 
                 captures.push({
@@ -3860,12 +4018,33 @@ const memoryPlugin = {
                   scope: scopeInfo.scope,
                   importance: defaultImportanceForAutoCapture(category),
                 });
+
+                if (category === "todo") {
+                  todoAcceptedInTurn += 1;
+                  const existing = recentTodoTextsByScope.get(scopeInfo.scope) ?? [];
+                  existing.push(candidate);
+                  recentTodoTextsByScope.set(scopeInfo.scope, existing);
+                }
               }
 
               if (captures.length >= autoCaptureCfg.maxItemsPerTurn) break;
             }
 
             const toStore = captures.slice(0, autoCaptureCfg.maxItemsPerTurn);
+
+            if (filteredOut.todo_rate_limit > 0 || filteredOut.todo_dedupe_window > 0) {
+              api.logger.info(
+                `openclaw-mem-engine:todoGuardrail ${JSON.stringify({
+                  phase: "capture",
+                  dropped: {
+                    todo_rate_limit: filteredOut.todo_rate_limit,
+                    todo_dedupe_window: filteredOut.todo_dedupe_window,
+                  },
+                  maxTodoPerTurn: autoCaptureCfg.maxTodoPerTurn,
+                  todoDedupeWindowHours: autoCaptureCfg.todoDedupeWindowHours,
+                })}`,
+              );
+            }
 
             for (const capture of toStore) {
               const normalizedLabel = importanceLabel(capture.importance);
@@ -3906,6 +4085,11 @@ export const __debugReceipts = {
   resolveReceiptsConfig,
   resolveScopePolicyConfig,
   resolveRecallBudgetConfig,
+  resolveAutoCaptureConfig,
+  todoDedupeCutoffMs,
+  isTodoWithinDedupeWindow,
+  todoStaleCutoffMs,
+  isTodoStale,
   buildRecallLifecycleReceipt,
   buildAutoCaptureLifecycleReceipt,
   applyPrependContextBudget,

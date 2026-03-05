@@ -52,6 +52,26 @@
       "label": "Auto Capture",
       "help": "Capture strict user-origin preference/decision memories on agent end"
     },
+    "autoCapture.captureTodo": {
+      "label": "Capture TODO",
+      "help": "Off by default; enable guarded TODO capture",
+      "advanced": true
+    },
+    "autoCapture.maxTodoPerTurn": {
+      "label": "TODO Max Per Turn",
+      "help": "Per-turn TODO capture cap (default 1)",
+      "advanced": true
+    },
+    "autoCapture.todoDedupeWindowHours": {
+      "label": "TODO Dedupe Window (hours)",
+      "help": "Only dedupe TODOs against same-scope items within this recent window",
+      "advanced": true
+    },
+    "autoCapture.todoStaleTtlDays": {
+      "label": "TODO Stale TTL (days)",
+      "help": "Recall-time TTL for TODO memories to avoid injecting stale tasks forever",
+      "advanced": true
+    },
     "receipts.enabled": {
       "label": "Lifecycle Receipts",
       "help": "Emit bounded recall/capture receipts for debug and audits",
@@ -243,6 +263,24 @@
               "captureTodo": {
                 "type": "boolean",
                 "default": false
+              },
+              "maxTodoPerTurn": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3,
+                "default": 1
+              },
+              "todoDedupeWindowHours": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 168,
+                "default": 24
+              },
+              "todoStaleTtlDays": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 90,
+                "default": 7
               },
               "dedupeSimilarityThreshold": {
                 "type": "number",

@@ -62,6 +62,8 @@ const autoCaptureReceipt = __debugReceipts.buildAutoCaptureLifecycleReceipt({
     tool_output: 2,
     secrets_like: 1,
     duplicate: 1,
+    todo_rate_limit: 0,
+    todo_dedupe_window: 1,
   },
   storedCount: 2,
 });

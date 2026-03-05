@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `memory_store` still stores the memory with a zero vector fallback so ingest never blocks on embedding failure.
 - `memory_recall` and `memory_store` now emit explicit warnings when recall/store quality is degraded due to embedding skip.
 - Expanded memory-engine tunables for recall/capture/receipts behavior and harden-config parsing in plugin schema/normalization (`autoRecall`, `autoCapture`, `receipts`).
+- Added Rollout Step 3 TODO guardrails to `openclaw-mem-engine` autoCapture/autoRecall:
+  - new `autoCapture` knobs: `maxTodoPerTurn`, `todoDedupeWindowHours`, `todoStaleTtlDays` (with `captureTodo` still defaulting to `false`)
+  - same-scope, time-bounded TODO dedupe window
+  - deterministic recall-time stale TODO TTL filtering
+  - bounded `openclaw-mem-engine:todoGuardrail` drop markers and receipt counters for TODO rate-limit/dedupe drops.
 
 ### Testing
 - `test_triage_json_contract_v0` now writes a temporary cron jobs fixture and passes `--cron-jobs-path`, preventing host-state coupling to `~/.openclaw/cron/jobs.json`.
