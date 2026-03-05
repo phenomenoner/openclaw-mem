@@ -24,17 +24,27 @@ class TestEpisodesIngestCli(unittest.TestCase):
         return json.loads(text) if text else None
 
     @staticmethod
-    def _event(*, event_id: str, ts_ms: int, session_id: str, event_type: str = "tool.result", payload=None):
+    def _event(
+        *,
+        event_id: str,
+        ts_ms: int,
+        session_id: str,
+        event_type: str = "tool.result",
+        payload=None,
+        scope: str | None = "proj-ingest",
+        summary: str | None = None,
+    ):
         out = {
             "schema": "openclaw-mem.episodes.spool.v0",
             "event_id": event_id,
             "ts_ms": ts_ms,
-            "scope": "proj-ingest",
             "session_id": session_id,
             "agent_id": "worker",
             "type": event_type,
-            "summary": f"event {event_id}",
+            "summary": summary or f"event {event_id}",
         }
+        if scope is not None:
+            out["scope"] = scope
         if payload is not None:
             out["payload"] = payload
         return out
@@ -162,6 +172,168 @@ class TestEpisodesIngestCli(unittest.TestCase):
             else:
                 self.assertLessEqual(len(str(payload.get("blob", ""))), 321)
             self.assertLessEqual(len(str(row["payload_json"]).encode("utf-8")), 1024)
+        conn.close()
+
+    def test_episodes_ingest_scope_derivation_from_summary_tag_or_global_default(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td) / "episodes.jsonl"
+            state = Path(td) / "state.json"
+            rows = [
+                self._event(
+                    event_id="scope-1",
+                    ts_ms=1000,
+                    session_id="s-scope",
+                    event_type="conversation.user",
+                    scope=None,
+                    summary="[SCOPE: Alpha/Beta] hello world",
+                    payload={"text": "[SCOPE: Alpha/Beta] hello world"},
+                ),
+                self._event(
+                    event_id="scope-2",
+                    ts_ms=1001,
+                    session_id="s-scope",
+                    event_type="conversation.assistant",
+                    scope=None,
+                    summary="no explicit scope",
+                    payload={"text": "plain"},
+                ),
+            ]
+            spool.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+
+            self._run(
+                conn,
+                [
+                    "episodes",
+                    "ingest",
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(state),
+                    "--json",
+                ],
+            )
+
+            alpha = self._run(
+                conn,
+                ["episodes", "query", "--scope", "alpha/beta", "--session-id", "s-scope", "--json"],
+            )
+            self.assertEqual(alpha["count"], 1)
+            self.assertEqual(alpha["items"][0]["event_id"], "scope-1")
+
+            global_rows = self._run(
+                conn,
+                ["episodes", "query", "--global", "--session-id", "s-scope", "--json"],
+            )
+            self.assertEqual(global_rows["count"], 1)
+            self.assertEqual(global_rows["items"][0]["event_id"], "scope-2")
+        conn.close()
+
+    def test_episodes_ingest_second_pass_redacts_late_pii_payload(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td) / "episodes.jsonl"
+            state = Path(td) / "state.json"
+            row = self._event(
+                event_id="pii-1",
+                ts_ms=1000,
+                session_id="s-pii",
+                event_type="conversation.user",
+                scope="proj-ingest",
+                summary="user shared contact",
+                payload={"phone_number": 886912345678, "text": "reach me"},
+            )
+            spool.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+            receipt = self._run(
+                conn,
+                ["episodes", "ingest", "--file", str(spool), "--state", str(state), "--json"],
+            )
+            self.assertEqual(receipt["inserted"], 1)
+            self.assertEqual(receipt["bounded"]["redacted_late"], 1)
+
+            got = self._run(
+                conn,
+                [
+                    "episodes",
+                    "query",
+                    "--scope",
+                    "proj-ingest",
+                    "--session-id",
+                    "s-pii",
+                    "--include-payload",
+                    "--json",
+                ],
+            )
+            self.assertEqual(got["count"], 1)
+            self.assertTrue(got["items"][0]["redacted"])
+            self.assertIsNone(got["items"][0]["payload"])
+        conn.close()
+
+    def test_episodes_extract_sessions_fallback_generates_conversation_spool(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            sessions_root = Path(td) / "sessions"
+            sessions_root.mkdir(parents=True)
+            session_file = sessions_root / "s1.jsonl"
+            session_file.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"ts_ms": 1000, "sessionKey": "sess-1", "agentId": "a", "role": "user", "content": "[SCOPE: demo] hi"}, ensure_ascii=False),
+                        json.dumps({"ts_ms": 1001, "sessionKey": "sess-1", "agentId": "a", "role": "assistant", "content": [{"type": "text", "text": "hello"}]}, ensure_ascii=False),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            spool = Path(td) / "episodes.jsonl"
+            extract_state = Path(td) / "extract-state.json"
+            ingest_state = Path(td) / "ingest-state.json"
+
+            extract_receipt = self._run(
+                conn,
+                [
+                    "episodes",
+                    "extract-sessions",
+                    "--sessions-root",
+                    str(sessions_root),
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(extract_state),
+                    "--json",
+                ],
+            )
+            self.assertEqual(extract_receipt["emitted"], 2)
+
+            ingest_receipt = self._run(
+                conn,
+                [
+                    "episodes",
+                    "ingest",
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(ingest_state),
+                    "--json",
+                ],
+            )
+            self.assertEqual(ingest_receipt["inserted"], 2)
+
+            convo = self._run(
+                conn,
+                ["episodes", "query", "--scope", "demo", "--session-id", "sess-1", "--json"],
+            )
+            self.assertEqual(convo["count"], 1)
+            self.assertEqual(convo["items"][0]["type"], "conversation.user")
+
+            convo_global = self._run(
+                conn,
+                ["episodes", "query", "--global", "--session-id", "sess-1", "--json"],
+            )
+            self.assertEqual(convo_global["count"], 1)
+            self.assertEqual(convo_global["items"][0]["type"], "conversation.assistant")
         conn.close()
 
     def test_episodes_ingest_deterministic_ordering(self):

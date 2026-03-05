@@ -168,7 +168,7 @@ Default posture:
 
 Introduce a simple retention policy (v0):
 
-- Default retention: 30 days for `tool.result`, 90 days for `conversation.*`, forever for `ops.decision` (configurable).
+- Default retention: 30 days for `tool.result`, 60 days for `conversation.user`, 90 days for `conversation.assistant`, forever for `ops.decision` (configurable).
 - Enforced by a GC command/cron that emits an aggregate-only receipt:
   - deleted counts by type/scope
 

@@ -8,13 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- Added episodic auto-mode sidecar flow:
-  - `extensions/openclaw-mem` can now emit bounded episodic spool JSONL (`tool.call`, `tool.result`, `ops.alert`) under feature flag `config.episodes.enabled`.
-  - new CLI command `openclaw-mem episodes ingest --file <jsonl> --state <state.json> [--truncate|--rotate]` ingests deterministically via offset state and appends into `episodic_events`.
-- Added guardrails for episodic ingest/capture:
-  - summary-first defaults
-  - bounded payload/refs with deterministic truncation metadata
-  - no raw stdout/stderr persistence by default
+- Expanded episodic auto-mode flow to full conversation coverage:
+  - `extensions/openclaw-mem` emits bounded episodic spool JSONL for `tool.call`, `tool.result`, and `ops.alert` under feature flag `config.episodes.enabled`.
+  - added extractor lane `openclaw-mem episodes extract-sessions` to tail OpenClaw session JSONL and emit `conversation.user` / `conversation.assistant` with offset-state tracking.
+  - `openclaw-mem episodes ingest --file <jsonl> --state <state.json> [--truncate|--rotate]` keeps deterministic offset-state ingest into `episodic_events`.
+- Hardened episodic safety/retention defaults:
+  - summary-first defaults for query and replay (`--include-payload` opt-in)
+  - secret redaction always-on + PII-lite redaction (email/phone) at capture and ingest second-pass
+  - late detection at ingest now nulls payload and sets `redacted=1`
+  - conversation payload default cap 4096 bytes (configurable) with ingest hard ceiling 8192 bytes
+  - retention defaults updated (`conversation.user` 60d, `conversation.assistant` 90d)
 - `openclaw-mem-engine` now supports configurable embedding clamp knobs (`embedding.maxChars`, `embedding.headChars`, `embedding.maxBytes`) and enforces them in both recall/store paths.
 - Memory recall/store now fail-open when embeddings are unavailable, provider errors, or input is over long:
   - `memory_recall` still returns lexical (FTS) results when vector path is skipped.

@@ -4,50 +4,31 @@ Status: **IMPLEMENTED (sidecar)**
 
 ## Overview
 
-The OpenClaw plugin in `extensions/openclaw-mem/` now supports two parallel lanes:
+`openclaw-mem` auto mode now has two capture lanes feeding one episodic spool:
 
-1. **Observations lane** (existing)
-   - listens to `tool_result_persist`
-   - appends compact observation JSONL (`openclaw-mem-observations.jsonl`)
-2. **Episodic auto lane** (new, optional)
-   - emits bounded episodic events JSONL (`openclaw-mem-episodes.jsonl`)
-   - ingested later by `openclaw-mem episodes ingest` into SQLite table `episodic_events`
+1. **Plugin lane** (`extensions/openclaw-mem`)
+   - captures `tool.call` / `tool.result` / `ops.alert`
+2. **Conversation lane** (`episodes extract-sessions`)
+   - tails OpenClaw `sessions/*.jsonl`
+   - emits `conversation.user` / `conversation.assistant`
 
-The plugin remains sidecar-only (no slot ownership).
-
-### Ecosystem boundaries
-
-- `memory-core` / `memory-lancedb` stay canonical slot backends.
-- `openclaw-mem` provides capture + local ingest/query + auditability.
-
-For backend-layer auto recall/capture, use optional `openclaw-mem-engine` (`docs/mem-engine.md`).
+Both lanes write JSONL spool lines, then `episodes ingest` writes deterministic rows into SQLite `episodic_events`.
 
 ---
 
-## Features
+## Manual mode vs auto mode
 
-✅ Observation auto-capture JSONL  
-✅ Episodic auto spool (tool.call / tool.result / ops.alert)  
-✅ Summary-first bounded payload/refs  
-✅ Secret/output guardrails  
-✅ Deterministic offset-based episodic ingest receipts
-
----
-
-## Installation
-
-Plugin source: `extensions/openclaw-mem/`
+### Manual mode
 
 ```bash
-ln -s "$(pwd)/extensions/openclaw-mem" ~/.openclaw/plugins/openclaw-mem
-openclaw gateway restart
+openclaw-mem episodes append ...
+openclaw-mem episodes query ...
+openclaw-mem episodes replay <session_id> ...
 ```
 
----
+### Auto mode (recommended)
 
-## Configuration
-
-Add to `~/.openclaw/openclaw.json`:
+1) Enable plugin episodic lane in `~/.openclaw/openclaw.json`:
 
 ```jsonc
 {
@@ -56,15 +37,6 @@ Add to `~/.openclaw/openclaw.json`:
       "openclaw-mem": {
         "enabled": true,
         "config": {
-          "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl",
-          "captureMessage": false,
-          "maxMessageLength": 1000,
-          "redactSensitive": true,
-          "backendMode": "auto",
-          "annotateMemoryTools": true,
-          "memoryToolNames": ["memory_search", "memory_get", "memory_store", "memory_recall", "memory_forget"],
-          "includeTools": [],
-          "excludeTools": ["web_fetch"],
           "episodes": {
             "enabled": true,
             "outputPath": "~/.openclaw/memory/openclaw-mem-episodes.jsonl",
@@ -83,98 +55,64 @@ Add to `~/.openclaw/openclaw.json`:
 }
 ```
 
-Important:
-- If using `OPENCLAW_STATE_DIR`, keep both spool paths under that state dir.
-- Episodic auto mode is feature-flagged via `episodes.enabled` (default false).
-
----
-
-## Manual mode vs auto mode
-
-### Manual mode
+2) Schedule conversation extraction:
 
 ```bash
-openclaw-mem episodes append ...
-openclaw-mem episodes query ...
-openclaw-mem episodes replay <session_id> ...
+uv run python -m openclaw_mem episodes extract-sessions \
+  --sessions-root ~/.openclaw/sessions \
+  --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
+  --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json \
+  --payload-cap-bytes 4096 \
+  --json
 ```
 
-### Auto mode
-
-1) enable `config.episodes.enabled=true`  
-2) ingest episodic spool on schedule:
+3) Schedule ingest:
 
 ```bash
 uv run python -m openclaw_mem episodes ingest \
   --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
   --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json \
+  --conversation-payload-cap-bytes 4096 \
   --json
 ```
 
-Optional spool maintenance in same command:
-- `--truncate`
-- `--rotate`
-
-Both are safe-guarded to only apply after full snapshot consumption.
-
 ---
 
-## What auto mode captures (v0)
+## Safety defaults
 
-Captured:
-- `tool.call`
-- `tool.result`
-- `ops.alert`
+- query/replay are summary-only by default (`--include-payload` is explicit)
+- secret redaction always on
+- PII-lite redaction (email/phone) enabled by default
+- conversation payload default cap: 4096 bytes
+- ingest hard payload ceiling: 8192 bytes
+- if secret-like/tool-dump content still looks unsafe, payload is nulled and row marked `redacted=1`
 
-Not captured by default:
-- full conversation transcripts
-- raw stdout/stderr blobs
-
-Safety posture: summary-first, bounded payload, no raw tool output persistence by default.
+Retention defaults:
+- `conversation.user`: 60d
+- `conversation.assistant`: 90d
 
 ---
 
 ## Verification
 
 ```bash
-# 1) trigger some tool usage in OpenClaw
-# 2) run ingest
+# Extract + ingest once
+uv run python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json
 uv run python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json
 
-# 3) query latest episodic rows
+# Summary-only (default)
 uv run python -m openclaw_mem episodes query --global --limit 20 --json
+
+# Payload opt-in
+uv run python -m openclaw_mem episodes query --global --limit 20 --include-payload --json
 ```
 
-Expected:
-- ingest receipt `inserted` increases after activity
-- query `count` grows
-
 ---
 
-## Troubleshooting
+## Rollback
 
-### Plugin not capturing
+1. set `plugins.entries.openclaw-mem.config.episodes.enabled=false`
+2. disable extractor + ingest jobs
+3. restart gateway
 
-1. `openclaw plugins list | grep openclaw-mem`
-2. `openclaw config get | jq '.plugins.entries["openclaw-mem"]'`
-3. `tail -f ~/.openclaw/logs/gateway.log | grep openclaw-mem`
-
-### Episodic ingest not moving
-
-- Check state offset file exists and updates.
-- Check spool has newline-terminated lines.
-- Query receipt fields: `invalid_json`, `invalid_event`, `duplicates`, `trailing_partial_bytes`.
-
-### JSONL growing too large
-
-- tighten include/exclude tool filters
-- keep `captureMessage=false`
-- schedule `episodes ingest --rotate` or external log rotation
-
----
-
-## References
-
-- `docs/specs/episodic-events-ledger-v0.md`
-- `docs/specs/episodic-auto-capture-v0.md`
-- `docs/deployment.md`
+Manual mode remains available.

@@ -93,7 +93,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 
 ### Optional (OpenClaw integration) — **PARTIAL**
 
-- **Auto-capture plugin** (`extensions/openclaw-mem`): writes observation JSONL and (optionally) episodic JSONL (`tool.call` / `tool.result` / `ops.alert`) for ingest.
+- **Auto-capture plugin** (`extensions/openclaw-mem`): writes observation JSONL and (optionally) episodic JSONL (`conversation.user` / `conversation.assistant` / `tool.call` / `tool.result` / `ops.alert`) for ingest.
 - **Backend adapter annotations (v0.5.9)**:
   - capture layer remains sidecar-only (no tool registration)
   - records memory backend metadata (`memory-core` / `memory-lancedb`) into `detail_json`
@@ -300,7 +300,7 @@ openclaw-mem episodes replay <session_id> ...
 
 ### Auto mode (episodic ledger)
 
-Enable episodic spool capture in plugin config + run periodic ingest job:
+Enable plugin episodic capture + schedule conversation extractor + ingest jobs:
 
 ```jsonc
 {
@@ -332,34 +332,56 @@ Enable episodic spool capture in plugin config + run periodic ingest job:
 }
 ```
 
-Ingest every 1–5 minutes:
+Run extractor + ingest every 1–5 minutes:
 
 ```bash
+uv run python -m openclaw_mem episodes extract-sessions \
+  --sessions-root ~/.openclaw/sessions \
+  --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
+  --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json \
+  --payload-cap-bytes 4096 \
+  --json
+
 uv run python -m openclaw_mem episodes ingest \
   --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
   --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json \
+  --conversation-payload-cap-bytes 4096 \
   --json
 ```
 
 Safety posture:
-- summary-first
-- bounded payload/refs
+- summary-first (query/replay payload is opt-in via `--include-payload`)
+- secret redaction always on for episodic auto mode
+- PII-lite redaction (email/phone) at capture + ingest second-pass
+- if secret-like/tool-dump content remains unsafe, ingest stores `payload=null` and `redacted=1`
+- conversation payload default 4KB (configurable), ingest hard ceiling 8KB
 - no raw stdout/stderr persisted by default
 
 Verification (quick):
 
 ```bash
-# Run ingest once
+# Run extractor + ingest once
+uv run python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json
 uv run python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json
 
-# Row count should increase after tool activity
+# Summary-only query/replay by default
 uv run python -m openclaw_mem episodes query --global --limit 20 --json
+uv run python -m openclaw_mem episodes replay <session_id> --global --json
+
+# Payload is explicit opt-in
+uv run python -m openclaw_mem episodes replay <session_id> --global --include-payload --json
 ```
 
 Notes (important):
 - If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), place spool/state files under that directory.
+- Scope derivation in auto conversation capture: leading `[SCOPE: x]` tag; otherwise `global`.
 - The capture hook is sidecar-only (does not own memory slot backend).
 - For explicit durable preference/task memory, continue to use `openclaw-mem store`.
+
+Rollback:
+1. set `plugins.entries.openclaw-mem.config.episodes.enabled=false`
+2. disable episodic ingest/extractor cron jobs
+3. restart OpenClaw gateway
 
 More detail:
 - `docs/auto-capture.md`

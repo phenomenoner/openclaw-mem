@@ -104,6 +104,13 @@ DEFAULT_EPISODIC_INGEST_STATE_PATH = os.path.join(
     "openclaw-mem",
     "episodes-ingest-state.json",
 )
+DEFAULT_EPISODIC_EXTRACT_STATE_PATH = os.path.join(
+    STATE_DIR,
+    "memory",
+    "openclaw-mem",
+    "episodes-extract-state.json",
+)
+DEFAULT_OPENCLAW_SESSIONS_ROOT = os.path.join(STATE_DIR, "sessions")
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 DEFAULT_GRAPH_CAPTURE_MD_INCLUDES = (".md",)
@@ -124,6 +131,7 @@ def _utcnow_iso() -> str:
 
 EPISODIC_SCHEMA_VERSION = "openclaw-mem.episodic.v0"
 EPISODIC_INGEST_STATE_SCHEMA = "openclaw-mem.episodes.ingest.state.v0"
+EPISODIC_EXTRACT_STATE_SCHEMA = "openclaw-mem.episodes.extract.state.v0"
 EPISODIC_SPOOL_SCHEMA = "openclaw-mem.episodes.spool.v0"
 EPISODIC_ALLOWED_TYPES = {
     "conversation.user",
@@ -134,11 +142,13 @@ EPISODIC_ALLOWED_TYPES = {
     "ops.alert",
 }
 EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES = 8 * 1024
+EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES = 4 * 1024
 EPISODIC_DEFAULT_REFS_CAP_BYTES = 4 * 1024
+EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES = 8 * 1024
 EPISODIC_MAX_QUERY_LIMIT = 500
 EPISODIC_REDACT_PLACEHOLDER = "[REDACTED]"
 EPISODIC_DEFAULT_RETENTION_DAYS = {
-    "conversation.user": 90,
+    "conversation.user": 60,
     "conversation.assistant": 90,
     "tool.call": 30,
     "tool.result": 30,
@@ -152,6 +162,16 @@ EPISODIC_SECRET_LIKE_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+)
+EPISODIC_PII_LITE_PATTERNS: Tuple[Tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
+        "[REDACTED_EMAIL]",
+    ),
+    (
+        re.compile(r"(?<!\d)(?:\+?\d[\d\-\s()]{7,}\d)(?!\d)"),
+        "[REDACTED_PHONE]",
+    ),
 )
 EPISODIC_TOOL_OUTPUT_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"^```(?:json|bash|sh|shell|log|output|yaml)?", re.IGNORECASE),
@@ -241,6 +261,36 @@ def _looks_like_secret(text: str) -> bool:
     return any(p.search(compact) for p in EPISODIC_SECRET_LIKE_PATTERNS)
 
 
+def _redact_pii_lite(text: str) -> str:
+    out = str(text or "")
+    if not out:
+        return out
+    for pattern, repl in EPISODIC_PII_LITE_PATTERNS:
+        out = pattern.sub(repl, out)
+    return out
+
+
+def _contains_pii_lite(text: str) -> bool:
+    compact = str(text or "").strip()
+    if not compact:
+        return False
+    return any(pattern.search(compact) for pattern, _ in EPISODIC_PII_LITE_PATTERNS)
+
+
+def _split_scope_prefixed_text(raw: Any) -> Tuple[Optional[str], str]:
+    text = _sanitize_str_surrogates(str(raw or "")).strip()
+    if not text:
+        return None, ""
+
+    m = re.match(r"^\s*\[\s*SCOPE\s*:\s*([^\]]+)\]\s*(.*)$", text, flags=re.IGNORECASE | re.DOTALL)
+    if not m:
+        return None, text
+
+    scope_raw = _normalize_scope_token(m.group(1))
+    body = _sanitize_str_surrogates(m.group(2) or "").strip()
+    return scope_raw, body
+
+
 def _looks_like_tool_output(text: str) -> bool:
     compact = str(text or "").strip()
     if not compact:
@@ -258,6 +308,8 @@ def _episodic_guard_text_fragments(summary: str, payload_serialized: Optional[st
 
     if _looks_like_secret(summary):
         raise ValueError("summary appears to contain secret-like content; pass --allow-tool-output to override")
+    if _contains_pii_lite(summary):
+        raise ValueError("summary appears to contain pii-like content; pass --allow-tool-output to override")
 
     payload_fragments: List[str] = []
     if payload_serialized is not None:
@@ -268,6 +320,8 @@ def _episodic_guard_text_fragments(summary: str, payload_serialized: Optional[st
     for fragment in payload_fragments:
         if _looks_like_secret(fragment):
             raise ValueError("payload appears to contain secret-like content; pass --allow-tool-output to override")
+        if _contains_pii_lite(fragment):
+            raise ValueError("payload appears to contain pii-like content; pass --allow-tool-output to override")
         if _looks_like_tool_output(fragment):
             raise ValueError("payload appears to contain tool-output-like content; pass --allow-tool-output to override")
 
@@ -351,7 +405,14 @@ _EPISODIC_FORBIDDEN_PAYLOAD_KEYS = {
 }
 
 
-def _sanitize_episodic_payload(value: Any, *, depth: int = 0, max_depth: int = 5, max_items: int = 48) -> Any:
+def _sanitize_episodic_payload(
+    value: Any,
+    *,
+    depth: int = 0,
+    max_depth: int = 5,
+    max_items: int = 48,
+    max_string_chars: int = EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES,
+) -> Any:
     if depth > max_depth:
         return "[TRUNCATED_DEPTH]"
 
@@ -359,8 +420,10 @@ def _sanitize_episodic_payload(value: Any, *, depth: int = 0, max_depth: int = 5
         compact = _sanitize_str_surrogates(value)
         if _looks_like_secret(compact):
             return "[REDACTED_SECRET]"
-        if len(compact) > 320:
-            return compact[:320] + "…"
+        compact = _redact_pii_lite(compact)
+        string_cap = max(160, int(max_string_chars or EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES))
+        if len(compact) > string_cap:
+            return compact[:string_cap] + "…"
         return compact
 
     if isinstance(value, dict):
@@ -374,25 +437,45 @@ def _sanitize_episodic_payload(value: Any, *, depth: int = 0, max_depth: int = 5
             if key.strip().lower() in _EPISODIC_FORBIDDEN_PAYLOAD_KEYS:
                 redacted_output_fields += 1
                 continue
-            out[key] = _sanitize_episodic_payload(v, depth=depth + 1, max_depth=max_depth, max_items=max_items)
+            out[key] = _sanitize_episodic_payload(
+                v,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_string_chars=max_string_chars,
+            )
         if redacted_output_fields > 0:
             out["_redacted_output_fields"] = redacted_output_fields
         return out
 
     if isinstance(value, list):
         return [
-            _sanitize_episodic_payload(v, depth=depth + 1, max_depth=max_depth, max_items=max_items)
+            _sanitize_episodic_payload(
+                v,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_string_chars=max_string_chars,
+            )
             for v in value[:max_items]
         ]
 
     return value
 
 
-def _episodic_bounded_json(value: Any, *, cap_bytes: int, label: str) -> Tuple[Optional[str], int, bool]:
+def _episodic_bounded_json(
+    value: Any,
+    *,
+    cap_bytes: int,
+    label: str,
+    max_string_chars: int = EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES,
+) -> Tuple[Optional[str], int, bool]:
     if value is None:
         return None, 0, False
 
-    sanitized = _sanitize_jsonable_surrogates(_sanitize_episodic_payload(value))
+    sanitized = _sanitize_jsonable_surrogates(
+        _sanitize_episodic_payload(value, max_string_chars=max_string_chars)
+    )
     serialized = _json_compact_dumps(sanitized)
     size = len(serialized.encode("utf-8"))
     if size <= cap_bytes:
@@ -418,15 +501,25 @@ def _normalize_episodic_spool_event(
     *,
     fallback_event_id: str,
     payload_cap: int,
+    conversation_payload_cap: int,
     refs_cap: int,
 ) -> Dict[str, Any]:
     event_id = str(obj.get("event_id") or "").strip() or fallback_event_id
     ts_ms = _parse_ts_ms(obj.get("ts_ms"))
-    scope = _normalize_episodic_scope(obj.get("scope"))
     session_id = _sanitize_str_surrogates(str(obj.get("session_id") or "").strip())
     agent_id = _sanitize_str_surrogates(str(obj.get("agent_id") or "").strip())
     event_type = _normalize_episodic_type(obj.get("type"))
-    summary = _sanitize_str_surrogates(str(obj.get("summary") or "").strip())
+
+    summary_raw = _sanitize_str_surrogates(str(obj.get("summary") or "").strip())
+    scope_from_summary, summary_body = _split_scope_prefixed_text(summary_raw)
+
+    raw_scope = _normalize_scope_token(obj.get("scope"))
+    scope_token = raw_scope or scope_from_summary or "global"
+    scope = _normalize_episodic_scope(scope_token)
+
+    summary = _redact_pii_lite(summary_body or summary_raw)
+    if _looks_like_secret(summary):
+        summary = "[REDACTED_SECRET]"
 
     if not session_id:
         raise ValueError("session_id is required")
@@ -435,18 +528,48 @@ def _normalize_episodic_spool_event(
     if not summary:
         raise ValueError("summary is required")
 
+    generic_payload_cap = min(max(256, int(payload_cap)), EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES)
+    conversation_cap = min(max(256, int(conversation_payload_cap)), EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES)
+    effective_payload_cap = generic_payload_cap
+    if event_type.startswith("conversation."):
+        effective_payload_cap = min(generic_payload_cap, conversation_cap)
+
     payload_serialized, payload_size, payload_truncated = _episodic_bounded_json(
         obj.get("payload"),
-        cap_bytes=payload_cap,
+        cap_bytes=effective_payload_cap,
         label="payload",
+        max_string_chars=effective_payload_cap,
     )
     refs_serialized, refs_size, refs_truncated = _episodic_bounded_json(
         obj.get("refs"),
-        cap_bytes=refs_cap,
+        cap_bytes=max(128, int(refs_cap)),
         label="refs",
+        max_string_chars=max(256, int(refs_cap)),
     )
 
-    _episodic_guard_text_fragments(summary, payload_serialized, refs_serialized, False)
+    redacted_late = bool(obj.get("redacted"))
+    for fragment in (payload_serialized, refs_serialized):
+        if not fragment:
+            continue
+        if _looks_like_secret(fragment) or _contains_pii_lite(fragment):
+            payload_serialized = None
+            payload_size = 0
+            redacted_late = True
+            break
+
+    if not redacted_late and event_type.startswith("conversation."):
+        raw_payload = obj.get("payload")
+        payload_probe = ""
+        if isinstance(raw_payload, dict):
+            payload_probe = _sanitize_str_surrogates(str(raw_payload.get("text") or ""))
+        elif isinstance(raw_payload, str):
+            payload_probe = _sanitize_str_surrogates(raw_payload)
+        elif payload_serialized:
+            payload_probe = payload_serialized
+        if _looks_like_tool_output(f"{summary}\n{payload_probe}".strip()):
+            payload_serialized = None
+            payload_size = 0
+            redacted_late = True
 
     return {
         "event_id": event_id,
@@ -462,6 +585,7 @@ def _normalize_episodic_spool_event(
         "refs_json": refs_serialized,
         "refs_bytes": refs_size,
         "refs_truncated": refs_truncated,
+        "redacted": redacted_late,
     }
 
 
@@ -6848,6 +6972,296 @@ def cmd_episodes_replay(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     _emit(out, args.json)
 
 
+def _extract_text_blocks(content: Any) -> List[str]:
+    out: List[str] = []
+    if isinstance(content, str):
+        text = _sanitize_str_surrogates(content).strip()
+        if text:
+            out.append(text)
+        return out
+
+    if not isinstance(content, list):
+        return out
+
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if str(block.get("type") or "").strip().lower() != "text":
+            continue
+        text = _sanitize_str_surrogates(str(block.get("text") or "")).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _extract_role_text_from_session_line(obj: Dict[str, Any]) -> Tuple[Optional[str], str]:
+    candidates: List[Dict[str, Any]] = []
+    if isinstance(obj.get("message"), dict):
+        candidates.append(obj["message"])
+    candidates.append(obj)
+
+    for cand in candidates:
+        role = str(cand.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+
+        texts = _extract_text_blocks(cand.get("content"))
+        if not texts and isinstance(cand.get("text"), str):
+            raw = _sanitize_str_surrogates(str(cand.get("text") or "")).strip()
+            if raw:
+                texts = [raw]
+
+        merged = "\n".join(t for t in texts if t.strip()).strip()
+        if merged:
+            return role, merged
+
+    return None, ""
+
+
+def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    sessions_root = Path(
+        str(getattr(args, "sessions_root", None) or DEFAULT_OPENCLAW_SESSIONS_ROOT)
+    ).expanduser().resolve()
+    spool_path = Path(str(getattr(args, "file", None) or DEFAULT_EPISODIC_SPOOL_PATH)).expanduser().resolve()
+    state_path = Path(
+        str(getattr(args, "state", None) or DEFAULT_EPISODIC_EXTRACT_STATE_PATH)
+    ).expanduser().resolve()
+
+    summary_max = max(40, min(400, int(getattr(args, "summary_max_chars", 220) or 220)))
+    payload_cap = int(
+        getattr(
+            args,
+            "payload_cap_bytes",
+            EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES,
+        )
+        or EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES
+    )
+    payload_cap = min(max(256, payload_cap), EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES)
+
+    if not sessions_root.exists() or not sessions_root.is_dir():
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.extract-sessions.v0",
+                "ok": False,
+                "error": f"sessions root not found: {sessions_root}",
+            },
+            True,
+        )
+        sys.exit(2)
+
+    try:
+        state = _read_json_file(state_path)
+    except ValueError as e:
+        _emit({"kind": "openclaw-mem.episodes.extract-sessions.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(2)
+
+    files_state = state.get("files") if isinstance(state.get("files"), dict) else {}
+    files = sorted([p for p in sessions_root.rglob("*.jsonl") if p.is_file()], key=lambda p: str(p))
+
+    spool_path.parent.mkdir(parents=True, exist_ok=True)
+    new_files_state: Dict[str, Any] = dict(files_state)
+
+    files_seen = 0
+    files_with_updates = 0
+    lines_total = 0
+    invalid_json = 0
+    unsupported_rows = 0
+    emitted = 0
+    payload_redacted = 0
+    payload_truncated = 0
+    trailing_partial_bytes = 0
+    errors_sample: List[str] = []
+
+    with spool_path.open("a", encoding="utf-8") as spool_fp:
+        for fp in files:
+            files_seen += 1
+            key = str(fp)
+            stat = fp.stat()
+
+            file_state = files_state.get(key) if isinstance(files_state.get(key), dict) else {}
+            prev_offset = int(file_state.get("offset") or 0)
+            prev_inode = int(file_state.get("inode") or 0)
+
+            if prev_offset < 0:
+                prev_offset = 0
+
+            if prev_inode and prev_inode != int(stat.st_ino):
+                prev_offset = 0
+            if prev_offset > int(stat.st_size):
+                prev_offset = 0
+
+            with fp.open("rb") as in_fp:
+                in_fp.seek(prev_offset)
+                blob = in_fp.read(max(0, int(stat.st_size) - prev_offset))
+
+            if not blob:
+                new_files_state[key] = {
+                    "offset": prev_offset,
+                    "inode": int(stat.st_ino),
+                    "size": int(stat.st_size),
+                    "updated_at": _utcnow_iso(),
+                }
+                continue
+
+            last_newline = blob.rfind(b"\n")
+            if last_newline < 0:
+                processed_blob = b""
+                next_offset = prev_offset
+                trailing_partial_bytes += len(blob)
+            else:
+                processed_blob = blob[: last_newline + 1]
+                trailing_partial_bytes += len(blob) - len(processed_blob)
+                next_offset = prev_offset + len(processed_blob)
+
+            if not processed_blob:
+                new_files_state[key] = {
+                    "offset": next_offset,
+                    "inode": int(stat.st_ino),
+                    "size": int(stat.st_size),
+                    "updated_at": _utcnow_iso(),
+                }
+                continue
+
+            files_with_updates += 1
+            cursor = prev_offset
+
+            for raw_line in processed_blob.splitlines(keepends=True):
+                line_start = cursor
+                cursor += len(raw_line)
+
+                line = raw_line.rstrip(b"\r\n")
+                if not line.strip():
+                    continue
+
+                lines_total += 1
+                try:
+                    obj = json.loads(line.decode("utf-8"))
+                    if not isinstance(obj, dict):
+                        raise ValueError("json_not_object")
+                except Exception:
+                    invalid_json += 1
+                    if len(errors_sample) < 5:
+                        errors_sample.append(f"{fp}:{line_start}:invalid_json")
+                    continue
+
+                role, text = _extract_role_text_from_session_line(obj)
+                if role not in {"user", "assistant"} or not text:
+                    unsupported_rows += 1
+                    continue
+
+                scope_from_tag, stripped = _split_scope_prefixed_text(text)
+                scope = _normalize_episodic_scope(scope_from_tag or "global")
+
+                original_text = stripped or text
+                clean_text = _redact_pii_lite(original_text)
+                secret_like = _looks_like_secret(clean_text)
+                tool_dump_like = _looks_like_tool_output(clean_text)
+
+                event_type = "conversation.user" if role == "user" else "conversation.assistant"
+
+                summary_text = clean_text
+                payload_obj = None
+                event_redacted = False
+                payload_was_truncated = False
+
+                if secret_like:
+                    summary_text = "[REDACTED_SECRET]"
+                    event_redacted = True
+                elif tool_dump_like:
+                    summary_text = "[REDACTED_TOOL_DUMP]"
+                    event_redacted = True
+                else:
+                    payload_json, _payload_bytes, payload_was_truncated = _episodic_bounded_json(
+                        {"text": clean_text},
+                        cap_bytes=payload_cap,
+                        label="payload",
+                        max_string_chars=payload_cap,
+                    )
+                    payload_obj = json.loads(payload_json) if payload_json else None
+
+                if payload_was_truncated:
+                    payload_truncated += 1
+
+                short = summary_text.replace("\n", " ").strip()
+                if len(short) > summary_max:
+                    short = short[:summary_max] + "…"
+                summary = f"{event_type}: {short}" if short else event_type
+
+                raw_ts = obj.get("ts_ms") or obj.get("timestamp_ms") or obj.get("tsMs")
+                if raw_ts is None:
+                    raw_ts = obj.get("timestamp") or obj.get("ts")
+                try:
+                    ts_ms = _parse_ts_ms(raw_ts)
+                except Exception:
+                    try:
+                        ts_ms = int(datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00")).timestamp() * 1000)
+                    except Exception:
+                        ts_ms = _utcnow_ts_ms()
+
+                event_id = f"ep-{hashlib.sha256(f'{key}:{line_start}:{event_type}:{clean_text}'.encode('utf-8')).hexdigest()[:32]}"
+                if event_redacted:
+                    payload_redacted += 1
+
+                spool_event = {
+                    "schema": EPISODIC_SPOOL_SCHEMA,
+                    "event_id": event_id,
+                    "ts_ms": ts_ms,
+                    "scope": scope,
+                    "session_id": _sanitize_str_surrogates(str(obj.get("sessionKey") or obj.get("session_id") or obj.get("session") or fp.stem)),
+                    "agent_id": _sanitize_str_surrogates(str(obj.get("agentId") or obj.get("agent_id") or "main")),
+                    "type": event_type,
+                    "summary": summary,
+                    "payload": payload_obj,
+                    "redacted": event_redacted,
+                    "refs": {
+                        "source": "session_jsonl_tail",
+                        "path": key,
+                        "offset": int(line_start),
+                    },
+                }
+                spool_fp.write(json.dumps(spool_event, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n")
+                emitted += 1
+
+            new_files_state[key] = {
+                "offset": int(next_offset),
+                "inode": int(stat.st_ino),
+                "size": int(stat.st_size),
+                "updated_at": _utcnow_iso(),
+            }
+
+    out_state = {
+        "schema": EPISODIC_EXTRACT_STATE_SCHEMA,
+        "sessions_root": str(sessions_root),
+        "files": new_files_state,
+        "updated_at": _utcnow_iso(),
+    }
+    _write_json_file_atomic(state_path, out_state)
+
+    out = {
+        "kind": "openclaw-mem.episodes.extract-sessions.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "source": {
+            "sessions_root": str(sessions_root),
+            "state": str(state_path),
+            "spool": str(spool_path),
+        },
+        "files_seen": files_seen,
+        "files_with_updates": files_with_updates,
+        "lines_total": lines_total,
+        "invalid_json": invalid_json,
+        "unsupported_rows": unsupported_rows,
+        "emitted": emitted,
+        "payload_redacted": payload_redacted,
+        "payload_truncated": payload_truncated,
+        "trailing_partial_bytes": trailing_partial_bytes,
+        "payload_cap_bytes": payload_cap,
+        "errors_sample": errors_sample,
+    }
+    _emit(out, args.json)
+
+
 def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     source_path = Path(str(getattr(args, "file", "") or "")).expanduser().resolve()
     state_path = Path(
@@ -6859,9 +7273,21 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
 
     try:
         payload_cap = int(getattr(args, "payload_cap_bytes", EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES))
+        conversation_payload_cap = int(
+            getattr(
+                args,
+                "conversation_payload_cap_bytes",
+                EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES,
+            )
+        )
         refs_cap = int(getattr(args, "refs_cap_bytes", EPISODIC_DEFAULT_REFS_CAP_BYTES))
-        if payload_cap <= 0 or refs_cap <= 0:
+        if payload_cap <= 0 or conversation_payload_cap <= 0 or refs_cap <= 0:
             raise ValueError("payload/refs caps must be > 0")
+        payload_cap = min(payload_cap, EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES)
+        conversation_payload_cap = min(
+            conversation_payload_cap,
+            EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES,
+        )
         if truncate_after and rotate_after:
             raise ValueError("--truncate and --rotate are mutually exclusive")
     except ValueError as e:
@@ -6934,6 +7360,7 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     inserted = 0
     payload_truncated_count = 0
     refs_truncated_count = 0
+    late_redacted_count = 0
     errors_sample: List[str] = []
 
     cursor = prev_offset
@@ -6968,6 +7395,7 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
                 line_obj,
                 fallback_event_id=fallback_event_id,
                 payload_cap=payload_cap,
+                conversation_payload_cap=conversation_payload_cap,
                 refs_cap=refs_cap,
             )
         except ValueError as e:
@@ -6982,7 +7410,7 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
                 INSERT INTO episodic_events (
                     event_id, ts_ms, scope, session_id, agent_id, type, summary,
                     payload_json, refs_json, redacted, schema_version, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event["event_id"],
@@ -6994,6 +7422,7 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
                     event["summary"],
                     event["payload_json"],
                     event["refs_json"],
+                    1 if bool(event.get("redacted")) else 0,
                     EPISODIC_SCHEMA_VERSION,
                     now_iso,
                 ),
@@ -7003,6 +7432,8 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
                 payload_truncated_count += 1
             if bool(event.get("refs_truncated")):
                 refs_truncated_count += 1
+            if bool(event.get("redacted")):
+                late_redacted_count += 1
         except sqlite3.IntegrityError:
             duplicates += 1
 
@@ -7093,9 +7524,12 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         "inserted": inserted,
         "bounded": {
             "payload_cap_bytes": payload_cap,
+            "conversation_payload_cap_bytes": conversation_payload_cap,
+            "payload_hard_cap_bytes": EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES,
             "refs_cap_bytes": refs_cap,
             "payload_truncated": payload_truncated_count,
             "refs_truncated": refs_truncated_count,
+            "redacted_late": late_redacted_count,
         },
         "maintenance": maintenance,
         "errors_sample": errors_sample,
@@ -7278,6 +7712,7 @@ def build_parser() -> argparse.ArgumentParser:
         "\n"
         "  # Episodic events ledger (v0)\n"
         "  openclaw-mem episodes append --scope openclaw-mem --session-id s1 --agent-id lyria --type conversation.user --summary \"Asked for update\" --json\n"
+        "  openclaw-mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json\n"
         "  openclaw-mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json\n"
         "  openclaw-mem episodes query --scope openclaw-mem --session-id s1 --limit 50 --json\n"
         "\n"
@@ -7656,7 +8091,7 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--preview-chars", dest="preview_chars", type=int, default=240, help="Preview character budget (default: 240)")
     a.set_defaults(func=cmd_artifact_peek)
 
-    sp = sub.add_parser("episodes", help="Append/ingest/query/replay/redact/gc for episodic session events")
+    sp = sub.add_parser("episodes", help="Append/extract/ingest/query/replay/redact/gc for episodic session events")
     add_common(sp)
     esub = sp.add_subparsers(dest="episodes_cmd", required=True)
 
@@ -7678,6 +8113,23 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--allow-tool-output", action="store_true", help="Allow tool-output/secret-like content (default: reject)")
     e.set_defaults(func=cmd_episodes_append)
 
+    e = esub.add_parser("extract-sessions", help="Tail OpenClaw session JSONL files into episodic spool (conversation fallback)")
+    add_common(e)
+    e.add_argument(
+        "--sessions-root",
+        default=DEFAULT_OPENCLAW_SESSIONS_ROOT,
+        help=f"OpenClaw sessions root (default: {DEFAULT_OPENCLAW_SESSIONS_ROOT})",
+    )
+    e.add_argument("--file", default=DEFAULT_EPISODIC_SPOOL_PATH, help=f"Episodes spool JSONL output (default: {DEFAULT_EPISODIC_SPOOL_PATH})")
+    e.add_argument(
+        "--state",
+        default=DEFAULT_EPISODIC_EXTRACT_STATE_PATH,
+        help=f"Extractor offset state file (default: {DEFAULT_EPISODIC_EXTRACT_STATE_PATH})",
+    )
+    e.add_argument("--summary-max-chars", type=int, default=220, help="Summary max chars for extracted conversation events (default: 220)")
+    e.add_argument("--payload-cap-bytes", type=int, default=EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES, help="Conversation payload cap in bytes (default: 4096, hard max: 8192)")
+    e.set_defaults(func=cmd_episodes_extract_sessions)
+
     e = esub.add_parser("ingest", help="Ingest episodic events from JSONL spool using an offset state file")
     add_common(e)
     e.add_argument("--file", required=True, help=f"Episodes spool JSONL file (e.g., {DEFAULT_EPISODIC_SPOOL_PATH})")
@@ -7686,7 +8138,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_EPISODIC_INGEST_STATE_PATH,
         help=f"Offset state file (default: {DEFAULT_EPISODIC_INGEST_STATE_PATH})",
     )
-    e.add_argument("--payload-cap-bytes", type=int, default=EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES, help="Payload size cap in bytes (default: 8192)")
+    e.add_argument("--payload-cap-bytes", type=int, default=EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES, help="Generic payload cap in bytes (default: 8192, hard max: 8192)")
+    e.add_argument("--conversation-payload-cap-bytes", type=int, default=EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES, help="Conversation payload cap in bytes (default: 4096, hard max: 8192)")
     e.add_argument("--refs-cap-bytes", type=int, default=EPISODIC_DEFAULT_REFS_CAP_BYTES, help="Refs size cap in bytes (default: 4096)")
     e.add_argument("--truncate", action="store_true", help="Truncate source spool after fully consuming current snapshot")
     e.add_argument("--rotate", action="store_true", help="Rotate source spool after fully consuming current snapshot")

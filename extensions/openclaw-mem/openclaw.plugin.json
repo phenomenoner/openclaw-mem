@@ -1,9 +1,9 @@
 {
   "id": "openclaw-mem",
   "name": "OpenClaw Mem",
-  "description": "Capture observations + optional episodic events into JSONL for openclaw-mem ingestion",
+  "description": "Capture observations + optional episodic events (including conversations) into JSONL for openclaw-mem ingestion",
   "kind": "utility",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -55,15 +55,18 @@
       "episodes": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Optional episodic auto-mode spool (tool.call/tool.result/ops.alert)",
+        "description": "Optional episodic auto-mode spool (conversation/tool/ops events; summary-first, redaction-on)",
         "properties": {
           "enabled": { "type": "boolean", "default": false },
           "outputPath": { "type": "string", "default": "memory/openclaw-mem-episodes.jsonl" },
           "scope": { "type": "string", "default": "global" },
+          "captureConversationUser": { "type": "boolean", "default": true },
+          "captureConversationAssistant": { "type": "boolean", "default": true },
           "captureToolCall": { "type": "boolean", "default": true },
           "captureToolResult": { "type": "boolean", "default": true },
           "captureOpsAlert": { "type": "boolean", "default": true },
           "payloadCapBytes": { "type": "number", "default": 2048 },
+          "conversationPayloadCapBytes": { "type": "number", "default": 4096 },
           "refsCapBytes": { "type": "number", "default": 1024 },
           "maxSummaryLength": { "type": "number", "default": 220 }
         }
