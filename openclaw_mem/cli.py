@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -145,6 +146,8 @@ EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES = 8 * 1024
 EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES = 4 * 1024
 EPISODIC_DEFAULT_REFS_CAP_BYTES = 4 * 1024
 EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES = 8 * 1024
+EPISODIC_FOLLOW_DEFAULT_POLL_INTERVAL_MS = 1000
+EPISODIC_FOLLOW_MIN_POLL_INTERVAL_MS = 100
 EPISODIC_MAX_QUERY_LIMIT = 500
 EPISODIC_REDACT_PLACEHOLDER = "[REDACTED]"
 EPISODIC_DEFAULT_RETENTION_DAYS = {
@@ -7264,85 +7267,73 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
     _emit(out, args.json)
 
 
-def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    source_path = Path(str(getattr(args, "file", "") or "")).expanduser().resolve()
-    state_path = Path(
-        str(getattr(args, "state", None) or DEFAULT_EPISODIC_INGEST_STATE_PATH)
-    ).expanduser().resolve()
-
-    truncate_after = bool(getattr(args, "truncate", False))
-    rotate_after = bool(getattr(args, "rotate", False))
-
+def _episodic_state_int(raw: Any) -> Optional[int]:
     try:
-        payload_cap = int(getattr(args, "payload_cap_bytes", EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES))
-        conversation_payload_cap = int(
-            getattr(
-                args,
-                "conversation_payload_cap_bytes",
-                EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES,
-            )
-        )
-        refs_cap = int(getattr(args, "refs_cap_bytes", EPISODIC_DEFAULT_REFS_CAP_BYTES))
-        if payload_cap <= 0 or conversation_payload_cap <= 0 or refs_cap <= 0:
-            raise ValueError("payload/refs caps must be > 0")
-        payload_cap = min(payload_cap, EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES)
-        conversation_payload_cap = min(
-            conversation_payload_cap,
-            EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES,
-        )
-        if truncate_after and rotate_after:
-            raise ValueError("--truncate and --rotate are mutually exclusive")
-    except ValueError as e:
-        _emit({"kind": "openclaw-mem.episodes.ingest.v0", "ok": False, "error": str(e)}, True)
-        sys.exit(2)
+        if raw is None:
+            return None
+        return int(raw)
+    except Exception:
+        return None
 
+
+def _episodes_ingest_once(
+    conn: sqlite3.Connection,
+    *,
+    source_path: Path,
+    state_path: Path,
+    payload_cap: int,
+    conversation_payload_cap: int,
+    refs_cap: int,
+    truncate_after: bool,
+    rotate_after: bool,
+    allow_missing_source: bool = False,
+) -> Optional[Dict[str, Any]]:
     if not source_path.exists() or not source_path.is_file():
-        _emit(
-            {
-                "kind": "openclaw-mem.episodes.ingest.v0",
-                "ok": False,
-                "error": f"source file not found: {source_path}",
-            },
-            True,
-        )
-        sys.exit(2)
+        if allow_missing_source:
+            return None
+        raise FileNotFoundError(f"source file not found: {source_path}")
 
     try:
         source_stat = source_path.stat()
+    except FileNotFoundError:
+        if allow_missing_source:
+            return None
+        raise FileNotFoundError(f"source file not found: {source_path}")
     except Exception as e:
-        _emit(
-            {
-                "kind": "openclaw-mem.episodes.ingest.v0",
-                "ok": False,
-                "error": f"failed to stat source file: {source_path}",
-                "detail": str(e),
-            },
-            True,
-        )
-        sys.exit(1)
+        raise RuntimeError(f"failed to stat source file: {source_path}: {str(e)}") from e
 
-    try:
-        state = _read_json_file(state_path)
-    except ValueError as e:
-        _emit({"kind": "openclaw-mem.episodes.ingest.v0", "ok": False, "error": str(e)}, True)
-        sys.exit(2)
+    state = _read_json_file(state_path)
 
-    prev_offset = 0
-    try:
-        prev_offset = int(state.get("offset") or 0)
-    except Exception:
-        prev_offset = 0
+    prev_offset = _episodic_state_int(state.get("offset")) or 0
     prev_offset = max(0, prev_offset)
+    prev_dev = _episodic_state_int(state.get("dev"))
+    prev_inode = _episodic_state_int(state.get("inode"))
+    prev_size = _episodic_state_int(state.get("size"))
 
     offset_recovery = None
-    if prev_offset > source_stat.st_size:
+    current_dev = int(source_stat.st_dev)
+    current_inode = int(source_stat.st_ino)
+    current_size = int(source_stat.st_size)
+
+    if prev_dev is not None and prev_inode is not None and (prev_dev != current_dev or prev_inode != current_inode):
+        offset_recovery = "reset_to_zero_source_replaced"
+        prev_offset = 0
+    elif prev_size is not None and prev_size > current_size:
+        offset_recovery = "reset_to_zero_source_shrunk"
+        prev_offset = 0
+    elif prev_offset > current_size:
         offset_recovery = "reset_to_zero_source_shrunk"
         prev_offset = 0
 
-    with source_path.open("rb") as fp:
-        fp.seek(prev_offset)
-        unread = max(0, source_stat.st_size - prev_offset)
-        blob = fp.read(unread)
+    try:
+        with source_path.open("rb") as fp:
+            fp.seek(prev_offset)
+            unread = max(0, current_size - prev_offset)
+            blob = fp.read(unread)
+    except FileNotFoundError:
+        if allow_missing_source:
+            return None
+        raise FileNotFoundError(f"source file not found: {source_path}")
 
     last_newline = blob.rfind(b"\n")
     if last_newline < 0:
@@ -7449,11 +7440,14 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     }
 
     if truncate_after or rotate_after:
-        if next_offset != source_stat.st_size:
+        if next_offset != current_size:
             maintenance["reason"] = "pending_partial_line"
         else:
-            current_size = source_path.stat().st_size
-            if current_size != source_stat.st_size:
+            try:
+                latest_stat = source_path.stat()
+            except FileNotFoundError:
+                latest_stat = None
+            if latest_stat is None or int(latest_stat.st_size) != current_size or int(latest_stat.st_ino) != current_inode:
                 maintenance["reason"] = "source_changed_since_snapshot"
             else:
                 if truncate_after:
@@ -7475,7 +7469,12 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
                     maintenance["rotated_to"] = str(rotated_path)
                     next_offset = 0
 
-    final_stat = source_path.stat()
+    try:
+        final_stat = source_path.stat()
+    except FileNotFoundError:
+        if not allow_missing_source:
+            raise
+        final_stat = source_stat
     state_payload = {
         "schema": EPISODIC_INGEST_STATE_SCHEMA,
         "file": str(source_path),
@@ -7485,20 +7484,7 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         "size": int(final_stat.st_size),
         "updated_at": _utcnow_iso(),
     }
-
-    try:
-        _write_json_file_atomic(state_path, state_payload)
-    except Exception as e:
-        _emit(
-            {
-                "kind": "openclaw-mem.episodes.ingest.v0",
-                "ok": False,
-                "error": f"failed to write state file: {state_path}",
-                "detail": str(e),
-            },
-            True,
-        )
-        sys.exit(1)
+    _write_json_file_atomic(state_path, state_payload)
 
     out = {
         "kind": "openclaw-mem.episodes.ingest.v0",
@@ -7510,7 +7496,7 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
             "state": str(state_path),
             "start_offset": prev_offset,
             "next_offset": int(next_offset),
-            "snapshot_size": int(source_stat.st_size),
+            "snapshot_size": current_size,
             "offset_recovery": offset_recovery,
             "trailing_partial_bytes": trailing_partial_bytes,
             "processed_sha256": hashlib.sha256(processed_blob).hexdigest() if processed_blob else None,
@@ -7535,6 +7521,275 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         },
         "maintenance": maintenance,
         "errors_sample": errors_sample,
+    }
+    return out
+
+
+def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    source_path = Path(str(getattr(args, "file", "") or "")).expanduser().resolve()
+    state_path = Path(
+        str(getattr(args, "state", None) or DEFAULT_EPISODIC_INGEST_STATE_PATH)
+    ).expanduser().resolve()
+
+    truncate_after = bool(getattr(args, "truncate", False))
+    rotate_after = bool(getattr(args, "rotate", False))
+    follow = bool(getattr(args, "follow", False))
+
+    try:
+        payload_cap = int(getattr(args, "payload_cap_bytes", EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES))
+        conversation_payload_cap = int(
+            getattr(
+                args,
+                "conversation_payload_cap_bytes",
+                EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES,
+            )
+        )
+        refs_cap = int(getattr(args, "refs_cap_bytes", EPISODIC_DEFAULT_REFS_CAP_BYTES))
+        poll_interval_ms = int(
+            getattr(args, "poll_interval_ms", EPISODIC_FOLLOW_DEFAULT_POLL_INTERVAL_MS)
+        )
+        idle_exit_seconds = float(getattr(args, "idle_exit_seconds", 0.0) or 0.0)
+
+        if payload_cap <= 0 or conversation_payload_cap <= 0 or refs_cap <= 0:
+            raise ValueError("payload/refs caps must be > 0")
+        payload_cap = min(payload_cap, EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES)
+        conversation_payload_cap = min(
+            conversation_payload_cap,
+            EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES,
+        )
+        if truncate_after and rotate_after:
+            raise ValueError("--truncate and --rotate are mutually exclusive")
+        if follow and (truncate_after or rotate_after):
+            raise ValueError("--follow cannot be combined with --truncate or --rotate")
+        if follow and poll_interval_ms < EPISODIC_FOLLOW_MIN_POLL_INTERVAL_MS:
+            raise ValueError(
+                f"--poll-interval-ms must be >= {EPISODIC_FOLLOW_MIN_POLL_INTERVAL_MS}"
+            )
+        if idle_exit_seconds < 0:
+            raise ValueError("--idle-exit-seconds must be >= 0")
+    except ValueError as e:
+        _emit({"kind": "openclaw-mem.episodes.ingest.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(2)
+
+    if not follow:
+        try:
+            out = _episodes_ingest_once(
+                conn,
+                source_path=source_path,
+                state_path=state_path,
+                payload_cap=payload_cap,
+                conversation_payload_cap=conversation_payload_cap,
+                refs_cap=refs_cap,
+                truncate_after=truncate_after,
+                rotate_after=rotate_after,
+                allow_missing_source=False,
+            )
+            assert out is not None
+        except FileNotFoundError as e:
+            _emit(
+                {
+                    "kind": "openclaw-mem.episodes.ingest.v0",
+                    "ok": False,
+                    "error": str(e),
+                },
+                True,
+            )
+            sys.exit(2)
+        except ValueError as e:
+            _emit({"kind": "openclaw-mem.episodes.ingest.v0", "ok": False, "error": str(e)}, True)
+            sys.exit(2)
+        except RuntimeError as e:
+            _emit(
+                {
+                    "kind": "openclaw-mem.episodes.ingest.v0",
+                    "ok": False,
+                    "error": str(e),
+                },
+                True,
+            )
+            sys.exit(1)
+        except Exception as e:
+            _emit(
+                {
+                    "kind": "openclaw-mem.episodes.ingest.v0",
+                    "ok": False,
+                    "error": "unexpected ingest failure",
+                    "detail": str(e),
+                },
+                True,
+            )
+            sys.exit(1)
+
+        _emit(out, args.json)
+        return
+
+    stop_requested = False
+    stop_signal_name = None
+    stop_reason = None
+
+    installed_handlers: List[Tuple[Any, Any]] = []
+
+    def _request_stop(signum: int, _frame: Any) -> None:
+        nonlocal stop_requested, stop_signal_name
+        stop_requested = True
+        try:
+            stop_signal_name = signal.Signals(signum).name
+        except Exception:
+            stop_signal_name = str(signum)
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            previous = signal.getsignal(sig)
+            signal.signal(sig, _request_stop)
+            installed_handlers.append((sig, previous))
+        except Exception:
+            continue
+
+    started = time.monotonic()
+    last_activity = started
+
+    cycles = 0
+    active_cycles = 0
+    idle_cycles = 0
+    source_missing_cycles = 0
+    aggregate_inserted = 0
+    aggregate_duplicates = 0
+    aggregate_invalid_json = 0
+    aggregate_invalid_event = 0
+    aggregate_payload_truncated = 0
+    aggregate_refs_truncated = 0
+    aggregate_redacted_late = 0
+    aggregate_lines_total = 0
+
+    last_cycle: Optional[Dict[str, Any]] = None
+
+    try:
+        while True:
+            if stop_requested:
+                stop_reason = "signal"
+                break
+
+            cycle_activity = False
+            cycle = _episodes_ingest_once(
+                conn,
+                source_path=source_path,
+                state_path=state_path,
+                payload_cap=payload_cap,
+                conversation_payload_cap=conversation_payload_cap,
+                refs_cap=refs_cap,
+                truncate_after=False,
+                rotate_after=False,
+                allow_missing_source=True,
+            )
+            cycles += 1
+
+            if cycle is None:
+                source_missing_cycles += 1
+            else:
+                last_cycle = cycle
+                lines = cycle.get("lines") or {}
+                bounded = cycle.get("bounded") or {}
+                source = cycle.get("source") or {}
+
+                aggregate_inserted += int(cycle.get("inserted") or 0)
+                aggregate_lines_total += int(lines.get("total") or 0)
+                aggregate_duplicates += int(lines.get("duplicates") or 0)
+                aggregate_invalid_json += int(lines.get("invalid_json") or 0)
+                aggregate_invalid_event += int(lines.get("invalid_event") or 0)
+                aggregate_payload_truncated += int(bounded.get("payload_truncated") or 0)
+                aggregate_refs_truncated += int(bounded.get("refs_truncated") or 0)
+                aggregate_redacted_late += int(bounded.get("redacted_late") or 0)
+
+                start_offset = int(source.get("start_offset") or 0)
+                next_offset = int(source.get("next_offset") or 0)
+                if (
+                    int(lines.get("total") or 0) > 0
+                    or int(cycle.get("inserted") or 0) > 0
+                    or next_offset != start_offset
+                    or bool(source.get("offset_recovery"))
+                ):
+                    cycle_activity = True
+
+            now = time.monotonic()
+            if cycle_activity:
+                active_cycles += 1
+                last_activity = now
+            else:
+                idle_cycles += 1
+
+            if stop_requested:
+                stop_reason = "signal"
+                break
+
+            if idle_exit_seconds > 0 and (now - last_activity) >= idle_exit_seconds:
+                stop_reason = "idle_timeout"
+                break
+
+            if not cycle_activity:
+                time.sleep(poll_interval_ms / 1000.0)
+    except KeyboardInterrupt:
+        stop_reason = "keyboard_interrupt"
+    except ValueError as e:
+        _emit({"kind": "openclaw-mem.episodes.ingest.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(2)
+    except Exception as e:
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.ingest.v0",
+                "ok": False,
+                "error": "follow ingest failed",
+                "detail": str(e),
+            },
+            True,
+        )
+        sys.exit(1)
+    finally:
+        for sig, previous in installed_handlers:
+            try:
+                signal.signal(sig, previous)
+            except Exception:
+                pass
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    out = {
+        "kind": "openclaw-mem.episodes.ingest.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "follow": {
+            "enabled": True,
+            "poll_interval_ms": poll_interval_ms,
+            "idle_exit_seconds": idle_exit_seconds,
+            "cycles": cycles,
+            "active_cycles": active_cycles,
+            "idle_cycles": idle_cycles,
+            "source_missing_cycles": source_missing_cycles,
+            "duration_ms": duration_ms,
+            "stop_reason": (stop_reason or "signal") if stop_requested else stop_reason,
+            "signal": stop_signal_name,
+        },
+        "source": {
+            "file": str(source_path),
+            "state": str(state_path),
+            "spool_schema": EPISODIC_SPOOL_SCHEMA,
+        },
+        "aggregate": {
+            "inserted": aggregate_inserted,
+            "lines_total": aggregate_lines_total,
+            "duplicates": aggregate_duplicates,
+            "invalid_json": aggregate_invalid_json,
+            "invalid_event": aggregate_invalid_event,
+            "payload_truncated": aggregate_payload_truncated,
+            "refs_truncated": aggregate_refs_truncated,
+            "redacted_late": aggregate_redacted_late,
+        },
+        "bounded": {
+            "payload_cap_bytes": payload_cap,
+            "conversation_payload_cap_bytes": conversation_payload_cap,
+            "payload_hard_cap_bytes": EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES,
+            "refs_cap_bytes": refs_cap,
+        },
+        "last_cycle": last_cycle,
     }
     _emit(out, args.json)
 
@@ -7720,6 +7975,7 @@ def build_parser() -> argparse.ArgumentParser:
         "  openclaw-mem episodes append --scope openclaw-mem --session-id s1 --agent-id lyria --type conversation.user --summary \"Asked for update\" --json\n"
         "  openclaw-mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json\n"
         "  openclaw-mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json\n"
+        "  openclaw-mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --follow --poll-interval-ms 1000 --json\n"
         "  openclaw-mem episodes query --scope openclaw-mem --session-id s1 --limit 50 --json\n"
         "\n"
         "  # AI compression (requires API key via env or ~/.openclaw/openclaw.json)\n"
@@ -8147,6 +8403,9 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--payload-cap-bytes", type=int, default=EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES, help="Generic payload cap in bytes (default: 8192, hard max: 8192)")
     e.add_argument("--conversation-payload-cap-bytes", type=int, default=EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES, help="Conversation payload cap in bytes (default: 4096, hard max: 8192)")
     e.add_argument("--refs-cap-bytes", type=int, default=EPISODIC_DEFAULT_REFS_CAP_BYTES, help="Refs size cap in bytes (default: 4096)")
+    e.add_argument("--follow", action="store_true", help="Run as a tailer daemon (poll spool + ingest continuously until interrupted)")
+    e.add_argument("--poll-interval-ms", type=int, default=EPISODIC_FOLLOW_DEFAULT_POLL_INTERVAL_MS, help="Follow mode poll interval in ms (default: 1000, min: 100)")
+    e.add_argument("--idle-exit-seconds", type=float, default=0.0, help="Optional follow auto-exit after N idle seconds (default: 0 = never)")
     e.add_argument("--truncate", action="store_true", help="Truncate source spool after fully consuming current snapshot")
     e.add_argument("--rotate", action="store_true", help="Rotate source spool after fully consuming current snapshot")
     e.set_defaults(func=cmd_episodes_ingest)

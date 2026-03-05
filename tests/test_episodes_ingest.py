@@ -1,6 +1,8 @@
 import io
 import json
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -99,6 +101,65 @@ class TestEpisodesIngestCli(unittest.TestCase):
                 ["episodes", "query", "--scope", "proj-ingest", "--session-id", "s1", "--json"],
             )
             self.assertEqual([x["event_id"] for x in out["items"]], ["ev-1", "ev-2", "ev-3"])
+        conn.close()
+
+    def test_episodes_ingest_resets_offset_when_spool_replaced(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td) / "episodes.jsonl"
+            state = Path(td) / "state.json"
+
+            l1 = json.dumps(self._event(event_id="rot-1", ts_ms=1000, session_id="s-rot"), ensure_ascii=False)
+            spool.write_text(l1 + "\n", encoding="utf-8")
+
+            first = self._run(
+                conn,
+                [
+                    "episodes",
+                    "ingest",
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(state),
+                    "--json",
+                ],
+            )
+            self.assertEqual(first["inserted"], 1)
+
+            rotated = Path(td) / "episodes.jsonl.1"
+            spool.rename(rotated)
+
+            l2 = json.dumps(
+                self._event(
+                    event_id="rot-2",
+                    ts_ms=1001,
+                    session_id="s-rot",
+                    summary="rotated file replacement " + ("x" * 320),
+                ),
+                ensure_ascii=False,
+            )
+            spool.write_text(l2 + "\n", encoding="utf-8")
+
+            second = self._run(
+                conn,
+                [
+                    "episodes",
+                    "ingest",
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(state),
+                    "--json",
+                ],
+            )
+            self.assertEqual(second["inserted"], 1)
+            self.assertEqual(second["source"]["offset_recovery"], "reset_to_zero_source_replaced")
+
+            out = self._run(
+                conn,
+                ["episodes", "query", "--scope", "proj-ingest", "--session-id", "s-rot", "--json"],
+            )
+            self.assertEqual([x["event_id"] for x in out["items"]], ["rot-1", "rot-2"])
         conn.close()
 
     def test_episodes_ingest_skips_invalid_json_lines(self):
@@ -377,6 +438,80 @@ class TestEpisodesIngestCli(unittest.TestCase):
             )
             self.assertEqual(convo_global["count"], 1)
             self.assertEqual(convo_global["items"][0]["type"], "conversation.assistant")
+        conn.close()
+
+    def test_episodes_ingest_follow_tails_appended_rows(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td) / "episodes.jsonl"
+            state = Path(td) / "state.json"
+
+            first = json.dumps(self._event(event_id="f-1", ts_ms=1000, session_id="s-follow"), ensure_ascii=False)
+            spool.write_text(first + "\n", encoding="utf-8")
+
+            second = json.dumps(self._event(event_id="f-2", ts_ms=1001, session_id="s-follow"), ensure_ascii=False)
+
+            def _append_later() -> None:
+                time.sleep(0.25)
+                with spool.open("a", encoding="utf-8") as fp:
+                    fp.write(second + "\n")
+
+            writer = threading.Thread(target=_append_later, daemon=True)
+            writer.start()
+
+            receipt = self._run(
+                conn,
+                [
+                    "episodes",
+                    "ingest",
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(state),
+                    "--follow",
+                    "--poll-interval-ms",
+                    "100",
+                    "--idle-exit-seconds",
+                    "0.8",
+                    "--json",
+                ],
+            )
+            writer.join(timeout=2)
+
+            self.assertTrue(receipt["follow"]["enabled"])
+            self.assertEqual(receipt["follow"]["stop_reason"], "idle_timeout")
+            self.assertGreaterEqual(receipt["aggregate"]["inserted"], 2)
+
+            out = self._run(
+                conn,
+                ["episodes", "query", "--scope", "proj-ingest", "--session-id", "s-follow", "--json"],
+            )
+            self.assertEqual([x["event_id"] for x in out["items"]], ["f-1", "f-2"])
+        conn.close()
+
+    def test_episodes_ingest_follow_rejects_rotate_truncate_combo(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td) / "episodes.jsonl"
+            state = Path(td) / "state.json"
+            spool.write_text(json.dumps(self._event(event_id="x", ts_ms=1, session_id="s"), ensure_ascii=False) + "\n", encoding="utf-8")
+
+            out = self._run(
+                conn,
+                [
+                    "episodes",
+                    "ingest",
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(state),
+                    "--follow",
+                    "--rotate",
+                    "--json",
+                ],
+                expect_exit=2,
+            )
+            self.assertIn("cannot be combined", out["error"])
         conn.close()
 
     def test_episodes_ingest_deterministic_ordering(self):
