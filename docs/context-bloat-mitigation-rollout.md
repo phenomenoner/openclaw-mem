@@ -115,7 +115,7 @@ Add a deterministic **max injected chars** ceiling (or token estimate) on the fi
 - stale TTL (to prevent ancient TODOs squatting in Working Set)
 
 **Success**
-- TODOs become recallable
+- TODOs become recallable (including in chats that include injected autoRecall receipts/metadata in the same message)
 - no runaway growth; injection stays under `budget.maxChars`
 
 **Rollback**: set `captureTodo=false`.

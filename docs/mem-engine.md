@@ -192,6 +192,11 @@ Guardrail behavior when `captureTodo=true`:
 - TODO injection obeys a deterministic recall-time TTL: TODO memories older than `todoStaleTtlDays` are dropped from autoRecall injection.
 - Drops emit bounded markers/receipts (`openclaw-mem-engine:todoGuardrail`, plus `autoCapture` receipt counters).
 
+Operational note (Telegram / injected metadata):
+- Some deployments include autoRecall receipts (e.g. `<relevant-memories>…</relevant-memories>`) and code-fenced metadata blocks in the *same* inbound message.
+- autoCapture filters tool-like content **per candidate line**, so a real user TODO line (e.g. `TODO: …`) can still be captured even when surrounded by injected blocks.
+- Keep TODO lines outside code fences for best results.
+
 Recommended enable snippet (Step 3):
 
 ```jsonc

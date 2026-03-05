@@ -3936,9 +3936,6 @@ const memoryPlugin = {
               const splitCandidates = splitCaptureCandidates(userText);
               candidateExtractionCount += splitCandidates.length;
 
-              const messageLooksSecret = looksLikeSecret(userText);
-              const messageLooksToolOutput = looksLikeToolOutput(userText);
-
               for (const rawCandidate of splitCandidates) {
                 if (captures.length >= autoCaptureCfg.maxItemsPerTurn) {
                   break;
@@ -3948,12 +3945,16 @@ const memoryPlugin = {
                 if (!candidate || candidate.length < 12) continue;
                 if (SLASH_COMMAND_PATTERN.test(candidate) || HEARTBEAT_PATTERN.test(candidate)) continue;
 
-                if (messageLooksSecret || looksLikeSecret(candidate)) {
+                // IMPORTANT: do not drop the entire message due to tool-output/metadata markers.
+                // OpenClaw sessions (e.g. Telegram) may include injected autoRecall receipts, code-fenced metadata,
+                // or <relevant-memories> blocks alongside real user text.
+                // We filter per-candidate so a legit TODO line can still be captured.
+                if (looksLikeSecret(candidate)) {
                   filteredOut.secrets_like += 1;
                   continue;
                 }
 
-                if (messageLooksToolOutput || looksLikeToolOutput(candidate)) {
+                if (looksLikeToolOutput(candidate)) {
                   filteredOut.tool_output += 1;
                   continue;
                 }
