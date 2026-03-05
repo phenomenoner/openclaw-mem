@@ -176,6 +176,8 @@ class TestEpisodesCli(unittest.TestCase):
                     summary,
                     "--payload-json",
                     '{"raw":"value"}',
+                    "--refs-json",
+                    '{"recordRef":"obs:1"}',
                     "--json",
                 ],
             )
@@ -213,6 +215,7 @@ class TestEpisodesCli(unittest.TestCase):
         for item in query_out["items"]:
             self.assertTrue(item["redacted"])
             self.assertEqual(item["payload"], "[REDACTED]")
+            self.assertEqual(item["refs"], "[REDACTED]")
         conn.close()
 
     def test_episodes_query_deterministic_ordering(self):

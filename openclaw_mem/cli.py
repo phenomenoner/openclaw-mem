@@ -7567,24 +7567,28 @@ def cmd_episodes_redact(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         sys.exit(2)
 
     payload_value: Optional[str]
+    refs_value: Optional[str]
     if replacement == "null":
         payload_value = None
+        refs_value = None
     else:
-        payload_value = _json_compact_dumps(EPISODIC_REDACT_PLACEHOLDER)
+        redacted_value = _json_compact_dumps(EPISODIC_REDACT_PLACEHOLDER)
+        payload_value = redacted_value
+        refs_value = redacted_value
 
     try:
         if event_id:
             cur = conn.execute(
-                "UPDATE episodic_events SET payload_json = ?, redacted = 1 WHERE event_id = ?",
-                (payload_value, event_id),
+                "UPDATE episodic_events SET payload_json = ?, refs_json = ?, redacted = 1 WHERE event_id = ?",
+                (payload_value, refs_value, event_id),
             )
             redacted_count = int(cur.rowcount)
             scope = None
         else:
             scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
             cur = conn.execute(
-                "UPDATE episodic_events SET payload_json = ?, redacted = 1 WHERE session_id = ? AND scope = ?",
-                (payload_value, session_id, scope),
+                "UPDATE episodic_events SET payload_json = ?, refs_json = ?, redacted = 1 WHERE session_id = ? AND scope = ?",
+                (payload_value, refs_value, session_id, scope),
             )
             redacted_count = int(cur.rowcount)
         conn.commit()
