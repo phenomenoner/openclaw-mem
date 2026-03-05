@@ -102,7 +102,7 @@ This keeps admin functionality available in agent/tool workflows even if CLI wir
 ### New tools
 
 - `memory_docs_ingest` — bounded ingest into `openclaw-mem docs` SQLite index
-- `memory_docs_search` — bounded docs snippets (`trusted/operator` provenance)
+- `memory_docs_search` — bounded docs snippets (`operator` provenance)
 
 `memory_recall` and `autoRecall` can consult docs cold lane **only when hot recall is insufficient** (`minHotItems` threshold).
 

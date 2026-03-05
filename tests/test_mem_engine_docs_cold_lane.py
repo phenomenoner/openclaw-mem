@@ -17,7 +17,7 @@ class TestMemEngineDocsColdLane(unittest.TestCase):
         self.assertIn("openclaw-mem-engine:docsColdLane.search", ts)
         self.assertIn("scopeMappingStrategy", ts)
         self.assertIn("docsColdLane", ts)
-        self.assertIn("[docs|trusted/operator|", ts)
+        self.assertIn("[docs|operator|", ts)
 
     def test_docs_cold_lane_schema_defaults(self):
         plugin = json.loads(PLUGIN_JSON.read_text("utf-8"))
@@ -39,7 +39,7 @@ class TestMemEngineDocsColdLane(unittest.TestCase):
         self.assertIn('skipReason: "no_source_roots"', helper)
         self.assertIn('skipReason: "no_matching_markdown"', helper)
         self.assertIn('source_kind: "operator"', helper)
-        self.assertIn('trust_tier: "trusted"', helper)
+        self.assertIn('trust_tier: "operator"', helper)
 
 
 if __name__ == "__main__":

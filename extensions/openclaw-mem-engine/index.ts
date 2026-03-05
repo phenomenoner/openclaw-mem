@@ -1379,7 +1379,7 @@ type DocsColdLaneHit = {
   score: number;
   match: string[];
   source_kind: "operator";
-  trust_tier: "trusted";
+  trust_tier: "operator";
 };
 
 type RecallColdLaneReceipt = {
@@ -2882,9 +2882,90 @@ const memoryPlugin = {
       embedOnIngest?: boolean;
       trigger: "startup" | "tool";
     }) => {
-      const roots = Array.isArray(input.sourceRoots) && input.sourceRoots.length > 0
-        ? input.sourceRoots.map((root) => resolveStateRelativePath(api, root, root))
+      const overrideRootsProvided = Array.isArray(input.sourceRoots) && input.sourceRoots.length > 0;
+      const roots = overrideRootsProvided
+        ? input.sourceRoots!.map((root) => resolveStateRelativePath(api, root, root))
         : docsColdLaneResolved.sourceRoots;
+
+      // Hardening: do not allow tool-driven ingestion outside configured allowlist roots.
+      if (overrideRootsProvided) {
+        const allowRoots = docsColdLaneResolved.sourceRoots;
+        if (allowRoots.length === 0) {
+          return {
+            receipt: {
+              ok: false,
+              skipped: true,
+              skipReason: "source_roots_not_configured",
+              sqlitePath: docsColdLaneResolved.sqlitePath,
+              sourceRoots: [],
+              sourceGlobs: [],
+              filesMatched: 0,
+              missingRoots: [],
+              batches: 0,
+              files_ingested: 0,
+              chunks_total: 0,
+              chunks_inserted: 0,
+              chunks_updated: 0,
+              chunks_unchanged: 0,
+              chunks_deleted: 0,
+              embedded: 0,
+            },
+            error: "source_roots_not_configured",
+            effective: {
+              sqlitePath: docsColdLaneResolved.sqlitePath,
+              sourceRoots: [],
+              sourceGlobs: docsColdLaneResolved.sourceGlobs,
+              maxChunkChars: docsColdLaneResolved.maxChunkChars,
+              embedOnIngest: docsColdLaneResolved.embedOnIngest,
+            },
+          };
+        }
+
+        const isAllowed = (candidate: string): boolean => {
+          const c = path.resolve(candidate);
+          return allowRoots.some((allowed) => {
+            const a = path.resolve(allowed);
+            if (a.toLowerCase().endsWith(".md")) {
+              return c === a;
+            }
+            const rel = path.relative(a, c);
+            return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+          });
+        };
+
+        const invalid = roots.filter((r) => !isAllowed(r));
+        if (invalid.length > 0) {
+          return {
+            receipt: {
+              ok: false,
+              skipped: true,
+              skipReason: "source_roots_not_allowlisted",
+              sqlitePath: docsColdLaneResolved.sqlitePath,
+              sourceRoots: allowRoots,
+              sourceGlobs: docsColdLaneResolved.sourceGlobs,
+              filesMatched: 0,
+              missingRoots: [],
+              batches: 0,
+              files_ingested: 0,
+              chunks_total: 0,
+              chunks_inserted: 0,
+              chunks_updated: 0,
+              chunks_unchanged: 0,
+              chunks_deleted: 0,
+              embedded: 0,
+              invalidRoots: invalid,
+            },
+            error: "source_roots_not_allowlisted",
+            effective: {
+              sqlitePath: docsColdLaneResolved.sqlitePath,
+              sourceRoots: allowRoots,
+              sourceGlobs: docsColdLaneResolved.sourceGlobs,
+              maxChunkChars: docsColdLaneResolved.maxChunkChars,
+              embedOnIngest: docsColdLaneResolved.embedOnIngest,
+            },
+          };
+        }
+      }
 
       const sourceGlobs = Array.isArray(input.sourceGlobs) && input.sourceGlobs.length > 0
         ? input.sourceGlobs
@@ -3683,7 +3764,7 @@ const memoryPlugin = {
             .join("\n");
 
           const docsLines = docsHits
-            .map((hit, idx) => `${idx + 1}. [${hit.docKind}|trusted/operator] ${hit.text} (${hit.recordRef})`)
+            .map((hit, idx) => `${idx + 1}. [${hit.docKind}|operator] ${hit.text} (${hit.recordRef})`)
             .join("\n");
 
           const sections: string[] = [];
@@ -4183,7 +4264,7 @@ const memoryPlugin = {
       {
         name: "memory_docs_search",
         label: "Memory Docs Search",
-        description: "Search docs cold lane snippets (trusted/operator markdown).",
+        description: "Search docs cold lane snippets (operator-authored markdown).", 
         parameters: Type.Object({
           query: Type.String({ description: "Search query" }),
           limit: Type.Optional(Type.Number({ description: "Max snippets (bounded)" })),
@@ -4447,7 +4528,7 @@ const memoryPlugin = {
               id: `docs:${hit.recordRef}`,
               createdAt: Date.now() + idx,
               category: "fact",
-              text: `[docs|trusted/operator|${hit.docKind}] ${hit.text} (${hit.recordRef})`,
+              text: `[docs|operator|${hit.docKind}] ${hit.text} (${hit.recordRef})`,
               importanceLabel: "unknown",
             }));
 

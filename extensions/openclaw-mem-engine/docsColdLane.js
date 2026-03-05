@@ -298,7 +298,7 @@ function normalizeDocsHit(row, maxSnippetChars) {
       ? row.match.filter((item) => typeof item === "string")
       : [],
     source_kind: "operator",
-    trust_tier: "trusted",
+    trust_tier: "operator",
   };
 }
 
