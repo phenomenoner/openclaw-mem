@@ -554,6 +554,8 @@ def _normalize_episodic_spool_event(
         if _looks_like_secret(fragment) or _contains_pii_lite(fragment):
             payload_serialized = None
             payload_size = 0
+            refs_serialized = None
+            refs_size = 0
             redacted_late = True
             break
 

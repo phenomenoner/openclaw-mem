@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened episodic safety/retention defaults:
   - summary-first defaults for query and replay (`--include-payload` opt-in)
   - secret redaction always-on + PII-lite redaction (email/phone) at capture and ingest second-pass
-  - late detection at ingest now nulls payload and sets `redacted=1`
+  - late detection at ingest now nulls payload **and refs** and sets `redacted=1`
   - conversation payload default cap 4096 bytes (configurable) with ingest hard ceiling 8192 bytes
   - retention defaults updated (`conversation.user` 60d, `conversation.assistant` 90d)
 - `openclaw-mem-engine` now supports configurable embedding clamp knobs (`embedding.maxChars`, `embedding.headChars`, `embedding.maxBytes`) and enforces them in both recall/store paths.

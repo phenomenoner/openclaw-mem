@@ -270,6 +270,49 @@ class TestEpisodesIngestCli(unittest.TestCase):
             self.assertIsNone(got["items"][0]["payload"])
         conn.close()
 
+    def test_episodes_ingest_second_pass_redacts_refs_also(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td) / "episodes.jsonl"
+            state = Path(td) / "state.json"
+            row = self._event(
+                event_id="refs-pii-1",
+                ts_ms=1000,
+                session_id="s-refs",
+                event_type="conversation.assistant",
+                scope="proj-ingest",
+                summary="assistant response",
+                payload={"text": "safe"},
+            )
+            row["refs"] = {"source": "x", "contact_number": 886912345678}
+            spool.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+
+            receipt = self._run(
+                conn,
+                ["episodes", "ingest", "--file", str(spool), "--state", str(state), "--json"],
+            )
+            self.assertEqual(receipt["inserted"], 1)
+            self.assertEqual(receipt["bounded"]["redacted_late"], 1)
+
+            got = self._run(
+                conn,
+                [
+                    "episodes",
+                    "query",
+                    "--scope",
+                    "proj-ingest",
+                    "--session-id",
+                    "s-refs",
+                    "--include-payload",
+                    "--json",
+                ],
+            )
+            self.assertEqual(got["count"], 1)
+            self.assertTrue(got["items"][0]["redacted"])
+            self.assertIsNone(got["items"][0]["payload"])
+            self.assertIsNone(got["items"][0]["refs"])
+        conn.close()
+
     def test_episodes_extract_sessions_fallback_generates_conversation_spool(self):
         conn = _connect(":memory:")
         with tempfile.TemporaryDirectory() as td:
