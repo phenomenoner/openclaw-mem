@@ -115,8 +115,8 @@ def _strip_md_task_prefix(text: str) -> str:
         t = re.sub(r"^\d{1,3}(?:-|－|–|—|−)(?=[^0-9\s])", "", t).lstrip()
 
         # Markdown checkboxes.
-        t = re.sub(r"^\[(?: |x|X|✓|✔|☐|☑)\]\s*", "", t).lstrip()
-        t = re.sub(r"^[☐☑✅✔]\s*", "", t).lstrip()
+        t = re.sub(r"^\[(?: |x|X|✓|✔|☐|☑|☒)\]\s*", "", t).lstrip()
+        t = re.sub(r"^[☐☑☒✅✔]\s*", "", t).lstrip()
 
     return t
 
