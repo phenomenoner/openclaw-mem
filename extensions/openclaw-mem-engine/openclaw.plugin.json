@@ -66,6 +66,56 @@
       "label": "Receipt Max Items",
       "help": "Maximum item count for top-hit arrays and tier slices",
       "advanced": true
+    },
+    "scopePolicy.enabled": {
+      "label": "Scope Policy",
+      "help": "Default-on namespace isolation policy for read/write scope resolution",
+      "advanced": true
+    },
+    "scopePolicy.defaultScope": {
+      "label": "Default Scope",
+      "help": "Fallback scope when no explicit/inferred scope exists (default: global)",
+      "advanced": true
+    },
+    "scopePolicy.fallbackScopes": {
+      "label": "Fallback Scopes",
+      "help": "Ordered allowlist used only when primary scope recall is insufficient",
+      "advanced": true
+    },
+    "scopePolicy.validationMode": {
+      "label": "Scope Validation",
+      "help": "Write-time scope validation mode: strict (default), normalize, or none",
+      "advanced": true
+    },
+    "budget.enabled": {
+      "label": "Context Budget",
+      "help": "Hard ceiling for final injected autoRecall prependContext",
+      "advanced": true
+    },
+    "budget.maxChars": {
+      "label": "Context Budget Max Chars",
+      "help": "Maximum characters allowed in final injected prependContext",
+      "advanced": true
+    },
+    "budget.minRecentSlots": {
+      "label": "Budget Min Recent Slots",
+      "help": "Keep at least N most-recent memory slots before dropping older slots",
+      "advanced": true
+    },
+    "budget.overflowAction": {
+      "label": "Budget Overflow Action",
+      "help": "truncate_oldest (default) or truncate_tail",
+      "advanced": true
+    },
+    "scopePolicy.fallbackMarker": {
+      "label": "Scope Fallback Marker",
+      "help": "Emit scope fallback marker when fallback scopes are consulted",
+      "advanced": true
+    },
+    "scopePolicy.maxScopeLength": {
+      "label": "Scope Max Length",
+      "help": "Maximum allowed scope length after normalization/validation",
+      "advanced": true
     }
   },
   "configSchema": {
@@ -236,6 +286,90 @@
                 "minimum": 1,
                 "maximum": 10,
                 "default": 3
+              }
+            }
+          }
+        ]
+      },
+      "scopePolicy": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "defaultScope": {
+                "type": "string",
+                "default": "global"
+              },
+              "fallbackScopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "fallbackMarker": {
+                "type": "boolean",
+                "default": true
+              },
+              "validationMode": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "normalize",
+                  "strict"
+                ],
+                "default": "strict"
+              },
+              "maxScopeLength": {
+                "type": "integer",
+                "minimum": 8,
+                "maximum": 256,
+                "default": 64
+              }
+            }
+          }
+        ]
+      },
+      "budget": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "maxChars": {
+                "type": "integer",
+                "minimum": 300,
+                "maximum": 12000,
+                "default": 1800
+              },
+              "minRecentSlots": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5,
+                "default": 1
+              },
+              "overflowAction": {
+                "type": "string",
+                "enum": [
+                  "truncate_oldest",
+                  "truncate_tail"
+                ],
+                "default": "truncate_oldest"
               }
             }
           }

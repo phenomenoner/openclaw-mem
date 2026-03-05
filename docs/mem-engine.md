@@ -111,6 +111,69 @@ Design constraints:
 - receipts are bounded/deterministic by default
 - no memory text is emitted in receipt payloads by default (IDs + scores only)
 
+### Scope policy + context budget knobs (Rollout Step 1/2)
+
+`openclaw-mem-engine` now exposes two rollbackable control planes:
+
+1) **Scope policy** (default-on namespace isolation)
+- `scopePolicy.enabled` (default `true`; kill-switch)
+- `scopePolicy.defaultScope` (default `"global"`)
+- `scopePolicy.fallbackScopes` (default `[]`; ordered allowlist, only consulted if primary scope is insufficient)
+- `scopePolicy.fallbackMarker` (default `true`; emit observable fallback marker in logs/receipts)
+- `scopePolicy.validationMode` (`strict` default; `normalize` / `none` optional)
+- `scopePolicy.maxScopeLength` (default `64`)
+
+Write-path hardening:
+- scope values are validated/normalized at write-time (`memory_store`, `autoCapture`, `memory_import`)
+- invalid strict scopes fall back to `defaultScope` and emit a scope-validation warning receipt/log marker
+
+2) **Final prepend context budget** (hard ceiling at packing tail)
+- `budget.enabled` (default `true`; kill-switch)
+- `budget.maxChars` (default `1800`)
+- `budget.minRecentSlots` (default `1`)
+- `budget.overflowAction` (`truncate_oldest` default; `truncate_tail` optional)
+
+Packing semantics:
+- budget is enforced at the **very end** of autoRecall packing (`prependContext`) independent of `maxItems`
+- if overflow occurs, oldest slots are dropped first while honoring `minRecentSlots`
+- if still above cap, tail truncation is applied to guarantee deterministic hard ceiling
+- truncation emits an observable `openclaw-mem-engine:contextBudget` marker (before/after chars + dropped ids/count)
+
+Example config snippet:
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem-engine": {
+        "enabled": true,
+        "config": {
+          "scopePolicy": {
+            "enabled": true,
+            "defaultScope": "global",
+            "fallbackScopes": ["openclaw-mem", "personal"],
+            "fallbackMarker": true,
+            "validationMode": "strict",
+            "maxScopeLength": 64
+          },
+          "budget": {
+            "enabled": true,
+            "maxChars": 1800,
+            "minRecentSlots": 1,
+            "overflowAction": "truncate_oldest"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Rollback (single-line posture):
+- disable either feature without code changes:
+  - `scopePolicy.enabled = false`
+  - `budget.enabled = false`
+
 ---
 
 ## Architecture overview
