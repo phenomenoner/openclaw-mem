@@ -55,7 +55,7 @@ openclaw-mem episodes replay <session_id> ...
 }
 ```
 
-2) Schedule conversation extraction:
+2) Run conversation extraction on a short cadence (cron/systemd timer):
 
 ```bash
 uv run python -m openclaw_mem episodes extract-sessions \
@@ -66,15 +66,22 @@ uv run python -m openclaw_mem episodes extract-sessions \
   --json
 ```
 
-3) Schedule ingest:
+3) Run ingest in **follow mode** (recommended default):
 
 ```bash
 uv run python -m openclaw_mem episodes ingest \
   --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
   --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json \
   --conversation-payload-cap-bytes 4096 \
+  --follow \
+  --poll-interval-ms 1000 \
   --json
 ```
+
+Useful follow flags:
+- `--poll-interval-ms <N>`: idle polling interval (low CPU when idle; default `1000`, min `100`)
+- `--idle-exit-seconds <N>`: optional auto-exit after N idle seconds (`0` = never; useful for supervised jobs/tests)
+- `--follow` cannot be combined with `--truncate`/`--rotate` (maintenance actions stay batch-only)
 
 ---
 
@@ -96,9 +103,9 @@ Retention defaults:
 ## Verification
 
 ```bash
-# Extract + ingest once
+# Extract once + run ingest daemon (Ctrl+C to stop)
 uv run python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json
-uv run python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json
+uv run python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --follow --poll-interval-ms 1000 --json
 
 # Summary-only (default)
 uv run python -m openclaw_mem episodes query --global --limit 20 --json
@@ -111,8 +118,10 @@ uv run python -m openclaw_mem episodes query --global --limit 20 --include-paylo
 
 ## Rollback
 
-1. set `plugins.entries.openclaw-mem.config.episodes.enabled=false`
-2. disable extractor + ingest jobs
-3. restart gateway
+1. stop follow process/service (`Ctrl+C` or service stop)
+2. switch back to periodic ingest pump (same command, without `--follow`)
+3. if needed, set `plugins.entries.openclaw-mem.config.episodes.enabled=false`
+4. restart gateway
 
+No schema migration is required; ingest state file is shared between batch and follow modes.
 Manual mode remains available.

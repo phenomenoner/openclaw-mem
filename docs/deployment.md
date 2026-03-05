@@ -205,7 +205,7 @@ crontab -e
 
 ## 2B. Episodic auto-mode ingestion (new)
 
-When `plugins.entries["openclaw-mem"].config.episodes.enabled=true`, schedule extractor + ingest every 1–5 minutes.
+When `plugins.entries["openclaw-mem"].config.episodes.enabled=true`, run extractor periodically and keep ingest in follow mode (daemon/tailer).
 
 Auto-captured set includes:
 - plugin lane: `tool.call`, `tool.result`, `ops.alert`
@@ -215,14 +215,29 @@ Scope derivation for conversation text:
 - leading `[SCOPE: x]` → `x`
 - otherwise `global`
 
-### Cron (silent on green)
+### Recommended: extractor cron + ingest follow service
 
 ```bash
+# extractor (periodic)
 */2 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --payload-cap-bytes 4096 --json >/dev/null 2>&1
+
+# ingest daemon (systemd/supervisor/pm2 screen/tmux)
+cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --conversation-payload-cap-bytes 4096 --follow --poll-interval-ms 1000 --json
+```
+
+Follow mode notes:
+- resumes from state offset across restarts
+- safely resets offset when spool is truncated/replaced (inode/dev or size shrink detection)
+- low CPU when idle (sleep-based polling)
+- graceful stop on SIGINT/SIGTERM
+
+### Legacy fallback: periodic ingest pump
+
+```bash
 */2 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --conversation-payload-cap-bytes 4096 --json >/dev/null 2>&1
 ```
 
-Optional daily spool rotate:
+Optional daily spool rotate (batch mode only):
 
 ```bash
 7 0 * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --rotate --json >/dev/null 2>&1
@@ -240,9 +255,10 @@ Expected:
 - query/replay are summary-only by default (payload appears only with `--include-payload`)
 
 Rollback:
-1. set `plugins.entries.openclaw-mem.config.episodes.enabled=false`
-2. disable ingest/extractor cron jobs
-3. restart gateway
+1. stop ingest follow service/process
+2. switch ingest back to periodic cron pump (legacy command above)
+3. if needed, set `plugins.entries.openclaw-mem.config.episodes.enabled=false`
+4. restart gateway
 
 ## 3. Log Rotation
 
