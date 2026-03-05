@@ -1016,6 +1016,17 @@ function extractUserTextMessages(messages: unknown[]): string[] {
   return out;
 }
 
+function stripAutoInjectedArtifacts(rawText: string): string {
+  let out = String(rawText ?? "");
+
+  // OpenClaw may inject autoRecall receipts + memory blocks into the LLM prompt.
+  // Those artifacts are not user intent and must not be eligible for autoCapture.
+  out = out.replace(/<!--\s*openclaw-mem-engine:autoRecall[\s\S]*?-->/gi, " ");
+  out = out.replace(/<relevant-memories>[\s\S]*?<\/relevant-memories>/gi, " ");
+
+  return out;
+}
+
 function splitCaptureCandidates(text: string): string[] {
   const trimmed = String(text ?? "").trim();
   if (!trimmed) return [];
@@ -3905,7 +3916,9 @@ const memoryPlugin = {
           if (allowedCategories.size === 0) return;
 
           try {
-            const userTexts = extractUserTextMessages(event.messages);
+            const userTexts = extractUserTextMessages(event.messages)
+              .map(stripAutoInjectedArtifacts)
+              .filter((text) => Boolean(String(text ?? "").trim()));
             if (userTexts.length === 0) return;
 
             const filteredOut = {
@@ -3936,6 +3949,8 @@ const memoryPlugin = {
               const splitCandidates = splitCaptureCandidates(userText);
               candidateExtractionCount += splitCandidates.length;
 
+              const messageScope = extractScopeFromText(userText);
+
               for (const rawCandidate of splitCandidates) {
                 if (captures.length >= autoCaptureCfg.maxItemsPerTurn) {
                   break;
@@ -3962,7 +3977,8 @@ const memoryPlugin = {
                 const category = detectAutoCaptureCategory(candidate);
                 if (!category || !allowedCategories.has(category)) continue;
 
-                const scopeInfo = resolveScope({ text: candidate, policy: scopePolicyCfg });
+                const explicitScope = extractScopeFromText(candidate) ?? messageScope;
+                const scopeInfo = resolveScope({ explicitScope, text: candidate, policy: scopePolicyCfg });
                 if (scopePolicyCfg.enabled && scopeInfo.invalid) {
                   api.logger.warn(
                     `openclaw-mem-engine:scopeValidation write=autoCapture invalid scope; fallback=${scopePolicyCfg.defaultScope}`,

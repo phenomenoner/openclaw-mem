@@ -194,7 +194,9 @@ Guardrail behavior when `captureTodo=true`:
 
 Operational note (Telegram / injected metadata):
 - Some deployments include autoRecall receipts (e.g. `<relevant-memories>…</relevant-memories>`) and code-fenced metadata blocks in the *same* inbound message.
-- autoCapture filters tool-like content **per candidate line**, so a real user TODO line (e.g. `TODO: …`) can still be captured even when surrounded by injected blocks.
+- autoCapture strips these injected artifacts before candidate extraction, and filters tool-like content **per candidate line**, so a real user TODO line (e.g. `TODO: …`) can still be captured.
+- Scope tags can be on the same line or on the previous line:
+  - `TODO: ...` preceded by `[SCOPE: openclaw-mem]` on its own line is still captured into that scope.
 - Keep TODO lines outside code fences for best results.
 
 Recommended enable snippet (Step 3):
