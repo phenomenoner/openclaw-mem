@@ -136,7 +136,7 @@ def _is_task_like(text: str, kind: str) -> bool:
 
     markers = ("TODO", "TASK", "REMINDER")
     separators = {":", "：", ";", "；", "-", ".", "。", "－", "–", "—", "−"}
-    close_by_open = {"[": "]", "(": ")", "{": "}", "【": "】", "〔": "〕", "「": "」", "『": "』", "《": "》", "〈": "〉", "«": "»", "〖": "〗", "〘": "〙", "‹": "›"}
+    close_by_open = {"[": "]", "(": ")", "{": "}", "【": "】", "〔": "〕", "「": "」", "『": "』", "《": "》", "〈": "〉", "«": "»", "〖": "〗", "〘": "〙", "‹": "›", "<": ">"}
 
     def _has_valid_suffix(text_: str, idx: int, *, allow_compact: bool = False) -> bool:
         if len(text_) == idx:
