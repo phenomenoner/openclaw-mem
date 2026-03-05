@@ -23,6 +23,7 @@ import time
 import unicodedata
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -106,6 +107,221 @@ def _utcnow_iso() -> str:
     """Return UTC timestamp in ISO format with timezone info."""
 
     return datetime.now(timezone.utc).isoformat()
+
+
+EPISODIC_SCHEMA_VERSION = "openclaw-mem.episodic.v0"
+EPISODIC_ALLOWED_TYPES = {
+    "conversation.user",
+    "conversation.assistant",
+    "tool.call",
+    "tool.result",
+    "ops.decision",
+    "ops.alert",
+}
+EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES = 8 * 1024
+EPISODIC_DEFAULT_REFS_CAP_BYTES = 4 * 1024
+EPISODIC_MAX_QUERY_LIMIT = 500
+EPISODIC_REDACT_PLACEHOLDER = "[REDACTED]"
+EPISODIC_DEFAULT_RETENTION_DAYS = {
+    "conversation.user": 90,
+    "conversation.assistant": 90,
+    "tool.call": 30,
+    "tool.result": 30,
+    "ops.decision": None,
+    "ops.alert": 90,
+}
+EPISODIC_SECRET_LIKE_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"-----BEGIN (?:RSA|EC|DSA|OPENSSH|PGP)?\s*PRIVATE KEY-----", re.IGNORECASE),
+    re.compile(r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|pwd|secret)\b\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+)
+EPISODIC_TOOL_OUTPUT_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"^```(?:json|bash|sh|shell|log|output|yaml)?", re.IGNORECASE),
+    re.compile(r"\b(?:stdout|stderr|exit\s*code|traceback|stack\s*trace)\b", re.IGNORECASE),
+    re.compile(r"\b(?:tool[_\s-]?call|tool[_\s-]?result|command output)\b", re.IGNORECASE),
+)
+
+
+def _utcnow_ts_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _normalize_scope_token(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    token = str(raw).strip().lower()
+    if not token:
+        return None
+    token = re.sub(r"[\s]+", "-", token)
+    token = re.sub(r"[^a-z0-9._:/-]+", "-", token)
+    token = re.sub(r"-+", "-", token)
+    token = re.sub(r"^[-./:_]+", "", token)
+    token = re.sub(r"[-./:_]+$", "", token)
+    return token or None
+
+
+def _normalize_episodic_scope(raw: Any) -> str:
+    normalized = _normalize_scope_token(raw)
+    if not normalized:
+        raise ValueError("invalid scope")
+    return normalized
+
+
+def _normalize_episodic_type(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    if value not in EPISODIC_ALLOWED_TYPES:
+        allowed = ", ".join(sorted(EPISODIC_ALLOWED_TYPES))
+        raise ValueError(f"invalid type: {value or '<empty>'}; allowed: {allowed}")
+    return value
+
+
+def _parse_ts_ms(raw: Any) -> int:
+    if raw is None:
+        return _utcnow_ts_ms()
+    try:
+        value = int(raw)
+    except Exception as e:
+        raise ValueError(f"invalid ts_ms: {raw}") from e
+    if value <= 0:
+        raise ValueError("ts_ms must be > 0")
+    return value
+
+
+def _json_compact_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _parse_optional_json_arg(raw_json: Optional[str], raw_file: Optional[str], label: str) -> Tuple[Any, Optional[str], int]:
+    if raw_json and raw_file:
+        raise ValueError(f"provide only one of --{label}-json or --{label}-file")
+
+    if raw_json:
+        source = raw_json
+    elif raw_file:
+        path = Path(str(raw_file)).expanduser().resolve()
+        if not path.exists() or not path.is_file():
+            raise ValueError(f"{label} file not found: {path}")
+        source = path.read_text(encoding="utf-8")
+    else:
+        return None, None, 0
+
+    try:
+        parsed = json.loads(source)
+    except Exception as e:
+        raise ValueError(f"invalid {label} JSON") from e
+
+    parsed = _sanitize_jsonable_surrogates(parsed)
+    serialized = _json_compact_dumps(parsed)
+    size_bytes = len(serialized.encode("utf-8"))
+    return parsed, serialized, size_bytes
+
+
+def _looks_like_secret(text: str) -> bool:
+    compact = str(text or "").strip()
+    if not compact:
+        return False
+    return any(p.search(compact) for p in EPISODIC_SECRET_LIKE_PATTERNS)
+
+
+def _looks_like_tool_output(text: str) -> bool:
+    compact = str(text or "").strip()
+    if not compact:
+        return True
+    if "<relevant-memories>" in compact:
+        return True
+    if re.search(r'^\{[\s\S]*\}$', compact) and re.search(r'"(?:stdout|stderr|exitCode|command|tool)"', compact):
+        return True
+    return any(p.search(compact) for p in EPISODIC_TOOL_OUTPUT_PATTERNS)
+
+
+def _episodic_guard_text_fragments(summary: str, payload_serialized: Optional[str], refs_serialized: Optional[str], allow_tool_output: bool) -> None:
+    if allow_tool_output:
+        return
+
+    if _looks_like_secret(summary):
+        raise ValueError("summary appears to contain secret-like content; pass --allow-tool-output to override")
+
+    payload_fragments: List[str] = []
+    if payload_serialized is not None:
+        payload_fragments.append(payload_serialized)
+    if refs_serialized is not None:
+        payload_fragments.append(refs_serialized)
+
+    for fragment in payload_fragments:
+        if _looks_like_secret(fragment):
+            raise ValueError("payload appears to contain secret-like content; pass --allow-tool-output to override")
+        if _looks_like_tool_output(fragment):
+            raise ValueError("payload appears to contain tool-output-like content; pass --allow-tool-output to override")
+
+
+def _resolve_query_scope(raw_scope: Optional[str], allow_global: bool) -> str:
+    if raw_scope is None or not str(raw_scope).strip():
+        if allow_global:
+            return "global"
+        raise ValueError("scope is required (or pass --global)")
+
+    normalized = _normalize_episodic_scope(raw_scope)
+    if allow_global and normalized != "global":
+        raise ValueError("--global cannot be combined with non-global --scope")
+    return normalized
+
+
+def _normalize_types_filter(raw_types: Optional[List[str]]) -> Optional[List[str]]:
+    if not raw_types:
+        return None
+
+    out: List[str] = []
+    seen = set()
+    for raw in raw_types:
+        parts = [p.strip() for p in str(raw).split(",") if p.strip()]
+        for part in parts:
+            t = _normalize_episodic_type(part)
+            if t in seen:
+                continue
+            seen.add(t)
+            out.append(t)
+
+    return out or None
+
+
+def _episodes_row_to_item(row: sqlite3.Row, include_payload: bool) -> Dict[str, Any]:
+    refs_obj: Any = None
+    refs_raw = row["refs_json"]
+    if refs_raw is not None:
+        try:
+            refs_obj = json.loads(refs_raw)
+        except Exception:
+            refs_obj = None
+
+    item: Dict[str, Any] = {
+        "id": int(row["id"]),
+        "event_id": row["event_id"],
+        "ts_ms": int(row["ts_ms"]),
+        "scope": row["scope"],
+        "session_id": row["session_id"],
+        "agent_id": row["agent_id"],
+        "type": row["type"],
+        "summary": row["summary"],
+        "refs": refs_obj,
+        "redacted": bool(row["redacted"]),
+        "schema_version": row["schema_version"],
+        "created_at": row["created_at"],
+    }
+
+    if include_payload:
+        payload_obj: Any = None
+        payload_raw = row["payload_json"]
+        if payload_raw is not None:
+            try:
+                payload_obj = json.loads(payload_raw)
+            except Exception:
+                payload_obj = None
+        item["payload"] = payload_obj
+
+    return item
 
 
 @dataclass
@@ -381,6 +597,30 @@ def _init_db(conn: sqlite3.Connection) -> None:
         END;
         """
     )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS episodic_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            scope TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            payload_json TEXT,
+            refs_json TEXT,
+            redacted INTEGER NOT NULL DEFAULT 0,
+            schema_version TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_episodic_event_id ON episodic_events(event_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_scope_ts ON episodic_events(scope, ts_ms);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_session_ts ON episodic_events(session_id, ts_ms);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_scope_type_ts ON episodic_events(scope, type, ts_ms);")
 
     conn.commit()
 
@@ -5555,6 +5795,419 @@ def cmd_graph_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None
     _emit(payload, bool(args.json))
 
 
+def cmd_episodes_append(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        event_type = _normalize_episodic_type(getattr(args, "type", None))
+        scope = _normalize_episodic_scope(getattr(args, "scope", None))
+        ts_ms = _parse_ts_ms(getattr(args, "ts_ms", None))
+
+        session_id = str(getattr(args, "session_id", "") or "").strip()
+        agent_id = str(getattr(args, "agent_id", "") or "").strip()
+        summary = _sanitize_str_surrogates(str(getattr(args, "summary", "") or "").strip())
+        if not session_id:
+            raise ValueError("session_id is required")
+        if not agent_id:
+            raise ValueError("agent_id is required")
+        if not summary:
+            raise ValueError("summary is required")
+
+        payload_cap = int(getattr(args, "payload_cap_bytes", EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES))
+        refs_cap = int(getattr(args, "refs_cap_bytes", EPISODIC_DEFAULT_REFS_CAP_BYTES))
+        if payload_cap <= 0 or refs_cap <= 0:
+            raise ValueError("payload/refs caps must be > 0")
+
+        payload_obj, payload_serialized, payload_size = _parse_optional_json_arg(
+            getattr(args, "payload_json", None),
+            getattr(args, "payload_file", None),
+            "payload",
+        )
+        refs_obj, refs_serialized, refs_size = _parse_optional_json_arg(
+            getattr(args, "refs_json", None),
+            getattr(args, "refs_file", None),
+            "refs",
+        )
+
+        if payload_size > payload_cap:
+            raise ValueError(f"payload exceeds cap ({payload_size} > {payload_cap} bytes)")
+        if refs_size > refs_cap:
+            raise ValueError(f"refs exceeds cap ({refs_size} > {refs_cap} bytes)")
+
+        _episodic_guard_text_fragments(
+            summary,
+            payload_serialized,
+            refs_serialized,
+            bool(getattr(args, "allow_tool_output", False)),
+        )
+
+        event_id_raw = str(getattr(args, "event_id", "") or "").strip()
+        event_id = event_id_raw or str(uuid.uuid4())
+
+        created_at = _utcnow_iso()
+        conn.execute(
+            """
+            INSERT INTO episodic_events (
+                event_id, ts_ms, scope, session_id, agent_id, type, summary,
+                payload_json, refs_json, redacted, schema_version, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            """,
+            (
+                event_id,
+                ts_ms,
+                scope,
+                session_id,
+                agent_id,
+                event_type,
+                summary,
+                payload_serialized,
+                refs_serialized,
+                EPISODIC_SCHEMA_VERSION,
+                created_at,
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as e:
+        _emit({
+            "kind": "openclaw-mem.episodes.append.v0",
+            "ok": False,
+            "error": "event_id already exists",
+            "detail": str(e),
+        }, True)
+        sys.exit(1)
+    except ValueError as e:
+        _emit({
+            "kind": "openclaw-mem.episodes.append.v0",
+            "ok": False,
+            "error": str(e),
+        }, True)
+        sys.exit(2)
+
+    out = {
+        "kind": "openclaw-mem.episodes.append.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "event": {
+            "event_id": event_id,
+            "ts_ms": ts_ms,
+            "scope": scope,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "type": event_type,
+            "summary": summary,
+            "payload_bytes": payload_size,
+            "refs_bytes": refs_size,
+            "schema_version": EPISODIC_SCHEMA_VERSION,
+            "redacted": False,
+            "payload_present": payload_obj is not None,
+            "refs_present": refs_obj is not None,
+        },
+        "caps": {
+            "payload_cap_bytes": payload_cap,
+            "refs_cap_bytes": refs_cap,
+        },
+    }
+    _emit(out, args.json)
+
+
+def _episodes_query_rows(
+    conn: sqlite3.Connection,
+    *,
+    scope: str,
+    session_id: Optional[str],
+    from_ts_ms: Optional[int],
+    to_ts_ms: Optional[int],
+    types_filter: Optional[List[str]],
+    limit: int,
+) -> List[sqlite3.Row]:
+    clauses = ["scope = ?"]
+    params: List[Any] = [scope]
+
+    if session_id:
+        clauses.append("session_id = ?")
+        params.append(session_id)
+    if from_ts_ms is not None:
+        clauses.append("ts_ms >= ?")
+        params.append(int(from_ts_ms))
+    if to_ts_ms is not None:
+        clauses.append("ts_ms <= ?")
+        params.append(int(to_ts_ms))
+    if types_filter:
+        placeholders = ",".join(["?"] * len(types_filter))
+        clauses.append(f"type IN ({placeholders})")
+        params.extend(types_filter)
+
+    sql = (
+        "SELECT id, event_id, ts_ms, scope, session_id, agent_id, type, summary, payload_json, refs_json, redacted, schema_version, created_at "
+        "FROM episodic_events "
+        f"WHERE {' AND '.join(clauses)} "
+        "ORDER BY ts_ms ASC, id ASC "
+        "LIMIT ?"
+    )
+    params.append(int(limit))
+    return conn.execute(sql, params).fetchall()
+
+
+def cmd_episodes_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
+        session_id = str(getattr(args, "session_id", "") or "").strip() or None
+        from_ts_ms = None
+        to_ts_ms = None
+        if getattr(args, "from_ts_ms", None) is not None:
+            from_ts_ms = _parse_ts_ms(getattr(args, "from_ts_ms"))
+        if getattr(args, "to_ts_ms", None) is not None:
+            to_ts_ms = _parse_ts_ms(getattr(args, "to_ts_ms"))
+        if from_ts_ms is not None and to_ts_ms is not None and from_ts_ms > to_ts_ms:
+            raise ValueError("from_ts_ms cannot be greater than to_ts_ms")
+
+        types_filter = _normalize_types_filter(getattr(args, "types", None))
+        limit = int(getattr(args, "limit", 50))
+        limit = max(1, min(EPISODIC_MAX_QUERY_LIMIT, limit))
+        include_payload = bool(getattr(args, "include_payload", False))
+    except ValueError as e:
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.query.v0",
+                "ok": False,
+                "error": str(e),
+            },
+            True,
+        )
+        sys.exit(2)
+
+    rows = _episodes_query_rows(
+        conn,
+        scope=scope,
+        session_id=session_id,
+        from_ts_ms=from_ts_ms,
+        to_ts_ms=to_ts_ms,
+        types_filter=types_filter,
+        limit=limit,
+    )
+
+    items = [_episodes_row_to_item(r, include_payload=include_payload) for r in rows]
+    out = {
+        "kind": "openclaw-mem.episodes.query.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "scope": scope,
+        "filters": {
+            "session_id": session_id,
+            "from_ts_ms": from_ts_ms,
+            "to_ts_ms": to_ts_ms,
+            "types": types_filter or [],
+            "limit": limit,
+            "include_payload": include_payload,
+        },
+        "count": len(items),
+        "items": items,
+    }
+    _emit(out, args.json)
+
+
+def cmd_episodes_replay(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
+        session_id = str(getattr(args, "session_id", "") or "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+
+        limit = int(getattr(args, "limit", 200))
+        limit = max(1, min(EPISODIC_MAX_QUERY_LIMIT, limit))
+        include_payload = bool(getattr(args, "include_payload", False))
+    except ValueError as e:
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.replay.v0",
+                "ok": False,
+                "error": str(e),
+            },
+            True,
+        )
+        sys.exit(2)
+
+    rows = _episodes_query_rows(
+        conn,
+        scope=scope,
+        session_id=session_id,
+        from_ts_ms=None,
+        to_ts_ms=None,
+        types_filter=None,
+        limit=limit,
+    )
+    items = [_episodes_row_to_item(r, include_payload=include_payload) for r in rows]
+
+    out = {
+        "kind": "openclaw-mem.episodes.replay.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "scope": scope,
+        "session_id": session_id,
+        "count": len(items),
+        "limit": limit,
+        "include_payload": include_payload,
+        "items": items,
+    }
+    _emit(out, args.json)
+
+
+def cmd_episodes_redact(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    event_id = str(getattr(args, "event_id", "") or "").strip() or None
+    session_id = str(getattr(args, "session_id", "") or "").strip() or None
+
+    if bool(event_id) == bool(session_id):
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.redact.v0",
+                "ok": False,
+                "error": "provide exactly one of --event-id or --session-id",
+            },
+            True,
+        )
+        sys.exit(2)
+
+    replacement = str(getattr(args, "replacement", "placeholder") or "placeholder").strip().lower()
+    if replacement not in {"null", "placeholder"}:
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.redact.v0",
+                "ok": False,
+                "error": "replacement must be 'null' or 'placeholder'",
+            },
+            True,
+        )
+        sys.exit(2)
+
+    payload_value: Optional[str]
+    if replacement == "null":
+        payload_value = None
+    else:
+        payload_value = _json_compact_dumps(EPISODIC_REDACT_PLACEHOLDER)
+
+    try:
+        if event_id:
+            cur = conn.execute(
+                "UPDATE episodic_events SET payload_json = ?, redacted = 1 WHERE event_id = ?",
+                (payload_value, event_id),
+            )
+            redacted_count = int(cur.rowcount)
+            scope = None
+        else:
+            scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
+            cur = conn.execute(
+                "UPDATE episodic_events SET payload_json = ?, redacted = 1 WHERE session_id = ? AND scope = ?",
+                (payload_value, session_id, scope),
+            )
+            redacted_count = int(cur.rowcount)
+        conn.commit()
+    except ValueError as e:
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.redact.v0",
+                "ok": False,
+                "error": str(e),
+            },
+            True,
+        )
+        sys.exit(2)
+
+    out = {
+        "kind": "openclaw-mem.episodes.redact.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "target": {
+            "event_id": event_id,
+            "session_id": session_id,
+            "scope": scope,
+        },
+        "replacement": replacement,
+        "redacted_count": redacted_count,
+    }
+    _emit(out, args.json)
+
+
+def _parse_retention_policy(raw: Optional[List[str]]) -> Dict[str, Optional[int]]:
+    policy: Dict[str, Optional[int]] = dict(EPISODIC_DEFAULT_RETENTION_DAYS)
+    if not raw:
+        return policy
+
+    for entry in raw:
+        text = str(entry or "").strip()
+        if not text:
+            continue
+        if "=" not in text:
+            raise ValueError(f"invalid --policy entry: {text}")
+        type_raw, days_raw = text.split("=", 1)
+        event_type = _normalize_episodic_type(type_raw)
+        days_token = days_raw.strip().lower()
+        if days_token in {"forever", "inf", "infinite", "none"}:
+            policy[event_type] = None
+            continue
+        try:
+            days = int(days_token)
+        except Exception as e:
+            raise ValueError(f"invalid retention days for {event_type}: {days_raw}") from e
+        if days < 0:
+            raise ValueError(f"retention days must be >= 0 for {event_type}")
+        policy[event_type] = days
+
+    return policy
+
+
+def cmd_episodes_gc(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
+        now_ts_ms = _parse_ts_ms(getattr(args, "now_ts_ms", None))
+        policy = _parse_retention_policy(getattr(args, "policy", None))
+    except ValueError as e:
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.gc.v0",
+                "ok": False,
+                "error": str(e),
+            },
+            True,
+        )
+        sys.exit(2)
+
+    deleted_by_type: Dict[str, int] = {}
+    deleted_total = 0
+
+    for event_type in sorted(EPISODIC_ALLOWED_TYPES):
+        days = policy.get(event_type)
+        if days is None:
+            deleted_by_type[event_type] = 0
+            continue
+
+        cutoff = now_ts_ms - (int(days) * 24 * 60 * 60 * 1000)
+        cur = conn.execute(
+            "DELETE FROM episodic_events WHERE scope = ? AND type = ? AND ts_ms < ?",
+            (scope, event_type, int(cutoff)),
+        )
+        deleted = int(cur.rowcount)
+        deleted_by_type[event_type] = deleted
+        deleted_total += deleted
+
+    conn.commit()
+
+    policy_days = {k: policy.get(k) for k in sorted(EPISODIC_ALLOWED_TYPES)}
+    out = {
+        "kind": "openclaw-mem.episodes.gc.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "scope": scope,
+        "now_ts_ms": now_ts_ms,
+        "deleted_total": deleted_total,
+        "deleted_by_type": deleted_by_type,
+        "policy_days": policy_days,
+    }
+    _emit(out, args.json)
+
+
 def build_parser() -> argparse.ArgumentParser:
     epilog = (
         "Examples:\n"
@@ -5572,6 +6225,10 @@ def build_parser() -> argparse.ArgumentParser:
         "  # Docs memory (hybrid FTS + vector)\n"
         "  openclaw-mem docs ingest --path ./docs --json\n"
         "  openclaw-mem docs search \"hybrid retrieval\" --trace --json\n"
+        "\n"
+        "  # Episodic events ledger (v0)\n"
+        "  openclaw-mem episodes append --scope openclaw-mem --session-id s1 --agent-id lyria --type conversation.user --summary \"Asked for update\" --json\n"
+        "  openclaw-mem episodes query --scope openclaw-mem --session-id s1 --limit 50 --json\n"
         "\n"
         "  # AI compression (requires API key via env or ~/.openclaw/openclaw.json)\n"
         "  export OPENAI_API_KEY=sk-...\n"
@@ -5894,6 +6551,65 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--window", type=int, default=2)
     g.set_defaults(func=cmd_graph_export)
 
+    sp = sub.add_parser("episodes", help="Append/query/redact/gc for episodic session events")
+    add_common(sp)
+    esub = sp.add_subparsers(dest="episodes_cmd", required=True)
+
+    e = esub.add_parser("append", help="Append one episodic event row")
+    add_common(e)
+    e.add_argument("--event-id", help="Stable event id (default: auto-generated UUIDv4)")
+    e.add_argument("--ts-ms", type=int, help="Event timestamp in unix ms (default: now)")
+    e.add_argument("--scope", required=True, help="Scope token (normalized; required)")
+    e.add_argument("--session-id", required=True, help="Session/run id (required)")
+    e.add_argument("--agent-id", required=True, help="Logical actor id (required)")
+    e.add_argument("--type", required=True, help="Event type enum (e.g. tool.result)")
+    e.add_argument("--summary", required=True, help="Short human-readable summary")
+    e.add_argument("--payload-json", help="Optional payload JSON string")
+    e.add_argument("--payload-file", help="Optional payload JSON file")
+    e.add_argument("--refs-json", help="Optional refs JSON string")
+    e.add_argument("--refs-file", help="Optional refs JSON file")
+    e.add_argument("--payload-cap-bytes", type=int, default=EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES, help="Payload size cap in bytes (default: 8192)")
+    e.add_argument("--refs-cap-bytes", type=int, default=EPISODIC_DEFAULT_REFS_CAP_BYTES, help="Refs size cap in bytes (default: 4096)")
+    e.add_argument("--allow-tool-output", action="store_true", help="Allow tool-output/secret-like content (default: reject)")
+    e.set_defaults(func=cmd_episodes_append)
+
+    e = esub.add_parser("query", help="Query episodic events (summary-only by default)")
+    add_common(e)
+    e.add_argument("--scope", help="Scope token. Required unless --global")
+    e.add_argument("--global", dest="global_scope", action="store_true", help="Explicitly query global scope")
+    e.add_argument("--session-id", help="Optional session filter")
+    e.add_argument("--from-ts-ms", type=int, help="Inclusive lower bound unix ms")
+    e.add_argument("--to-ts-ms", type=int, help="Inclusive upper bound unix ms")
+    e.add_argument("--type", dest="types", action="append", help="Event type filter (repeatable or comma-separated)")
+    e.add_argument("--limit", type=int, default=50, help="Max rows (default: 50, max: 500)")
+    e.add_argument("--include-payload", action="store_true", help="Include payload object in output")
+    e.set_defaults(func=cmd_episodes_query)
+
+    e = esub.add_parser("replay", help="Replay one session timeline")
+    add_common(e)
+    e.add_argument("session_id", help="Session id")
+    e.add_argument("--scope", help="Scope token. Required unless --global")
+    e.add_argument("--global", dest="global_scope", action="store_true", help="Explicitly query global scope")
+    e.add_argument("--limit", type=int, default=200, help="Max rows (default: 200, max: 500)")
+    e.add_argument("--include-payload", action="store_true", help="Include payload object in output")
+    e.set_defaults(func=cmd_episodes_replay)
+
+    e = esub.add_parser("redact", help="Redact payloads by event_id or session_id")
+    add_common(e)
+    e.add_argument("--event-id", help="Redact one event by event_id")
+    e.add_argument("--session-id", help="Redact all events in a session (requires scope unless --global)")
+    e.add_argument("--scope", help="Scope token for session redaction")
+    e.add_argument("--global", dest="global_scope", action="store_true", help="Explicitly target global scope")
+    e.add_argument("--replacement", choices=["null", "placeholder"], default="placeholder", help="Payload replacement strategy (default: placeholder)")
+    e.set_defaults(func=cmd_episodes_redact)
+
+    e = esub.add_parser("gc", help="Apply retention policy and delete old episodic events")
+    add_common(e)
+    e.add_argument("--scope", help="Scope token. Required unless --global")
+    e.add_argument("--global", dest="global_scope", action="store_true", help="Explicitly target global scope")
+    e.add_argument("--now-ts-ms", type=int, help="Retention reference time in unix ms (default: now)")
+    e.add_argument("--policy", action="append", help="Override retention policy TYPE=DAYS or TYPE=forever (repeatable)")
+    e.set_defaults(func=cmd_episodes_gc)
 
     sp = sub.add_parser("store", help="Proactively store a memory")
     add_common(sp)

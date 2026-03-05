@@ -1,6 +1,6 @@
 # Episodic Events Ledger (v0) — append-only session timeline for OpenClaw agents
 
-Status: **DRAFT**
+Status: **IMPLEMENTED (v0)**
 
 Owner: `openclaw-mem` (sidecar / SQLite ledger). Optional read-only projection via `openclaw-mem-engine` can come later.
 
@@ -101,6 +101,36 @@ Add a new command group:
 
 All commands support `--json` and emit a stable receipt schema.
 
+### Operator usage (v0)
+
+```bash
+# append one event
+openclaw-mem episodes append \
+  --scope openclaw-mem \
+  --session-id sess-001 \
+  --agent-id lyria \
+  --type conversation.user \
+  --summary "Asked for status" \
+  --payload-json '{"intent":"status"}' \
+  --refs-json '{"recordRef":"obs:42"}' \
+  --json
+
+# query is scope-bound by default (summary-only)
+openclaw-mem episodes query --scope openclaw-mem --session-id sess-001 --limit 50 --json
+
+# include payload only when needed
+openclaw-mem episodes query --scope openclaw-mem --session-id sess-001 --include-payload --json
+
+# replay shorthand (ordered timeline)
+openclaw-mem episodes replay sess-001 --scope openclaw-mem --json
+
+# redact payloads while preserving rows
+openclaw-mem episodes redact --session-id sess-001 --scope openclaw-mem --replacement placeholder --json
+
+# retention GC (aggregate receipt only)
+openclaw-mem episodes gc --scope openclaw-mem --json
+```
+
 ### OpenClaw tool surfaces (optional)
 If/when we expose this to agents directly, prefer *read-only by default*:
 
@@ -151,13 +181,13 @@ Introduce a simple retention policy (v0):
 
 ## Acceptance checklist (v0)
 
-- [ ] DB migration: table + indexes created (idempotent).
-- [ ] `episodes append` validates scope/type and enforces payload size caps.
-- [ ] `episodes query` supports `scope/session_id/from/to/types/limit` and is deterministic.
-- [ ] Summary-only default confirmed by tests.
-- [ ] Redaction command works (payload removed; redacted flag set).
-- [ ] Retention GC produces an aggregate receipt.
-- [ ] Scope isolation tests: scope X cannot query scope Y.
+- [x] DB migration: table + indexes created (idempotent).
+- [x] `episodes append` validates scope/type and enforces payload size caps.
+- [x] `episodes query` supports `scope/session_id/from/to/types/limit` and is deterministic.
+- [x] Summary-only default confirmed by tests.
+- [x] Redaction command works (payload removed; redacted flag set).
+- [x] Retention GC produces an aggregate receipt.
+- [x] Scope isolation tests: scope X cannot query scope Y.
 
 ## Rollback
 - Feature-flag the command group; disable without schema drop.
