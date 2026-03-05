@@ -111,6 +111,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("{TASK}: renew reminders"))
         self.assertTrue(_summary_has_task_marker("《task》 clean notes"))
         self.assertTrue(_summary_has_task_marker("〖task〗 clean notes"))
+        self.assertTrue(_summary_has_task_marker("〘task〙 clean notes"))
         self.assertTrue(_summary_has_task_marker("「TODO」 rotate runbook"))
         self.assertTrue(_summary_has_task_marker("《TASK》 renew reminders"))
         self.assertTrue(_summary_has_task_marker("『task』renew reminders"))
@@ -184,6 +185,7 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("«TODOLIST» clean old notes"))
         self.assertFalse(_summary_has_task_marker("〈TODOLIST〉 clean old notes"))
         self.assertFalse(_summary_has_task_marker("‹TODOLIST› clean old notes"))
+        self.assertFalse(_summary_has_task_marker("〘TODOLIST〙 clean old notes"))
         self.assertTrue(_summary_has_task_marker("[TODO]clean old notes"))
         self.assertTrue(_summary_has_task_marker("「TODO」clean old notes"))
         self.assertTrue(_summary_has_task_marker("『TODO』clean old notes"))
@@ -192,6 +194,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("〈TODO〉clean old notes"))
         self.assertTrue(_summary_has_task_marker("‹TODO›clean old notes"))
         self.assertTrue(_summary_has_task_marker("〖TODO〗clean old notes"))
+        self.assertTrue(_summary_has_task_marker("〘TODO〙clean old notes"))
         self.assertTrue(_summary_has_task_marker("【TODO】clean old notes"))
         self.assertTrue(_summary_has_task_marker("〔TODO〕clean old notes"))
         self.assertTrue(_summary_has_task_marker("-TODO clean old notes"))
@@ -1670,6 +1673,7 @@ class TestCliM0(unittest.TestCase):
             "《TODO》rotate on-call notes",
             "〔TODO〕rotate on-call notes",
             "〖TODO〗rotate on-call notes",
+            "〘TODO〙rotate on-call notes",
             "[☑]TODO: rotate on-call notes",
         )
 
