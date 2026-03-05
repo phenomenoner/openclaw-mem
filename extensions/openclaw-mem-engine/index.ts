@@ -709,7 +709,7 @@ function applyPrependContextBudget(input: {
   const droppedIds: string[] = [];
   const minRecentSlots = Math.min(Math.max(0, input.cfg.minRecentSlots), activeSlots.length);
 
-  if (beforeChars > input.cfg.maxChars && input.cfg.overflowAction === "truncate_oldest") {
+  if (beforeChars > input.cfg.maxChars) {
     const protectedIds = new Set(
       [...activeSlots]
         .sort((a, b) => {
@@ -720,20 +720,34 @@ function applyPrependContextBudget(input: {
         .map((slot) => slot.id),
     );
 
-    const removable = [...activeSlots]
-      .filter((slot) => !protectedIds.has(slot.id))
-      .sort((a, b) => {
-        if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
-        return a.id.localeCompare(b.id);
-      });
+    if (input.cfg.overflowAction === "truncate_oldest") {
+      const removable = [...activeSlots]
+        .filter((slot) => !protectedIds.has(slot.id))
+        .sort((a, b) => {
+          if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+          return a.id.localeCompare(b.id);
+        });
 
-    for (const slot of removable) {
-      const nextSlots = activeSlots.filter((candidate) => candidate.id !== slot.id);
-      const nextContext = composePrependContext(input.receiptComment, nextSlots);
-      droppedIds.push(slot.id);
-      activeSlots = nextSlots;
-      if (nextContext.length <= input.cfg.maxChars) {
-        break;
+      for (const slot of removable) {
+        const nextSlots = activeSlots.filter((candidate) => candidate.id !== slot.id);
+        const nextContext = composePrependContext(input.receiptComment, nextSlots);
+        droppedIds.push(slot.id);
+        activeSlots = nextSlots;
+        if (nextContext.length <= input.cfg.maxChars) {
+          break;
+        }
+      }
+    } else if (input.cfg.overflowAction === "truncate_tail") {
+      const removable = [...activeSlots].filter((slot) => !protectedIds.has(slot.id)).reverse();
+
+      for (const slot of removable) {
+        const nextSlots = activeSlots.filter((candidate) => candidate.id !== slot.id);
+        const nextContext = composePrependContext(input.receiptComment, nextSlots);
+        droppedIds.push(slot.id);
+        activeSlots = nextSlots;
+        if (nextContext.length <= input.cfg.maxChars) {
+          break;
+        }
       }
     }
   }
@@ -3676,48 +3690,68 @@ const memoryPlugin = {
             });
 
             const seedReceiptComment = seedReceipt ? renderAutoRecallReceiptComment(seedReceipt, receiptsCfg) : "";
-            const initialBudget = applyPrependContextBudget({
+            let finalBudget = applyPrependContextBudget({
               slots,
               receiptComment: seedReceiptComment,
               cfg: budgetCfg,
             });
 
-            const finalReceipt = emitAutoRecallReceipt({
-              skipped: false,
-              rejected: tiered.rejected,
-              tierCounts: tiered.tierCounts,
-              ftsResults: tiered.ftsResults,
-              vecResults: tiered.vecResults,
-              fusedResults: tiered.selected,
-              injectedCount: initialBudget.keptSlots,
-              fallback: tiered.fallback,
-              budget: initialBudget.budget,
-            });
+            // Fixed-point: receipt comment includes injectedCount, which can slightly change length.
+            // Iterate a couple times to keep the logged receipt consistent with the final injected context.
+            for (let iter = 0; iter < 3; iter += 1) {
+              const candidateReceipt = emitAutoRecallReceipt({
+                skipped: false,
+                rejected: tiered.rejected,
+                tierCounts: tiered.tierCounts,
+                ftsResults: tiered.ftsResults,
+                vecResults: tiered.vecResults,
+                fusedResults: tiered.selected,
+                injectedCount: finalBudget.keptSlots,
+                fallback: tiered.fallback,
+                budget: finalBudget.budget,
+              });
 
-            if (finalReceipt) {
-              api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(finalReceipt)}`);
+              const candidateReceiptComment = candidateReceipt
+                ? renderAutoRecallReceiptComment(candidateReceipt, receiptsCfg)
+                : "";
+
+              const nextBudget = applyPrependContextBudget({
+                slots,
+                receiptComment: candidateReceiptComment,
+                cfg: budgetCfg,
+              });
+
+              const stable =
+                nextBudget.keptSlots === finalBudget.keptSlots &&
+                nextBudget.budget.afterChars === finalBudget.budget.afterChars;
+
+              finalBudget = nextBudget;
+
+              if (stable) {
+                if (candidateReceipt) {
+                  api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(candidateReceipt)}`);
+                }
+                break;
+              }
+
+              if (iter === 2 && candidateReceipt) {
+                api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(candidateReceipt)}`);
+              }
             }
 
-            if (initialBudget.budget.truncated && scopePolicyCfg.fallbackMarker) {
+            if (finalBudget.budget.truncated && budgetCfg.enabled) {
               api.logger.info(
                 `openclaw-mem-engine:contextBudget ${JSON.stringify({
-                  beforeChars: initialBudget.budget.beforeChars,
-                  afterChars: initialBudget.budget.afterChars,
-                  droppedIds: initialBudget.budget.droppedIds,
-                  droppedCount: initialBudget.budget.droppedCount,
-                  truncatedChars: initialBudget.budget.truncatedChars,
+                  beforeChars: finalBudget.budget.beforeChars,
+                  afterChars: finalBudget.budget.afterChars,
+                  droppedIds: finalBudget.budget.droppedIds,
+                  droppedCount: finalBudget.budget.droppedCount,
+                  truncatedChars: finalBudget.budget.truncatedChars,
                 })}`,
               );
             }
 
-            const finalReceiptComment = finalReceipt ? renderAutoRecallReceiptComment(finalReceipt, receiptsCfg) : "";
-            const finalContext = applyPrependContextBudget({
-              slots,
-              receiptComment: finalReceiptComment,
-              cfg: budgetCfg,
-            });
-
-            return { prependContext: finalContext.prependContext };
+            return { prependContext: finalBudget.prependContext };
           } catch (err) {
             api.logger.warn(`openclaw-mem-engine: autoRecall failed: ${String(err)}`);
           }

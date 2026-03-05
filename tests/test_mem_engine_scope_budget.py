@@ -122,7 +122,12 @@ def test_scope_budget_contract_markers_present_in_ts_and_schema():
     assert "openclaw-mem-engine:contextBudget" in ts
     assert "validationMode === \"strict\"" in ts
     assert "overflowAction === \"truncate_oldest\"" in ts
+    assert "input.cfg.overflowAction === \"truncate_tail\"" in ts
     assert "minRecentSlotsHonored" in ts
+
+    # Budget marker must not be gated by scope fallback marker.
+    assert "initialBudget.budget.truncated && scopePolicyCfg.fallbackMarker" not in ts
+    assert "finalBudget.budget.truncated && budgetCfg.enabled" in ts
 
     # Config surface defaults
     scope_policy = plugin["configSchema"]["properties"]["scopePolicy"]["oneOf"][1]["properties"]

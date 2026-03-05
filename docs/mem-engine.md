@@ -135,9 +135,11 @@ Write-path hardening:
 
 Packing semantics:
 - budget is enforced at the **very end** of autoRecall packing (`prependContext`) independent of `maxItems`
-- if overflow occurs, oldest slots are dropped first while honoring `minRecentSlots`
-- if still above cap, tail truncation is applied to guarantee deterministic hard ceiling
-- truncation emits an observable `openclaw-mem-engine:contextBudget` marker (before/after chars + dropped ids/count)
+- if overflow occurs:
+  - `truncate_oldest`: drop **oldest-by-createdAt** slots first, while protecting the `minRecentSlots` most-recent slots
+  - `truncate_tail`: drop from the **tail of the selected/relevance-ordered list** first (least relevant), still protecting `minRecentSlots`
+- if still above cap (e.g. receiptComment itself is large), final tail slicing is applied to guarantee a deterministic hard ceiling
+- when truncation happens and `budget.enabled=true`, emit `openclaw-mem-engine:contextBudget` marker (before/after chars + dropped ids/count)
 
 Example config snippet:
 
