@@ -970,13 +970,18 @@ function tokenJaccardSimilarity(a: string, b: string): number {
   return union > 0 ? overlap / union : 0;
 }
 
+const SUBSTRING_NEAR_DUPLICATE_MIN_CHARS = 30;
+
 function isNearDuplicateText(a: string, b: string, threshold: number): boolean {
   const aNorm = normalizeForDedupe(a);
   const bNorm = normalizeForDedupe(b);
   if (!aNorm || !bNorm) return false;
   if (aNorm === bNorm) return true;
 
-  if ((aNorm.includes(bNorm) || bNorm.includes(aNorm)) && Math.min(aNorm.length, bNorm.length) >= 18) {
+  if (
+    (aNorm.includes(bNorm) || bNorm.includes(aNorm)) &&
+    Math.min(aNorm.length, bNorm.length) >= SUBSTRING_NEAR_DUPLICATE_MIN_CHARS
+  ) {
     return true;
   }
 
@@ -1937,12 +1942,22 @@ class MemoryDB {
     const safeMinCreatedAt = Number.isFinite(minCreatedAt) ? Math.max(0, Math.floor(minCreatedAt)) : 0;
     const where = `${scopeFilterExpr(scope)} AND category = 'todo' AND createdAt >= ${safeMinCreatedAt}`;
 
-    const rows = await this.table!
+    const query = this.table!
       .query()
       .select([...MEMORY_SCALAR_COLUMNS])
-      .where(where)
-      .limit(safeLimit)
-      .toArray();
+      .where(where);
+
+    type QueryWithOrderBy = {
+      orderBy?: (expr: string) => { limit: (limit: number) => { toArray: () => Promise<any[]> } };
+      limit: (limit: number) => { toArray: () => Promise<any[]> };
+    };
+
+    const maybeOrderedQuery = query as unknown as QueryWithOrderBy;
+
+    const rows =
+      typeof maybeOrderedQuery.orderBy === "function"
+        ? await maybeOrderedQuery.orderBy("createdAt DESC").limit(safeLimit).toArray()
+        : await maybeOrderedQuery.limit(Math.min(1024, safeLimit * 4)).toArray();
 
     return rows
       .map((row) => toMemoryScalarRow(row))
@@ -1950,7 +1965,8 @@ class MemoryDB {
       .sort((a, b) => {
         if (b.createdAt !== a.createdAt) return b.createdAt - a.createdAt;
         return a.id.localeCompare(b.id);
-      });
+      })
+      .slice(0, safeLimit);
   }
 
   async hasId(id: string): Promise<boolean> {
@@ -3906,6 +3922,7 @@ const memoryPlugin = {
             const dedupeNowMs = Date.now();
             const todoDedupeCutoff = todoDedupeCutoffMs(dedupeNowMs, autoCaptureCfg.todoDedupeWindowHours);
             const recentTodoTextsByScope = new Map<string, string[]>();
+            const warnedTodoFetchFailureScopes = new Set<string>();
 
             const captures: Array<{
               text: string;
@@ -3974,7 +3991,24 @@ const memoryPlugin = {
 
                   let recentTodoTexts = recentTodoTextsByScope.get(scopeInfo.scope);
                   if (!recentTodoTexts) {
-                    const recentTodos = await db.listRecentTodosByScope(scopeInfo.scope, todoDedupeCutoff, 64).catch(() => []);
+                    let recentTodos: MemoryScalarRow[] = [];
+                    try {
+                      recentTodos = await db.listRecentTodosByScope(scopeInfo.scope, todoDedupeCutoff, 64);
+                    } catch (err) {
+                      if (!warnedTodoFetchFailureScopes.has(scopeInfo.scope)) {
+                        warnedTodoFetchFailureScopes.add(scopeInfo.scope);
+                        api.logger.warn(
+                          `openclaw-mem-engine:todoGuardrail ${JSON.stringify({
+                            phase: "capture",
+                            warning: "listRecentTodosByScope_failed",
+                            scope: scopeInfo.scope,
+                            cutoff: todoDedupeCutoff,
+                            error: String(err ?? "unknown").slice(0, 240),
+                          })}`,
+                        );
+                      }
+                    }
+
                     recentTodoTexts = recentTodos
                       .filter((row) => isTodoWithinDedupeWindow(row.createdAt, dedupeNowMs, autoCaptureCfg.todoDedupeWindowHours))
                       .map((row) => row.text)

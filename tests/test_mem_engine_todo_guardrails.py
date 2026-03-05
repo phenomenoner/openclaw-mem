@@ -12,8 +12,10 @@ def test_todo_guardrail_contract_markers_and_schema_defaults():
     # Contract markers in TS implementation.
     assert "openclaw-mem-engine:todoGuardrail" in ts
     assert "listRecentTodosByScope" in ts
+    assert "listRecentTodosByScope_failed" in ts
     assert "isTodoWithinDedupeWindow" in ts
     assert "isTodoStale(" in ts
+    assert "SUBSTRING_NEAR_DUPLICATE_MIN_CHARS = 30" in ts
     assert '"maxTodoPerTurn"' in ts
     assert '"todoDedupeWindowHours"' in ts
     assert '"todoStaleTtlDays"' in ts
