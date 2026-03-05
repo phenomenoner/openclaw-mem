@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Added episodic auto-mode sidecar flow:
+  - `extensions/openclaw-mem` can now emit bounded episodic spool JSONL (`tool.call`, `tool.result`, `ops.alert`) under feature flag `config.episodes.enabled`.
+  - new CLI command `openclaw-mem episodes ingest --file <jsonl> --state <state.json> [--truncate|--rotate]` ingests deterministically via offset state and appends into `episodic_events`.
+- Added guardrails for episodic ingest/capture:
+  - summary-first defaults
+  - bounded payload/refs with deterministic truncation metadata
+  - no raw stdout/stderr persistence by default
 - `openclaw-mem-engine` now supports configurable embedding clamp knobs (`embedding.maxChars`, `embedding.headChars`, `embedding.maxBytes`) and enforces them in both recall/store paths.
 - Memory recall/store now fail-open when embeddings are unavailable, provider errors, or input is over long:
   - `memory_recall` still returns lexical (FTS) results when vector path is skipped.
@@ -25,7 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `memory_recall` + `autoRecall` now optionally consult docs cold lane only when hot lane is insufficient (`minHotItems`)
   - bounded receipt/log markers: `openclaw-mem-engine:docsColdLane.ingest`, `openclaw-mem-engine:docsColdLane.search`, plus optional `coldLane` block in recall lifecycle receipts.
 
+### Docs
+- Added `docs/specs/episodic-auto-capture-v0.md` (capture scope, safety posture, config defaults, cron wiring, rollback).
+- Updated `README.md`, `docs/auto-capture.md`, and `docs/deployment.md` with a manual-vs-auto episodic guide and verification steps.
+
 ### Testing
+- Added episodic ingest regression tests (`tests/test_episodes_ingest.py`) for offset state handling, invalid JSON lines, bounded payload behavior, and deterministic query ordering after ingest.
+- Added plugin contract checks (`tests/test_plugin_episodic_spool.py`) for episodic spool schema + event-type emission markers.
 - `test_triage_json_contract_v0` now writes a temporary cron jobs fixture and passes `--cron-jobs-path`, preventing host-state coupling to `~/.openclaw/cron/jobs.json`.
 - Added docs-cold-lane contract tests (`test_mem_engine_docs_cold_lane.py`) for config schema defaults, trust/provenance markers, and runtime marker wiring.
 

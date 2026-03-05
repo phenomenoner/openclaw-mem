@@ -2,6 +2,8 @@
 
 Status: **IMPLEMENTED (v0)**
 
+Auto-mode addendum: `docs/specs/episodic-auto-capture-v0.md`
+
 Owner: `openclaw-mem` (sidecar / SQLite ledger). Optional read-only projection via `openclaw-mem-engine` can come later.
 
 ## Problem

@@ -34,6 +34,8 @@ nav:
   - Releases: https://github.com/phenomenoner/openclaw-mem/releases
   - Specs:
       - Docs memory (hybrid search v0): specs/docs-memory-hybrid-search-v0.md
+      - Episodic events ledger (v0): specs/episodic-events-ledger-v0.md
+      - Episodic auto-capture (v0): specs/episodic-auto-capture-v0.md
       - Graphic memory (GraphRAG-lite PRD): specs/graphic-memory-graphrag-lite-prd.md
   - Reference:
       - Ecosystem fit: ecosystem-fit.md

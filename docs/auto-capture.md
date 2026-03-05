@@ -1,69 +1,46 @@
 # Auto-Capture Plugin (`openclaw-mem`)
 
-Status: **PARTIAL** (capture-only; sidecar by design).
+Status: **IMPLEMENTED (sidecar)**
 
 ## Overview
 
-The OpenClaw plugin in `extensions/openclaw-mem/` is **capture-only**:
+The OpenClaw plugin in `extensions/openclaw-mem/` now supports two parallel lanes:
 
-- listens to `tool_result_persist`
-- writes compact JSONL observations for later ingestion into the local SQLite store
+1. **Observations lane** (existing)
+   - listens to `tool_result_persist`
+   - appends compact observation JSONL (`openclaw-mem-observations.jsonl`)
+2. **Episodic auto lane** (new, optional)
+   - emits bounded episodic events JSONL (`openclaw-mem-episodes.jsonl`)
+   - ingested later by `openclaw-mem episodes ingest` into SQLite table `episodic_events`
 
-For explicit long-term memory writes/reads, use CLI directly:
-- `openclaw-mem store ...`
-- `openclaw-mem hybrid ...`
+The plugin remains sidecar-only (no slot ownership).
 
-### Ecosystem boundaries (why this is sidecar-only)
+### Ecosystem boundaries
 
-- `memory-core` and `memory-lancedb` are the canonical OpenClaw memory backends.
-- `openclaw-mem` focuses on capture, local ingest/recall, and operations visibility.
-- This keeps backend migration and rollback low-risk: slot ownership stays native, while capture/audit remains continuous.
+- `memory-core` / `memory-lancedb` stay canonical slot backends.
+- `openclaw-mem` provides capture + local ingest/query + auditability.
 
-If you want the full deployment matrix, see `docs/ecosystem-fit.md`.
-
-> Note: if you want **autoRecall/autoCapture** at the *memory backend* layer, that is provided by the optional slot backend **`openclaw-mem-engine`** (not this capture-only plugin). See: `docs/mem-engine.md`.
+For backend-layer auto recall/capture, use optional `openclaw-mem-engine` (`docs/mem-engine.md`).
 
 ---
 
 ## Features
 
-✅ Automatic capture (append-only JSONL)  
-✅ Include/exclude filtering for noisy tools  
-✅ Smart summaries (compact extraction from tool results)  
-✅ Optional message capture with truncation  
-✅ Best-effort secret redaction before persisting
+✅ Observation auto-capture JSONL  
+✅ Episodic auto spool (tool.call / tool.result / ops.alert)  
+✅ Summary-first bounded payload/refs  
+✅ Secret/output guardrails  
+✅ Deterministic offset-based episodic ingest receipts
 
 ---
 
 ## Installation
 
-The plugin source is at: `extensions/openclaw-mem/`.
-
-### Option 1: Symlink (recommended)
+Plugin source: `extensions/openclaw-mem/`
 
 ```bash
-# From openclaw-mem repo root
 ln -s "$(pwd)/extensions/openclaw-mem" ~/.openclaw/plugins/openclaw-mem
 openclaw gateway restart
-```
-
-### Option 2: Copy
-
-```bash
-cp -r extensions/openclaw-mem ~/.openclaw/plugins/
-openclaw gateway restart
-```
-
-### Option 3: Plugin load path
-
-```json
-{
-  "plugins": {
-    "load": {
-      "paths": ["/path/to/openclaw-mem/extensions/openclaw-mem"]
-    }
-  }
-}
 ```
 
 ---
@@ -80,7 +57,6 @@ Add to `~/.openclaw/openclaw.json`:
         "enabled": true,
         "config": {
           "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl",
-          "enabled": true,
           "captureMessage": false,
           "maxMessageLength": 1000,
           "redactSensitive": true,
@@ -88,7 +64,18 @@ Add to `~/.openclaw/openclaw.json`:
           "annotateMemoryTools": true,
           "memoryToolNames": ["memory_search", "memory_get", "memory_store", "memory_recall", "memory_forget"],
           "includeTools": [],
-          "excludeTools": ["web_fetch"]
+          "excludeTools": ["web_fetch"],
+          "episodes": {
+            "enabled": true,
+            "outputPath": "~/.openclaw/memory/openclaw-mem-episodes.jsonl",
+            "scope": "global",
+            "captureToolCall": true,
+            "captureToolResult": true,
+            "captureOpsAlert": true,
+            "payloadCapBytes": 2048,
+            "refsCapBytes": 1024,
+            "maxSummaryLength": 220
+          }
         }
       }
     }
@@ -96,78 +83,71 @@ Add to `~/.openclaw/openclaw.json`:
 }
 ```
 
-Note:
-- If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), set `outputPath` under that directory (e.g. `/some/dir/memory/openclaw-mem-observations.jsonl`).
-
-### Config options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enabled` | boolean | `true` | Enable/disable capture behavior inside the plugin |
-| `outputPath` | string | `~/.openclaw/memory/openclaw-mem-observations.jsonl` *(or under `OPENCLAW_STATE_DIR` if set)* | JSONL output file |
-| `captureMessage` | boolean | `false` | Include full tool message (truncated) |
-| `maxMessageLength` | number | `1000` | Max message length per content block |
-| `redactSensitive` | boolean | `true` | Redact common secret patterns before persisting |
-| `includeTools` | string[] | `[]` | Allowlist (if set, only these tools are captured) |
-| `excludeTools` | string[] | `[]` | Denylist (excluded tools are not captured) |
-| `backendMode` | string | `auto` | Memory backend annotation mode (`auto`, `memory-core`, `memory-lancedb`) |
-| `annotateMemoryTools` | boolean | `true` | Write backend/tool metadata into `detail_json` |
-| `memoryToolNames` | string[] | canonical set | Tool names treated as memory actions for annotations |
-
-Note:
-- If both `includeTools` and `excludeTools` are empty, all tools are captured.
+Important:
+- If using `OPENCLAW_STATE_DIR`, keep both spool paths under that state dir.
+- Episodic auto mode is feature-flagged via `episodes.enabled` (default false).
 
 ---
 
-## Output format
+## Manual mode vs auto mode
 
-Each captured tool execution is written as a single-line JSON object:
+### Manual mode
 
-```jsonl
-{"ts":"2026-02-05T20:00:00.000Z","kind":"tool","tool_name":"web_search","tool_call_id":"toolu_01ABC","session_key":"agent:main:main","agent_id":"main","is_synthetic":false,"summary":"searched for OpenClaw docs"}
+```bash
+openclaw-mem episodes append ...
+openclaw-mem episodes query ...
+openclaw-mem episodes replay <session_id> ...
 ```
 
-Fields:
-- `ts` — ISO 8601 timestamp
-- `kind` — currently always `"tool"`
-- `tool_name` — tool that was executed
-- `tool_call_id` — unique call id
-- `session_key` — OpenClaw session identifier
-- `agent_id` — agent id
-- `is_synthetic` — true if synthesized by guard/repair logic
-- `summary` — compact summary extracted from tool result
-- `message` — (optional) full tool message if `captureMessage=true`
+### Auto mode
+
+1) enable `config.episodes.enabled=true`  
+2) ingest episodic spool on schedule:
+
+```bash
+uv run python -m openclaw_mem episodes ingest \
+  --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
+  --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json \
+  --json
+```
+
+Optional spool maintenance in same command:
+- `--truncate`
+- `--rotate`
+
+Both are safe-guarded to only apply after full snapshot consumption.
 
 ---
 
-## Usage workflow
+## What auto mode captures (v0)
 
-### 1) Enable plugin + verify capture
+Captured:
+- `tool.call`
+- `tool.result`
+- `ops.alert`
 
-```bash
-tail -f ~/.openclaw/memory/openclaw-mem-observations.jsonl
-```
+Not captured by default:
+- full conversation transcripts
+- raw stdout/stderr blobs
 
-### 2) Ingest into SQLite
+Safety posture: summary-first, bounded payload, no raw tool output persistence by default.
 
-```bash
-cd /path/to/openclaw-mem
-uv run --python 3.13 --frozen -- python -m openclaw_mem ingest \
-  --file ~/.openclaw/memory/openclaw-mem-observations.jsonl --json
-```
+---
 
-### 3) Search
-
-```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem search "web_search" --json
-```
-
-### 4) Explicit memory write/read (CLI)
+## Verification
 
 ```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem store "Prefer dark theme" --category preference --importance 0.8 --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "theme preference" --limit 5 --json
+# 1) trigger some tool usage in OpenClaw
+# 2) run ingest
+uv run python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json
+
+# 3) query latest episodic rows
+uv run python -m openclaw_mem episodes query --global --limit 20 --json
 ```
+
+Expected:
+- ingest receipt `inserted` increases after activity
+- query `count` grows
 
 ---
 
@@ -175,31 +155,26 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "theme preference
 
 ### Plugin not capturing
 
-1. Check plugin is loaded:
-   ```bash
-   openclaw plugins list | grep openclaw-mem
-   ```
+1. `openclaw plugins list | grep openclaw-mem`
+2. `openclaw config get | jq '.plugins.entries["openclaw-mem"]'`
+3. `tail -f ~/.openclaw/logs/gateway.log | grep openclaw-mem`
 
-2. Check config:
-   ```bash
-   openclaw config get | jq '.plugins.entries["openclaw-mem"]'
-   ```
+### Episodic ingest not moving
 
-3. Check logs:
-   ```bash
-   tail -f ~/.openclaw/logs/gateway.log | grep openclaw-mem
-   ```
+- Check state offset file exists and updates.
+- Check spool has newline-terminated lines.
+- Query receipt fields: `invalid_json`, `invalid_event`, `duplicates`, `trailing_partial_bytes`.
 
-### JSONL file growing too large
+### JSONL growing too large
 
-1. Reduce scope (`excludeTools` or `includeTools`)
-2. Keep `captureMessage=false`
-3. Rotate JSONL periodically (see `docs/deployment.md`)
+- tighten include/exclude tool filters
+- keep `captureMessage=false`
+- schedule `episodes ingest --rotate` or external log rotation
 
 ---
 
-## Next steps
+## References
 
-- Deployment patterns: `docs/deployment.md`
-- Privacy/export rules: `docs/privacy-export-rules.md`
-- Learning loop (PAI-inspired, openclaw-mem-governed): `docs/thought-links.md` (section 11) + `docs/roadmap.md` (Feedback loop)
+- `docs/specs/episodic-events-ledger-v0.md`
+- `docs/specs/episodic-auto-capture-v0.md`
+- `docs/deployment.md`

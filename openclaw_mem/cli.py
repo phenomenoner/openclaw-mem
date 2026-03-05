@@ -97,6 +97,13 @@ DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH = os.path.join(
     "openclaw-mem",
     "graph-capture-md-state.json",
 )
+DEFAULT_EPISODIC_SPOOL_PATH = os.path.join(STATE_DIR, "memory", "openclaw-mem-episodes.jsonl")
+DEFAULT_EPISODIC_INGEST_STATE_PATH = os.path.join(
+    STATE_DIR,
+    "memory",
+    "openclaw-mem",
+    "episodes-ingest-state.json",
+)
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 DEFAULT_GRAPH_CAPTURE_MD_INCLUDES = (".md",)
@@ -116,6 +123,8 @@ def _utcnow_iso() -> str:
 
 
 EPISODIC_SCHEMA_VERSION = "openclaw-mem.episodic.v0"
+EPISODIC_INGEST_STATE_SCHEMA = "openclaw-mem.episodes.ingest.state.v0"
+EPISODIC_SPOOL_SCHEMA = "openclaw-mem.episodes.spool.v0"
 EPISODIC_ALLOWED_TYPES = {
     "conversation.user",
     "conversation.assistant",
@@ -330,6 +339,161 @@ def _episodes_row_to_item(row: sqlite3.Row, include_payload: bool) -> Dict[str, 
     return item
 
 _IMPORTANCE_LABEL_KEYS = ("must_remember", "nice_to_have", "ignore", "unknown")
+
+
+_EPISODIC_FORBIDDEN_PAYLOAD_KEYS = {
+    "stdout",
+    "stderr",
+    "raw_stdout",
+    "raw_stderr",
+    "command_output",
+    "tool_output",
+}
+
+
+def _sanitize_episodic_payload(value: Any, *, depth: int = 0, max_depth: int = 5, max_items: int = 48) -> Any:
+    if depth > max_depth:
+        return "[TRUNCATED_DEPTH]"
+
+    if isinstance(value, str):
+        compact = _sanitize_str_surrogates(value)
+        if _looks_like_secret(compact):
+            return "[REDACTED_SECRET]"
+        if len(compact) > 320:
+            return compact[:320] + "…"
+        return compact
+
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        redacted_output_fields = 0
+        for i, (k, v) in enumerate(value.items()):
+            if i >= max_items:
+                out["_truncated_items"] = True
+                break
+            key = _sanitize_str_surrogates(str(k))
+            if key.strip().lower() in _EPISODIC_FORBIDDEN_PAYLOAD_KEYS:
+                redacted_output_fields += 1
+                continue
+            out[key] = _sanitize_episodic_payload(v, depth=depth + 1, max_depth=max_depth, max_items=max_items)
+        if redacted_output_fields > 0:
+            out["_redacted_output_fields"] = redacted_output_fields
+        return out
+
+    if isinstance(value, list):
+        return [
+            _sanitize_episodic_payload(v, depth=depth + 1, max_depth=max_depth, max_items=max_items)
+            for v in value[:max_items]
+        ]
+
+    return value
+
+
+def _episodic_bounded_json(value: Any, *, cap_bytes: int, label: str) -> Tuple[Optional[str], int, bool]:
+    if value is None:
+        return None, 0, False
+
+    sanitized = _sanitize_jsonable_surrogates(_sanitize_episodic_payload(value))
+    serialized = _json_compact_dumps(sanitized)
+    size = len(serialized.encode("utf-8"))
+    if size <= cap_bytes:
+        return serialized, size, False
+
+    preview = serialized[: min(256, max(32, cap_bytes // 2))]
+    truncated_obj = {
+        "_truncated": True,
+        "reason": f"{label}_cap",
+        "original_bytes": size,
+        "preview": preview,
+    }
+    serialized = _json_compact_dumps(truncated_obj)
+    size = len(serialized.encode("utf-8"))
+    if size > cap_bytes:
+        serialized = _json_compact_dumps({"_truncated": True, "reason": f"{label}_cap", "original_bytes": size})
+        size = len(serialized.encode("utf-8"))
+    return serialized, size, True
+
+
+def _normalize_episodic_spool_event(
+    obj: Dict[str, Any],
+    *,
+    fallback_event_id: str,
+    payload_cap: int,
+    refs_cap: int,
+) -> Dict[str, Any]:
+    event_id = str(obj.get("event_id") or "").strip() or fallback_event_id
+    ts_ms = _parse_ts_ms(obj.get("ts_ms"))
+    scope = _normalize_episodic_scope(obj.get("scope"))
+    session_id = _sanitize_str_surrogates(str(obj.get("session_id") or "").strip())
+    agent_id = _sanitize_str_surrogates(str(obj.get("agent_id") or "").strip())
+    event_type = _normalize_episodic_type(obj.get("type"))
+    summary = _sanitize_str_surrogates(str(obj.get("summary") or "").strip())
+
+    if not session_id:
+        raise ValueError("session_id is required")
+    if not agent_id:
+        raise ValueError("agent_id is required")
+    if not summary:
+        raise ValueError("summary is required")
+
+    payload_serialized, payload_size, payload_truncated = _episodic_bounded_json(
+        obj.get("payload"),
+        cap_bytes=payload_cap,
+        label="payload",
+    )
+    refs_serialized, refs_size, refs_truncated = _episodic_bounded_json(
+        obj.get("refs"),
+        cap_bytes=refs_cap,
+        label="refs",
+    )
+
+    _episodic_guard_text_fragments(summary, payload_serialized, refs_serialized, False)
+
+    return {
+        "event_id": event_id,
+        "ts_ms": ts_ms,
+        "scope": scope,
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "type": event_type,
+        "summary": summary,
+        "payload_json": payload_serialized,
+        "payload_bytes": payload_size,
+        "payload_truncated": payload_truncated,
+        "refs_json": refs_serialized,
+        "refs_bytes": refs_size,
+        "refs_truncated": refs_truncated,
+    }
+
+
+def _read_json_file(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise ValueError(f"invalid state file JSON: {path}") from e
+    if isinstance(data, dict):
+        return data
+    raise ValueError(f"state file must be an object: {path}")
+
+
+def _write_json_file_atomic(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=str(path.parent))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fp:
+            fp.write(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+            fp.write("\n")
+            fp.flush()
+            os.fsync(fp.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
 
 
 @dataclass
@@ -6684,6 +6848,261 @@ def cmd_episodes_replay(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     _emit(out, args.json)
 
 
+def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    source_path = Path(str(getattr(args, "file", "") or "")).expanduser().resolve()
+    state_path = Path(
+        str(getattr(args, "state", None) or DEFAULT_EPISODIC_INGEST_STATE_PATH)
+    ).expanduser().resolve()
+
+    truncate_after = bool(getattr(args, "truncate", False))
+    rotate_after = bool(getattr(args, "rotate", False))
+
+    try:
+        payload_cap = int(getattr(args, "payload_cap_bytes", EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES))
+        refs_cap = int(getattr(args, "refs_cap_bytes", EPISODIC_DEFAULT_REFS_CAP_BYTES))
+        if payload_cap <= 0 or refs_cap <= 0:
+            raise ValueError("payload/refs caps must be > 0")
+        if truncate_after and rotate_after:
+            raise ValueError("--truncate and --rotate are mutually exclusive")
+    except ValueError as e:
+        _emit({"kind": "openclaw-mem.episodes.ingest.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(2)
+
+    if not source_path.exists() or not source_path.is_file():
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.ingest.v0",
+                "ok": False,
+                "error": f"source file not found: {source_path}",
+            },
+            True,
+        )
+        sys.exit(2)
+
+    try:
+        source_stat = source_path.stat()
+    except Exception as e:
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.ingest.v0",
+                "ok": False,
+                "error": f"failed to stat source file: {source_path}",
+                "detail": str(e),
+            },
+            True,
+        )
+        sys.exit(1)
+
+    try:
+        state = _read_json_file(state_path)
+    except ValueError as e:
+        _emit({"kind": "openclaw-mem.episodes.ingest.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(2)
+
+    prev_offset = 0
+    try:
+        prev_offset = int(state.get("offset") or 0)
+    except Exception:
+        prev_offset = 0
+    prev_offset = max(0, prev_offset)
+
+    offset_recovery = None
+    if prev_offset > source_stat.st_size:
+        offset_recovery = "reset_to_zero_source_shrunk"
+        prev_offset = 0
+
+    with source_path.open("rb") as fp:
+        fp.seek(prev_offset)
+        unread = max(0, source_stat.st_size - prev_offset)
+        blob = fp.read(unread)
+
+    last_newline = blob.rfind(b"\n")
+    if last_newline < 0:
+        processed_blob = b""
+        next_offset = prev_offset
+        trailing_partial_bytes = len(blob)
+    else:
+        processed_blob = blob[: last_newline + 1]
+        trailing_partial_bytes = len(blob) - len(processed_blob)
+        next_offset = prev_offset + len(processed_blob)
+
+    line_total = 0
+    line_blank = 0
+    line_invalid_json = 0
+    line_invalid_event = 0
+    duplicates = 0
+    inserted = 0
+    payload_truncated_count = 0
+    refs_truncated_count = 0
+    errors_sample: List[str] = []
+
+    cursor = prev_offset
+    now_iso = _utcnow_iso()
+
+    for raw_line in processed_blob.splitlines(keepends=True):
+        line_start = cursor
+        cursor += len(raw_line)
+
+        line = raw_line.rstrip(b"\r\n")
+        if not line.strip():
+            line_blank += 1
+            continue
+
+        line_total += 1
+
+        try:
+            line_text = line.decode("utf-8")
+            line_obj = json.loads(line_text)
+            if not isinstance(line_obj, dict):
+                raise ValueError("line is not a JSON object")
+        except Exception:
+            line_invalid_json += 1
+            if len(errors_sample) < 5:
+                errors_sample.append(f"line@{line_start}: invalid_json")
+            continue
+
+        try:
+            fallback_seed = f"{line_start}:".encode("utf-8") + line
+            fallback_event_id = f"ep-{hashlib.sha256(fallback_seed).hexdigest()[:32]}"
+            event = _normalize_episodic_spool_event(
+                line_obj,
+                fallback_event_id=fallback_event_id,
+                payload_cap=payload_cap,
+                refs_cap=refs_cap,
+            )
+        except ValueError as e:
+            line_invalid_event += 1
+            if len(errors_sample) < 5:
+                errors_sample.append(f"line@{line_start}: {str(e)}")
+            continue
+
+        try:
+            conn.execute(
+                """
+                INSERT INTO episodic_events (
+                    event_id, ts_ms, scope, session_id, agent_id, type, summary,
+                    payload_json, refs_json, redacted, schema_version, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (
+                    event["event_id"],
+                    event["ts_ms"],
+                    event["scope"],
+                    event["session_id"],
+                    event["agent_id"],
+                    event["type"],
+                    event["summary"],
+                    event["payload_json"],
+                    event["refs_json"],
+                    EPISODIC_SCHEMA_VERSION,
+                    now_iso,
+                ),
+            )
+            inserted += 1
+            if bool(event.get("payload_truncated")):
+                payload_truncated_count += 1
+            if bool(event.get("refs_truncated")):
+                refs_truncated_count += 1
+        except sqlite3.IntegrityError:
+            duplicates += 1
+
+    conn.commit()
+
+    maintenance: Dict[str, Any] = {
+        "requested": "truncate" if truncate_after else "rotate" if rotate_after else "none",
+        "applied": "none",
+        "reason": None,
+        "rotated_to": None,
+    }
+
+    if truncate_after or rotate_after:
+        if next_offset != source_stat.st_size:
+            maintenance["reason"] = "pending_partial_line"
+        else:
+            current_size = source_path.stat().st_size
+            if current_size != source_stat.st_size:
+                maintenance["reason"] = "source_changed_since_snapshot"
+            else:
+                if truncate_after:
+                    source_path.parent.mkdir(parents=True, exist_ok=True)
+                    with source_path.open("w", encoding="utf-8"):
+                        pass
+                    maintenance["applied"] = "truncated"
+                    next_offset = 0
+                elif rotate_after:
+                    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                    rotated_path = source_path.with_name(f"{source_path.name}.{stamp}.ingested")
+                    suffix = 1
+                    while rotated_path.exists():
+                        suffix += 1
+                        rotated_path = source_path.with_name(f"{source_path.name}.{stamp}.ingested.{suffix}")
+                    source_path.rename(rotated_path)
+                    source_path.touch()
+                    maintenance["applied"] = "rotated"
+                    maintenance["rotated_to"] = str(rotated_path)
+                    next_offset = 0
+
+    final_stat = source_path.stat()
+    state_payload = {
+        "schema": EPISODIC_INGEST_STATE_SCHEMA,
+        "file": str(source_path),
+        "offset": int(next_offset),
+        "dev": int(final_stat.st_dev),
+        "inode": int(final_stat.st_ino),
+        "size": int(final_stat.st_size),
+        "updated_at": _utcnow_iso(),
+    }
+
+    try:
+        _write_json_file_atomic(state_path, state_payload)
+    except Exception as e:
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.ingest.v0",
+                "ok": False,
+                "error": f"failed to write state file: {state_path}",
+                "detail": str(e),
+            },
+            True,
+        )
+        sys.exit(1)
+
+    out = {
+        "kind": "openclaw-mem.episodes.ingest.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "source": {
+            "file": str(source_path),
+            "state": str(state_path),
+            "start_offset": prev_offset,
+            "next_offset": int(next_offset),
+            "snapshot_size": int(source_stat.st_size),
+            "offset_recovery": offset_recovery,
+            "trailing_partial_bytes": trailing_partial_bytes,
+            "processed_sha256": hashlib.sha256(processed_blob).hexdigest() if processed_blob else None,
+            "spool_schema": EPISODIC_SPOOL_SCHEMA,
+        },
+        "lines": {
+            "total": line_total,
+            "blank": line_blank,
+            "invalid_json": line_invalid_json,
+            "invalid_event": line_invalid_event,
+            "duplicates": duplicates,
+        },
+        "inserted": inserted,
+        "bounded": {
+            "payload_cap_bytes": payload_cap,
+            "refs_cap_bytes": refs_cap,
+            "payload_truncated": payload_truncated_count,
+            "refs_truncated": refs_truncated_count,
+        },
+        "maintenance": maintenance,
+        "errors_sample": errors_sample,
+    }
+    _emit(out, args.json)
+
+
 def cmd_episodes_redact(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     event_id = str(getattr(args, "event_id", "") or "").strip() or None
     session_id = str(getattr(args, "session_id", "") or "").strip() or None
@@ -6859,6 +7278,7 @@ def build_parser() -> argparse.ArgumentParser:
         "\n"
         "  # Episodic events ledger (v0)\n"
         "  openclaw-mem episodes append --scope openclaw-mem --session-id s1 --agent-id lyria --type conversation.user --summary \"Asked for update\" --json\n"
+        "  openclaw-mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json\n"
         "  openclaw-mem episodes query --scope openclaw-mem --session-id s1 --limit 50 --json\n"
         "\n"
         "  # AI compression (requires API key via env or ~/.openclaw/openclaw.json)\n"
@@ -7236,7 +7656,7 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--preview-chars", dest="preview_chars", type=int, default=240, help="Preview character budget (default: 240)")
     a.set_defaults(func=cmd_artifact_peek)
 
-    sp = sub.add_parser("episodes", help="Append/query/redact/gc for episodic session events")
+    sp = sub.add_parser("episodes", help="Append/ingest/query/replay/redact/gc for episodic session events")
     add_common(sp)
     esub = sp.add_subparsers(dest="episodes_cmd", required=True)
 
@@ -7257,6 +7677,20 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--refs-cap-bytes", type=int, default=EPISODIC_DEFAULT_REFS_CAP_BYTES, help="Refs size cap in bytes (default: 4096)")
     e.add_argument("--allow-tool-output", action="store_true", help="Allow tool-output/secret-like content (default: reject)")
     e.set_defaults(func=cmd_episodes_append)
+
+    e = esub.add_parser("ingest", help="Ingest episodic events from JSONL spool using an offset state file")
+    add_common(e)
+    e.add_argument("--file", required=True, help=f"Episodes spool JSONL file (e.g., {DEFAULT_EPISODIC_SPOOL_PATH})")
+    e.add_argument(
+        "--state",
+        default=DEFAULT_EPISODIC_INGEST_STATE_PATH,
+        help=f"Offset state file (default: {DEFAULT_EPISODIC_INGEST_STATE_PATH})",
+    )
+    e.add_argument("--payload-cap-bytes", type=int, default=EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES, help="Payload size cap in bytes (default: 8192)")
+    e.add_argument("--refs-cap-bytes", type=int, default=EPISODIC_DEFAULT_REFS_CAP_BYTES, help="Refs size cap in bytes (default: 4096)")
+    e.add_argument("--truncate", action="store_true", help="Truncate source spool after fully consuming current snapshot")
+    e.add_argument("--rotate", action="store_true", help="Rotate source spool after fully consuming current snapshot")
+    e.set_defaults(func=cmd_episodes_ingest)
 
     e = esub.add_parser("query", help="Query episodic events (summary-only by default)")
     add_common(e)

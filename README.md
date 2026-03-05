@@ -93,7 +93,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 
 ### Optional (OpenClaw integration) — **PARTIAL**
 
-- **Auto-capture plugin** (`extensions/openclaw-mem`): listens to `tool_result_persist` and writes JSONL for ingestion.
+- **Auto-capture plugin** (`extensions/openclaw-mem`): writes observation JSONL and (optionally) episodic JSONL (`tool.call` / `tool.result` / `ops.alert`) for ingest.
 - **Backend adapter annotations (v0.5.9)**:
   - capture layer remains sidecar-only (no tool registration)
   - records memory backend metadata (`memory-core` / `memory-lancedb`) into `detail_json`
@@ -284,11 +284,23 @@ Design notes:
 
 ---
 
-## OpenClaw plugin: auto-capture
+## OpenClaw plugin: auto-capture (manual vs auto mode)
 
 The plugin lives at `extensions/openclaw-mem`.
 
-Minimal config fragment for `~/.openclaw/openclaw.json`:
+### Manual mode (default behavior)
+
+Use CLI directly:
+
+```bash
+openclaw-mem episodes append ...
+openclaw-mem episodes query ...
+openclaw-mem episodes replay <session_id> ...
+```
+
+### Auto mode (episodic ledger)
+
+Enable episodic spool capture in plugin config + run periodic ingest job:
 
 ```jsonc
 {
@@ -301,7 +313,18 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
           "captureMessage": false,
           "redactSensitive": true,
           "backendMode": "auto",
-          "annotateMemoryTools": true
+          "annotateMemoryTools": true,
+          "episodes": {
+            "enabled": true,
+            "outputPath": "~/.openclaw/memory/openclaw-mem-episodes.jsonl",
+            "scope": "global",
+            "captureToolCall": true,
+            "captureToolResult": true,
+            "captureOpsAlert": true,
+            "payloadCapBytes": 2048,
+            "refsCapBytes": 1024,
+            "maxSummaryLength": 220
+          }
         }
       }
     }
@@ -309,15 +332,38 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
 }
 ```
 
+Ingest every 1–5 minutes:
+
+```bash
+uv run python -m openclaw_mem episodes ingest \
+  --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
+  --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json \
+  --json
+```
+
+Safety posture:
+- summary-first
+- bounded payload/refs
+- no raw stdout/stderr persisted by default
+
+Verification (quick):
+
+```bash
+# Run ingest once
+uv run python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json
+
+# Row count should increase after tool activity
+uv run python -m openclaw_mem episodes query --global --limit 20 --json
+```
+
 Notes (important):
-- If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), set `outputPath` under that directory (e.g. `/some/dir/memory/openclaw-mem-observations.jsonl`).
-- The capture hook listens to **tool results**, not raw inbound chat messages.
-- `openclaw-mem` plugin is a **sidecar adapter** (capture + annotations), not the canonical memory backend.
-- Canonical memory tools depend on your active memory slot backend (e.g., `memory-core` vs `memory-lancedb`).
-- For preferences/tasks that must be remembered reliably, use **explicit** writes via CLI (`openclaw-mem store`).
+- If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), place spool/state files under that directory.
+- The capture hook is sidecar-only (does not own memory slot backend).
+- For explicit durable preference/task memory, continue to use `openclaw-mem store`.
 
 More detail:
 - `docs/auto-capture.md`
+- `docs/specs/episodic-auto-capture-v0.md`
 
 ---
 
@@ -391,6 +437,8 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 - `docs/v0.5.9-adapter-spec.md` — minimal-risk adapter design for `memory-core`/`memory-lancedb`
 - `docs/ecosystem-fit.md` — ownership boundaries + deployment patterns (`memory-core`/`memory-lancedb` + `openclaw-mem`)
 - `docs/specs/graphic-memory-auto-capture-auto-recall.md` — Graphic Memory auto-recall/auto-capture knobs (dev)
+- `docs/specs/episodic-events-ledger-v0.md` — episodic data model + manual APIs
+- `docs/specs/episodic-auto-capture-v0.md` — episodic auto-mode (plugin spool + ingest)
 - `CHANGELOG.md` — notable changes (Keep a Changelog)
 
 ---

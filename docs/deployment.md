@@ -203,6 +203,30 @@ crontab -e
 */5 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source $HOME/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --no-update-index --json >> $HOME/.openclaw/logs/openclaw-mem-harvest.log 2>&1
 ```
 
+## 2B. Episodic auto-mode ingestion (new)
+
+When `plugins.entries["openclaw-mem"].config.episodes.enabled=true`, schedule episodic ingest every 1–5 minutes.
+
+### Cron (silent on green)
+
+```bash
+*/2 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json >/dev/null 2>&1
+```
+
+Optional daily spool rotate:
+
+```bash
+7 0 * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --rotate --json >/dev/null 2>&1
+```
+
+Verification:
+
+```bash
+uv run python -m openclaw_mem episodes query --global --limit 20 --json
+```
+
+Expected: `count` increases after tool activity.
+
 ## 3. Log Rotation
 
 ### logrotate (Linux)
