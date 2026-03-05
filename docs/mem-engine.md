@@ -339,7 +339,15 @@ Operators feel recall failure most painfully on: “we already decided this.”
 
 So the engine path should be able to **optionally** search an operator-authored docs corpus (DECISIONS / roadmaps / specs) using the same hybrid recipe (FTS + embeddings) and return bounded citations.
 
+Status (current):
+- shipped as `docsColdLane` in `openclaw-mem-engine` config
+- installable tools: `memory_docs_ingest`, `memory_docs_search`
+- `memory_recall` + `autoRecall` can consult cold lane only after hot lane is insufficient (`minHotItems`)
+- results are marked `source_kind=operator`, `trust_tier=trusted`
+- embeddings are optional/fail-open (FTS-only still works)
+
 - Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
+- Ops guide: [mem-engine-admin-ops.md](mem-engine-admin-ops.md#docs-memory-cold-lane-installable)
 - Stance: **no local LLM**; rerank (if needed) is remote + bounded.
 
 ---

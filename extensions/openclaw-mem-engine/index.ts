@@ -41,6 +41,7 @@ import {
   todoStaleCutoffMs,
   isTodoStale,
 } from "./todoGuardrails.js";
+import { docsIngestWithCli, docsSearchWithCli } from "./docsColdLane.js";
 
 // ============================================================================
 // Config
@@ -107,6 +108,44 @@ type ReceiptsConfigInput = {
   maxItems?: number;
 };
 
+type DocsScopeMappingStrategy = "none" | "repo_prefix" | "path_prefix" | "map";
+
+type DocsColdLaneConfigInput = {
+  enabled?: boolean;
+  sqlitePath?: string;
+  sourceRoots?: string[];
+  sourceGlobs?: string[];
+  maxChunkChars?: number;
+  embedOnIngest?: boolean;
+  ingestOnStart?: boolean;
+  maxItems?: number;
+  maxSnippetChars?: number;
+  minHotItems?: number;
+  searchFtsK?: number;
+  searchVecK?: number;
+  searchRrfK?: number;
+  scopeMappingStrategy?: DocsScopeMappingStrategy;
+  scopeMap?: Record<string, string[]>;
+};
+
+type DocsColdLaneConfig = {
+  enabled: boolean;
+  sqlitePath: string;
+  sourceRoots: string[];
+  sourceGlobs: string[];
+  maxChunkChars: number;
+  embedOnIngest: boolean;
+  ingestOnStart: boolean;
+  maxItems: number;
+  maxSnippetChars: number;
+  minHotItems: number;
+  searchFtsK: number;
+  searchVecK: number;
+  searchRrfK: number;
+  scopeMappingStrategy: DocsScopeMappingStrategy;
+  scopeMap: Record<string, string[]>;
+};
+
 type PluginConfig = {
   embedding?: {
     apiKey?: string;
@@ -124,6 +163,7 @@ type PluginConfig = {
   scopePolicy?: boolean | ScopePolicyConfigInput;
   budget?: boolean | RecallBudgetConfigInput;
   receipts?: boolean | ReceiptsConfigInput;
+  docsColdLane?: boolean | DocsColdLaneConfigInput;
 };
 
 const DEFAULT_DB_PATH = "~/.openclaw/memory/lancedb";
@@ -137,6 +177,10 @@ const AUTO_CAPTURE_MAX_CHARS_PER_ITEM = 320;
 const AUTO_CAPTURE_MAX_TODO_PER_TURN = 3;
 const AUTO_CAPTURE_MAX_TODO_DEDUPE_WINDOW_HOURS = 24 * 7;
 const AUTO_CAPTURE_MAX_TODO_STALE_TTL_DAYS = 90;
+const DOCS_COLD_LANE_MAX_ITEMS = 5;
+const DOCS_COLD_LANE_MAX_SNIPPET_CHARS = 600;
+const DOCS_COLD_LANE_MAX_CHUNK_CHARS = 4000;
+const DOCS_COLD_LANE_MAX_SEARCH_K = 100;
 
 type AutoRecallConfig = {
   enabled: boolean;
@@ -232,6 +276,24 @@ const DEFAULT_RECEIPTS_CONFIG: ReceiptsConfig = {
   enabled: true,
   verbosity: "low",
   maxItems: 3,
+};
+
+const DEFAULT_DOCS_COLD_LANE_CONFIG: DocsColdLaneConfig = {
+  enabled: false,
+  sqlitePath: "~/.openclaw/memory/openclaw-mem.sqlite",
+  sourceRoots: [],
+  sourceGlobs: ["**/*.md"],
+  maxChunkChars: 1400,
+  embedOnIngest: true,
+  ingestOnStart: false,
+  maxItems: 2,
+  maxSnippetChars: 280,
+  minHotItems: 2,
+  searchFtsK: 20,
+  searchVecK: 20,
+  searchRrfK: 60,
+  scopeMappingStrategy: "repo_prefix",
+  scopeMap: {},
 };
 
 function vectorDimsForModel(model: string): number {
@@ -628,6 +690,107 @@ function resolveReceiptsConfig(input: PluginConfig["receipts"]): ReceiptsConfig 
       max: MAX_RECEIPT_ITEMS,
       integer: true,
     }),
+  };
+}
+
+function resolveDocsColdLaneConfig(input: PluginConfig["docsColdLane"]): DocsColdLaneConfig {
+  const defaults = DEFAULT_DOCS_COLD_LANE_CONFIG;
+
+  if (input === false) {
+    return { ...defaults, enabled: false };
+  }
+
+  if (input === true || input == null) {
+    return { ...defaults };
+  }
+
+  if (typeof input !== "object" || Array.isArray(input)) {
+    return { ...defaults };
+  }
+
+  const raw = input as DocsColdLaneConfigInput;
+
+  const sourceRoots = Array.isArray(raw.sourceRoots)
+    ? raw.sourceRoots
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean)
+        .slice(0, 32)
+    : defaults.sourceRoots;
+
+  const sourceGlobs = Array.isArray(raw.sourceGlobs)
+    ? raw.sourceGlobs
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean)
+        .slice(0, 32)
+    : defaults.sourceGlobs;
+
+  const normalizedScopeMap: Record<string, string[]> = {};
+  if (raw.scopeMap && typeof raw.scopeMap === "object" && !Array.isArray(raw.scopeMap)) {
+    for (const [scopeKeyRaw, prefixesRaw] of Object.entries(raw.scopeMap)) {
+      const scopeKey = normalizeScopeToken(scopeKeyRaw);
+      if (!scopeKey || !Array.isArray(prefixesRaw)) continue;
+      const prefixes = prefixesRaw
+        .map((value) => (typeof value === "string" ? value.trim().replace(/^\/+/, "") : ""))
+        .filter(Boolean)
+        .slice(0, 16);
+      if (prefixes.length > 0) {
+        normalizedScopeMap[scopeKey] = prefixes;
+      }
+    }
+  }
+
+  const scopeMappingStrategy: DocsScopeMappingStrategy =
+    raw.scopeMappingStrategy === "none" ||
+    raw.scopeMappingStrategy === "repo_prefix" ||
+    raw.scopeMappingStrategy === "path_prefix" ||
+    raw.scopeMappingStrategy === "map"
+      ? raw.scopeMappingStrategy
+      : defaults.scopeMappingStrategy;
+
+  return {
+    enabled: normalizeBoolean(raw.enabled, defaults.enabled),
+    sqlitePath: typeof raw.sqlitePath === "string" && raw.sqlitePath.trim() ? raw.sqlitePath.trim() : defaults.sqlitePath,
+    sourceRoots,
+    sourceGlobs: sourceGlobs.length > 0 ? sourceGlobs : defaults.sourceGlobs,
+    maxChunkChars: normalizeNumberInRange(raw.maxChunkChars, defaults.maxChunkChars, {
+      min: 200,
+      max: DOCS_COLD_LANE_MAX_CHUNK_CHARS,
+      integer: true,
+    }),
+    embedOnIngest: normalizeBoolean(raw.embedOnIngest, defaults.embedOnIngest),
+    ingestOnStart: normalizeBoolean(raw.ingestOnStart, defaults.ingestOnStart),
+    maxItems: normalizeNumberInRange(raw.maxItems, defaults.maxItems, {
+      min: 1,
+      max: DOCS_COLD_LANE_MAX_ITEMS,
+      integer: true,
+    }),
+    maxSnippetChars: normalizeNumberInRange(raw.maxSnippetChars, defaults.maxSnippetChars, {
+      min: 80,
+      max: DOCS_COLD_LANE_MAX_SNIPPET_CHARS,
+      integer: true,
+    }),
+    minHotItems: normalizeNumberInRange(raw.minHotItems, defaults.minHotItems, {
+      min: 0,
+      max: AUTO_RECALL_MAX_ITEMS,
+      integer: true,
+    }),
+    searchFtsK: normalizeNumberInRange(raw.searchFtsK, defaults.searchFtsK, {
+      min: 1,
+      max: DOCS_COLD_LANE_MAX_SEARCH_K,
+      integer: true,
+    }),
+    searchVecK: normalizeNumberInRange(raw.searchVecK, defaults.searchVecK, {
+      min: 1,
+      max: DOCS_COLD_LANE_MAX_SEARCH_K,
+      integer: true,
+    }),
+    searchRrfK: normalizeNumberInRange(raw.searchRrfK, defaults.searchRrfK, {
+      min: 1,
+      max: 200,
+      integer: true,
+    }),
+    scopeMappingStrategy,
+    scopeMap: Object.keys(normalizedScopeMap).length > 0 ? normalizedScopeMap : defaults.scopeMap,
   };
 }
 
@@ -1204,6 +1367,34 @@ type RecallBudgetReceipt = {
   minRecentSlotsHonored: boolean;
 };
 
+type DocsColdLaneHit = {
+  id: string;
+  recordRef: string;
+  title: string;
+  headingPath: string;
+  text: string;
+  path: string;
+  repo: string;
+  docKind: string;
+  score: number;
+  match: string[];
+  source_kind: "operator";
+  trust_tier: "trusted";
+};
+
+type RecallColdLaneReceipt = {
+  enabled: boolean;
+  consulted: boolean;
+  trigger: "insufficient_hot" | "manual" | "disabled";
+  scope: string;
+  strategy: DocsScopeMappingStrategy;
+  requested: number;
+  returned: number;
+  filteredByScope: number;
+  sourceRootsCount: number;
+  error?: string;
+};
+
 type RecallLifecycleReceipt = {
   schema: "openclaw-mem-engine.recall.receipt.v1";
   verbosity: ReceiptsVerbosity;
@@ -1221,6 +1412,7 @@ type RecallLifecycleReceipt = {
   injectedCount: number;
   fallback?: RecallFallbackReceipt;
   budget?: RecallBudgetReceipt;
+  coldLane?: RecallColdLaneReceipt;
 };
 
 type AutoCaptureLifecycleReceipt = {
@@ -1313,6 +1505,7 @@ function buildRecallLifecycleReceipt(input: {
   injectedCount: number;
   fallback?: RecallFallbackReceipt;
   budget?: RecallBudgetReceipt;
+  coldLane?: RecallColdLaneReceipt;
 }): RecallLifecycleReceipt {
   const maxItems = clampReceiptItems(input.cfg.maxItems, input.cfg);
   const tierCounts = input.tierCounts.slice(0, 6).map((item) => ({
@@ -1339,6 +1532,7 @@ function buildRecallLifecycleReceipt(input: {
     injectedCount: Math.max(0, Math.floor(input.injectedCount)),
     fallback: input.fallback,
     budget: input.budget,
+    coldLane: input.coldLane,
   };
 }
 
@@ -1385,6 +1579,13 @@ function renderAutoRecallReceiptComment(receipt: RecallLifecycleReceipt, cfg: Re
           consulted: receipt.fallback.consulted,
           usedScopes: receipt.fallback.usedScopes,
           contributed: receipt.fallback.contributed,
+        }
+      : undefined,
+    coldLane: receipt.coldLane
+      ? {
+          consulted: receipt.coldLane.consulted,
+          returned: receipt.coldLane.returned,
+          strategy: receipt.coldLane.strategy,
         }
       : undefined,
   };
@@ -2203,7 +2404,17 @@ const memoryEngineConfigSchema = {
     const cfg = value as Record<string, unknown>;
     assertAllowedKeys(
       cfg,
-      ["embedding", "dbPath", "tableName", "autoRecall", "autoCapture", "scopePolicy", "budget", "receipts"],
+      [
+        "embedding",
+        "dbPath",
+        "tableName",
+        "autoRecall",
+        "autoCapture",
+        "scopePolicy",
+        "budget",
+        "receipts",
+        "docsColdLane",
+      ],
       "openclaw-mem-engine config",
     );
 
@@ -2354,6 +2565,75 @@ const memoryEngineConfigSchema = {
       };
     };
 
+    const parseDocsColdLane = (raw: unknown): PluginConfig["docsColdLane"] => {
+      if (raw == null) return undefined;
+      if (typeof raw === "boolean") return raw;
+      if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("docsColdLane must be a boolean or object");
+      }
+
+      const obj = raw as Record<string, unknown>;
+      assertAllowedKeys(
+        obj,
+        [
+          "enabled",
+          "sqlitePath",
+          "sourceRoots",
+          "sourceGlobs",
+          "maxChunkChars",
+          "embedOnIngest",
+          "ingestOnStart",
+          "maxItems",
+          "maxSnippetChars",
+          "minHotItems",
+          "searchFtsK",
+          "searchVecK",
+          "searchRrfK",
+          "scopeMappingStrategy",
+          "scopeMap",
+        ],
+        "docsColdLane config",
+      );
+
+      const scopeMap: Record<string, string[]> | undefined =
+        obj.scopeMap && typeof obj.scopeMap === "object" && !Array.isArray(obj.scopeMap)
+          ? Object.fromEntries(
+              Object.entries(obj.scopeMap as Record<string, unknown>).map(([k, value]) => [
+                k,
+                Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [],
+              ]),
+            )
+          : undefined;
+
+      return {
+        enabled: typeof obj.enabled === "boolean" ? obj.enabled : undefined,
+        sqlitePath: typeof obj.sqlitePath === "string" ? obj.sqlitePath : undefined,
+        sourceRoots: Array.isArray(obj.sourceRoots)
+          ? obj.sourceRoots.filter((item): item is string => typeof item === "string")
+          : undefined,
+        sourceGlobs: Array.isArray(obj.sourceGlobs)
+          ? obj.sourceGlobs.filter((item): item is string => typeof item === "string")
+          : undefined,
+        maxChunkChars: typeof obj.maxChunkChars === "number" ? obj.maxChunkChars : undefined,
+        embedOnIngest: typeof obj.embedOnIngest === "boolean" ? obj.embedOnIngest : undefined,
+        ingestOnStart: typeof obj.ingestOnStart === "boolean" ? obj.ingestOnStart : undefined,
+        maxItems: typeof obj.maxItems === "number" ? obj.maxItems : undefined,
+        maxSnippetChars: typeof obj.maxSnippetChars === "number" ? obj.maxSnippetChars : undefined,
+        minHotItems: typeof obj.minHotItems === "number" ? obj.minHotItems : undefined,
+        searchFtsK: typeof obj.searchFtsK === "number" ? obj.searchFtsK : undefined,
+        searchVecK: typeof obj.searchVecK === "number" ? obj.searchVecK : undefined,
+        searchRrfK: typeof obj.searchRrfK === "number" ? obj.searchRrfK : undefined,
+        scopeMappingStrategy:
+          obj.scopeMappingStrategy === "none" ||
+          obj.scopeMappingStrategy === "repo_prefix" ||
+          obj.scopeMappingStrategy === "path_prefix" ||
+          obj.scopeMappingStrategy === "map"
+            ? obj.scopeMappingStrategy
+            : undefined,
+        scopeMap,
+      };
+    };
+
     return {
       embedding,
       dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : undefined,
@@ -2363,6 +2643,7 @@ const memoryEngineConfigSchema = {
       scopePolicy: parseScopePolicy(cfg.scopePolicy),
       budget: parseBudget(cfg.budget),
       receipts: parseReceipts(cfg.receipts),
+      docsColdLane: parseDocsColdLane(cfg.docsColdLane),
     };
   },
   uiHints: {
@@ -2498,6 +2779,51 @@ const memoryEngineConfigSchema = {
       help: "Maximum item count for top-hit arrays and tier slices",
       advanced: true,
     },
+    "docsColdLane.enabled": {
+      label: "Docs Cold Lane",
+      help: "Enable bounded docs ingest/search lane for operator-authored markdown",
+      advanced: true,
+    },
+    "docsColdLane.sqlitePath": {
+      label: "Docs SQLite Path",
+      help: "SQLite file used by openclaw-mem docs ingest/search",
+      advanced: true,
+    },
+    "docsColdLane.sourceRoots": {
+      label: "Docs Source Roots",
+      help: "Allowlisted roots for docs ingest (repeatable)",
+      advanced: true,
+    },
+    "docsColdLane.sourceGlobs": {
+      label: "Docs Source Globs",
+      help: "Allowlisted markdown globs relative to each root",
+      advanced: true,
+    },
+    "docsColdLane.scopeMappingStrategy": {
+      label: "Docs Scope Mapping",
+      help: "none | repo_prefix | path_prefix | map",
+      advanced: true,
+    },
+    "docsColdLane.maxChunkChars": {
+      label: "Docs Chunk Max Chars",
+      help: "Chunk size passed to docs ingest (bounded)",
+      advanced: true,
+    },
+    "docsColdLane.maxItems": {
+      label: "Docs Max Recall Items",
+      help: "Maximum docs snippets returned per recall/search",
+      advanced: true,
+    },
+    "docsColdLane.maxSnippetChars": {
+      label: "Docs Snippet Max Chars",
+      help: "Maximum snippet chars per returned docs hit",
+      advanced: true,
+    },
+    "docsColdLane.minHotItems": {
+      label: "Docs Trigger Hot Threshold",
+      help: "Consult docs lane only when hot memories are below this count",
+      advanced: true,
+    },
   },
 };
 
@@ -2516,6 +2842,7 @@ const memoryPlugin = {
     const scopePolicyCfg = resolveScopePolicyConfig(cfg.scopePolicy);
     const budgetCfg = resolveRecallBudgetConfig(cfg.budget);
     const receiptsCfg = resolveReceiptsConfig(cfg.receipts);
+    const docsColdLaneCfg = resolveDocsColdLaneConfig(cfg.docsColdLane);
 
     const model = cfg.embedding?.model ?? DEFAULT_MODEL;
     const vectorDim = vectorDimsForModel(model);
@@ -2525,12 +2852,18 @@ const memoryPlugin = {
     const resolvedDbPath = resolveStateRelativePath(api, cfg.dbPath, DEFAULT_DB_PATH);
     const tableName = (cfg.tableName ?? DEFAULT_TABLE_NAME).trim() || DEFAULT_TABLE_NAME;
 
+    const docsColdLaneResolved: DocsColdLaneConfig = {
+      ...docsColdLaneCfg,
+      sqlitePath: resolveStateRelativePath(api, docsColdLaneCfg.sqlitePath, docsColdLaneCfg.sqlitePath),
+      sourceRoots: docsColdLaneCfg.sourceRoots.map((root) => resolveStateRelativePath(api, root, root)),
+    };
+
     const db = new MemoryDB(resolvedDbPath, tableName, vectorDim);
     const embeddingClampCfg = resolveEmbeddingClampConfig(cfg.embedding);
     const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model, embeddingClampCfg) : null;
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, lazyInit=true)`,
     );
 
     const resolveAdminFilters = (input: {
@@ -2541,6 +2874,135 @@ const memoryPlugin = {
       const category = normalizeAdminCategory(input.category);
       return { scope, category };
     };
+
+    const runDocsColdLaneIngest = async (input: {
+      sourceRoots?: string[];
+      sourceGlobs?: string[];
+      maxChunkChars?: number;
+      embedOnIngest?: boolean;
+      trigger: "startup" | "tool";
+    }) => {
+      const roots = Array.isArray(input.sourceRoots) && input.sourceRoots.length > 0
+        ? input.sourceRoots.map((root) => resolveStateRelativePath(api, root, root))
+        : docsColdLaneResolved.sourceRoots;
+
+      const sourceGlobs = Array.isArray(input.sourceGlobs) && input.sourceGlobs.length > 0
+        ? input.sourceGlobs
+        : docsColdLaneResolved.sourceGlobs;
+
+      const maxChunkChars =
+        typeof input.maxChunkChars === "number" && Number.isFinite(input.maxChunkChars)
+          ? Math.max(200, Math.min(DOCS_COLD_LANE_MAX_CHUNK_CHARS, Math.floor(input.maxChunkChars)))
+          : docsColdLaneResolved.maxChunkChars;
+
+      const embedOnIngest =
+        typeof input.embedOnIngest === "boolean" ? input.embedOnIngest : docsColdLaneResolved.embedOnIngest;
+
+      const result = await docsIngestWithCli({
+        sqlitePath: docsColdLaneResolved.sqlitePath,
+        sourceRoots: roots,
+        sourceGlobs,
+        maxChunkChars,
+        embedOnIngest,
+      });
+
+      api.logger.info(
+        `openclaw-mem-engine:docsColdLane.ingest ${JSON.stringify({
+          trigger: input.trigger,
+          enabled: docsColdLaneResolved.enabled,
+          sqlitePath: docsColdLaneResolved.sqlitePath,
+          sourceRoots: roots,
+          sourceGlobs,
+          maxChunkChars,
+          embedOnIngest,
+          receipt: result.receipt,
+          error: result.error ?? null,
+        })}`,
+      );
+
+      return {
+        ...result,
+        effective: {
+          sqlitePath: docsColdLaneResolved.sqlitePath,
+          sourceRoots: roots,
+          sourceGlobs,
+          maxChunkChars,
+          embedOnIngest,
+        },
+      };
+    };
+
+    const runDocsColdLaneSearch = async (input: {
+      query: string;
+      scope: string;
+      limit: number;
+      trigger: "manual" | "insufficient_hot";
+    }): Promise<{ hits: DocsColdLaneHit[]; receipt: RecallColdLaneReceipt }> => {
+      if (!docsColdLaneResolved.enabled) {
+        return {
+          hits: [],
+          receipt: {
+            enabled: false,
+            consulted: false,
+            trigger: "disabled",
+            scope: input.scope,
+            strategy: docsColdLaneResolved.scopeMappingStrategy,
+            requested: input.limit,
+            returned: 0,
+            filteredByScope: 0,
+            sourceRootsCount: docsColdLaneResolved.sourceRoots.length,
+          },
+        };
+      }
+
+      const boundedLimit = Math.max(1, Math.min(docsColdLaneResolved.maxItems, input.limit));
+      const result = await docsSearchWithCli({
+        sqlitePath: docsColdLaneResolved.sqlitePath,
+        query: input.query,
+        scope: input.scope,
+        limit: boundedLimit,
+        maxSnippetChars: docsColdLaneResolved.maxSnippetChars,
+        searchFtsK: docsColdLaneResolved.searchFtsK,
+        searchVecK: docsColdLaneResolved.searchVecK,
+        searchRrfK: docsColdLaneResolved.searchRrfK,
+        scopeMappingStrategy: docsColdLaneResolved.scopeMappingStrategy,
+        scopeMap: docsColdLaneResolved.scopeMap,
+      });
+
+      const receipt: RecallColdLaneReceipt = {
+        enabled: true,
+        consulted: true,
+        trigger: input.trigger,
+        scope: input.scope,
+        strategy: docsColdLaneResolved.scopeMappingStrategy,
+        requested: boundedLimit,
+        returned: result.items.length,
+        filteredByScope: result.filteredByScope,
+        sourceRootsCount: docsColdLaneResolved.sourceRoots.length,
+        error: result.error,
+      };
+
+      api.logger.info(
+        `openclaw-mem-engine:docsColdLane.search ${JSON.stringify({
+          trigger: input.trigger,
+          scope: input.scope,
+          requested: boundedLimit,
+          returned: result.items.length,
+          filteredByScope: result.filteredByScope,
+          strategy: docsColdLaneResolved.scopeMappingStrategy,
+          sqlitePath: docsColdLaneResolved.sqlitePath,
+          error: result.error ?? null,
+        })}`,
+      );
+
+      return { hits: result.items as DocsColdLaneHit[], receipt };
+    };
+
+    if (docsColdLaneResolved.enabled && docsColdLaneResolved.ingestOnStart) {
+      void runDocsColdLaneIngest({ trigger: "startup" }).catch((err) => {
+        api.logger.warn(`openclaw-mem-engine:docsColdLane.ingest failed: ${String(err)}`);
+      });
+    }
 
     const listMemories = async (input: {
       scope?: unknown;
@@ -3018,6 +3480,7 @@ const memoryPlugin = {
             policyTier?: string;
             fallback?: RecallFallbackReceipt;
             budget?: RecallBudgetReceipt;
+            coldLane?: RecallColdLaneReceipt;
           }) => {
             const tierCounts = input.tierCounts ?? [];
             const ftsResults = input.ftsResults ?? [];
@@ -3040,6 +3503,7 @@ const memoryPlugin = {
                   injectedCount: input.injectedCount ?? 0,
                   fallback: input.fallback,
                   budget: input.budget,
+                  coldLane: input.coldLane,
                 })
               : undefined;
 
@@ -3062,6 +3526,7 @@ const memoryPlugin = {
                 normalized: scopeResolved.normalized,
               },
               fallback: input.fallback,
+              coldLane: input.coldLane,
               lifecycle,
             };
           };
@@ -3157,6 +3622,24 @@ const memoryPlugin = {
 
           const combinedRejected = uniqueReasons([...(preRejected ?? []), ...(tiered.rejected ?? [])]);
 
+          let docsHits: DocsColdLaneHit[] = [];
+          let coldLaneReceipt: RecallColdLaneReceipt | undefined;
+
+          if (
+            docsColdLaneResolved.enabled &&
+            normalizedQuery.length > 0 &&
+            memories.length < Math.max(0, docsColdLaneResolved.minHotItems)
+          ) {
+            const docs = await runDocsColdLaneSearch({
+              query: normalizedQuery,
+              scope,
+              limit: Math.max(1, normalizedLimit - memories.length),
+              trigger: "insufficient_hot",
+            });
+            docsHits = docs.hits;
+            coldLaneReceipt = docs.receipt;
+          }
+
           const receipt = buildReceiptPayload({
             skipped: false,
             rejected: combinedRejected,
@@ -3164,8 +3647,9 @@ const memoryPlugin = {
             ftsResults: tiered.ftsResults,
             vecResults: tiered.vecResults,
             fusedResults: tiered.selected,
-            injectedCount: memories.length,
+            injectedCount: memories.length + docsHits.length,
             fallback: tiered.fallback,
+            coldLane: coldLaneReceipt,
           });
 
           const warningPrefix = (() => {
@@ -3178,18 +3662,19 @@ const memoryPlugin = {
             return "";
           })();
 
-          if (memories.length === 0) {
+          if (memories.length === 0 && docsHits.length === 0) {
             return {
               content: [{ type: "text", text: `${warningPrefix}No relevant memories found.` }],
               details: {
                 count: 0,
                 memories: [],
+                docs: [],
                 receipt,
               },
             };
           }
 
-          const lines = memories
+          const memoryLines = memories
             .map((m, i) => {
               const scorePct = (m.score * 100).toFixed(0);
               const preview = m.text.length > 240 ? `${m.text.slice(0, 240)}…` : m.text;
@@ -3197,11 +3682,24 @@ const memoryPlugin = {
             })
             .join("\n");
 
+          const docsLines = docsHits
+            .map((hit, idx) => `${idx + 1}. [${hit.docKind}|trusted/operator] ${hit.text} (${hit.recordRef})`)
+            .join("\n");
+
+          const sections: string[] = [];
+          if (memoryLines) {
+            sections.push(`Memories (${memories.length}):\n${memoryLines}`);
+          }
+          if (docsLines) {
+            sections.push(`Docs cold lane (${docsHits.length}):\n${docsLines}`);
+          }
+
           return {
-            content: [{ type: "text", text: `${warningPrefix}Found ${memories.length} memories:\n\n${lines}` }],
+            content: [{ type: "text", text: `${warningPrefix}Found ${memories.length + docsHits.length} relevant items:\n\n${sections.join("\n\n")}` }],
             details: {
-              count: memories.length,
+              count: memories.length + docsHits.length,
               memories,
+              docs: docsHits,
               receipt,
             },
           };
@@ -3637,15 +4135,136 @@ const memoryPlugin = {
       { name: "memory_import" },
     );
 
+    api.registerTool(
+      {
+        name: "memory_docs_ingest",
+        label: "Memory Docs Ingest",
+        description: "Ingest allowlisted operator-authored markdown docs into docs cold lane index.",
+        parameters: Type.Object({
+          sourceRoots: Type.Optional(Type.Array(Type.String({ description: "Root path allowlist (repeatable)" }))),
+          sourceGlobs: Type.Optional(Type.Array(Type.String({ description: "Glob allowlist relative to roots" }))),
+          maxChunkChars: Type.Optional(Type.Number({ description: "Chunk size upper bound (chars)" })),
+          embedOnIngest: Type.Optional(Type.Boolean({ description: "Generate embeddings if API key is available" })),
+        }),
+        async execute(_toolCallId: string, params: unknown) {
+          const parsed = params as {
+            sourceRoots?: string[];
+            sourceGlobs?: string[];
+            maxChunkChars?: number;
+            embedOnIngest?: boolean;
+          };
+
+          const result = await runDocsColdLaneIngest({
+            sourceRoots: parsed.sourceRoots,
+            sourceGlobs: parsed.sourceGlobs,
+            maxChunkChars: parsed.maxChunkChars,
+            embedOnIngest: parsed.embedOnIngest,
+            trigger: "tool",
+          });
+
+          const text = result.error
+            ? `Docs cold lane ingest completed with warnings: ${result.error}`
+            : `Docs cold lane ingest complete (files=${result.receipt.filesMatched}, batches=${result.receipt.batches}, changed=${result.receipt.chunks_inserted + result.receipt.chunks_updated}).`;
+
+          return {
+            content: [{ type: "text", text }],
+            details: {
+              receipt: result.receipt,
+              effective: result.effective,
+              error: result.error ?? null,
+            },
+          };
+        },
+      },
+      { name: "memory_docs_ingest" },
+    );
+
+    api.registerTool(
+      {
+        name: "memory_docs_search",
+        label: "Memory Docs Search",
+        description: "Search docs cold lane snippets (trusted/operator markdown).",
+        parameters: Type.Object({
+          query: Type.String({ description: "Search query" }),
+          limit: Type.Optional(Type.Number({ description: "Max snippets (bounded)" })),
+          scope: Type.Optional(Type.String({ description: "Scope hint for scope-aware filtering" })),
+        }),
+        async execute(_toolCallId: string, params: unknown) {
+          const parsed = params as { query: string; limit?: number; scope?: string };
+          const query = String(parsed.query ?? "").trim();
+          if (!query) {
+            return {
+              content: [{ type: "text", text: "No docs query provided." }],
+              details: {
+                count: 0,
+                hits: [],
+                receipt: {
+                  enabled: docsColdLaneResolved.enabled,
+                  consulted: false,
+                  trigger: docsColdLaneResolved.enabled ? "manual" : "disabled",
+                  scope: "global",
+                  strategy: docsColdLaneResolved.scopeMappingStrategy,
+                  requested: 0,
+                  returned: 0,
+                  filteredByScope: 0,
+                  sourceRootsCount: docsColdLaneResolved.sourceRoots.length,
+                } as RecallColdLaneReceipt,
+              },
+            };
+          }
+
+          const scopeResolved = resolveScope({
+            explicitScope: parsed.scope,
+            text: query,
+            policy: scopePolicyCfg,
+          });
+
+          const limit = clampLimit(parsed.limit);
+          const docs = await runDocsColdLaneSearch({
+            query,
+            scope: scopeResolved.scope,
+            limit,
+            trigger: "manual",
+          });
+
+          if (docs.hits.length === 0) {
+            return {
+              content: [{ type: "text", text: "No docs cold-lane matches found." }],
+              details: {
+                count: 0,
+                hits: [],
+                receipt: docs.receipt,
+              },
+            };
+          }
+
+          const lines = docs.hits
+            .map((hit, idx) => `${idx + 1}. [${hit.docKind}] ${hit.text} (${hit.recordRef})`)
+            .join("\n");
+
+          return {
+            content: [{ type: "text", text: `Found ${docs.hits.length} docs snippets:\n\n${lines}` }],
+            details: {
+              count: docs.hits.length,
+              hits: docs.hits,
+              receipt: docs.receipt,
+            },
+          };
+        },
+      },
+      { name: "memory_docs_search" },
+    );
+
     // ----------------------------------------------------------------------
     // Lifecycle hooks (M1)
     // ----------------------------------------------------------------------
 
     if (autoRecallCfg.enabled) {
       if (!embeddings) {
-        api.logger.warn("openclaw-mem-engine: autoRecall enabled but embeddings are unavailable");
-      } else {
-        api.on("before_agent_start", async (event) => {
+        api.logger.warn("openclaw-mem-engine: autoRecall enabled but embeddings are unavailable (FTS/docs fail-open)");
+      }
+
+      api.on("before_agent_start", async (event) => {
           const prompt = typeof event.prompt === "string" ? event.prompt : "";
           const trimmedPrompt = prompt.trim();
           const scopeInfo = resolveScope({ text: trimmedPrompt, policy: scopePolicyCfg });
@@ -3661,6 +4280,7 @@ const memoryPlugin = {
             injectedCount?: number;
             fallback?: RecallFallbackReceipt;
             budget?: RecallBudgetReceipt;
+            coldLane?: RecallColdLaneReceipt;
           }) => {
             if (!receiptsCfg.enabled) return undefined;
             return buildRecallLifecycleReceipt({
@@ -3677,6 +4297,7 @@ const memoryPlugin = {
               injectedCount: input.injectedCount ?? 0,
               fallback: input.fallback,
               budget: input.budget,
+              coldLane: input.coldLane,
             });
           };
 
@@ -3711,22 +4332,19 @@ const memoryPlugin = {
               Math.min(MAX_RECALL_LIMIT, limit * Math.max(1, autoRecallCfg.tierSearchMultiplier)),
             );
 
-            let vector: number[];
-            try {
-              vector = await embeddings.embed(trimmedPrompt);
-            } catch (err) {
-              const tooLong = isEmbeddingInputTooLongError(err);
-              const reason: RecallRejectionReason = tooLong ? "embedding_input_too_long" : "provider_unavailable";
+            const preRejected: RecallRejectionReason[] = [];
+            let vector: number[] | null = null;
 
-              const receipt = emitAutoRecallReceipt({
-                skipped: true,
-                skipReason: reason,
-                rejected: [reason],
-              });
-              if (receipt) {
-                api.logger.warn(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
+            if (!embeddings) {
+              preRejected.push("provider_unavailable");
+            } else {
+              try {
+                vector = await embeddings.embed(trimmedPrompt);
+              } catch (err) {
+                const tooLong = isEmbeddingInputTooLongError(err);
+                preRejected.push(tooLong ? "embedding_input_too_long" : "provider_unavailable");
+                vector = null;
               }
-              return;
             }
 
             const plans: RecallTierPlan[] = [
@@ -3747,11 +4365,13 @@ const memoryPlugin = {
               search: async ({ query: textQuery, scope, labels, searchLimit }) => {
                 const [ftsResults, vecResults] = await Promise.all([
                   db.fullTextSearch(textQuery, searchLimit, scope, labels).catch(() => []),
-                  db.vectorSearch(vector, searchLimit, scope, labels).catch(() => []),
+                  vector ? db.vectorSearch(vector, searchLimit, scope, labels).catch(() => []) : Promise.resolve([]),
                 ]);
                 return { ftsResults, vecResults };
               },
             });
+
+            const combinedRejected = uniqueReasons([...(preRejected ?? []), ...(tiered.rejected ?? [])]);
 
             if (scopePolicyCfg.fallbackMarker && tiered.fallback.consulted) {
               api.logger.info(
@@ -3793,24 +4413,25 @@ const memoryPlugin = {
               );
             }
 
-            if (selectedForInjection.length === 0) {
-              const receipt = emitAutoRecallReceipt({
-                skipped: false,
-                rejected: tiered.rejected,
-                tierCounts: tiered.tierCounts,
-                ftsResults: tiered.ftsResults,
-                vecResults: tiered.vecResults,
-                fusedResults: selectedForInjection,
-                injectedCount: 0,
-                fallback: tiered.fallback,
+            let docsForInjection: DocsColdLaneHit[] = [];
+            let coldLaneReceipt: RecallColdLaneReceipt | undefined;
+
+            if (
+              docsColdLaneResolved.enabled &&
+              trimmedPrompt.length > 0 &&
+              selectedForInjection.length < Math.max(0, docsColdLaneResolved.minHotItems)
+            ) {
+              const docs = await runDocsColdLaneSearch({
+                query: trimmedPrompt,
+                scope: scopeInfo.scope,
+                limit: Math.max(1, limit - selectedForInjection.length),
+                trigger: "insufficient_hot",
               });
-              if (receipt) {
-                api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
-              }
-              return;
+              docsForInjection = docs.hits;
+              coldLaneReceipt = docs.receipt;
             }
 
-            const slots: PackedMemorySlot[] = selectedForInjection.map((hit) => {
+            const memorySlots: PackedMemorySlot[] = selectedForInjection.map((hit) => {
               const normalizedImportance = toImportanceRecord(hit.row.importance);
               const normalizedLabel = resolveImportanceLabel(normalizedImportance, hit.row.importance_label);
               return {
@@ -3822,15 +4443,44 @@ const memoryPlugin = {
               };
             });
 
+            const docsSlots: PackedMemorySlot[] = docsForInjection.map((hit, idx) => ({
+              id: `docs:${hit.recordRef}`,
+              createdAt: Date.now() + idx,
+              category: "fact",
+              text: `[docs|trusted/operator|${hit.docKind}] ${hit.text} (${hit.recordRef})`,
+              importanceLabel: "unknown",
+            }));
+
+            const slots: PackedMemorySlot[] = [...memorySlots, ...docsSlots];
+
+            if (slots.length === 0) {
+              const receipt = emitAutoRecallReceipt({
+                skipped: false,
+                rejected: combinedRejected,
+                tierCounts: tiered.tierCounts,
+                ftsResults: tiered.ftsResults,
+                vecResults: tiered.vecResults,
+                fusedResults: selectedForInjection,
+                injectedCount: 0,
+                fallback: tiered.fallback,
+                coldLane: coldLaneReceipt,
+              });
+              if (receipt) {
+                api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
+              }
+              return;
+            }
+
             const seedReceipt = emitAutoRecallReceipt({
               skipped: false,
-              rejected: tiered.rejected,
+              rejected: combinedRejected,
               tierCounts: tiered.tierCounts,
               ftsResults: tiered.ftsResults,
               vecResults: tiered.vecResults,
               fusedResults: selectedForInjection,
               injectedCount: slots.length,
               fallback: tiered.fallback,
+              coldLane: coldLaneReceipt,
             });
 
             const seedReceiptComment = seedReceipt ? renderAutoRecallReceiptComment(seedReceipt, receiptsCfg) : "";
@@ -3845,7 +4495,7 @@ const memoryPlugin = {
             for (let iter = 0; iter < 3; iter += 1) {
               const candidateReceipt = emitAutoRecallReceipt({
                 skipped: false,
-                rejected: tiered.rejected,
+                rejected: combinedRejected,
                 tierCounts: tiered.tierCounts,
                 ftsResults: tiered.ftsResults,
                 vecResults: tiered.vecResults,
@@ -3853,6 +4503,7 @@ const memoryPlugin = {
                 injectedCount: finalBudget.keptSlots,
                 fallback: tiered.fallback,
                 budget: finalBudget.budget,
+                coldLane: coldLaneReceipt,
               });
 
               const candidateReceiptComment = candidateReceipt
@@ -3900,7 +4551,6 @@ const memoryPlugin = {
             api.logger.warn(`openclaw-mem-engine: autoRecall failed: ${String(err)}`);
           }
         });
-      }
     }
 
     if (autoCaptureCfg.enabled) {

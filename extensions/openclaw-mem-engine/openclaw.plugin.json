@@ -136,6 +136,51 @@
       "label": "Scope Max Length",
       "help": "Maximum allowed scope length after normalization/validation",
       "advanced": true
+    },
+    "docsColdLane.enabled": {
+      "label": "Docs Cold Lane",
+      "help": "Enable bounded docs ingest/search lane for operator-authored markdown",
+      "advanced": true
+    },
+    "docsColdLane.sqlitePath": {
+      "label": "Docs SQLite Path",
+      "help": "SQLite file used by openclaw-mem docs ingest/search",
+      "advanced": true
+    },
+    "docsColdLane.sourceRoots": {
+      "label": "Docs Source Roots",
+      "help": "Allowlisted roots for docs ingest (repeatable)",
+      "advanced": true
+    },
+    "docsColdLane.sourceGlobs": {
+      "label": "Docs Source Globs",
+      "help": "Allowlisted markdown globs relative to each root",
+      "advanced": true
+    },
+    "docsColdLane.scopeMappingStrategy": {
+      "label": "Docs Scope Mapping",
+      "help": "none | repo_prefix | path_prefix | map",
+      "advanced": true
+    },
+    "docsColdLane.maxChunkChars": {
+      "label": "Docs Chunk Max Chars",
+      "help": "Chunk size passed to docs ingest (bounded)",
+      "advanced": true
+    },
+    "docsColdLane.maxItems": {
+      "label": "Docs Max Recall Items",
+      "help": "Maximum docs snippets returned per recall/search",
+      "advanced": true
+    },
+    "docsColdLane.maxSnippetChars": {
+      "label": "Docs Snippet Max Chars",
+      "help": "Maximum snippet chars per returned docs hit",
+      "advanced": true
+    },
+    "docsColdLane.minHotItems": {
+      "label": "Docs Trigger Hot Threshold",
+      "help": "Consult docs lane only when hot memories are below this count",
+      "advanced": true
     }
   },
   "configSchema": {
@@ -408,6 +453,113 @@
                   "truncate_tail"
                 ],
                 "default": "truncate_oldest"
+              }
+            }
+          }
+        ]
+      },
+      "docsColdLane": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "sqlitePath": {
+                "type": "string",
+                "default": "~/.openclaw/memory/openclaw-mem.sqlite"
+              },
+              "sourceRoots": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "sourceGlobs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [
+                  "**/*.md"
+                ]
+              },
+              "maxChunkChars": {
+                "type": "integer",
+                "minimum": 200,
+                "maximum": 4000,
+                "default": 1400
+              },
+              "embedOnIngest": {
+                "type": "boolean",
+                "default": true
+              },
+              "ingestOnStart": {
+                "type": "boolean",
+                "default": false
+              },
+              "maxItems": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "default": 2
+              },
+              "maxSnippetChars": {
+                "type": "integer",
+                "minimum": 80,
+                "maximum": 600,
+                "default": 280
+              },
+              "minHotItems": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5,
+                "default": 2
+              },
+              "searchFtsK": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 20
+              },
+              "searchVecK": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 20
+              },
+              "searchRrfK": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "default": 60
+              },
+              "scopeMappingStrategy": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "repo_prefix",
+                  "path_prefix",
+                  "map"
+                ],
+                "default": "repo_prefix"
+              },
+              "scopeMap": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "default": {}
               }
             }
           }

@@ -19,9 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - same-scope, time-bounded TODO dedupe window
   - deterministic recall-time stale TODO TTL filtering
   - bounded `openclaw-mem-engine:todoGuardrail` drop markers and receipt counters for TODO rate-limit/dedupe drops.
+- Added installable **Docs Memory cold lane** to `openclaw-mem-engine`:
+  - new config surface `docsColdLane` (`enabled`, `sourceRoots`, `sourceGlobs`, `scopeMappingStrategy`, `maxChunkChars`, bounded recall knobs)
+  - new tools: `memory_docs_ingest`, `memory_docs_search`
+  - `memory_recall` + `autoRecall` now optionally consult docs cold lane only when hot lane is insufficient (`minHotItems`)
+  - bounded receipt/log markers: `openclaw-mem-engine:docsColdLane.ingest`, `openclaw-mem-engine:docsColdLane.search`, plus optional `coldLane` block in recall lifecycle receipts.
 
 ### Testing
 - `test_triage_json_contract_v0` now writes a temporary cron jobs fixture and passes `--cron-jobs-path`, preventing host-state coupling to `~/.openclaw/cron/jobs.json`.
+- Added docs-cold-lane contract tests (`test_mem_engine_docs_cold_lane.py`) for config schema defaults, trust/provenance markers, and runtime marker wiring.
 
 ## [1.0.3] - 2026-02-28
 
