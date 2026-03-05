@@ -31,11 +31,11 @@ See: `docs/reality-check.md` (commands + expected JSON shapes).
 uv sync --locked
 DB=/tmp/openclaw-mem.sqlite
 
-uv run python -m openclaw_mem --db "$DB" --json status
-uv run python -m openclaw_mem --db "$DB" --json ingest --file /tmp/sample.jsonl
-uv run python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
-uv run python -m openclaw_mem --db "$DB" --json episodes append --scope demo --session-id s1 --agent-id demo --type ops.alert --summary "hello" 
-uv run python -m openclaw_mem --db "$DB" --json episodes query --scope demo --session-id s1
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json status
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json ingest --file /tmp/sample.jsonl
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json episodes append --scope demo --session-id s1 --agent-id demo --type ops.alert --summary "hello" 
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json episodes query --scope demo --session-id s1
 ```
 
 Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_ts`, and `ingest` prints `{inserted, ids}`.
@@ -120,7 +120,7 @@ Automation truth (dev):
   - Example run:
 
     ```bash
-    uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
+    uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
     ```
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
 - **Ops profile surface (DONE)**: `profile --json` for quick state snapshots (counts, importance labels, top tools/kinds, recent rows, embedding stats).
@@ -133,13 +133,13 @@ Automation truth (dev):
 - **Autograde switch (copy/paste)**:
   ```bash
   # Enable heuristic autograde for ingest/harvest
-  OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+  OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 
   # Run a one-off no-autograde harvest (kill-switch)
-  OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+  OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 
   # Force CLI-only kill switch (per command)
-  uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
+  uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
   ```
 
 - **Lifecycle manager (ROADMAP)**: ref/last_used_at-based decay + archive-first retention.
@@ -166,7 +166,7 @@ uv sync --locked
 ```
 
 After syncing, run from this source checkout with:
-- `uv run python -m openclaw_mem ...` (recommended)
+- `uv run --python 3.13 --frozen -- python -m openclaw_mem ...` (recommended)
 
 If you have a packaged install that provides a console script, you can also use:
 - `openclaw-mem ...`
@@ -177,43 +177,43 @@ If you have a packaged install that provides a console script, you can also use:
 
 ```bash
 # 1) Create/open DB and show counts
-uv run python -m openclaw_mem status --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem status --json
 
 # 1.5) Snapshot ops profile (counts, importance labels, top tools, recent rows)
-uv run python -m openclaw_mem profile --json --recent-limit 15
+uv run --python 3.13 --frozen -- python -m openclaw_mem profile --json --recent-limit 15
 
 # 1.6) Check active OpenClaw memory backend + fallback posture
-uv run python -m openclaw_mem backend --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem backend --json
 
 # 2) Ingest JSONL observations
-uv run python -m openclaw_mem ingest --file observations.jsonl --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem ingest --file observations.jsonl --json
 
 # 3) Layer 1 recall (compact)
-uv run python -m openclaw_mem search "gateway timeout" --limit 10 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem search "gateway timeout" --limit 10 --json
 
 # 4) Layer 2 recall (nearby context)
-uv run python -m openclaw_mem timeline 42 --window 3 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem timeline 42 --window 3 --json
 
 # 5) Layer 3 recall (full rows)
-uv run python -m openclaw_mem get 42 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem get 42 --json
 
 # 6) (Dev) Build a compact, cited context bundle
-uv run python -m openclaw_mem pack --query "gateway timeout" --limit 12 --budget-tokens 1200 --trace --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack --query "gateway timeout" --limit 12 --budget-tokens 1200 --trace --json
 # With --trace, this returns a redaction-safe `openclaw-mem.pack.trace.v1` receipt plus the packed `bundle_text` and citations.
 # `--query-en` can be used when you want an English retrieval lane in addition to the main query.
 
 # 6a) Optional: skip JSON wrapper for pure L1 text payload
-uv run python -m openclaw_mem pack --query "gateway timeout" --no-json
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack --query "gateway timeout" --no-json
 ```
 
 ### Proactive memory (explicit “remember this”)
 
 ```bash
-uv run python -m openclaw_mem store "Prefer tabs over spaces" \
+uv run --python 3.13 --frozen -- python -m openclaw_mem store "Prefer tabs over spaces" \
   --category preference --importance 0.9 --json
 
-uv run python -m openclaw_mem hybrid "tabs or spaces preference" --limit 5 --json
-uv run python -m openclaw_mem hybrid "tabs or spaces preference" \
+uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "tabs or spaces preference" --limit 5 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "tabs or spaces preference" \
   --rerank-provider jina --rerank-topn 20 --json
 ```
 
@@ -266,15 +266,15 @@ See detailed deployment patterns:
 
 ```bash
 # Store original text + optional English companion
-uv run python -m openclaw_mem store "<original non-English text>" \
+uv run --python 3.13 --frozen -- python -m openclaw_mem store "<original non-English text>" \
   --text-en "Preference: run integration tests before release" \
   --lang zh --category preference --importance 0.9 --json
 
 # Build embeddings (original + English)
-uv run python -m openclaw_mem embed --field both --limit 500 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem embed --field both --limit 500 --json
 
 # Hybrid recall with optional EN assist query
-uv run python -m openclaw_mem hybrid "<original query>" \
+uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "<original query>" \
   --query-en "pre-release process" \
   --limit 5 --json
 ```
@@ -335,14 +335,14 @@ Enable plugin episodic capture + schedule conversation extractor + ingest jobs:
 Run extractor + ingest every 1–5 minutes:
 
 ```bash
-uv run python -m openclaw_mem episodes extract-sessions \
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes extract-sessions \
   --sessions-root ~/.openclaw/sessions \
   --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
   --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json \
   --payload-cap-bytes 4096 \
   --json
 
-uv run python -m openclaw_mem episodes ingest \
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes ingest \
   --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
   --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json \
   --conversation-payload-cap-bytes 4096 \
@@ -361,15 +361,15 @@ Verification (quick):
 
 ```bash
 # Run extractor + ingest once
-uv run python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json
-uv run python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json
 
 # Summary-only query/replay by default
-uv run python -m openclaw_mem episodes query --global --limit 20 --json
-uv run python -m openclaw_mem episodes replay <session_id> --global --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes query --global --limit 20 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes replay <session_id> --global --json
 
 # Payload is explicit opt-in
-uv run python -m openclaw_mem episodes replay <session_id> --global --include-payload --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes replay <session_id> --global --include-payload --json
 ```
 
 Notes (important):
@@ -393,7 +393,7 @@ More detail:
 
 ```bash
 # 0: no new issues, 10: attention needed
-uv run python -m openclaw_mem triage --mode heartbeat --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode heartbeat --json
 ```
 
 This is designed to be safe for heartbeat automation: fast, local, and deterministic.
@@ -411,17 +411,17 @@ Graphic Memory automation toggles are opt-in (default OFF):
 Inspect effective toggle state:
 
 ```bash
-uv run python -m openclaw_mem graph auto-status --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph auto-status --json
 ```
 
 Automation examples:
 
 ```bash
-OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
+OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
 
-OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
 
-OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
 ```
 
 Design notes: `docs/specs/graphic-memory-auto-capture-auto-recall.md`

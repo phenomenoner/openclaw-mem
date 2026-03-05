@@ -90,21 +90,21 @@ When a gate is reached, it should be called out explicitly in operator reports.
 
 ## Copy/paste commands (reference)
 
-> This repo is currently **source-checkout first**. Prefer `uv run python -m openclaw_mem ...`.
+> This repo is currently **source-checkout first**. Prefer `uv run --python 3.13 --frozen -- python -m openclaw_mem ...`.
 
 ### 0) Basic local sanity (no OpenClaw required)
 ```bash
 uv sync --locked
 DB=/tmp/openclaw-mem-upgradecheck.sqlite
 
-uv run python -m openclaw_mem --db "$DB" --json status
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json status
 ```
 
 ### 1) Harvest (production paths are operator-specific)
 ```bash
 export OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1  # optional (alias: heuristic_v1)
 
-uv run python -m openclaw_mem harvest \
+uv run --python 3.13 --frozen -- python -m openclaw_mem harvest \
   --source ~/.openclaw/memory/openclaw-mem-observations.jsonl \
   --db ~/.openclaw/memory/openclaw-mem.sqlite \
   --archive-dir ~/.openclaw/memory/openclaw-mem/archive \
@@ -114,7 +114,7 @@ uv run python -m openclaw_mem harvest \
 
 ### 2) Triage (tasks)
 ```bash
-uv run python -m openclaw_mem triage \
+uv run --python 3.13 --frozen -- python -m openclaw_mem triage \
   --db ~/.openclaw/memory/openclaw-mem.sqlite \
   --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 \
   --state-path ~/.openclaw/memory/openclaw-mem/triage-state.json \
@@ -130,13 +130,13 @@ Task extraction is deterministic and picks rows when either:
   - Example run:
 
     ```bash
-    uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
+    uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
     ```
 
 
 ### 3) Retrieval smoke test
 ```bash
-uv run python -m openclaw_mem --db ~/.openclaw/memory/openclaw-mem.sqlite --json search "timeout" --limit 5
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db ~/.openclaw/memory/openclaw-mem.sqlite --json search "timeout" --limit 5
 ```
 
 ---
