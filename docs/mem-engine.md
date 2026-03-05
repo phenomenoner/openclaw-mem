@@ -538,6 +538,8 @@ Deliverables (coarse):
 - tag versions before large auto-capture or regrading changes
 - ability to revert/checkout a tagged version
 
+Spec (v0): `docs/specs/mem-engine-versioning-safety-net-v0.md`
+
 ### M4 — Multimodal (optional)
 
 Deliverables (coarse):
