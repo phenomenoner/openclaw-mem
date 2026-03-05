@@ -86,9 +86,16 @@ class TestJsonContracts(unittest.TestCase):
         self.assertIn("skipped_disabled", out)
         self.assertIn("scorer_errors", out)
         self.assertIn("label_counts", out)
+        self.assertEqual(
+            out["label_counts"],
+            {"must_remember": 0, "nice_to_have": 0, "ignore": 0, "unknown": 0},
+        )
 
     def test_triage_json_contract_v0(self):
-        out = self._run_json_ok(
+        # triage uses exit codes for automation:
+        # - 0: no new issues
+        # - 10: attention needed
+        result = self._run_cli(
             "triage",
             "--mode",
             "heartbeat",
@@ -97,6 +104,14 @@ class TestJsonContracts(unittest.TestCase):
             "--cron-jobs-path",
             str(self.cron_jobs_path),
         )
+        if result.returncode not in (0, 10):
+            self.fail(
+                f"CLI failed: rc={result.returncode}\\nstderr=\\n{result.stderr}\\nstdout=\\n{result.stdout}"
+            )
+        try:
+            out = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            self.fail(f"Invalid JSON output:\\n{result.stdout}")
 
         self.assertEqual(out["kind"], "openclaw-mem.triage.v0")
         self.assertIsInstance(out["ts"], str)

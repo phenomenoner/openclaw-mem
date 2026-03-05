@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _summary_has_task_marker, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
+from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
 
 
 class TestCliM0(unittest.TestCase):
@@ -27,6 +27,47 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["embeddings_en"]["count"], 0)
         conn.close()
 
+    def test_pack_falls_back_to_fts_when_no_api_key(self):
+        conn = _connect(":memory:")
+        _insert_observation(
+            conn,
+            {
+                "kind": "preference",
+                "summary": "Prefers using Asia/Taipei (UTC+8) timezone for time displays.",
+                "tool_name": "memory_store",
+                "detail": {"importance": {"score": 0.8, "label": "must_remember"}},
+            },
+        )
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "timezone",
+                "query_en": None,
+                "limit": 12,
+                "budget_tokens": 400,
+                "trace": False,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_pack(conn, args)
+        payload = json.loads(buf.getvalue())
+        texts = [it.get("summary") for it in payload.get("items", [])]
+        self.assertTrue(any("UTC+8" in (t or "") for t in texts))
+        conn.close()
+
+    def test_normalize_importance_scorer_value_accepts_common_aliases(self):
+        self.assertEqual(_normalize_importance_scorer_value("heuristic_v1"), "heuristic-v1")
+        self.assertEqual(_normalize_importance_scorer_value("Heuristic v1"), "heuristic-v1")
+        self.assertEqual(_normalize_importance_scorer_value(" heuristic-v1 "), "heuristic-v1")
+        self.assertEqual(_normalize_importance_scorer_value("heuristic-v2"), "heuristic-v2")
+        self.assertEqual(_normalize_importance_scorer_value("off"), "off")
+        self.assertEqual(_normalize_importance_scorer_value(""), "")
+
     def test_summary_has_task_marker_accepts_full_width_colon_and_unicode_dashes(self):
         self.assertTrue(_summary_has_task_marker("reminder：pay rent"))
         self.assertTrue(_summary_has_task_marker("ＴＯＤＯ：繳房租"))
@@ -34,6 +75,9 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("Task–follow up on release checklist"))
         self.assertTrue(_summary_has_task_marker("Task—follow up on release checklist"))
         self.assertTrue(_summary_has_task_marker("Task−follow up on release checklist"))
+        self.assertTrue(_summary_has_task_marker("TODO。rotate docs update"))
+        self.assertTrue(_summary_has_task_marker("TODO; rotate runbook"))
+        self.assertTrue(_summary_has_task_marker("TASK；follow up on release checklist"))
 
     def test_summary_has_task_marker_accepts_lowercase_marker_with_separator(self):
         self.assertTrue(_summary_has_task_marker("todo buy milk"))
@@ -43,6 +87,7 @@ class TestCliM0(unittest.TestCase):
     def test_summary_has_task_marker_accepts_example_formats(self):
         self.assertTrue(_summary_has_task_marker("TODO: rotate runbook"))
         self.assertTrue(_summary_has_task_marker("task- check alerts"))
+        self.assertTrue(_summary_has_task_marker("TODO. rotate runbook"))
         self.assertTrue(_summary_has_task_marker("(TASK): review PR"))
         self.assertTrue(_summary_has_task_marker("- [ ] TODO file patch"))
 
@@ -64,6 +109,13 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("〔REMINDER〕: sync notes"))
         self.assertTrue(_summary_has_task_marker("{TODO} rotate runbook"))
         self.assertTrue(_summary_has_task_marker("{TASK}: renew reminders"))
+        self.assertTrue(_summary_has_task_marker("《task》 clean notes"))
+        self.assertTrue(_summary_has_task_marker("＜task＞ clean notes"))
+        self.assertTrue(_summary_has_task_marker("〖task〗 clean notes"))
+        self.assertTrue(_summary_has_task_marker("〘task〙 clean notes"))
+        self.assertTrue(_summary_has_task_marker("「TODO」 rotate runbook"))
+        self.assertTrue(_summary_has_task_marker("《TASK》 renew reminders"))
+        self.assertTrue(_summary_has_task_marker("『task』renew reminders"))
 
     def test_summary_has_task_marker_accepts_list_and_checkbox_prefixes(self):
         self.assertTrue(_summary_has_task_marker("- TODO buy milk"))
@@ -74,6 +126,8 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker(">> TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("• [x] [REMINDER] renew domain"))
         self.assertTrue(_summary_has_task_marker("‣ TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("▪ TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("◦ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("∙ [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("· [x] [REMINDER] renew domain"))
         self.assertTrue(_summary_has_task_marker("- [✓] TODO buy milk"))
@@ -86,16 +140,31 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("a) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("(a) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("（ａ） TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("（1） TODO clean desk"))
         self.assertTrue(_summary_has_task_marker("B. [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("iv) TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("IX. [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("(iv) TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("– TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("— TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("− TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("・ TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("1- TODO rotate runbook"))
+        self.assertTrue(_summary_has_task_marker("1-TODO rotate runbook"))
+        self.assertTrue(_summary_has_task_marker("iv- TODO rotate runbook"))
+        self.assertTrue(_summary_has_task_marker("iv- TASK: clean desk"))
 
     def test_summary_has_task_marker_accepts_compact_wrapper_chaining(self):
         self.assertTrue(_summary_has_task_marker("•[x]TODO fix pipeline"))
+        self.assertTrue(_summary_has_task_marker("‣[x]TODO clean pipeline"))
+        self.assertTrue(_summary_has_task_marker("▪[x]TODO clean pipeline"))
         self.assertTrue(_summary_has_task_marker("·[ ]TASK sync branch"))
+        self.assertTrue(_summary_has_task_marker("◦[x]TODO compact pipeline"))
         self.assertTrue(_summary_has_task_marker("- (I)[ ] TODO reorder docs"))
         self.assertTrue(_summary_has_task_marker(">>‣TODO audit logs"))
+        self.assertTrue(_summary_has_task_marker("—TODO audit logs"))
+        self.assertTrue(_summary_has_task_marker("–TODO audit logs"))
+        self.assertTrue(_summary_has_task_marker("・TODO audit logs"))
 
     def test_summary_has_task_marker_accepts_nested_prefix_combinations(self):
         self.assertTrue(_summary_has_task_marker("* (1) [ ] TODO: clean desk"))
@@ -112,14 +181,32 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("TODOLIST clean old notes"))
         self.assertFalse(_summary_has_task_marker("taskforce sync tomorrow"))
         self.assertFalse(_summary_has_task_marker("[TODOLIST] clean old notes"))
+        self.assertFalse(_summary_has_task_marker("「TODOLIST」 clean old notes"))
+        self.assertFalse(_summary_has_task_marker("《TODOLIST》 clean old notes"))
+        self.assertFalse(_summary_has_task_marker("«TODOLIST» clean old notes"))
+        self.assertFalse(_summary_has_task_marker("〈TODOLIST〉 clean old notes"))
+        self.assertFalse(_summary_has_task_marker("‹TODOLIST› clean old notes"))
+        self.assertFalse(_summary_has_task_marker("＜TODOLIST＞ clean old notes"))
+        self.assertFalse(_summary_has_task_marker("〘TODOLIST〙 clean old notes"))
         self.assertTrue(_summary_has_task_marker("[TODO]clean old notes"))
+        self.assertTrue(_summary_has_task_marker("「TODO」clean old notes"))
+        self.assertTrue(_summary_has_task_marker("『TODO』clean old notes"))
+        self.assertTrue(_summary_has_task_marker("《TODO》clean old notes"))
+        self.assertTrue(_summary_has_task_marker("«TODO»clean old notes"))
+        self.assertTrue(_summary_has_task_marker("〈TODO〉clean old notes"))
+        self.assertTrue(_summary_has_task_marker("‹TODO›clean old notes"))
+        self.assertTrue(_summary_has_task_marker("＜TODO＞clean old notes"))
+        self.assertTrue(_summary_has_task_marker("〖TODO〗clean old notes"))
+        self.assertTrue(_summary_has_task_marker("〘TODO〙clean old notes"))
         self.assertTrue(_summary_has_task_marker("【TODO】clean old notes"))
+        self.assertTrue(_summary_has_task_marker("〔TODO〕clean old notes"))
         self.assertTrue(_summary_has_task_marker("-TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("+TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker(">TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker(">>TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker(">>>TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("‣TODO clean old notes"))
+        self.assertTrue(_summary_has_task_marker("▪TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("·TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("[x]TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("[✓]TODO clean old notes"))
@@ -138,6 +225,14 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("ic) TODO clean old notes"))
         self.assertFalse(_summary_has_task_marker("(iiv) TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("* (1)TODO clean old notes"))
+
+    def test_summary_has_task_marker_rejects_inline_markers_and_mismatched_wrappers(self):
+        self.assertFalse(_summary_has_task_marker("We should TODO: fix this later"))
+        self.assertFalse(_summary_has_task_marker("Meeting notes - TODO: fix this later"))
+        self.assertFalse(_summary_has_task_marker("I think [TODO] fix this later"))
+        self.assertFalse(_summary_has_task_marker("TODO! fix this later"))
+        self.assertFalse(_summary_has_task_marker("[TODO) fix this later"))
+        self.assertFalse(_summary_has_task_marker("TODOs: plural shouldn't match"))
 
     def test_parser_merges_global_and_command_json_flags(self):
         before_args = build_parser().parse_args(["--json", "status"])
@@ -999,6 +1094,76 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_triage_tasks_mode_no_dedupe_does_not_write_state(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "task",
+                        "tool_name": "memory_store",
+                        "summary": "TODO: buy coffee this afternoon",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type("Args", (), {
+            "mode": "tasks",
+            "since_minutes": 60,
+            "limit": 10,
+            "keywords": None,
+            "cron_jobs_path": None,
+            "tasks_since_minutes": 1440,
+            "importance_min": 0.7,
+            "state_path": state_path,
+            "dedupe": False,
+            "json": True,
+        })()
+
+        buf1 = io.StringIO()
+        with redirect_stdout(buf1):
+            with self.assertRaises(SystemExit) as cm1:
+                cmd_triage(conn, args)
+        self.assertEqual(cm1.exception.code, 10)
+        out1 = json.loads(buf1.getvalue())
+        self.assertEqual(out1["dedupe"], False)
+        self.assertEqual(out1["tasks"]["found_total"], 1)
+        self.assertEqual(out1["tasks"]["found_new"], 1)
+
+        # no-dedupe should not write state
+        with open(state_path, "r", encoding="utf-8") as fp:
+            self.assertEqual(fp.read().strip(), "")
+
+        buf2 = io.StringIO()
+        with redirect_stdout(buf2):
+            with self.assertRaises(SystemExit) as cm2:
+                cmd_triage(conn, args)
+        self.assertEqual(cm2.exception.code, 10)
+        out2 = json.loads(buf2.getvalue())
+        self.assertEqual(out2["tasks"]["found_new"], 1)
+
+        conn.close()
+
     def test_triage_tasks_accepts_task_marker_without_colon(self):
         import tempfile
         from datetime import datetime, timezone
@@ -1179,6 +1344,67 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["tasks"]["found_new"], 1)
         self.assertEqual(out["tasks"]["matches"][0]["summary"], "[TODO]buy coffee this afternoon")
+
+        conn.close()
+
+    def test_triage_tasks_accepts_curly_brace_wrapped_task_marker_prefix(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "{TODO}buy coffee this afternoon",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "tasks",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["tasks"]["found_new"], 1)
+        self.assertEqual(out["tasks"]["matches"][0]["summary"], "{TODO}buy coffee this afternoon")
 
         conn.close()
 
@@ -1444,6 +1670,15 @@ class TestCliM0(unittest.TestCase):
             "-TODO: rotate on-call notes",
             "(1)TODO: rotate on-call notes",
             "a)TODO: rotate on-call notes",
+            "「TODO」rotate on-call notes",
+            "『TODO』rotate on-call notes",
+            "『TASK』rotate on-call notes",
+            "《TODO》rotate on-call notes",
+            "＜TODO＞rotate on-call notes",
+            "〔TODO〕rotate on-call notes",
+            "〖TODO〗rotate on-call notes",
+            "〘TODO〙rotate on-call notes",
+            "[☑]TODO: rotate on-call notes",
         )
 
         for summary in summaries:
@@ -1513,6 +1748,7 @@ class TestCliM0(unittest.TestCase):
             "‣ TODO: rotate on-call notes",
             "∙ [ ] TASK: rotate on-call notes",
             "· [x] [REMINDER] rotate on-call notes",
+            "• [☐] TASK: rotate on-call notes",
         )
 
         for summary in summaries:
@@ -2912,6 +3148,88 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(buf.getvalue(), "- [obs:1] plain summary\n")
         conn.close()
 
+
+    def test_pack_use_graph_on_adds_graph_payload_and_trace_extensions(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "plain summary",
+                    "summary_en": "plain summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        # Force graph on; we patch graph internals to keep the test deterministic.
+        args = build_parser().parse_args(["pack", "--query", "something", "--json", "--trace", "--use-graph", "on"])
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [
+                {
+                    "recordRef": "obs:1",
+                    "id": 1,
+                    "ts": "2026-02-04T13:00:00Z",
+                    "kind": "fact",
+                    "tool_name": "memory_store",
+                    "score": -9.0,
+                    "title": "stub",
+                    "why_relevant": "fts_match",
+                }
+            ],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\\n",
+        }
+
+        fake_graph_pack_payload = {
+            "kind": "openclaw-mem.graph.pack.v0",
+            "ts": "2026-02-04T13:00:00Z",
+            "budget": {"budgetTokens": 1200, "estimatedTokens": 20},
+            "items": [
+                {
+                    "recordRef": "obs:1",
+                    "id": 1,
+                    "ts": "2026-02-04T13:00:00Z",
+                    "kind": "fact",
+                    "tool_name": "memory_store",
+                    "summary": "plain summary",
+                }
+            ],
+            "bundle_text": "[GRAPH_CONTEXT v0]\\nItems: 1\\n\\n1) obs:1 :: plain summary\\n",
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
+        ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertIn("graph", out)
+        self.assertTrue(out["graph"]["triggered"])
+        self.assertIn("bundle_text_with_graph", out)
+        self.assertIn("[GRAPH_CONTEXT v0]", out["bundle_text_with_graph"])
+
+        self.assertIn("trace", out)
+        self.assertIn("extensions", out["trace"])
+        self.assertIn("graph", out["trace"]["extensions"])
+        self.assertTrue(out["trace"]["extensions"]["graph"]["triggered"])
+
+        conn.close()
+
     def test_pack_budget_tokens_clamped_to_minimum_one(self):
         conn = _connect(":memory:")
 
@@ -3068,6 +3386,7 @@ class TestCliM0(unittest.TestCase):
                 "candidates",
                 "output",
                 "timing",
+                "extensions",
             },
         )
 
@@ -3597,6 +3916,74 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out["trace"]["output"]["includedCount"], 1)
         self.assertEqual(out["trace"]["output"]["excludedCount"], 1)
         conn.close()
+
+    def test_triage_cron_errors_coerces_numeric_strings(self):
+        import tempfile
+
+        # Fake cron jobs store: timestamps/durations may be stored as strings.
+        jobs = {
+            "jobs": [
+                {
+                    "id": "job1",
+                    "name": "Job 1",
+                    "enabled": True,
+                    "state": {"lastStatus": "ok", "lastRunAtMs": "9999999999999"},
+                },
+                {
+                    "id": "job2",
+                    "name": "Job 2",
+                    "enabled": True,
+                    "state": {
+                        "lastStatus": "error",
+                        "lastRunAtMs": "9999999999999",
+                        "lastDurationMs": "1234",
+                        "nextRunAtMs": "9999999999999",
+                        "lastError": "boom first line\nboom second line",
+                    },
+                },
+            ]
+        }
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as tmp:
+            json.dump(jobs, tmp)
+            tmp_path = tmp.name
+
+        conn = _connect(":memory:")
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "cron-errors",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": tmp_path,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+
+        self.assertEqual(out["cron"]["found_new"], 1)
+        match = out["cron"]["matches"][0]
+        self.assertEqual(match["id"], "job2")
+        self.assertEqual(match["lastRunAtMs"], 9999999999999)
+        self.assertEqual(match["lastDurationMs"], 1234)
+        self.assertEqual(match["nextRunAtMs"], 9999999999999)
+        self.assertEqual(match["lastErrorLine"], "boom first line")
+
+        conn.close()
+
 
 
 if __name__ == "__main__":

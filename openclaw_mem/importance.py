@@ -58,6 +58,16 @@ def _normalize_label(value: Any) -> str | None:
     return None
 
 
+def normalize_label(value: Any) -> str | None:
+    """Public wrapper for label normalization.
+
+    Keeps CLI receipts and any external callers aligned with the
+    same backward-compatible aliases used by the importance parser.
+    """
+
+    return _normalize_label(value)
+
+
 def _parse_score_like(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
@@ -72,6 +82,39 @@ def _parse_score_like(value: Any) -> float | None:
         normalized = unicodedata.normalize("NFKC", value).strip()
         if not normalized:
             return None
+
+        # Explicit percent form: '86%' -> 0.86
+        if normalized.endswith('%'):
+            raw = normalized[:-1].strip()
+            if not raw:
+                return None
+            try:
+                score = float(raw) / 100.0
+            except Exception:
+                return None
+            if math.isfinite(score):
+                return score
+            return None
+
+        # Explicit ratio form: '86/100' -> 0.86
+        if '/' in normalized:
+            left, right = normalized.split('/', 1)
+            left = left.strip()
+            right = right.strip()
+            if not left or not right:
+                return None
+            try:
+                num = float(left)
+                den = float(right)
+            except Exception:
+                return None
+            if not math.isfinite(num) or not math.isfinite(den) or den == 0.0:
+                return None
+            score = num / den
+            if math.isfinite(score):
+                return score
+            return None
+
         try:
             score = float(normalized)
         except Exception:
@@ -134,6 +177,15 @@ def make_importance(
     }
 
 
+def _coerce_percent_if_intlike(score: float) -> float:
+    """Coerce common integer-ish 0-100 scores into 0-1 percent form."""
+
+    s = float(score)
+    if s > 1.0 and s <= 100.0 and s.is_integer():
+        return s / 100.0
+    return s
+
+
 def parse_importance_score(value: Any) -> float:
     """Best-effort parse of an importance score from detail_json.importance.
 
@@ -146,12 +198,12 @@ def parse_importance_score(value: Any) -> float:
     """
     score = _parse_score_like(value)
     if score is not None:
-        return _clamp01(score)
+        return _clamp01(_coerce_percent_if_intlike(score))
 
     if isinstance(value, dict):
         score = _parse_score_like(value.get("score"))
         if score is not None:
-            return _clamp01(score)
+            return _clamp01(_coerce_percent_if_intlike(score))
 
         key = _normalize_label(value.get("label"))
         if key is not None:

@@ -1,0 +1,26 @@
+import unittest
+
+from openclaw_mem.cli import build_parser
+
+
+class TestArtifactCliParser(unittest.TestCase):
+    def test_artifact_parser_subcommands(self) -> None:
+        a = build_parser().parse_args(["artifact", "stash"])
+        self.assertEqual(a.cmd, "artifact")
+        self.assertEqual(a.artifact_cmd, "stash")
+
+        b = build_parser().parse_args(["artifact", "fetch", "ocm_artifact:v1:sha256:" + ("a" * 64)])
+        self.assertEqual(b.cmd, "artifact")
+        self.assertEqual(b.artifact_cmd, "fetch")
+        self.assertTrue(b.json)
+
+        c = build_parser().parse_args(["artifact", "fetch", "--no-json", "ocm_artifact:v1:sha256:" + ("a" * 64)])
+        self.assertFalse(c.json)
+
+        d = build_parser().parse_args(["artifact", "peek", "ocm_artifact:v1:sha256:" + ("a" * 64)])
+        self.assertEqual(d.cmd, "artifact")
+        self.assertEqual(d.artifact_cmd, "peek")
+
+
+if __name__ == "__main__":
+    unittest.main()

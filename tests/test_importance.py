@@ -19,6 +19,13 @@ class TestImportance(unittest.TestCase):
         self.assertEqual(parse_importance_score(0), 0.0)
         self.assertEqual(parse_importance_score(0.42), 0.42)
 
+
+    def test_parse_importance_score_treats_intlike_0_100_as_percent(self):
+        self.assertAlmostEqual(parse_importance_score(86), 0.86)
+        self.assertAlmostEqual(parse_importance_score("86"), 0.86)
+        self.assertAlmostEqual(parse_importance_score({"score": 86}), 0.86)
+        self.assertAlmostEqual(parse_importance_score({"score": "86"}), 0.86)
+
     def test_parse_importance_score_rejects_non_finite_and_bool(self):
         self.assertEqual(parse_importance_score(float("nan")), 0.0)
         self.assertEqual(parse_importance_score(float("inf")), 0.0)
@@ -46,6 +53,19 @@ class TestImportance(unittest.TestCase):
         self.assertEqual(parse_importance_score({"score": "0.86"}), 0.86)
         self.assertEqual(parse_importance_score({"score": " ０.９５ "}), 0.95)
 
+    def test_parse_importance_score_supports_percent_and_ratio_strings(self):
+        self.assertEqual(parse_importance_score("85%"), 0.85)
+        self.assertEqual(parse_importance_score("86%"), 0.86)
+        self.assertEqual(parse_importance_score(" 92 %"), 0.92)
+        self.assertEqual(parse_importance_score(" ８６％ "), 0.86)
+        self.assertEqual(parse_importance_score({"score": " 95％ "}), 0.95)
+        self.assertEqual(parse_importance_score("150%"), 1.0)
+        self.assertEqual(parse_importance_score(" 42.5% "), 0.425)
+        self.assertEqual(parse_importance_score("86/100"), 0.86)
+        self.assertEqual(parse_importance_score({"score": "86/100"}), 0.86)
+        self.assertEqual(parse_importance_score("43/50"), 0.86)
+        self.assertEqual(parse_importance_score("1/0"), 0.0)
+
     def test_parse_importance_score_invalid_returns_zero(self):
         self.assertEqual(parse_importance_score(None), 0.0)
         self.assertEqual(parse_importance_score({"score": "high"}), 0.0)
@@ -62,6 +82,8 @@ class TestImportance(unittest.TestCase):
         self.assertTrue(is_parseable_importance({"score": "0.7"}))
         self.assertTrue(is_parseable_importance({"label": "must remember"}))
         self.assertTrue(is_parseable_importance({"label": "ＭＵＳＴ＿ＲＥＭＥＭＢＥＲ"}))
+        self.assertTrue(is_parseable_importance("86%"))
+        self.assertTrue(is_parseable_importance({"score": "86/100"}))
         self.assertFalse(is_parseable_importance({"score": True}))
         self.assertFalse(is_parseable_importance({"score": "not-a-number"}))
         self.assertFalse(is_parseable_importance({"label": "UNKNOWN"}))

@@ -34,6 +34,10 @@ These are automated via OpenClaw cron jobs (so the system works without manual C
   - code root: `/root/.openclaw/workspace/openclaw-mem-dev` (dev)
   - DB: `/root/.openclaw/memory/openclaw-mem-dev.sqlite`
   - receipts: `/root/.openclaw/memory/openclaw-mem-dev/{harvest_last.json,triage_last.json}`
+- DEV feature lane: `57d3e88c-4278-414a-8e33-c091baae7887` (`17,47 * * * *` Asia/Taipei)
+  - code root: `/root/.openclaw/workspace/openclaw-mem-dev` (dev)
+  - branch: `dev`
+  - lock: `openclaw-mem-dev-feature` + global heavy-python guard
 
 ### AI compression (derived artifact, dev)
 - Job: `58a7c87c-d1b2-4c9c-96fd-6ecccf623b85` (daily 00:35 Asia/Taipei)

@@ -32,6 +32,12 @@ from typing import Iterable, Dict, Any, List, Optional, Tuple
 from openclaw_mem import __version__
 from openclaw_mem import defaults
 from openclaw_mem import pack_trace_v1
+from openclaw_mem.artifact_sidecar import (
+    fetch_artifact,
+    parse_artifact_handle,
+    peek_artifact,
+    stash_artifact,
+)
 from openclaw_mem.docs_memory import (
     chunk_content_hash,
     chunk_markdown,
@@ -323,6 +329,8 @@ def _episodes_row_to_item(row: sqlite3.Row, include_payload: bool) -> Dict[str, 
 
     return item
 
+_IMPORTANCE_LABEL_KEYS = ("must_remember", "nice_to_have", "ignore", "unknown")
+
 
 @dataclass
 class IngestRunSummary:
@@ -339,8 +347,51 @@ class IngestRunSummary:
     label_counts: Dict[str, int] = field(default_factory=dict)
 
     def bump_label(self, label: str) -> None:
-        key = (label or "").strip().lower() or "unknown"
+        raw = label or ""
+        try:
+            from openclaw_mem.importance import normalize_label
+
+            normalized = normalize_label(raw)
+        except Exception:
+            normalized = None
+
+        if normalized:
+            key = normalized
+        else:
+            key = unicodedata.normalize("NFKC", raw).strip().lower() or "unknown"
+
         self.label_counts[key] = int(self.label_counts.get(key, 0)) + 1
+
+    def normalized_label_counts(self) -> Dict[str, int]:
+        """Return deterministic label counts for receipts.
+
+        Always includes the canonical importance labels with zero defaults, and
+        preserves any non-canonical labels (sorted for deterministic output).
+        """
+
+        out: Dict[str, int] = {k: int(self.label_counts.get(k, 0)) for k in _IMPORTANCE_LABEL_KEYS}
+        for key in sorted(self.label_counts):
+            if key in out:
+                continue
+            out[key] = int(self.label_counts.get(key, 0))
+        return out
+
+
+def _normalize_importance_scorer_value(value: str) -> str:
+    """Normalize importance autograde scorer values.
+
+    Accepts minor aliases (e.g., heuristic_v1) while keeping a
+    single canonical value for storage/receipts.
+    """
+
+    v = unicodedata.normalize("NFKC", str(value)).strip().lower()
+    if not v:
+        return ""
+
+    v = v.replace("_", "-").replace(" ", "")
+    if v in {"heuristicv1", "heuristic-v1"}:
+        return "heuristic-v1"
+    return v
 
 
 def _apply_importance_scorer_override(args: argparse.Namespace) -> None:
@@ -363,7 +414,7 @@ def _apply_importance_scorer_override(args: argparse.Namespace) -> None:
     if raw is None:
         return
 
-    v = str(raw).strip().lower()
+    v = _normalize_importance_scorer_value(str(raw))
     if not v:
         return
 
@@ -719,7 +770,14 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summa
     if run_summary is not None:
         run_summary.total_seen += 1
 
-    had_importance = "importance" in detail_obj
+    try:
+        from openclaw_mem.importance import is_parseable_importance
+
+        had_importance = is_parseable_importance(detail_obj.get("importance"))
+    except Exception:
+        # Conservative fallback: if the helper import fails for any reason,
+        # preserve prior behavior (treat presence of the field as 'existing').
+        had_importance = "importance" in detail_obj
     if run_summary is not None and had_importance:
         run_summary.skipped_existing += 1
         try:
@@ -740,7 +798,7 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summa
     # - default OFF
     # - only populate missing `detail_json.importance`
     # - fail-open on any grading error
-    scorer = (os.environ.get("OPENCLAW_MEM_IMPORTANCE_SCORER") or "").strip().lower()
+    scorer = _normalize_importance_scorer_value(os.environ.get("OPENCLAW_MEM_IMPORTANCE_SCORER") or "")
 
     if scorer == "heuristic-v1":
         if not had_importance:
@@ -1040,7 +1098,7 @@ def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "skipped_existing": summary.skipped_existing,
             "skipped_disabled": summary.skipped_disabled,
             "scorer_errors": summary.scorer_errors,
-            "label_counts": summary.label_counts,
+            "label_counts": summary.normalized_label_counts(),
         },
         args.json,
     )
@@ -2339,50 +2397,61 @@ def _hybrid_retrieve(
         # Keep a wider candidate pool before final rerank.
         candidate_limit = max(candidate_limit, rerank_topn * 3)
 
-    api_key = _get_api_key()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json")
-
-    client = OpenAIEmbeddingsClient(
-        api_key=api_key,
-        base_url=getattr(args, "base_url", defaults.openai_base_url()),
-    )
-    try:
-        embed_inputs = [query] + ([query_en] if query_en else [])
-        embed_vecs = client.embed(embed_inputs, model=model)
-        query_vec = embed_vecs[0]
-        query_en_vec = embed_vecs[1] if query_en else None
-    except Exception as e:
-        raise RuntimeError(str(e)) from e
+    # Vector lane is optional: if no API key (or no stored embeddings), we
+    # fall back to FTS-only retrieval.
+    vec_ids: List[int] = []
+    vec_en_ids: List[int] = []
 
     vec_rows = conn.execute(
         "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ?",
         (model,),
     ).fetchall()
 
-    vec_ranked = rank_cosine(
-        query_vec=query_vec,
-        items=((int(r[0]), r[1], float(r[2])) for r in vec_rows),
-        limit=candidate_limit,
-    )
-    vec_ids = [rid for rid, _ in vec_ranked]
-
-    vec_en_ids: List[int] = []
-    if query_en_vec is not None:
+    vec_en_rows = []
+    if query_en:
         vec_en_rows = conn.execute(
             "SELECT observation_id, vector, norm FROM observation_embeddings_en WHERE model = ?",
             (model,),
         ).fetchall()
 
-        # Backward-compatible fallback when dedicated EN table is not populated.
-        search_rows = vec_en_rows if vec_en_rows else vec_rows
+    need_vec = bool(vec_rows)
+    need_vec_en = bool(query_en and (vec_en_rows or vec_rows))
 
-        vec_en_ranked = rank_cosine(
-            query_vec=query_en_vec,
-            items=((int(r[0]), r[1], float(r[2])) for r in search_rows),
-            limit=candidate_limit,
+    api_key = _get_api_key()
+    if api_key and (need_vec or need_vec_en):
+        client = OpenAIEmbeddingsClient(
+            api_key=api_key,
+            base_url=getattr(args, "base_url", defaults.openai_base_url()),
         )
-        vec_en_ids = [rid for rid, _ in vec_en_ranked]
+        try:
+            embed_inputs = [query] + ([query_en] if query_en else [])
+            embed_vecs = client.embed(embed_inputs, model=model)
+            query_vec = embed_vecs[0]
+            query_en_vec = embed_vecs[1] if query_en else None
+        except Exception as e:
+            raise RuntimeError(str(e)) from e
+
+        if need_vec:
+            vec_ranked = rank_cosine(
+                query_vec=query_vec,
+                items=((int(r[0]), r[1], float(r[2])) for r in vec_rows),
+                limit=candidate_limit,
+            )
+            vec_ids = [rid for rid, _ in vec_ranked]
+
+        if query_en_vec is not None and need_vec_en:
+            # Backward-compatible fallback when dedicated EN table is not populated.
+            search_rows = vec_en_rows if vec_en_rows else vec_rows
+
+            vec_en_ranked = rank_cosine(
+                query_vec=query_en_vec,
+                items=((int(r[0]), r[1], float(r[2])) for r in search_rows),
+                limit=candidate_limit,
+            )
+            vec_en_ids = [rid for rid, _ in vec_en_ranked]
+    else:
+        if not api_key and (need_vec or need_vec_en):
+            print("Warning: No API key, skipping vector retrieval", file=sys.stderr)
 
     fts_rows = []
     try:
@@ -2396,16 +2465,61 @@ def _hybrid_retrieve(
             """,
             (query, candidate_limit),
         ).fetchall()
-    except sqlite3.OperationalError as e:
-        # FTS syntax can fail for edge-case query strings (e.g. hyphens/operators).
-        if "no such column: matches" in str(e):
+    except sqlite3.OperationalError:
+        # FTS syntax can fail for edge-case query strings (hyphens/operators/punctuation).
+        # Prefer fail-open behavior:
+        # 1) retry once with a best-effort sanitized query
+        # 2) if it still fails, skip the FTS lane (instead of crashing)
+        sanitized = re.sub(r"[^\w\s]", " ", query, flags=re.UNICODE)
+        sanitized = " ".join(sanitized.split())
+        retry_query = sanitized if sanitized else query
+
+        if retry_query != query:
+            try:
+                fts_rows = conn.execute(
+                    """
+                    SELECT rowid
+                    FROM observations_fts
+                    WHERE observations_fts MATCH ?
+                    ORDER BY bm25(observations_fts) ASC
+                    LIMIT ?;
+                    """,
+                    (retry_query, candidate_limit),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                print(
+                    f"[openclaw-mem] FTS query parse failed; skipping FTS lane (query={query!r}).",
+                    file=sys.stderr,
+                )
+        else:
             print(
                 f"[openclaw-mem] FTS query parse failed; skipping FTS lane (query={query!r}).",
                 file=sys.stderr,
             )
-        else:
-            raise
     fts_ids = [int(r["rowid"]) for r in fts_rows]
+
+    # If the query is a multi-token natural-language string, FTS5 MATCH defaults
+    # to an implicit AND, which can easily yield zero hits. As a best-effort
+    # fallback (especially when vector search is unavailable), retry with an OR
+    # query to recover some signal.
+    if not fts_ids:
+        tokens = [t for t in re.sub(r"[^\w\s]", " ", query, flags=re.UNICODE).split() if t]
+        if len(tokens) > 1:
+            or_query = " OR ".join(tokens)
+            try:
+                fts_rows = conn.execute(
+                    """
+                    SELECT rowid
+                    FROM observations_fts
+                    WHERE observations_fts MATCH ?
+                    ORDER BY bm25(observations_fts) ASC
+                    LIMIT ?;
+                    """,
+                    (or_query, candidate_limit),
+                ).fetchall()
+                fts_ids = [int(r["rowid"]) for r in fts_rows]
+            except sqlite3.OperationalError:
+                pass
 
     ranked_lists = [fts_ids, vec_ids]
     if vec_en_ids:
@@ -2669,6 +2783,340 @@ def _estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
 
 
+
+
+_ACK_RE = re.compile(r"^(yes|no|y|n|ok|done|lgtm|k|thx|thanks|👍)$", re.IGNORECASE)
+
+
+def _pack_graph_stage0_anti_trigger(query: str) -> str | None:
+    """Return anti-trigger reason or None.
+
+    Keep this conservative: we only skip when it is *very* likely not a retrieval request.
+    """
+    q = (query or "").strip()
+    if not q:
+        return "empty"
+
+    # Token count heuristic.
+    toks = [t for t in re.split(r"\s+", q) if t]
+    if len(toks) < 3:
+        if _ACK_RE.match(q):
+            return "ack_pattern"
+        return "too_short"
+
+    # If user pasted tool output / stack traces, treat as "not asking".
+    if q.startswith("```") or q.startswith("Traceback") or q.startswith("Error:"):
+        return "paste_detect"
+
+    return None
+
+
+def _pack_graph_stage1_keywords(query: str) -> dict:
+    q = (query or "").lower()
+
+    buckets = {
+        "A": [
+            "spec",
+            "docs",
+            "documentation",
+            "roadmap",
+            "decision",
+            "tech note",
+            "design",
+            "architecture",
+            "prd",
+            "sop",
+            "runbook",
+            "文件",
+            "文檔",
+            "規格",
+            "決策",
+            "紀錄",
+            "技術筆記",
+            "架構",
+            "設計",
+            "流程",
+        ],
+        "B": [
+            "where is",
+            "where are",
+            "find",
+            "locate",
+            "which file",
+            "link to",
+            "point me to",
+            "在哪",
+            "哪裡",
+            "搜尋",
+            "定位",
+            "哪個檔",
+            "連結",
+            "指到",
+            "出處",
+        ],
+        "C": [
+            "dependency",
+            "depends on",
+            "related",
+            "relationship",
+            "connect",
+            "tie to",
+            "依賴",
+            "關聯",
+            "之間關係",
+            "相關",
+            "影響範圍",
+            "串起來",
+        ],
+        "D": [
+            "confirm",
+            "verify",
+            "is it true",
+            "did we",
+            "current status",
+            "latest",
+            "what changed",
+            "changelog",
+            "確認",
+            "驗證",
+            "是不是真的",
+            "我們有沒有",
+            "目前狀態",
+            "最新",
+            "改了什麼",
+            "變更",
+        ],
+        "E": [
+            "decisions",
+            "tech_notes",
+            "tech notes",
+            "pm",
+            "status",
+            "index",
+            "quickstart",
+            "changelog",
+            "docs/specs/",
+            "projects/",
+        ],
+    }
+
+    categories = []
+    matched = []
+
+    for cat, toks in buckets.items():
+        for t in toks:
+            if t and t in q:
+                if cat not in categories:
+                    categories.append(cat)
+                if len(matched) < 5:
+                    matched.append(t)
+
+    return {
+        "hit": bool(categories),
+        "categories": categories,
+        "matched_keywords": matched,
+    }
+
+
+def _pack_graph_probe_observations(conn: sqlite3.Connection, query: str, *, probe_limit: int) -> dict:
+    """Lightweight deterministic FTS probe (semantic-by-retrieval).
+
+    Returns redaction-safe aggregate-only stats.
+    """
+    q = (query or "").strip()
+
+    # Keep probe robust to pasted code fences / URLs.
+    q = q.replace("```", " ")
+    q = re.sub(r"https?://\S+", " ", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    if not q:
+        return {"ran": False, "reason": "empty_after_strip"}
+
+    started = time.perf_counter()
+    rows = _graph_search_rows(conn, q, int(max(1, probe_limit)))
+    dt_ms = int((time.perf_counter() - started) * 1000)
+
+    scores = []
+    for r in rows:
+        s = r["score"] if isinstance(r, sqlite3.Row) else None
+        if isinstance(s, (int, float)) and not isinstance(s, bool):
+            scores.append(float(s))
+
+    best = min(scores) if scores else None
+
+    return {
+        "ran": True,
+        "latency_ms": dt_ms,
+        "hit_count": len(rows),
+        "best_score": best,
+        "scores": scores,
+    }
+
+
+def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args: argparse.Namespace) -> dict:
+    """Optional Graphic Memory preflight for `pack` (default OFF; fail-open).
+
+    Returns:
+    - triggered + reason
+    - preflight payload (if triggered)
+    - trace extension (redaction-safe)
+    """
+
+    use_graph = str(getattr(args, "use_graph", "off") or "off").strip().lower()
+
+    # Default: no-op
+    out = {
+        "use_graph": use_graph,
+        "triggered": False,
+        "trigger_reason": "off",
+        "fail_open": True,
+        "error_first_line": None,
+        "selection_count": 0,
+        "budget_tokens": int(max(1, int(getattr(args, "graph_budget_tokens", 1200) or 1200))),
+        "take": int(max(1, int(getattr(args, "graph_take", 12) or 12))),
+        "scope": (str(getattr(args, "graph_scope", "") or "").strip() or None),
+        "probe": {"ran": False},
+        "stage0": {"fired": False, "reason": None},
+        "stage1": {"hit": False, "categories": [], "matched_keywords": []},
+        "probe_decision": None,
+        "payload": None,
+    }
+
+    if use_graph not in {"off", "auto", "on"}:
+        return out
+
+    if use_graph == "off":
+        return out
+
+    # Stage 0
+    anti = _pack_graph_stage0_anti_trigger(query)
+    if anti:
+        out["stage0"] = {"fired": True, "reason": anti}
+        if use_graph != "on":
+            out["triggered"] = False
+            out["trigger_reason"] = f"anti:{anti}"
+            return out
+
+    # Stage 1
+    stage1 = _pack_graph_stage1_keywords(query)
+    out["stage1"] = stage1
+
+    # Forced
+    if use_graph == "on":
+        out["triggered"] = True
+        out["trigger_reason"] = "forced_on"
+    elif bool(stage1.get("hit")):
+        out["triggered"] = True
+        out["trigger_reason"] = "keyword:" + "+".join(stage1.get("categories") or [])
+    else:
+        # Stage 2 probe (auto only)
+        probe_flag = getattr(args, "graph_probe", None)
+        probe_enabled = True if probe_flag is None else (str(probe_flag).strip().lower() == "on")
+        if not probe_enabled:
+            out["triggered"] = False
+            out["trigger_reason"] = "auto_probe_off"
+            return out
+
+        probe_limit = int(max(1, int(getattr(args, "graph_probe_limit", 5) or 5)))
+        t_high = float(getattr(args, "graph_probe_t_high", -5.0) or -5.0)
+        t_marginal = float(getattr(args, "graph_probe_t_marginal", -2.0) or -2.0)
+        n_min = int(max(1, int(getattr(args, "graph_probe_n_min", 3) or 3)))
+
+        probe = _pack_graph_probe_observations(conn, query, probe_limit=probe_limit)
+        out["probe"] = {
+            "ran": bool(probe.get("ran")),
+            "latency_ms": int(probe.get("latency_ms") or 0),
+            "hit_count": int(probe.get("hit_count") or 0),
+            "best_score": probe.get("best_score"),
+        }
+
+        scores = list(probe.get("scores") or [])
+        best = probe.get("best_score")
+        marginal_count = sum(1 for s in scores if isinstance(s, (int, float)) and float(s) <= float(t_marginal))
+
+        if not scores:
+            out["triggered"] = False
+            out["trigger_reason"] = "probe_empty"
+            out["probe_decision"] = "skip_empty"
+        elif isinstance(best, (int, float)) and float(best) <= float(t_high):
+            out["triggered"] = True
+            out["trigger_reason"] = "probe_strong"
+            out["probe_decision"] = "fire_probe_strong"
+        elif isinstance(best, (int, float)) and float(best) <= float(t_marginal) and marginal_count >= n_min:
+            out["triggered"] = True
+            out["trigger_reason"] = "probe_breadth"
+            out["probe_decision"] = "fire_probe_breadth"
+        else:
+            out["triggered"] = False
+            out["trigger_reason"] = "probe_weak"
+            out["probe_decision"] = "skip_weak"
+
+    if not out["triggered"]:
+        return out
+
+    # If triggered: run preflight (fail-open)
+    try:
+        index_payload = _graph_index_payload(
+            conn,
+            query=query,
+            scope=out["scope"],
+            limit=12,
+            window=2,
+            suggest_limit=6,
+            budget_tokens=int(out["budget_tokens"]),
+        )
+        selected_refs = _graph_preflight_selection(index_payload, take=int(out["take"]))
+        pack_payload = _graph_pack_payload(
+            conn,
+            raw_ids=selected_refs,
+            budget_tokens=int(out["budget_tokens"]),
+            max_items=int(out["take"]),
+            allow_empty=True,
+        )
+
+        out["selection_count"] = len(selected_refs)
+        out["payload"] = {
+            "kind": "openclaw-mem.graph.preflight.v0",
+            "query": {"text": query, "scope": out["scope"]},
+            "selection": {"take": int(out["take"]), "selectedCount": len(selected_refs), "recordRefs": selected_refs},
+            "budget": {"budgetTokens": int(out["budget_tokens"]), "estimatedTokens": _estimate_tokens(pack_payload.get("bundle_text", "") or "")},
+            "pack": pack_payload,
+            "items": pack_payload.get("items", []),
+            "bundle_text": pack_payload.get("bundle_text", "") or "",
+        }
+
+        out["fail_open"] = False
+    except Exception as e:
+        line = (str(e).splitlines() or [str(e)])[:1][0]
+        out["error_first_line"] = line[:200]
+        out["fail_open"] = True
+
+    return out
+
+
+def _pack_graph_trace_extension(graph_state: dict) -> dict:
+    """Redaction-safe graph trigger/probe receipt for pack --trace."""
+    if not isinstance(graph_state, dict):
+        return {}
+
+    pre = graph_state.get("payload") or {}
+    return {
+        "triggered": bool(graph_state.get("triggered")),
+        "trigger_reason": graph_state.get("trigger_reason"),
+        "stage0": graph_state.get("stage0"),
+        "stage1": graph_state.get("stage1"),
+        "probe": graph_state.get("probe"),
+        "probe_decision": graph_state.get("probe_decision"),
+        "selected_refs_count": int(graph_state.get("selection_count") or 0),
+        "budget_tokens": int(graph_state.get("budget_tokens") or 0),
+        "take": int(graph_state.get("take") or 0),
+        "scope": graph_state.get("scope"),
+        "fail_open": bool(graph_state.get("fail_open")),
+        "error_first_line": graph_state.get("error_first_line"),
+        "preflight_kind": pre.get("kind"),
+    }
+
+
 def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Build a compact, cited L1-style bundle from hybrid retrieval."""
     query = (args.query or "").strip()
@@ -2682,6 +3130,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     nice_cap = 100
 
     started = time.perf_counter()
+
+    graph_state = _pack_graph_preflight_optional(conn, query=query, args=args)
 
     retrieval_args = argparse.Namespace(
         query=query,
@@ -2800,6 +3250,33 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "citations": citations,
     }
 
+    # Optional graph output (kept separate for safety; consumer may choose to inject).
+    if (graph_state or {}).get("use_graph") != "off":
+        payload["graph"] = {
+            "use_graph": graph_state.get("use_graph"),
+            "triggered": bool(graph_state.get("triggered")),
+            "trigger_reason": graph_state.get("trigger_reason"),
+            "fail_open": bool(graph_state.get("fail_open")),
+            "error_first_line": graph_state.get("error_first_line"),
+            "stage0": graph_state.get("stage0"),
+            "stage1": graph_state.get("stage1"),
+            "probe": graph_state.get("probe"),
+            "probe_decision": graph_state.get("probe_decision"),
+            "selection_count": int(graph_state.get("selection_count") or 0),
+            "budget_tokens": int(graph_state.get("budget_tokens") or 0),
+            "take": int(graph_state.get("take") or 0),
+            "scope": graph_state.get("scope"),
+            "preflight": graph_state.get("payload"),
+        }
+
+        graph_bundle = ((graph_state.get("payload") or {}).get("bundle_text") or "").strip()
+        if graph_bundle:
+            combined = (graph_bundle + "\n" + bundle_text).strip() + "\n"
+            max_chars = max(0, int(budget_tokens + int(graph_state.get("budget_tokens") or 0)) * 4 - 3)
+            if max_chars and len(combined) > max_chars:
+                combined = combined[:max_chars].rstrip() + "\n"
+            payload["bundle_text_with_graph"] = combined
+
     if bool(args.trace):
         duration_ms = int((time.perf_counter() - started) * 1000)
         included_refs = [item["recordRef"] for item in selected_items]
@@ -2862,13 +3339,14 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 ),
             ),
             timing=pack_trace_v1.PackTraceV1Timing(durationMs=duration_ms),
+            extensions={"graph": _pack_graph_trace_extension(graph_state)} if (graph_state or {}).get("use_graph") != "off" else {},
         )
         payload["trace"] = pack_trace_v1.to_dict(trace)
 
     if bool(args.json):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        print(bundle_text)
+        print((payload.get("bundle_text_with_graph") or bundle_text))
 
 
 
@@ -3079,11 +3557,18 @@ def _triage_observations(conn: sqlite3.Connection, since_ts: str, keywords: List
     return [dict(r) for r in rows]
 
 
+
+
 def _triage_cron_errors(*, since_ms: int, cron_jobs_path: str, limit: int) -> List[Dict[str, Any]]:
     """Detect cron jobs whose lastStatus != ok.
 
     Reads OpenClaw cron store (jobs.json). Deterministic and no LLM calls.
+
+    Notes:
+    - Coerces numeric timestamps/durations that may be stored as strings.
+    - Emits a bounded `lastErrorLine` when available (best-effort).
     """
+
     p = Path(os.path.expanduser(cron_jobs_path))
     if not p.exists():
         return []
@@ -3097,17 +3582,65 @@ def _triage_cron_errors(*, since_ms: int, cron_jobs_path: str, limit: int) -> Li
     if not isinstance(jobs, list):
         return []
 
+    def _as_int(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return int(value)
+        if isinstance(value, float):
+            try:
+                return int(value)
+            except Exception:
+                return None
+        if isinstance(value, str):
+            s = value.strip()
+            if not s:
+                return None
+            if s.isdigit() or (s.startswith("-") and s[1:].isdigit()):
+                try:
+                    return int(s)
+                except Exception:
+                    return None
+            try:
+                f = float(s)
+            except Exception:
+                return None
+            if f != f or f in (float("inf"), float("-inf")):
+                return None
+            try:
+                return int(f)
+            except Exception:
+                return None
+        return None
+
+    def _first_line(value: Any, *, max_chars: int = 400) -> str | None:
+        if not isinstance(value, str):
+            return None
+        s = value.strip("\n")
+        if not s:
+            return None
+        line = s.splitlines()[0].strip()
+        if not line:
+            return None
+        if len(line) > max_chars:
+            return line[: max_chars - 1] + "…"
+        return line
+
     bad: List[Dict[str, Any]] = []
     for j in jobs:
         if not isinstance(j, dict):
             continue
         state = j.get("state") if isinstance(j.get("state"), dict) else {}
-        last_status = state.get("lastStatus")
-        last_run = state.get("lastRunAtMs")
-        if last_status in (None, "ok"):
+
+        last_status_raw = state.get("lastStatus")
+        last_status = (str(last_status_raw).strip() if last_status_raw is not None else None)
+
+        last_run = _as_int(state.get("lastRunAtMs"))
+        if last_status is None or last_status.lower() == "ok":
             continue
-        if isinstance(last_run, (int, float)) and int(last_run) < int(since_ms):
+        if last_run is not None and int(last_run) < int(since_ms):
             continue
+
         bad.append(
             {
                 "id": j.get("id"),
@@ -3115,13 +3648,20 @@ def _triage_cron_errors(*, since_ms: int, cron_jobs_path: str, limit: int) -> Li
                 "enabled": j.get("enabled"),
                 "lastStatus": last_status,
                 "lastRunAtMs": last_run,
-                "lastDurationMs": state.get("lastDurationMs"),
-                "nextRunAtMs": (state.get("nextRunAtMs") if isinstance(state, dict) else None),
+                "lastDurationMs": _as_int(state.get("lastDurationMs")),
+                "nextRunAtMs": _as_int(state.get("nextRunAtMs")),
+                "lastErrorLine": _first_line(
+                    state.get("lastError")
+                    or state.get("lastErrorLine")
+                    or state.get("lastErrorMessage")
+                    or state.get("error")
+                ),
             }
         )
 
     bad.sort(key=lambda x: (-(int(x.get("lastRunAtMs") or 0)), str(x.get("name") or "")))
     return bad[:limit]
+
 
 
 def _summary_has_task_marker(summary: str) -> bool:
@@ -3134,23 +3674,31 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     Accepted forms:
     - plain marker: `TODO ...`
-    - bracketed marker: `[TODO] ...`, `(TODO) ...`, `【TODO】 ...`, `〔TODO〕 ...`, or `{TODO} ...`
+    - bracketed marker: `[TODO] ...`, `(TASK) ...`, `【REMINDER】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`, `〈TODO〉 ...`, `〖TODO〗 ...`, `〘TODO〙 ...`, or `‹TODO› ...`
+    - compact no-space bracketed marker: `[TODO]buy milk`, `(TASK)review PR`, `【REMINDER】pay rent`, `【TODO】buy milk`, `〔TODO〕buy milk`, `{TODO}buy milk`, `〖TODO〗buy milk`, `〘TODO〙buy milk`
 
     Optional leading markdown wrappers are tolerated before markers:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
-    - list bullets: `-`, `*`, `+`, `•`, `‣`, `∙`, `·` (whitespace optional before nested wrappers/marker)
+    - list bullets: `-`, `*`, `+`, `•`, `▪`, `‣`, `∙`, `·`, `◦`, `・`, `–`, `—`, `−` (whitespace optional before nested wrappers/marker)
     - markdown checkboxes: `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` (whitespace optional before nested wrappers/marker)
-    - ordered-list prefixes: `1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (whitespace optional before nested wrappers/marker)
+    - ordered-list prefixes: `1.` / `1)` / `1-` / `（1）` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (whitespace optional before nested wrappers/marker)
 
     A marker is considered valid when followed by:
     - ':' (including full-width '：')
     - whitespace
-    - '-' / '－' / '–' / '—' / '−'
+    - ';' / '；' / '-' / '.' / '。' / '－' / '–' / '—' / '−'
     - end-of-string
+
+    Rejected forms (examples):
+    - inline markers not at the beginning: `We should TODO: fix this later`
+    - words that merely start with a marker: `TODOLIST ...`, `taskforce ...`
+    - punctuation-only suffix: `TODO! ...` (must be followed by a separator/space/end)
+    - mismatched wrappers: `[TODO) ...`
 
     Example formats:
     - TODO: rotate runbook
     - task- check alerts
+    - TODO. rotate runbook
     - (TASK): review PR
     - - [ ] TODO file patch
     """
@@ -3160,9 +3708,10 @@ def _summary_has_task_marker(summary: str) -> bool:
         return False
 
     markers = ("TODO", "TASK", "REMINDER")
-    separators = {":", "：", "-", "－", "–", "—", "−"}
-    bullet_prefixes = {"-", "*", "+", "•", "‣", "∙", "·"}
+    separators = {":", "：", ";", "；", "-", ".", "。", "－", "–", "—", "−"}
+    bullet_prefixes = {"-", "*", "+", "•", "▪", "‣", "∙", "·", "◦", "・", "–", "—", "−"}
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑"}
+    ordered_prefix_sep = {".", ")", "-", "－", "–", "—", "−"}
 
     def _has_valid_suffix(text: str, idx: int, *, allow_compact: bool = False) -> bool:
         if len(text) == idx:
@@ -3183,7 +3732,7 @@ def _summary_has_task_marker(summary: str) -> bool:
         if not text:
             return False
 
-        close_by_open = {"[": "]", "(": ")", "【": "】", "〔": "〕", "{": "}"}
+        close_by_open = {"[": "]", "(": ")", "【": "】", "〔": "〕", "{": "}", "「": "」", "『": "』", "《": "》", "〈": "〉", "«": "»", "〖": "〗", "〘": "〙", "‹": "›", "<": ">"}
         close = close_by_open.get(text[0])
         if close is None:
             return False
@@ -3238,13 +3787,13 @@ def _summary_has_task_marker(summary: str) -> bool:
             i = 0
             while i < len(value) and value[i].isdigit():
                 i += 1
-            if i > 0 and i < len(value) and value[i] in {".", ")"} and i + 1 < len(value):
+            if i > 0 and i < len(value) and value[i] in ordered_prefix_sep and i + 1 < len(value):
                 return True
 
             j = 0
             while j < len(value) and ("a" <= value[j] <= "z" or "A" <= value[j] <= "Z"):
                 j += 1
-            if j > 0 and j < len(value) and value[j] in {".", ")"} and j + 1 < len(value):
+            if j > 0 and j < len(value) and value[j] in ordered_prefix_sep and j + 1 < len(value):
                 token = value[:j]
                 if len(token) == 1 or _is_roman_token(token):
                     return True
@@ -3291,7 +3840,7 @@ def _summary_has_task_marker(summary: str) -> bool:
             i = 0
             while i < len(value) and value[i].isdigit():
                 i += 1
-            if i > 0 and i < len(value) and value[i] in {".", ")"} and i + 1 < len(value):
+            if i > 0 and i < len(value) and value[i] in ordered_prefix_sep and i + 1 < len(value):
                 next_part = value[i + 1 :]
                 if next_part and next_part[0].isspace():
                     return next_part.lstrip()
@@ -3301,7 +3850,7 @@ def _summary_has_task_marker(summary: str) -> bool:
             j = 0
             while j < len(value) and ("a" <= value[j] <= "z" or "A" <= value[j] <= "Z"):
                 j += 1
-            if j > 0 and j < len(value) and value[j] in {".", ")"} and j + 1 < len(value):
+            if j > 0 and j < len(value) and value[j] in ordered_prefix_sep and j + 1 < len(value):
                 token = value[:j]
                 if len(token) == 1 or _is_roman_token(token):
                     next_part = value[j + 1 :]
@@ -3375,12 +3924,12 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - kind == 'task' OR
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; supports plain or
-      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`), plus optional leading
+      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』`/`〖TODO〗`/`〘TODO〙` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`〔TODO〕buy milk`/`「TODO」buy milk`/`『TODO』buy milk`/`〖TODO〗buy milk`/`〘TODO〙buy milk`), plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
-      (`-`/`*`/`+`/`•`, `[ ]`/`[x]`/`[✓]`/`[✔]`), and ordered-list prefixes like
-      `1.`/`1)`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
+      (`-`/`*`/`+`/`•`/`▪`/`‣`/`∙`/`·`/`◦`/`・`/`–`/`—`/`−`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`), and ordered-list prefixes like
+      `1.`/`1)`/`1-`/`（1）`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
       between wrappers and the next wrapper/marker;
-      accepts ':', whitespace, '-', '－', '–', '—', '−', or marker-only)
+      accepts ':', whitespace, ';', '；', '-', '－', '–', '—', '−', or marker-only)
 
     Importance is best-effort parsed from detail_json.importance.
     """
@@ -3479,6 +4028,8 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     since_minutes = max(0, since_minutes)
     limit = max(1, min(200, limit))
 
+    dedupe = bool(getattr(args, "dedupe", True))
+
     kw_raw = getattr(args, "keywords", None)
     if kw_raw:
         keywords = [k.strip().lower() for k in str(kw_raw).split(",") if k.strip()]
@@ -3503,7 +4054,7 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     importance_min = float(getattr(args, "importance_min", 0.7))
 
     state_path = Path(os.path.expanduser(getattr(args, "state_path", None) or "~/.openclaw/memory/openclaw-mem/triage-state.json"))
-    state = _load_triage_state(state_path)
+    state = _load_triage_state(state_path) if dedupe else {}
 
     last_obs_id = int(((state.get("observations") or {}).get("last_alerted_id") or 0))
     last_task_id = int(((state.get("tasks") or {}).get("last_alerted_id") or 0))
@@ -3531,10 +4082,15 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if mode in {"heartbeat", "tasks"}:
         tasks_all = _triage_tasks(conn, since_ts=tasks_since_utc, importance_min=importance_min, limit=limit)
 
-    # Dedupe: only alert on *new* items
-    obs_new = [m for m in obs_all if int(m.get("id") or 0) > last_obs_id]
-    tasks_new = [m for m in tasks_all if int(m.get("id") or 0) > last_task_id]
-    cron_new = [m for m in cron_all if int(m.get("lastRunAtMs") or 0) > last_cron_ms]
+    if dedupe:
+        # Dedupe: only alert on *new* items
+        obs_new = [m for m in obs_all if int(m.get("id") or 0) > last_obs_id]
+        tasks_new = [m for m in tasks_all if int(m.get("id") or 0) > last_task_id]
+        cron_new = [m for m in cron_all if int(m.get("lastRunAtMs") or 0) > last_cron_ms]
+    else:
+        obs_new = list(obs_all)
+        tasks_new = list(tasks_all)
+        cron_new = list(cron_all)
 
     needs_attention = (len(obs_new) > 0) or (len(cron_new) > 0) or (len(tasks_new) > 0)
 
@@ -3544,6 +4100,7 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "version": {"openclaw_mem": __version__, "schema": "v0"},
         "ok": True,
         "mode": mode,
+        "dedupe": dedupe,
         "since_minutes": since_minutes,
         "since_utc": since_utc,
         "keywords": keywords,
@@ -3570,7 +4127,7 @@ def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         },
     }
 
-    if needs_attention:
+    if needs_attention and dedupe:
         # Update state maxima
         if obs_new:
             last_obs_id = max(last_obs_id, max(int(m.get("id") or 0) for m in obs_new))
@@ -3640,7 +4197,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 "skipped_existing": summary.skipped_existing,
                 "skipped_disabled": summary.skipped_disabled,
                 "scorer_errors": summary.scorer_errors,
-                "label_counts": summary.label_counts,
+                "label_counts": summary.normalized_label_counts(),
             },
             args.json,
         )
@@ -3677,7 +4234,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             try:
                 client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
                 model = args.model
-                limit = 500
+                limit = max(1, int(getattr(args, "embed_limit", 1000)))
                 batch = 64
                 now = _utcnow_iso()
 
@@ -3768,7 +4325,7 @@ def cmd_harvest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "skipped_existing": summary.skipped_existing,
         "skipped_disabled": summary.skipped_disabled,
         "scorer_errors": summary.scorer_errors,
-        "label_counts": summary.label_counts,
+        "label_counts": summary.normalized_label_counts(),
         "embedded": embedded,
     }
     if embed_error:
@@ -4485,6 +5042,80 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit({"ok": True, "id": rowid, "file": stored_path, "embedded": bool(api_key)}, args.json)
 
 
+def cmd_artifact_stash(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    if getattr(args, "from_path", None):
+        data = Path(str(args.from_path)).expanduser().read_bytes()
+    else:
+        data = sys.stdin.buffer.read()
+
+    meta_obj: Dict[str, Any] = {}
+    raw_meta_json = (getattr(args, "meta_json", None) or "").strip()
+    if raw_meta_json:
+        try:
+            parsed = json.loads(raw_meta_json)
+        except json.JSONDecodeError as e:
+            _emit({"error": f"invalid --meta-json: {e}"}, True)
+            sys.exit(2)
+        if not isinstance(parsed, dict):
+            _emit({"error": "--meta-json must be a JSON object"}, True)
+            sys.exit(2)
+        meta_obj = parsed
+
+    receipt = stash_artifact(
+        data,
+        kind=str(getattr(args, "kind", "tool_output") or "tool_output"),
+        meta=meta_obj,
+        compress=bool(getattr(args, "gzip", False)),
+    )
+    _emit(receipt, bool(args.json))
+
+
+def cmd_artifact_fetch(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    handle = str(getattr(args, "handle", "") or "").strip()
+    try:
+        parse_artifact_handle(handle)
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    try:
+        receipt = fetch_artifact(
+            handle,
+            mode=str(getattr(args, "mode", "headtail") or "headtail"),
+            max_chars=max(1, int(getattr(args, "max_chars", 8000) or 8000)),
+        )
+    except FileNotFoundError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    if bool(args.json):
+        _emit(receipt, True)
+        return
+
+    sys.stdout.write(str(receipt.get("text") or ""))
+
+
+def cmd_artifact_peek(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    handle = str(getattr(args, "handle", "") or "").strip()
+    try:
+        parse_artifact_handle(handle)
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    try:
+        receipt = peek_artifact(
+            handle,
+            preview_chars=max(1, int(getattr(args, "preview_chars", 240) or 240)),
+        )
+    except FileNotFoundError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+
+    _emit(receipt, bool(args.json))
 
 
 # --- Graphic memory (GraphRAG-lite) — v0 skeleton (index-first + progressive disclosure) ---
@@ -6481,6 +7112,25 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--query-en", help="Optional English query for bilingual retrieval")
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
+
+    # Optional: Graphic Memory preflight integration (default OFF; fail-open)
+    sp.add_argument(
+        "--use-graph",
+        choices=["off", "auto", "on"],
+        default="off",
+        help="Graphic Memory integration: off (default) | auto (deterministic trigger+probe) | on (always run preflight).",
+    )
+    sp.add_argument("--graph-scope", default=None, help="Optional scope hint for graph preflight (default: unset)")
+    sp.add_argument("--graph-budget-tokens", type=int, default=1200, help="Token budget for graph preflight bundle_text (default: 1200)")
+    sp.add_argument("--graph-take", type=int, default=12, help="Max selected refs to pack for graph preflight (default: 12)")
+
+    # Probe knobs (used in --use-graph=auto)
+    sp.add_argument("--graph-probe", choices=["on", "off"], default=None, help="Enable index-probe stage in auto mode (default: on)")
+    sp.add_argument("--graph-probe-limit", type=int, default=5, help="Max FTS rows to fetch in probe (default: 5)")
+    sp.add_argument("--graph-probe-t-high", type=float, default=-5.0, help="Probe trigger threshold for best bm25() score (default: -5.0)")
+    sp.add_argument("--graph-probe-t-marginal", type=float, default=-2.0, help="Probe marginal threshold (default: -2.0)")
+    sp.add_argument("--graph-probe-n-min", type=int, default=3, help="Breadth minimum count for marginal probe hits (default: 3)")
+
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)
 
@@ -6550,6 +7200,41 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--limit", type=int, default=12)
     g.add_argument("--window", type=int, default=2)
     g.set_defaults(func=cmd_graph_export)
+
+    sp = sub.add_parser("artifact", help="Context Budget Sidecar artifact store (stash/fetch/peek)")
+    sp.add_argument("--db", default=None, help="SQLite DB path")
+    sp.add_argument("--json", action="store_true", help="Structured JSON output")
+    asub = sp.add_subparsers(dest="artifact_cmd", required=True)
+
+    a = asub.add_parser("stash", help="Store raw tool output from --from PATH or stdin")
+    a.add_argument("--db", default=None, help="SQLite DB path")
+    a.add_argument("--json", action="store_true", help="Structured JSON output")
+    a.add_argument("--from", dest="from_path", help="Read raw payload bytes from file path (default: stdin)")
+    a.add_argument("--kind", default="tool_output", help="Artifact kind label (default: tool_output)")
+    a.add_argument("--meta-json", default=None, help="Optional metadata JSON object (small, non-raw)")
+    a.add_argument("--gzip", action="store_true", help="Compress blob as .txt.gz")
+    a.set_defaults(func=cmd_artifact_stash)
+
+    a = asub.add_parser("fetch", help="Fetch bounded artifact text by handle")
+    a.add_argument("--db", default=None, help="SQLite DB path")
+    a.add_argument(
+        "--json",
+        dest="json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true). Use --no-json for raw bounded text only.",
+    )
+    a.add_argument("handle", help="Artifact handle: ocm_artifact:v1:sha256:<64hex>")
+    a.add_argument("--mode", choices=["headtail", "head", "tail"], default="headtail", help="Bounded extraction mode (default: headtail)")
+    a.add_argument("--max-chars", dest="max_chars", type=int, default=8000, help="Maximum characters to return (default: 8000)")
+    a.set_defaults(func=cmd_artifact_fetch)
+
+    a = asub.add_parser("peek", help="Show artifact metadata + tiny preview")
+    a.add_argument("--db", default=None, help="SQLite DB path")
+    a.add_argument("--json", action="store_true", help="Structured JSON output")
+    a.add_argument("handle", help="Artifact handle: ocm_artifact:v1:sha256:<64hex>")
+    a.add_argument("--preview-chars", dest="preview_chars", type=int, default=240, help="Preview character budget (default: 240)")
+    a.set_defaults(func=cmd_artifact_peek)
 
     sp = sub.add_parser("episodes", help="Append/query/redact/gc for episodic session events")
     add_common(sp)
@@ -6686,6 +7371,13 @@ def build_parser() -> argparse.ArgumentParser:
         dest="state_path",
         help="State file for dedupe (default: ~/.openclaw/memory/openclaw-mem/triage-state.json)",
     )
+    sp.add_argument(
+        "--no-dedupe",
+        dest="dedupe",
+        action="store_false",
+        default=True,
+        help="Disable state dedupe; return all matches (manual debugging)",
+    )
     sp.set_defaults(func=cmd_triage)
 
     sp = sub.add_parser("harvest", help="Auto-ingest and embed observations from log file")
@@ -6717,6 +7409,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-update-index", dest="update_index", action="store_false", help="Skip index update")
     sp.add_argument("--index-to", default=None, help=f"Index output path (default: {DEFAULT_INDEX_PATH})")
     sp.add_argument("--index-limit", type=int, default=5000, help="Index: max observations to include")
+    sp.add_argument(
+        "--embed-limit",
+        type=int,
+        default=1000,
+        help="Max embeddings to compute during harvest (default: 1000)",
+    )
     sp.set_defaults(func=cmd_harvest)
 
     sp = sub.add_parser("writeback-lancedb", help="Write graded metadata back into LanceDB rows")

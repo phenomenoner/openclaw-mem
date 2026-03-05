@@ -64,12 +64,16 @@ def test_trivial_skip_examples():
     assert should_skip_autorecall("...")
     assert should_skip_autorecall("/sync_snapshot")
     assert should_skip_autorecall("heartbeat_ok")
+    assert should_skip_autorecall("HEARTBEAT")
+    assert should_skip_autorecall("heartbeat ping")
+    assert should_skip_autorecall("💯✨!!!")
 
 
 def test_non_trivial_examples():
     assert not should_skip_autorecall("好的，幫我看 cron 狀態")
-    assert not should_skip_autorecall("ok, let's debug the issue")
+    assert not should_skip_autorecall("ok, let\'s debug the issue")
     assert not should_skip_autorecall("nudge: please check A-fast")
+    assert not should_skip_autorecall("晚安，明天 9 點提醒我開會")
 
 
 def test_engine_contract_markers_present_in_ts():
@@ -77,4 +81,5 @@ def test_engine_contract_markers_present_in_ts():
 
     # Contract markers for the behavior we rely on.
     assert "if (!cleaned) return true;" in ts
+    assert "if (/heartbeat/i.test(compact)) return true;" in ts
     assert "nudge" in ts  # ACK_PATTERN should include it

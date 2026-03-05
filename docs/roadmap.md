@@ -53,6 +53,23 @@ Acceptance criteria:
 - `memory_store/memory_recall/memory_forget` emit JSON receipts (filters, latency, counts).
 - M1 delivers a “concept → decisions/preferences” golden set where hybrid beats vector-only.
 
+### 1.7) Graphic Memory consumption (triggered preflight → pack integration)
+
+Status: **ROADMAP**.
+
+- Problem: Graphic Memory has working auto-capture and `graph preflight`, but it is not yet **routinely consumed** in doc/decision/dependency lookup flows.
+- Plan (two-step):
+  1) Spec-level: add a deterministic, bilingual trigger policy for when to run `graph preflight` (soft + fail-open).
+  2) Product-level: integrate the same trigger into `openclaw-mem pack` / `hybrid` via `--use-graph=auto` (default OFF).
+
+Artifacts:
+- Spec: `docs/specs/graphic-memory-preflight-trigger-policy.md`
+
+Acceptance criteria:
+- `pack` behavior unchanged when graph is OFF.
+- In `--use-graph=auto`, trigger is deterministic + traceable (`--trace` shows trigger reason).
+- Graph failures are fail-open and never break pack.
+
 ### 1.6) Sunrise rollout (Stage A→B→C)
 
 Status: **PARTIAL** (Stage A running; Stage B/C pending).
@@ -90,7 +107,7 @@ Status: **PARTIAL** (baseline shipped; benchmark pass pending).
 - [x] Deterministic `heuristic-v1` + unit tests
 - [x] Feature flag for autograde: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1`
 - [x] Ingest wiring: only fill missing importance; never overwrite; fail-open
-- [x] CLI override: `--importance-scorer {heuristic-v1|off}` for `ingest`/`harvest` (env fallback remains)
+- [x] CLI override: `--importance-scorer {heuristic-v1|heuristic_v1|off}` for `ingest`/`harvest` (env fallback remains)
 - [x] **E2E safety belt**: prove flag-off = no change; flag-on fills missing; fail-open doesn’t break ingest
 - [x] **Ingest summary (text + JSON)** with at least:
   - `total_seen`, `graded_filled`, `skipped_existing`, `skipped_disabled`, `scorer_errors`, `label_counts`

@@ -162,6 +162,13 @@ openclaw-mem graph preflight "${QUERY}" \
   --budget-tokens 1200
 ```
 
+## Trigger policy (recommended)
+
+Graphic Memory preflight is most valuable for **docs/decisions/dependency/status verification** tasks.
+
+- Deterministic trigger policy (bilingual): `docs/specs/graphic-memory-preflight-trigger-policy.md`
+- Posture: soft trigger + fail-open + low-noise.
+
 ## Agent prompt snippet
 
 Use this snippet in agent scaffolds when `OPENCLAW_MEM_GRAPH_AUTO_RECALL=1`:

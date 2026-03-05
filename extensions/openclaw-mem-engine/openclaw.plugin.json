@@ -245,8 +245,8 @@
               "maxItems": {
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 5,
-                "default": 4
+                "maximum": 6,
+                "default": 5
               },
               "skipTrivialPrompts": {
                 "type": "boolean",
@@ -288,8 +288,8 @@
               "maxItemsPerTurn": {
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 3,
-                "default": 2
+                "maximum": 4,
+                "default": 3
               },
               "maxCharsPerItem": {
                 "type": "integer",

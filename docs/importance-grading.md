@@ -95,11 +95,11 @@ python3 -m unittest -q tests/test_heuristic_v1.py
 You can optionally have `ingest` / `harvest` run `heuristic-v1` and write `detail_json.importance` during import.
 
 - Enable via env var:
-  - `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1`
+  - `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (alias `heuristic_v1`)
 - Or override per-run:
 
   - CLI override takes precedence over env var for the same run (for one-off dry-run behavior, use `--importance-scorer off`).
-  - `--importance-scorer {heuristic-v1|off}`
+  - `--importance-scorer {heuristic-v1|heuristic_v1|off}`
 
 Notes:
 - This is designed to be safe + reversible: set the env/flag to `off` to stop grading.
@@ -115,7 +115,7 @@ Fields:
 - `skipped_existing`: observations that already had `detail_json.importance` (left untouched)
 - `skipped_disabled`: observations with missing importance when autograde is disabled
 - `scorer_errors`: autograde failures (ingest still succeeds; fail-open)
-- `label_counts`: aggregate label distribution for observations that had importance (existing + newly graded)
+- `label_counts`: aggregate label distribution for observations that had importance (existing + newly graded). Receipts always include canonical keys (`must_remember`, `nice_to_have`, `ignore`, `unknown`) with zero defaults for deterministic dashboards.
 
 Example:
 

@@ -54,13 +54,13 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 
 ```bash
 # Create/open DB and show counts
-uv run python -m openclaw_mem --json status
+uv run --python 3.13 --frozen -- python -m openclaw_mem --json status
 
 # Cheap recall
-uv run python -m openclaw_mem --json search "gateway timeout" --limit 10
+uv run --python 3.13 --frozen -- python -m openclaw_mem --json search "gateway timeout" --limit 10
 
 # Build a compact recall bundle
-uv run python -m openclaw_mem pack --query "gateway timeout" --limit 8 --trace --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack --query "gateway timeout" --limit 8 --trace --json
 ```
 
 ## What’s new (v1.0.4, since v1.0.1)

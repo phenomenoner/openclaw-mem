@@ -18,6 +18,11 @@ This repo is run like a small, ops-sensitive product: **main stays stable**, exp
   - `.../openclaw-mem` (main)
   - `.../openclaw-mem-dev` (dev)
 
+- Slow-cook lanes policy (important):
+  - Slow-cook automation **direct-pushes to `dev`**.
+  - Do **NOT** open PRs into `dev` from `slowcook/*` branches.
+  - PRs are reserved for **`dev` → `main`** release review.
+
 - If you need to change code for a slow-cook job, target **dev** unless the task explicitly says otherwise.
 
 ## Merging dev → main
