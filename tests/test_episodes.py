@@ -176,6 +176,8 @@ class TestEpisodesCli(unittest.TestCase):
                     summary,
                     "--payload-json",
                     '{"raw":"value"}',
+                    "--refs-json",
+                    '{"recordRef":"obs:1"}',
                     "--json",
                 ],
             )
@@ -213,6 +215,7 @@ class TestEpisodesCli(unittest.TestCase):
         for item in query_out["items"]:
             self.assertTrue(item["redacted"])
             self.assertEqual(item["payload"], "[REDACTED]")
+            self.assertEqual(item["refs"], "[REDACTED]")
         conn.close()
 
     def test_episodes_query_deterministic_ordering(self):
@@ -364,6 +367,77 @@ class TestEpisodesCli(unittest.TestCase):
             ["episodes", "query", "--scope", "proj-gc", "--session-id", "s-gc", "--json"],
         )
         self.assertEqual([x["event_id"] for x in post["items"]], ["old-decision"])
+        conn.close()
+
+    def test_episodes_gc_conversation_type_default_retention(self):
+        conn = _connect(":memory:")
+        now_ts_ms = 1_800_000_000_000
+
+        self._run(
+            conn,
+            [
+                "episodes",
+                "append",
+                "--event-id",
+                "old-user",
+                "--ts-ms",
+                str(now_ts_ms - (70 * 24 * 60 * 60 * 1000)),
+                "--scope",
+                "proj-ret",
+                "--session-id",
+                "s-ret",
+                "--agent-id",
+                "w",
+                "--type",
+                "conversation.user",
+                "--summary",
+                "old user",
+                "--json",
+            ],
+        )
+        self._run(
+            conn,
+            [
+                "episodes",
+                "append",
+                "--event-id",
+                "old-assistant",
+                "--ts-ms",
+                str(now_ts_ms - (70 * 24 * 60 * 60 * 1000)),
+                "--scope",
+                "proj-ret",
+                "--session-id",
+                "s-ret",
+                "--agent-id",
+                "w",
+                "--type",
+                "conversation.assistant",
+                "--summary",
+                "old assistant",
+                "--json",
+            ],
+        )
+
+        gc_out = self._run(
+            conn,
+            [
+                "episodes",
+                "gc",
+                "--scope",
+                "proj-ret",
+                "--now-ts-ms",
+                str(now_ts_ms),
+                "--json",
+            ],
+        )
+        self.assertEqual(gc_out["deleted_by_type"]["conversation.user"], 1)
+        self.assertEqual(gc_out["deleted_by_type"]["conversation.assistant"], 0)
+
+        post = self._run(
+            conn,
+            ["episodes", "query", "--scope", "proj-ret", "--session-id", "s-ret", "--json"],
+        )
+        self.assertEqual([x["event_id"] for x in post["items"]], ["old-assistant"])
         conn.close()
 
 

@@ -203,6 +203,47 @@ crontab -e
 */5 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source $HOME/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --no-update-index --json >> $HOME/.openclaw/logs/openclaw-mem-harvest.log 2>&1
 ```
 
+## 2B. Episodic auto-mode ingestion (new)
+
+When `plugins.entries["openclaw-mem"].config.episodes.enabled=true`, schedule extractor + ingest every 1–5 minutes.
+
+Auto-captured set includes:
+- plugin lane: `tool.call`, `tool.result`, `ops.alert`
+- extractor lane: `conversation.user`, `conversation.assistant`
+
+Scope derivation for conversation text:
+- leading `[SCOPE: x]` → `x`
+- otherwise `global`
+
+### Cron (silent on green)
+
+```bash
+*/2 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --payload-cap-bytes 4096 --json >/dev/null 2>&1
+*/2 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --conversation-payload-cap-bytes 4096 --json >/dev/null 2>&1
+```
+
+Optional daily spool rotate:
+
+```bash
+7 0 * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --rotate --json >/dev/null 2>&1
+```
+
+Verification:
+
+```bash
+uv run python -m openclaw_mem episodes query --global --limit 20 --json
+uv run python -m openclaw_mem episodes replay <session_id> --global --json
+```
+
+Expected:
+- `count` increases after activity
+- query/replay are summary-only by default (payload appears only with `--include-payload`)
+
+Rollback:
+1. set `plugins.entries.openclaw-mem.config.episodes.enabled=false`
+2. disable ingest/extractor cron jobs
+3. restart gateway
+
 ## 3. Log Rotation
 
 ### logrotate (Linux)

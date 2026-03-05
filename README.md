@@ -31,9 +31,11 @@ See: `docs/reality-check.md` (commands + expected JSON shapes).
 uv sync --locked
 DB=/tmp/openclaw-mem.sqlite
 
-uv run python -m openclaw_mem --db "$DB" --json status
-uv run python -m openclaw_mem --db "$DB" --json ingest --file /tmp/sample.jsonl
-uv run python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json status
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json ingest --file /tmp/sample.jsonl
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json episodes append --scope demo --session-id s1 --agent-id demo --type ops.alert --summary "hello" 
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json episodes query --scope demo --session-id s1
 ```
 
 Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_ts`, and `ingest` prints `{inserted, ids}`.
@@ -52,7 +54,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 
 ## Status map (DONE / PARTIAL / ROADMAP)
 
-- **DONE**: local SQLite ledger + FTS5; `ingest/search/timeline/get`; deterministic `triage`.
+- **DONE**: local SQLite ledger + FTS5; `ingest/search/timeline/get`; deterministic `triage`; **episodic events ledger** (`episodes append/query/replay/redact/gc`).
 - **PARTIAL**: embeddings/hybrid/rerank; AI compression (LLM-assisted, hard caps + rollback; see `docs/ai-compression.md`); dual-language fields.
 - **PARTIAL**: OpenClaw plugin capture + backend annotations; Route A semantic recall (`index`, `semantic`).
 - **PARTIAL (dev)**: Context Packer (`pack`) with redaction-safe `--trace` receipts (exists, not yet auto-wired; see `docs/automation-status.md`).
@@ -69,6 +71,9 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **Observation store**: SQLite + FTS5
 - **Progressive disclosure recall**:
   - `search` → `timeline` → `get`
+- **Episodic events ledger (v0)**: append-only session timeline
+  - `episodes append/query/replay/redact/gc`
+  - query is **summary-only by default**; payload opt-in via `--include-payload`
 - **Context Packer (dev)**: `pack` builds a compact, cited bundle (summary-only). Use `--no-json` for plain-text payloads, or `--trace --json` for redaction-safe `openclaw-mem.pack.trace.v1` receipts that list refreshed `recordRef`s.
 - **Export**: `export` (with safety confirmation)
 - **Auto-ingest helper**: `harvest` (ingest + optional embeddings)
@@ -88,7 +93,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 
 ### Optional (OpenClaw integration) — **PARTIAL**
 
-- **Auto-capture plugin** (`extensions/openclaw-mem`): listens to `tool_result_persist` and writes JSONL for ingestion.
+- **Auto-capture plugin** (`extensions/openclaw-mem`): writes observation JSONL and (optionally) episodic JSONL (`conversation.user` / `conversation.assistant` / `tool.call` / `tool.result` / `ops.alert`) for ingest.
 - **Backend adapter annotations (v0.5.9)**:
   - capture layer remains sidecar-only (no tool registration)
   - records memory backend metadata (`memory-core` / `memory-lancedb`) into `detail_json`
@@ -109,11 +114,14 @@ Automation truth (dev):
 - `triage --mode tasks` extraction is deterministic:
   - matches `kind == "task"`, or
   - `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
+
+  - Note: also accepts additional bullet glyphs like ▪ ◦ ・ – — − and checkbox glyphs like [☐]/[☑]/[☒] (see QUICKSTART.md for the full list).
   - Example formats: `TODO: rotate runbook`, `【TODO】 rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`.
+
   - Example run:
 
     ```bash
-    uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
+    uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
     ```
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
 - **Ops profile surface (DONE)**: `profile --json` for quick state snapshots (counts, importance labels, top tools/kinds, recent rows, embedding stats).
@@ -126,13 +134,13 @@ Automation truth (dev):
 - **Autograde switch (copy/paste)**:
   ```bash
   # Enable heuristic autograde for ingest/harvest
-  OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+  OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 
   # Run a one-off no-autograde harvest (kill-switch)
-  OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+  OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 
   # Force CLI-only kill switch (per command)
-  uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
+  uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
   ```
 
 - **Lifecycle manager (ROADMAP)**: ref/last_used_at-based decay + archive-first retention.
@@ -159,7 +167,7 @@ uv sync --locked
 ```
 
 After syncing, run from this source checkout with:
-- `uv run python -m openclaw_mem ...` (recommended)
+- `uv run --python 3.13 --frozen -- python -m openclaw_mem ...` (recommended)
 
 If you have a packaged install that provides a console script, you can also use:
 - `openclaw-mem ...`
@@ -170,43 +178,43 @@ If you have a packaged install that provides a console script, you can also use:
 
 ```bash
 # 1) Create/open DB and show counts
-uv run python -m openclaw_mem status --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem status --json
 
 # 1.5) Snapshot ops profile (counts, importance labels, top tools, recent rows)
-uv run python -m openclaw_mem profile --json --recent-limit 15
+uv run --python 3.13 --frozen -- python -m openclaw_mem profile --json --recent-limit 15
 
 # 1.6) Check active OpenClaw memory backend + fallback posture
-uv run python -m openclaw_mem backend --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem backend --json
 
 # 2) Ingest JSONL observations
-uv run python -m openclaw_mem ingest --file observations.jsonl --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem ingest --file observations.jsonl --json
 
 # 3) Layer 1 recall (compact)
-uv run python -m openclaw_mem search "gateway timeout" --limit 10 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem search "gateway timeout" --limit 10 --json
 
 # 4) Layer 2 recall (nearby context)
-uv run python -m openclaw_mem timeline 42 --window 3 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem timeline 42 --window 3 --json
 
 # 5) Layer 3 recall (full rows)
-uv run python -m openclaw_mem get 42 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem get 42 --json
 
 # 6) (Dev) Build a compact, cited context bundle
-uv run python -m openclaw_mem pack --query "gateway timeout" --limit 12 --budget-tokens 1200 --trace --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack --query "gateway timeout" --limit 12 --budget-tokens 1200 --trace --json
 # With --trace, this returns a redaction-safe `openclaw-mem.pack.trace.v1` receipt plus the packed `bundle_text` and citations.
 # `--query-en` can be used when you want an English retrieval lane in addition to the main query.
 
 # 6a) Optional: skip JSON wrapper for pure L1 text payload
-uv run python -m openclaw_mem pack --query "gateway timeout" --no-json
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack --query "gateway timeout" --no-json
 ```
 
 ### Proactive memory (explicit “remember this”)
 
 ```bash
-uv run python -m openclaw_mem store "Prefer tabs over spaces" \
+uv run --python 3.13 --frozen -- python -m openclaw_mem store "Prefer tabs over spaces" \
   --category preference --importance 0.9 --json
 
-uv run python -m openclaw_mem hybrid "tabs or spaces preference" --limit 5 --json
-uv run python -m openclaw_mem hybrid "tabs or spaces preference" \
+uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "tabs or spaces preference" --limit 5 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "tabs or spaces preference" \
   --rerank-provider jina --rerank-topn 20 --json
 ```
 
@@ -259,15 +267,15 @@ See detailed deployment patterns:
 
 ```bash
 # Store original text + optional English companion
-uv run python -m openclaw_mem store "<original non-English text>" \
+uv run --python 3.13 --frozen -- python -m openclaw_mem store "<original non-English text>" \
   --text-en "Preference: run integration tests before release" \
   --lang zh --category preference --importance 0.9 --json
 
 # Build embeddings (original + English)
-uv run python -m openclaw_mem embed --field both --limit 500 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem embed --field both --limit 500 --json
 
 # Hybrid recall with optional EN assist query
-uv run python -m openclaw_mem hybrid "<original query>" \
+uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "<original query>" \
   --query-en "pre-release process" \
   --limit 5 --json
 ```
@@ -277,11 +285,23 @@ Design notes:
 
 ---
 
-## OpenClaw plugin: auto-capture
+## OpenClaw plugin: auto-capture (manual vs auto mode)
 
 The plugin lives at `extensions/openclaw-mem`.
 
-Minimal config fragment for `~/.openclaw/openclaw.json`:
+### Manual mode (default behavior)
+
+Use CLI directly:
+
+```bash
+openclaw-mem episodes append ...
+openclaw-mem episodes query ...
+openclaw-mem episodes replay <session_id> ...
+```
+
+### Auto mode (episodic ledger)
+
+Enable plugin episodic capture + schedule conversation extractor + ingest jobs:
 
 ```jsonc
 {
@@ -294,7 +314,18 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
           "captureMessage": false,
           "redactSensitive": true,
           "backendMode": "auto",
-          "annotateMemoryTools": true
+          "annotateMemoryTools": true,
+          "episodes": {
+            "enabled": true,
+            "outputPath": "~/.openclaw/memory/openclaw-mem-episodes.jsonl",
+            "scope": "global",
+            "captureToolCall": true,
+            "captureToolResult": true,
+            "captureOpsAlert": true,
+            "payloadCapBytes": 2048,
+            "refsCapBytes": 1024,
+            "maxSummaryLength": 220
+          }
         }
       }
     }
@@ -302,15 +333,60 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
 }
 ```
 
+Run extractor + ingest every 1–5 minutes:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes extract-sessions \
+  --sessions-root ~/.openclaw/sessions \
+  --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
+  --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json \
+  --payload-cap-bytes 4096 \
+  --json
+
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes ingest \
+  --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
+  --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json \
+  --conversation-payload-cap-bytes 4096 \
+  --json
+```
+
+Safety posture:
+- summary-first (query/replay payload is opt-in via `--include-payload`)
+- secret redaction always on for episodic auto mode
+- PII-lite redaction (email/phone) at capture + ingest second-pass
+- if secret-like/tool-dump content remains unsafe, ingest stores `payload=null` and `redacted=1`
+- conversation payload default 4KB (configurable), ingest hard ceiling 8KB
+- no raw stdout/stderr persisted by default
+
+Verification (quick):
+
+```bash
+# Run extractor + ingest once
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json
+
+# Summary-only query/replay by default
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes query --global --limit 20 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes replay <session_id> --global --json
+
+# Payload is explicit opt-in
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes replay <session_id> --global --include-payload --json
+```
+
 Notes (important):
-- If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), set `outputPath` under that directory (e.g. `/some/dir/memory/openclaw-mem-observations.jsonl`).
-- The capture hook listens to **tool results**, not raw inbound chat messages.
-- `openclaw-mem` plugin is a **sidecar adapter** (capture + annotations), not the canonical memory backend.
-- Canonical memory tools depend on your active memory slot backend (e.g., `memory-core` vs `memory-lancedb`).
-- For preferences/tasks that must be remembered reliably, use **explicit** writes via CLI (`openclaw-mem store`).
+- If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), place spool/state files under that directory.
+- Scope derivation in auto conversation capture: leading `[SCOPE: x]` tag; otherwise `global`.
+- The capture hook is sidecar-only (does not own memory slot backend).
+- For explicit durable preference/task memory, continue to use `openclaw-mem store`.
+
+Rollback:
+1. set `plugins.entries.openclaw-mem.config.episodes.enabled=false`
+2. disable episodic ingest/extractor cron jobs
+3. restart OpenClaw gateway
 
 More detail:
 - `docs/auto-capture.md`
+- `docs/specs/episodic-auto-capture-v0.md`
 
 ---
 
@@ -318,7 +394,7 @@ More detail:
 
 ```bash
 # 0: no new issues, 10: attention needed
-uv run python -m openclaw_mem triage --mode heartbeat --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode heartbeat --json
 ```
 
 This is designed to be safe for heartbeat automation: fast, local, and deterministic.
@@ -336,17 +412,17 @@ Graphic Memory automation toggles are opt-in (default OFF):
 Inspect effective toggle state:
 
 ```bash
-uv run python -m openclaw_mem graph auto-status --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph auto-status --json
 ```
 
 Automation examples:
 
 ```bash
-OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
+OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
 
-OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
 
-OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
 ```
 
 Design notes: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
@@ -384,6 +460,8 @@ If you like the "living knowledge graph" workflow (Hub & Spoke, graph view, dail
 - `docs/v0.5.9-adapter-spec.md` — minimal-risk adapter design for `memory-core`/`memory-lancedb`
 - `docs/ecosystem-fit.md` — ownership boundaries + deployment patterns (`memory-core`/`memory-lancedb` + `openclaw-mem`)
 - `docs/specs/graphic-memory-auto-capture-auto-recall.md` — Graphic Memory auto-recall/auto-capture knobs (dev)
+- `docs/specs/episodic-events-ledger-v0.md` — episodic data model + manual APIs
+- `docs/specs/episodic-auto-capture-v0.md` — episodic auto-mode (plugin spool + ingest)
 - `CHANGELOG.md` — notable changes (Keep a Changelog)
 
 ---

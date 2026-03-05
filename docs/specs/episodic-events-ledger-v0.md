@@ -2,6 +2,8 @@
 
 Status: **IMPLEMENTED (v0)**
 
+Auto-mode addendum: `docs/specs/episodic-auto-capture-v0.md`
+
 Owner: `openclaw-mem` (sidecar / SQLite ledger). Optional read-only projection via `openclaw-mem-engine` can come later.
 
 ## Problem
@@ -152,8 +154,9 @@ Default posture:
 - `refs_json` also bounded.
 
 3) **Redaction**
-- Provide a redaction path that overwrites `payload_json` (and optionally `summary`) with `[REDACTED]` and sets `redacted=1`.
+- Redaction overwrites `summary` with `[REDACTED]`, clears `refs_json`, and replaces `payload_json` with either `NULL` or a `[REDACTED]` placeholder (per `--replacement`).
 - Keep the event row for audit continuity.
+- Scope posture: `--event-id` redaction requires `--scope` (or explicit `--global`).
 
 4) **Scope isolation**
 - Every query must include a scope (or be explicitly `scope=global`).
@@ -165,7 +168,7 @@ Default posture:
 
 Introduce a simple retention policy (v0):
 
-- Default retention: 30 days for `tool.result`, 90 days for `conversation.*`, forever for `ops.decision` (configurable).
+- Default retention: 30 days for `tool.result`, 60 days for `conversation.user`, 90 days for `conversation.assistant`, forever for `ops.decision` (configurable).
 - Enforced by a GC command/cron that emits an aggregate-only receipt:
   - deleted counts by type/scope
 

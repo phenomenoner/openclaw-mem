@@ -1,9 +1,17 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
 const DEFAULT_OUTPUT = "memory/openclaw-mem-observations.jsonl";
+const DEFAULT_EPISODIC_OUTPUT = "memory/openclaw-mem-episodes.jsonl";
+const DEFAULT_EPISODIC_SCOPE = "global";
 const MAX_MESSAGE_LENGTH = 1000; // Truncate large messages to prevent bloat
+const DEFAULT_EPISODIC_SUMMARY_LENGTH = 220;
+const DEFAULT_EPISODIC_PAYLOAD_BYTES = 2048;
+const DEFAULT_EPISODIC_CONVERSATION_PAYLOAD_BYTES = 4096;
+const EPISODIC_INGEST_HARD_PAYLOAD_BYTES = 8192;
+const DEFAULT_EPISODIC_REFS_BYTES = 1024;
 const DEFAULT_MEMORY_TOOLS = [
   "memory_search",
   "memory_get",
@@ -13,6 +21,21 @@ const DEFAULT_MEMORY_TOOLS = [
 ];
 
 type BackendMode = "auto" | "memory-core" | "memory-lancedb";
+
+type EpisodicConfig = {
+  enabled?: boolean;
+  outputPath?: string;
+  scope?: string;
+  captureToolCall?: boolean;
+  captureToolResult?: boolean;
+  captureOpsAlert?: boolean;
+  captureConversationUser?: boolean;
+  captureConversationAssistant?: boolean;
+  payloadCapBytes?: number;
+  conversationPayloadCapBytes?: number;
+  refsCapBytes?: number;
+  maxSummaryLength?: number;
+};
 
 type PluginConfig = {
   enabled?: boolean;
@@ -26,6 +49,21 @@ type PluginConfig = {
   backendMode?: BackendMode;
   annotateMemoryTools?: boolean;
   memoryToolNames?: string[];
+  // episodic auto mode (v0)
+  episodes?: EpisodicConfig;
+};
+
+type EpisodicEventLine = {
+  schema: "openclaw-mem.episodes.spool.v0";
+  event_id: string;
+  ts_ms: number;
+  scope: string;
+  session_id: string;
+  agent_id: string;
+  type: "conversation.user" | "conversation.assistant" | "tool.call" | "tool.result" | "ops.alert";
+  summary: string;
+  payload?: unknown;
+  refs?: unknown;
 };
 
 function shouldCapture(toolName: string | undefined, cfg: PluginConfig): boolean {
@@ -52,6 +90,8 @@ function redactSensitiveText(text: string): string {
     [/\bBearer\s+[A-Za-z0-9\-_.=]{8,}\b/g, "Bearer [REDACTED]"],
     [/\bAuthorization:\s*Bearer\s+[A-Za-z0-9\-_.=]{8,}\b/gi, "Authorization: Bearer [REDACTED]"],
     [/\b\d{8,12}:[A-Za-z0-9_-]{20,}\b/g, "[TELEGRAM_BOT_TOKEN_REDACTED]"],
+    [/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[REDACTED_EMAIL]"],
+    [/(?<!\d)(?:\+?\d[\d\-\s()]{7,}\d)(?!\d)/g, "[REDACTED_PHONE]"],
   ];
 
   let out = text;
@@ -156,10 +196,150 @@ function normalizedMemoryToolSet(cfg: PluginConfig): Set<string> {
   return new Set(src.filter((x) => typeof x === "string" && x.trim()).map((x) => x.trim()));
 }
 
+function clampNumber(input: unknown, fallback: number, min: number, max: number): number {
+  if (typeof input !== "number" || !Number.isFinite(input)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(input)));
+}
+
+function normalizeScopeToken(input: unknown, fallback: string): string {
+  const raw = typeof input === "string" ? input.trim().toLowerCase() : "";
+  if (!raw) return fallback;
+  const cleaned = raw
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._:/-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-./:_]+/, "")
+    .replace(/[-./:_]+$/, "");
+  return cleaned || fallback;
+}
+
+function splitLeadingScopeTag(input: string): { scope?: string; text: string } {
+  const raw = String(input ?? "").trim();
+  if (!raw) return { text: "" };
+
+  const m = raw.match(/^\[\s*SCOPE\s*:\s*([^\]]+)\]\s*([\s\S]*)$/i);
+  if (!m) {
+    return { text: raw };
+  }
+
+  const scope = normalizeScopeToken(m[1], "");
+  const text = String(m[2] ?? "").trim();
+  if (!scope) {
+    return { text: raw };
+  }
+  return { scope, text };
+}
+
+function extractTextFromMessageContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content.trim();
+  }
+  if (!Array.isArray(content)) return "";
+
+  const out: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const typed = block as Record<string, unknown>;
+    if (typed.type !== "text") continue;
+    if (typeof typed.text === "string" && typed.text.trim()) {
+      out.push(typed.text.trim());
+    }
+  }
+  return out.join("\n").trim();
+}
+
+function stableEventId(parts: Array<string | number | boolean | undefined | null>): string {
+  const h = createHash("sha256");
+  for (const part of parts) {
+    h.update(String(part ?? ""));
+    h.update("\x1f");
+  }
+  return `ep-${h.digest("hex").slice(0, 32)}`;
+}
+
+function appendJsonlLine(filePath: string, payload: unknown): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.appendFileSync(filePath, JSON.stringify(payload) + "\n", "utf-8");
+}
+
+function shortText(text: string, maxLength: number): string {
+  if (!text) return "";
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength)}…`;
+}
+
+function looksLikeFailureSignal(summary: string): boolean {
+  const s = (summary || "").toLowerCase();
+  if (!s) return false;
+  return /(error|failed|failure|exception|traceback|timeout|rate\s*limit|429|denied)/i.test(s);
+}
+
+function buildToolResultSummary(toolName: string, message: unknown, redactSensitive: boolean, maxLength: number): string {
+  const raw = extractSummary(message, redactSensitive);
+  const compact = raw.replace(/\s+/g, " ").trim();
+  if (!compact) return `${toolName} result captured`;
+  if (compact.startsWith("{") || compact.startsWith("[")) return `${toolName} result captured`;
+  if (/(stdout|stderr|traceback|stack\s*trace|command output)/i.test(compact)) {
+    return `${toolName} result captured (output redacted)`;
+  }
+  return shortText(`${toolName}: ${compact}`, maxLength);
+}
+
+function buildAgentEndAlertSummary(maxLength: number): string {
+  return shortText("agent_end reported unsuccessful turn", maxLength);
+}
+
+function sanitizeEpisodeValue(value: unknown, depth = 0): unknown {
+  if (depth > 5) return "[TRUNCATED_DEPTH]";
+
+  if (typeof value === "string") {
+    const redacted = redactSensitiveText(value);
+    return redacted.length > 600 ? `${redacted.slice(0, 600)}…` : redacted;
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 48).map((v) => sanitizeEpisodeValue(v, depth + 1));
+  }
+
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    const entries = Object.entries(value as Record<string, unknown>);
+    for (const [idx, [k, v]] of entries.entries()) {
+      if (idx >= 48) {
+        out._truncated_items = true;
+        break;
+      }
+      const key = String(k || "").toLowerCase().trim();
+      if (["stdout", "stderr", "raw_stdout", "raw_stderr", "tool_output", "command_output"].includes(key)) {
+        continue;
+      }
+      out[k] = sanitizeEpisodeValue(v, depth + 1);
+    }
+    return out;
+  }
+
+  return value;
+}
+
+function withBoundedJson(value: unknown, capBytes: number): unknown {
+  if (value == null) return undefined;
+  const effectiveCap = Math.max(256, Math.min(capBytes, EPISODIC_INGEST_HARD_PAYLOAD_BYTES));
+  const sanitized = sanitizeEpisodeValue(value);
+  const raw = JSON.stringify(sanitized);
+  if (!raw) return undefined;
+  const size = Buffer.byteLength(raw, "utf-8");
+  if (size <= effectiveCap) return sanitized;
+  return {
+    _truncated: true,
+    reason: "cap_bytes",
+    original_bytes: size,
+    preview: raw.slice(0, Math.min(220, Math.max(40, Math.floor(effectiveCap / 2)))),
+  };
+}
+
 const plugin = {
   id: "openclaw-mem",
   name: "OpenClaw Mem",
-  description: "Capture tool results into JSONL for openclaw-mem ingestion",
+  description: "Capture tool results + optional episodic spool for openclaw-mem ingestion",
   kind: "utility",
 
   register(api: OpenClawPluginApi) {
@@ -198,6 +378,65 @@ const plugin = {
 
     const resolvedMemoryBackend = resolveMemoryBackend(api, backendMode);
     const memoryBackendReady = isMemoryBackendReady(api, resolvedMemoryBackend);
+
+    const episodesCfg = (cfg.episodes ?? {}) as EpisodicConfig;
+    const episodesEnabled = episodesCfg.enabled ?? false;
+    const episodesOutputPath = resolveOutputPath(episodesCfg.outputPath ?? DEFAULT_EPISODIC_OUTPUT);
+    const episodesScope = normalizeScopeToken(episodesCfg.scope, DEFAULT_EPISODIC_SCOPE);
+    const episodesCaptureToolCall = episodesCfg.captureToolCall ?? true;
+    const episodesCaptureToolResult = episodesCfg.captureToolResult ?? true;
+    const episodesCaptureOpsAlert = episodesCfg.captureOpsAlert ?? true;
+    const episodesCaptureConversationUser = episodesCfg.captureConversationUser ?? true;
+    const episodesCaptureConversationAssistant = episodesCfg.captureConversationAssistant ?? true;
+    const episodesPayloadCapBytes = clampNumber(
+      episodesCfg.payloadCapBytes,
+      DEFAULT_EPISODIC_PAYLOAD_BYTES,
+      256,
+      EPISODIC_INGEST_HARD_PAYLOAD_BYTES,
+    );
+    const episodesConversationPayloadCapBytes = clampNumber(
+      episodesCfg.conversationPayloadCapBytes,
+      DEFAULT_EPISODIC_CONVERSATION_PAYLOAD_BYTES,
+      256,
+      EPISODIC_INGEST_HARD_PAYLOAD_BYTES,
+    );
+    const episodesRefsCapBytes = clampNumber(
+      episodesCfg.refsCapBytes,
+      DEFAULT_EPISODIC_REFS_BYTES,
+      128,
+      16 * 1024,
+    );
+    const episodesSummaryMaxLength = clampNumber(
+      episodesCfg.maxSummaryLength,
+      DEFAULT_EPISODIC_SUMMARY_LENGTH,
+      48,
+      400,
+    );
+
+    const appendEpisode = (episode: EpisodicEventLine) => {
+      if (!episodesEnabled) return;
+
+      const scopeSplit = splitLeadingScopeTag(episode.summary);
+      const resolvedScope = normalizeScopeToken(scopeSplit.scope ?? episode.scope, DEFAULT_EPISODIC_SCOPE);
+      const normalizedSummary = scopeSplit.text || episode.summary;
+      const payloadCap = episode.type.startsWith("conversation.")
+        ? episodesConversationPayloadCapBytes
+        : episodesPayloadCapBytes;
+
+      const line: EpisodicEventLine = {
+        ...episode,
+        scope: resolvedScope,
+        summary: shortText(redactSensitiveText(normalizedSummary), episodesSummaryMaxLength),
+        payload: withBoundedJson(episode.payload, payloadCap),
+        refs: withBoundedJson(episode.refs, episodesRefsCapBytes),
+      };
+
+      try {
+        appendJsonlLine(episodesOutputPath, line);
+      } catch (err) {
+        api.logger.warn(`openclaw-mem: failed to write episodic spool JSONL: ${String(err)}`);
+      }
+    };
 
     api.on("tool_result_persist", (event, ctx) => {
       if (!shouldCapture(event.toolName ?? ctx.toolName, cfg)) return;
@@ -241,19 +480,169 @@ const plugin = {
       }
 
       try {
-        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-        fs.appendFileSync(outputPath, JSON.stringify(obs) + "\n", "utf-8");
+        appendJsonlLine(outputPath, obs);
       } catch (err) {
         api.logger.warn(`openclaw-mem: failed to write JSONL: ${String(err)}`);
+      }
+
+      if (episodesEnabled) {
+        const tsMs = Date.now();
+        const sessionId = String(ctx.sessionKey ?? "unknown");
+        const agentId = String(ctx.agentId ?? "unknown");
+        const toolCallId = String(event.toolCallId ?? ctx.toolCallId ?? "");
+
+        const commonPayload = {
+          tool_name: toolName,
+          tool_call_id: toolCallId || undefined,
+          is_synthetic: event.isSynthetic ?? false,
+          memory_backend: annotateMemoryTools ? resolvedMemoryBackend : undefined,
+          memory_backend_ready: annotateMemoryTools ? memoryBackendReady : undefined,
+          memory_tool: annotateMemoryTools ? isMemoryTool : undefined,
+          memory_operation: annotateMemoryTools ? memoryOperation : undefined,
+        };
+        const commonRefs = {
+          tool_name: toolName,
+          tool_call_id: toolCallId || undefined,
+          source: "hook.persist",
+        };
+
+        if (episodesCaptureToolCall) {
+          appendEpisode({
+            schema: "openclaw-mem.episodes.spool.v0",
+            event_id: stableEventId(["tool.call", episodesScope, sessionId, agentId, toolCallId || toolName, tsMs]),
+            ts_ms: tsMs,
+            scope: episodesScope,
+            session_id: sessionId,
+            agent_id: agentId,
+            type: "tool.call",
+            summary: shortText(`tool.call ${toolName}`, episodesSummaryMaxLength),
+            payload: commonPayload,
+            refs: commonRefs,
+          });
+        }
+
+        const resultSummary = buildToolResultSummary(toolName, event.message, redactSensitive, episodesSummaryMaxLength);
+
+        if (episodesCaptureToolResult) {
+          appendEpisode({
+            schema: "openclaw-mem.episodes.spool.v0",
+            event_id: stableEventId(["tool.result", episodesScope, sessionId, agentId, toolCallId || toolName, tsMs]),
+            ts_ms: tsMs,
+            scope: episodesScope,
+            session_id: sessionId,
+            agent_id: agentId,
+            type: "tool.result",
+            summary: resultSummary,
+            payload: {
+              ...commonPayload,
+              result_summary: shortText(resultSummary, Math.max(40, episodesSummaryMaxLength - 20)),
+            },
+            refs: commonRefs,
+          });
+        }
+
+        if (episodesCaptureOpsAlert && looksLikeFailureSignal(resultSummary)) {
+          appendEpisode({
+            schema: "openclaw-mem.episodes.spool.v0",
+            event_id: stableEventId(["ops.alert", episodesScope, sessionId, agentId, toolCallId || toolName, tsMs]),
+            ts_ms: tsMs,
+            scope: episodesScope,
+            session_id: sessionId,
+            agent_id: agentId,
+            type: "ops.alert",
+            summary: shortText(`ops.alert potential tool failure: ${toolName}`, episodesSummaryMaxLength),
+            payload: {
+              ...commonPayload,
+              signal: "tool_failure_pattern",
+            },
+            refs: commonRefs,
+          });
+        }
       }
 
       // Do not modify the tool result; return undefined to keep it as-is.
       return;
     });
 
+    if (episodesEnabled && (episodesCaptureOpsAlert || episodesCaptureConversationUser || episodesCaptureConversationAssistant)) {
+      api.on("agent_end", (event: any) => {
+        const tsMs = Number.isFinite(Date.parse(String(event?.timestamp ?? "")))
+          ? Date.parse(String(event?.timestamp))
+          : Date.now();
+        const sessionId = String(event?.sessionKey ?? event?.session_id ?? "unknown");
+        const agentId = String(event?.agentId ?? event?.agent_id ?? "unknown");
+
+        if (Array.isArray(event?.messages)) {
+          for (const [idx, message] of event.messages.entries()) {
+            if (!message || typeof message !== "object") continue;
+            const msg = message as Record<string, unknown>;
+            const role = String(msg.role ?? "").trim().toLowerCase();
+            if (role !== "user" && role !== "assistant") continue;
+
+            if (role === "user" && !episodesCaptureConversationUser) continue;
+            if (role === "assistant" && !episodesCaptureConversationAssistant) continue;
+
+            const text = extractTextFromMessageContent(msg.content);
+            if (!text) continue;
+
+            const scoped = splitLeadingScopeTag(text);
+            const body = (scoped.text || text).trim();
+            if (!body) continue;
+
+            const eventType = role === "user" ? "conversation.user" : "conversation.assistant";
+            appendEpisode({
+              schema: "openclaw-mem.episodes.spool.v0",
+              event_id: stableEventId([eventType, sessionId, agentId, idx, body.slice(0, 120)]),
+              ts_ms: tsMs + idx,
+              scope: scoped.scope ?? "global",
+              session_id: sessionId,
+              agent_id: agentId,
+              type: eventType,
+              summary: `${eventType}: ${shortText(body.replace(/\s+/g, " "), episodesSummaryMaxLength)}`,
+              payload: {
+                text: body,
+              },
+              refs: {
+                source: "agent_end.messages",
+                role,
+                index: idx,
+              },
+            });
+          }
+        }
+
+        if (episodesCaptureOpsAlert && event?.success === false) {
+          appendEpisode({
+            schema: "openclaw-mem.episodes.spool.v0",
+            event_id: stableEventId(["ops.alert", episodesScope, sessionId, agentId, "agent_end", tsMs]),
+            ts_ms: tsMs,
+            scope: episodesScope,
+            session_id: sessionId,
+            agent_id: agentId,
+            type: "ops.alert",
+            summary: buildAgentEndAlertSummary(episodesSummaryMaxLength),
+            payload: {
+              event: "agent_end",
+              success: false,
+              reason: shortText(redactSensitiveText(String(event?.error ?? event?.reason ?? "unspecified")), 180),
+            },
+            refs: {
+              source: "agent_end",
+            },
+          });
+        }
+      });
+    }
+
     api.logger.info(
       `openclaw-mem: capturing tool results to ${outputPath} (backend=${resolvedMemoryBackend}, ready=${memoryBackendReady})`,
     );
+
+    if (episodesEnabled) {
+      api.logger.info(
+        `openclaw-mem: episodic auto-mode enabled (spool=${episodesOutputPath}, scope=${episodesScope}, call=${episodesCaptureToolCall}, result=${episodesCaptureToolResult}, alert=${episodesCaptureOpsAlert}, convo_user=${episodesCaptureConversationUser}, convo_assistant=${episodesCaptureConversationAssistant})`,
+      );
+    }
   },
 };
 

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Expanded episodic auto-mode flow to full conversation coverage:
+  - `extensions/openclaw-mem` emits bounded episodic spool JSONL for `tool.call`, `tool.result`, and `ops.alert` under feature flag `config.episodes.enabled`.
+  - added extractor lane `openclaw-mem episodes extract-sessions` to tail OpenClaw session JSONL and emit `conversation.user` / `conversation.assistant` with offset-state tracking.
+  - extractor filter defaults to all `chat_type=direct` chats (Telegram direct + WebUI direct), excludes groups by default, and supports optional `--chat-id` allowlist narrowing.
+  - `openclaw-mem episodes ingest --file <jsonl> --state <state.json> [--truncate|--rotate]` keeps deterministic offset-state ingest into `episodic_events`.
+- Hardened episodic safety/retention defaults:
+  - summary-first defaults for query and replay (`--include-payload` opt-in)
+  - secret redaction always-on + PII-lite redaction (email/phone) at capture and ingest second-pass
+  - late detection at ingest now nulls payload **and refs** and sets `redacted=1`
+  - conversation payload default cap 4096 bytes (configurable) with ingest hard ceiling 8192 bytes
+  - retention defaults updated (`conversation.user` 60d, `conversation.assistant` 90d)
 - `openclaw-mem-engine` now supports configurable embedding clamp knobs (`embedding.maxChars`, `embedding.headChars`, `embedding.maxBytes`) and enforces them in both recall/store paths.
 - Memory recall/store now fail-open when embeddings are unavailable, provider errors, or input is over long:
   - `memory_recall` still returns lexical (FTS) results when vector path is skipped.
@@ -25,7 +36,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `memory_recall` + `autoRecall` now optionally consult docs cold lane only when hot lane is insufficient (`minHotItems`)
   - bounded receipt/log markers: `openclaw-mem-engine:docsColdLane.ingest`, `openclaw-mem-engine:docsColdLane.search`, plus optional `coldLane` block in recall lifecycle receipts.
 
+### Docs
+
+- Aligned triage marker docs with parser support by documenting `[☒]` checklist marker in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
+- Removed duplicate legacy `uv run python -m openclaw_mem triage --mode tasks ...` example blocks; docs now keep only the frozen `uv run --python 3.13 --frozen -- python -m openclaw_mem ...` form.
+- Standardized README and `docs/upgrade-checklist.md` command examples to deterministic 'uv run --python 3.13 --frozen -- python -m openclaw_mem ...' form.
+- Added `docs/specs/episodic-auto-capture-v0.md` (capture scope, safety posture, config defaults, cron wiring, rollback).
+- Updated `README.md`, `docs/auto-capture.md`, and `docs/deployment.md` with a manual-vs-auto episodic guide and verification steps.
+
 ### Testing
+- Added episodic ingest regression tests (`tests/test_episodes_ingest.py`) for offset state handling, invalid JSON lines, bounded payload behavior, and deterministic query ordering after ingest.
+- Added conversation extractor regression tests (`tests/test_episodes_extract_sessions.py`) for scope-tag parsing, PII redaction, payload truncation, and redacted/null payload policy.
+- Added plugin contract checks (`tests/test_plugin_episodic_spool.py`) for episodic spool schema + event-type emission markers.
 - `test_triage_json_contract_v0` now writes a temporary cron jobs fixture and passes `--cron-jobs-path`, preventing host-state coupling to `~/.openclaw/cron/jobs.json`.
 - Added docs-cold-lane contract tests (`test_mem_engine_docs_cold_lane.py`) for config schema defaults, trust/provenance markers, and runtime marker wiring.
 
@@ -62,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `triage --mode tasks` now also accepts bracket-wrapped task markers (`[TODO] ...`, `(TASK) ...`) using the same deterministic separator rules as plain markers.
 - `triage --mode tasks` now accepts markdown list/checklist-prefixed markers (for example `- TODO ...`, `* [ ] TASK: ...`, `+ TODO ...`, `• [x] [REMINDER] ...`) and ordered-list prefixes (`1. ...`, `1) ...`, `(1) ...`, `a. ...`, `a) ...`, `(a) ...`, `iv. ...`, `iv) ...`, `(iv) ...`) while keeping deterministic separator checks.
 - `triage --mode tasks` now also accepts markdown blockquote-prefixed markers (`> TODO ...`, `> > [ ] TASK: ...`, compact `>> TODO ...`) and mixed wrapper chains (for example `- > (iv) [ ] TODO: ...`) using the same deterministic separator rules.
-- `triage --mode tasks` list/checklist wrapper parsing now also accepts checked checkbox markers `[✓]` and `[✔]` in addition to `[ ]` and `[x]`.
+- `triage --mode tasks` list/checklist wrapper parsing now also accepts additional unicode checkbox markers `[✓]`, `[✔]`, `[☐]`, `[☑]`, and `[☒]` in addition to `[ ]` and `[x]`.
 - `triage --mode tasks` now also accepts compact no-space markdown wrapper chains before task markers (for example `-TODO ...`, `>>TODO ...`, `[x]TODO ...`, `1)TODO ...`, `* (1)TODO ...`) while preserving deterministic marker boundary checks.
 - `triage --mode tasks` bracket-wrapped task markers now also accept compact no-space suffix forms (for example `[TODO]buy milk`, `(TASK)review PR`, `【TODO】buy milk`) while preserving non-marker boundary checks (for example `[TODOLIST]...`).
 - Roman ordered-list prefixes now require canonical Roman numerals (for example `iv`, `IX`), reducing permissive false positives such as `ic`/`iiv`.
