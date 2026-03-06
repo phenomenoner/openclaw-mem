@@ -15,8 +15,9 @@ git clone https://github.com/phenomenoner/openclaw-mem.git
 cd openclaw-mem
 uv sync --locked
 
-# status
-uv run --python 3.13 -- python -m openclaw_mem status --json
+# status + backend posture
+uv run --python 3.13 --frozen -- python -m openclaw_mem --json status
+uv run --python 3.13 --frozen -- python -m openclaw_mem --json backend
 ```
 
 ## Next
