@@ -110,6 +110,7 @@ One line:
 Design constraints:
 - receipts are bounded/deterministic by default
 - no memory text is emitted in receipt payloads by default (IDs + scores only)
+- operator-legible explainability is first-class (`whySummary`, `whyTheseIds`, fallback suppression reason)
 
 ### Scope policy + context budget knobs (Rollout Step 1/2)
 
@@ -120,6 +121,7 @@ Design constraints:
 - `scopePolicy.defaultScope` (default `"global"`)
 - `scopePolicy.fallbackScopes` (default `[]`; ordered allowlist, only consulted if primary scope is insufficient)
 - `scopePolicy.fallbackMarker` (default `true`; emit observable fallback marker in logs/receipts)
+- `scopePolicy.skipFallbackOnInvalidScope` (default `true`; invalid strict scope tags suppress fallback scopes)
 - `scopePolicy.validationMode` (`strict` default; `normalize` / `none` optional)
 - `scopePolicy.maxScopeLength` (default `64`)
 
@@ -155,6 +157,7 @@ Example config snippet:
             "defaultScope": "global",
             "fallbackScopes": ["openclaw-mem", "personal"],
             "fallbackMarker": true,
+            "skipFallbackOnInvalidScope": true,
             "validationMode": "strict",
             "maxScopeLength": 64
           },
@@ -230,6 +233,25 @@ Recommended enable snippet (Step 3):
 
 Rollback:
 - immediate kill switch: `autoCapture.captureTodo = false`
+
+### Rollout Step 4 — deterministic Working Set (canary-gated)
+
+Step 4 is now wired in `before_agent_start` behind a rollbackable config gate:
+- `workingSet.enabled` (default `false`)
+- `workingSet.persist` (default `true`)
+- `workingSet.maxChars` / `maxItemsPerSection` / `maxGoalChars` / `maxItemChars`
+
+Behavior when enabled:
+- synthesize a per-scope working state blob from recent scoped memories + current prompt
+  - goal / constraints / decisions / next_actions / open_questions
+- pin Working Set as the first injected slot before normal recall results
+- optional upsert persistence with deterministic ID `working_set:<scope>`
+
+Receipts:
+- recall lifecycle now includes optional `workingSet` summary (`generated`, `id`, `chars`, section counts, `persisted`)
+
+Rollback:
+- `workingSet.enabled = false`
 
 ---
 

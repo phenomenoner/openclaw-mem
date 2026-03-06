@@ -181,6 +181,41 @@
       "label": "Docs Trigger Hot Threshold",
       "help": "Consult docs lane only when hot memories are below this count",
       "advanced": true
+    },
+    "scopePolicy.skipFallbackOnInvalidScope": {
+      "label": "Scope Invalid Fallback Guard",
+      "help": "When strict validation fails, suppress fallback scopes and stay in defaultScope only",
+      "advanced": true
+    },
+    "workingSet.enabled": {
+      "label": "Working Set",
+      "help": "Deterministic per-scope synthesis injected before regular recall slots",
+      "advanced": true
+    },
+    "workingSet.persist": {
+      "label": "Working Set Persist",
+      "help": "Upsert working_set:<scope> memory row for operator auditability",
+      "advanced": true
+    },
+    "workingSet.maxChars": {
+      "label": "Working Set Max Chars",
+      "help": "Hard cap for synthesized working set text",
+      "advanced": true
+    },
+    "workingSet.maxItemsPerSection": {
+      "label": "Working Set Max Items/Section",
+      "help": "Maximum bullets per working set section",
+      "advanced": true
+    },
+    "workingSet.maxGoalChars": {
+      "label": "Working Set Goal Max Chars",
+      "help": "Maximum characters kept for Goal line",
+      "advanced": true
+    },
+    "workingSet.maxItemChars": {
+      "label": "Working Set Item Max Chars",
+      "help": "Maximum characters kept per bullet",
+      "advanced": true
     }
   },
   "configSchema": {
@@ -416,6 +451,10 @@
                 "minimum": 8,
                 "maximum": 256,
                 "default": 64
+              },
+              "skipFallbackOnInvalidScope": {
+                "type": "boolean",
+                "default": true
               }
             }
           }
@@ -560,6 +599,51 @@
                   }
                 },
                 "default": {}
+              }
+            }
+          }
+        ]
+      },
+      "workingSet": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "persist": {
+                "type": "boolean",
+                "default": true
+              },
+              "maxChars": {
+                "type": "integer",
+                "minimum": 240,
+                "maximum": 2800,
+                "default": 1200
+              },
+              "maxItemsPerSection": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "default": 3
+              },
+              "maxGoalChars": {
+                "type": "integer",
+                "minimum": 40,
+                "maximum": 600,
+                "default": 200
+              },
+              "maxItemChars": {
+                "type": "integer",
+                "minimum": 40,
+                "maximum": 400,
+                "default": 180
               }
             }
           }

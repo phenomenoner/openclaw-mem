@@ -89,6 +89,7 @@ type ScopePolicyConfigInput = {
   defaultScope?: string;
   fallbackScopes?: string[];
   fallbackMarker?: boolean;
+  skipFallbackOnInvalidScope?: boolean;
   validationMode?: ScopeValidationMode;
   maxScopeLength?: number;
 };
@@ -98,6 +99,15 @@ type RecallBudgetConfigInput = {
   maxChars?: number;
   minRecentSlots?: number;
   overflowAction?: OverflowAction;
+};
+
+type WorkingSetConfigInput = {
+  enabled?: boolean;
+  persist?: boolean;
+  maxChars?: number;
+  maxItemsPerSection?: number;
+  maxGoalChars?: number;
+  maxItemChars?: number;
 };
 
 type ReceiptsVerbosity = "low" | "high";
@@ -162,6 +172,7 @@ type PluginConfig = {
   autoCapture?: boolean | AutoCaptureConfigInput;
   scopePolicy?: boolean | ScopePolicyConfigInput;
   budget?: boolean | RecallBudgetConfigInput;
+  workingSet?: boolean | WorkingSetConfigInput;
   receipts?: boolean | ReceiptsConfigInput;
   docsColdLane?: boolean | DocsColdLaneConfigInput;
 };
@@ -181,6 +192,8 @@ const DOCS_COLD_LANE_MAX_ITEMS = 5;
 const DOCS_COLD_LANE_MAX_SNIPPET_CHARS = 600;
 const DOCS_COLD_LANE_MAX_CHUNK_CHARS = 4000;
 const DOCS_COLD_LANE_MAX_SEARCH_K = 100;
+const WORKING_SET_MAX_CHARS = 2800;
+const WORKING_SET_MAX_ITEMS_PER_SECTION = 5;
 
 type AutoRecallConfig = {
   enabled: boolean;
@@ -210,6 +223,7 @@ type ScopePolicyConfig = {
   defaultScope: string;
   fallbackScopes: string[];
   fallbackMarker: boolean;
+  skipFallbackOnInvalidScope: boolean;
   validationMode: ScopeValidationMode;
   maxScopeLength: number;
 };
@@ -219,6 +233,15 @@ type RecallBudgetConfig = {
   maxChars: number;
   minRecentSlots: number;
   overflowAction: OverflowAction;
+};
+
+type WorkingSetConfig = {
+  enabled: boolean;
+  persist: boolean;
+  maxChars: number;
+  maxItemsPerSection: number;
+  maxGoalChars: number;
+  maxItemChars: number;
 };
 
 type ReceiptsConfig = {
@@ -261,6 +284,7 @@ const DEFAULT_SCOPE_POLICY_CONFIG: ScopePolicyConfig = {
   defaultScope: "global",
   fallbackScopes: [],
   fallbackMarker: true,
+  skipFallbackOnInvalidScope: true,
   validationMode: "strict",
   maxScopeLength: MAX_SCOPE_LENGTH,
 };
@@ -270,6 +294,15 @@ const DEFAULT_RECALL_BUDGET_CONFIG: RecallBudgetConfig = {
   maxChars: 1800,
   minRecentSlots: 1,
   overflowAction: "truncate_oldest",
+};
+
+const DEFAULT_WORKING_SET_CONFIG: WorkingSetConfig = {
+  enabled: false,
+  persist: true,
+  maxChars: 1200,
+  maxItemsPerSection: 3,
+  maxGoalChars: 200,
+  maxItemChars: 180,
 };
 
 const DEFAULT_RECEIPTS_CONFIG: ReceiptsConfig = {
@@ -325,6 +358,7 @@ const MAX_RECEIPT_ITEMS = 10;
 
 const DEFAULT_ADMIN_LIMIT = 50;
 const MAX_ADMIN_LIMIT = 5000;
+const WORKING_SET_ID_PREFIX = "working_set:";
 
 type AdminExportFormat = "jsonl" | "json";
 type AdminImportDedupe = "none" | "id" | "id_text";
@@ -624,6 +658,10 @@ function resolveScopePolicyConfig(input: PluginConfig["scopePolicy"]): ScopePoli
     defaultScope,
     fallbackScopes,
     fallbackMarker: normalizeBoolean(raw.fallbackMarker, defaults.fallbackMarker),
+    skipFallbackOnInvalidScope: normalizeBoolean(
+      raw.skipFallbackOnInvalidScope,
+      defaults.skipFallbackOnInvalidScope,
+    ),
     validationMode,
     maxScopeLength,
   };
@@ -662,6 +700,48 @@ function resolveRecallBudgetConfig(input: PluginConfig["budget"]): RecallBudgetC
       integer: true,
     }),
     overflowAction,
+  };
+}
+
+function resolveWorkingSetConfig(input: PluginConfig["workingSet"]): WorkingSetConfig {
+  const defaults = DEFAULT_WORKING_SET_CONFIG;
+  if (input === false) {
+    return { ...defaults, enabled: false };
+  }
+
+  if (input === true || input == null) {
+    return { ...defaults };
+  }
+
+  if (typeof input !== "object" || Array.isArray(input)) {
+    return { ...defaults };
+  }
+
+  const raw = input as WorkingSetConfigInput;
+
+  return {
+    enabled: normalizeBoolean(raw.enabled, defaults.enabled),
+    persist: normalizeBoolean(raw.persist, defaults.persist),
+    maxChars: normalizeNumberInRange(raw.maxChars, defaults.maxChars, {
+      min: 240,
+      max: WORKING_SET_MAX_CHARS,
+      integer: true,
+    }),
+    maxItemsPerSection: normalizeNumberInRange(raw.maxItemsPerSection, defaults.maxItemsPerSection, {
+      min: 1,
+      max: WORKING_SET_MAX_ITEMS_PER_SECTION,
+      integer: true,
+    }),
+    maxGoalChars: normalizeNumberInRange(raw.maxGoalChars, defaults.maxGoalChars, {
+      min: 40,
+      max: 600,
+      integer: true,
+    }),
+    maxItemChars: normalizeNumberInRange(raw.maxItemChars, defaults.maxItemChars, {
+      min: 40,
+      max: 400,
+      integer: true,
+    }),
   };
 }
 
@@ -973,6 +1053,185 @@ function applyPrependContextBudget(input: {
       truncatedChars,
       truncated: beforeChars > afterChars,
       minRecentSlotsHonored,
+    },
+  };
+}
+
+function workingSetIdForScope(scope: string): string {
+  return `${WORKING_SET_ID_PREFIX}${scope}`;
+}
+
+function isWorkingSetMemoryId(id: string): boolean {
+  return String(id ?? "").startsWith(WORKING_SET_ID_PREFIX);
+}
+
+function normalizeWorkingSetLine(text: string, maxChars: number): string {
+  const compact = String(text ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/[\u0000-\u001F]+/g, " ")
+    .trim();
+
+  if (!compact) return "";
+  if (compact.length <= maxChars) return compact;
+  if (maxChars <= 1) return compact.slice(0, maxChars);
+  return `${compact.slice(0, maxChars - 1)}…`;
+}
+
+function dedupeStable(lines: string[], maxItems: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(line);
+    if (out.length >= maxItems) break;
+  }
+
+  return out;
+}
+
+function extractPromptOpenQuestions(prompt: string, maxItems: number, maxItemChars: number): string[] {
+  const lines = prompt
+    .split(/\r?\n/)
+    .map((line) => normalizeWorkingSetLine(line, maxItemChars))
+    .filter((line) => line.includes("?") || line.includes("？"));
+  return dedupeStable(lines, maxItems);
+}
+
+function buildWorkingSetBundle(input: {
+  scope: string;
+  prompt: string;
+  rows: MemoryScalarRow[];
+  nowMs: number;
+  cfg: WorkingSetConfig;
+}): {
+  slot: PackedMemorySlot | null;
+  receipt: RecallWorkingSetReceipt;
+} {
+  const disabledReceipt: RecallWorkingSetReceipt = {
+    enabled: input.cfg.enabled,
+    generated: false,
+    id: null,
+    chars: 0,
+    sections: {
+      goal: false,
+      constraints: 0,
+      decisions: 0,
+      nextActions: 0,
+      openQuestions: 0,
+    },
+    persisted: false,
+  };
+
+  if (!input.cfg.enabled) {
+    return { slot: null, receipt: disabledReceipt };
+  }
+
+  const maxItems = input.cfg.maxItemsPerSection;
+  const maxItemChars = input.cfg.maxItemChars;
+
+  const goal = normalizeWorkingSetLine(input.prompt, input.cfg.maxGoalChars);
+  const openQuestions = extractPromptOpenQuestions(input.prompt, Math.max(1, Math.min(3, maxItems)), maxItemChars);
+
+  const sortedRows = [...input.rows]
+    .filter((row) => !isWorkingSetMemoryId(row.id))
+    .sort((a, b) => {
+      if (b.createdAt !== a.createdAt) return b.createdAt - a.createdAt;
+      return a.id.localeCompare(b.id);
+    });
+
+  const constraintCandidates = sortedRows
+    .filter((row) => row.category === "preference" || row.category === "decision")
+    .map((row) => row.text)
+    .filter((text) =>
+      /(\b(?:must|only|never|don't|do not|avoid|required|forbid|forbidden)\b|必須|只能|不要|禁止|務必)/i.test(text),
+    )
+    .map((text) => normalizeWorkingSetLine(text, maxItemChars));
+
+  const decisions = [...sortedRows]
+    .filter((row) => row.category === "decision")
+    .sort((a, b) => {
+      const pa = a.importance_label === "must_remember" ? 0 : a.importance_label === "nice_to_have" ? 1 : 2;
+      const pb = b.importance_label === "must_remember" ? 0 : b.importance_label === "nice_to_have" ? 1 : 2;
+      if (pa !== pb) return pa - pb;
+      if (b.createdAt !== a.createdAt) return b.createdAt - a.createdAt;
+      return a.id.localeCompare(b.id);
+    })
+    .map((row) => normalizeWorkingSetLine(row.text, maxItemChars));
+
+  const nextActions = sortedRows
+    .filter((row) => row.category === "todo")
+    .map((row) => normalizeWorkingSetLine(row.text, maxItemChars));
+
+  const constraints = dedupeStable(constraintCandidates, maxItems);
+  const decisionsStable = dedupeStable(decisions, maxItems);
+  const nextActionsStable = dedupeStable(nextActions, maxItems);
+
+  const lines: string[] = [
+    `[working_set v1] scope=${input.scope}`,
+    `updatedAt=${new Date(input.nowMs).toISOString()}`,
+  ];
+
+  if (goal) {
+    lines.push(`goal: ${goal}`);
+  }
+
+  if (constraints.length > 0) {
+    lines.push("constraints:");
+    lines.push(...constraints.map((line) => `- ${line}`));
+  }
+
+  if (decisionsStable.length > 0) {
+    lines.push("decisions:");
+    lines.push(...decisionsStable.map((line) => `- ${line}`));
+  }
+
+  if (nextActionsStable.length > 0) {
+    lines.push("next_actions:");
+    lines.push(...nextActionsStable.map((line) => `- ${line}`));
+  }
+
+  if (openQuestions.length > 0) {
+    lines.push("open_questions:");
+    lines.push(...openQuestions.map((line) => `- ${line}`));
+  }
+
+  let text = lines.join("\n").trim();
+  if (!text) {
+    return { slot: null, receipt: disabledReceipt };
+  }
+
+  if (text.length > input.cfg.maxChars) {
+    text = text.slice(0, input.cfg.maxChars);
+  }
+
+  const slot: PackedMemorySlot = {
+    id: workingSetIdForScope(input.scope),
+    createdAt: input.nowMs,
+    category: "other",
+    text,
+    importanceLabel: "must_remember",
+  };
+
+  return {
+    slot,
+    receipt: {
+      enabled: true,
+      generated: true,
+      id: slot.id,
+      chars: text.length,
+      sections: {
+        goal: Boolean(goal),
+        constraints: constraints.length,
+        decisions: decisionsStable.length,
+        nextActions: nextActionsStable.length,
+        openQuestions: openQuestions.length,
+      },
+      persisted: false,
     },
   };
 }
@@ -1346,11 +1605,31 @@ type RecallTierReceipt = {
   selected: number;
 };
 
+type RecallWhyTier = "must" | "nice" | "unknown" | "ignore";
+
+type RecallWhyIdReceipt = {
+  id: string;
+  tier: RecallWhyTier;
+  scope: string;
+  origin: "primary" | "fallback";
+  signals: Array<"fts" | "vec">;
+};
+
+type RecallWhySummary = {
+  byTier: Record<RecallWhyTier, number>;
+  fromPrimaryScope: number;
+  fromFallbackScope: number;
+};
+
+type RecallFallbackSuppressedReason = "invalid_scope" | "disabled" | "no_fallback_scopes";
+
 type RecallFallbackReceipt = {
+  eligible: boolean;
   consulted: boolean;
   consultedScopes: string[];
   usedScopes: string[];
   contributed: number;
+  suppressedReason: RecallFallbackSuppressedReason | null;
 };
 
 type RecallBudgetReceipt = {
@@ -1395,6 +1674,21 @@ type RecallColdLaneReceipt = {
   error?: string;
 };
 
+type RecallWorkingSetReceipt = {
+  enabled: boolean;
+  generated: boolean;
+  id: string | null;
+  chars: number;
+  sections: {
+    goal: boolean;
+    constraints: number;
+    decisions: number;
+    nextActions: number;
+    openQuestions: number;
+  };
+  persisted: boolean;
+};
+
 type RecallLifecycleReceipt = {
   schema: "openclaw-mem-engine.recall.receipt.v1";
   verbosity: ReceiptsVerbosity;
@@ -1408,11 +1702,14 @@ type RecallLifecycleReceipt = {
   ftsTop: RecallReceiptRankedHit[];
   vecTop: RecallReceiptRankedHit[];
   fusedTop: string[];
+  whySummary: RecallWhySummary;
+  whyTheseIds: RecallWhyIdReceipt[];
   finalCount: number;
   injectedCount: number;
   fallback?: RecallFallbackReceipt;
   budget?: RecallBudgetReceipt;
   coldLane?: RecallColdLaneReceipt;
+  workingSet?: RecallWorkingSetReceipt;
 };
 
 type AutoCaptureLifecycleReceipt = {
@@ -1477,6 +1774,80 @@ function buildRankedHits(
     .slice(0, maxItems);
 }
 
+function toWhyTier(rawLabel: unknown): RecallWhyTier {
+  const normalized = resolveImportanceLabel(undefined, rawLabel);
+  if (normalized === "must_remember") return "must";
+  if (normalized === "nice_to_have") return "nice";
+  if (normalized === "ignore") return "ignore";
+  return "unknown";
+}
+
+function buildWhySummary(input: {
+  fusedResults: RecallResult[];
+  ftsResults: RecallResult[];
+  vecResults: RecallResult[];
+  scope: string;
+  cfg: ReceiptsConfig;
+}): {
+  summary: RecallWhySummary;
+  ids: RecallWhyIdReceipt[];
+} {
+  const maxItems = clampReceiptItems(input.cfg.maxItems, input.cfg);
+  const ftsIds = new Set(input.ftsResults.map((item) => String(item.row.id ?? "")).filter(Boolean));
+  const vecIds = new Set(input.vecResults.map((item) => String(item.row.id ?? "")).filter(Boolean));
+
+  const byTier: Record<RecallWhyTier, number> = {
+    must: 0,
+    nice: 0,
+    unknown: 0,
+    ignore: 0,
+  };
+
+  let fromPrimaryScope = 0;
+  let fromFallbackScope = 0;
+
+  const ids: RecallWhyIdReceipt[] = [];
+
+  for (const item of input.fusedResults) {
+    const id = String(item.row.id ?? "");
+    if (!id) continue;
+
+    const rowScope = String(item.row.scope ?? "").trim() || "global";
+    const origin: "primary" | "fallback" = rowScope === input.scope ? "primary" : "fallback";
+    const tier = toWhyTier(item.row.importance_label);
+
+    byTier[tier] += 1;
+    if (origin === "primary") {
+      fromPrimaryScope += 1;
+    } else {
+      fromFallbackScope += 1;
+    }
+
+    if (ids.length >= maxItems) continue;
+
+    const signals: Array<"fts" | "vec"> = [];
+    if (ftsIds.has(id)) signals.push("fts");
+    if (vecIds.has(id)) signals.push("vec");
+
+    ids.push({
+      id,
+      tier,
+      scope: rowScope,
+      origin,
+      signals,
+    });
+  }
+
+  return {
+    summary: {
+      byTier,
+      fromPrimaryScope,
+      fromFallbackScope,
+    },
+    ids,
+  };
+}
+
 function uniqueReasons(reasons: RecallRejectionReason[]): RecallRejectionReason[] {
   const order: RecallRejectionReason[] = [
     "trivial_prompt",
@@ -1506,6 +1877,7 @@ function buildRecallLifecycleReceipt(input: {
   fallback?: RecallFallbackReceipt;
   budget?: RecallBudgetReceipt;
   coldLane?: RecallColdLaneReceipt;
+  workingSet?: RecallWorkingSetReceipt;
 }): RecallLifecycleReceipt {
   const maxItems = clampReceiptItems(input.cfg.maxItems, input.cfg);
   const tierCounts = input.tierCounts.slice(0, 6).map((item) => ({
@@ -1514,6 +1886,13 @@ function buildRecallLifecycleReceipt(input: {
     candidates: Math.max(0, Math.floor(item.candidates)),
     selected: Math.max(0, Math.floor(item.selected)),
   }));
+  const why = buildWhySummary({
+    fusedResults: input.fusedResults,
+    ftsResults: input.ftsResults,
+    vecResults: input.vecResults,
+    scope: input.scope,
+    cfg: input.cfg,
+  });
 
   return {
     schema: "openclaw-mem-engine.recall.receipt.v1",
@@ -1528,11 +1907,14 @@ function buildRecallLifecycleReceipt(input: {
     ftsTop: buildRankedHits(input.ftsResults, input.cfg),
     vecTop: buildRankedHits(input.vecResults, input.cfg, { includeDistance: true }),
     fusedTop: input.fusedResults.slice(0, maxItems).map((item) => String(item.row.id ?? "")),
+    whySummary: why.summary,
+    whyTheseIds: why.ids,
     finalCount: input.fusedResults.length,
     injectedCount: Math.max(0, Math.floor(input.injectedCount)),
     fallback: input.fallback,
     budget: input.budget,
     coldLane: input.coldLane,
+    workingSet: input.workingSet,
   };
 }
 
@@ -1573,12 +1955,24 @@ function renderAutoRecallReceiptComment(receipt: RecallLifecycleReceipt, cfg: Re
     skipReason: receipt.skipReason,
     tiersSearched: receipt.tiersSearched,
     fusedTop: receipt.fusedTop,
+    whySummary: receipt.whySummary,
+    whyTheseIds: receipt.whyTheseIds,
+    // Back-compat alias for early canary parsers.
+    why: {
+      byTier: receipt.whySummary.byTier,
+      fromPrimaryScope: receipt.whySummary.fromPrimaryScope,
+      fromFallbackScope: receipt.whySummary.fromFallbackScope,
+      ids: receipt.whyTheseIds,
+    },
     injectedCount: receipt.injectedCount,
     fallback: receipt.fallback
       ? {
+          eligible: receipt.fallback.eligible,
           consulted: receipt.fallback.consulted,
+          consultedScopes: receipt.fallback.consultedScopes,
           usedScopes: receipt.fallback.usedScopes,
           contributed: receipt.fallback.contributed,
+          suppressedReason: receipt.fallback.suppressedReason,
         }
       : undefined,
     coldLane: receipt.coldLane
@@ -1586,6 +1980,16 @@ function renderAutoRecallReceiptComment(receipt: RecallLifecycleReceipt, cfg: Re
           consulted: receipt.coldLane.consulted,
           returned: receipt.coldLane.returned,
           strategy: receipt.coldLane.strategy,
+        }
+      : undefined,
+    workingSet: receipt.workingSet
+      ? {
+          enabled: receipt.workingSet.enabled,
+          generated: receipt.workingSet.generated,
+          id: receipt.workingSet.id,
+          chars: receipt.workingSet.chars,
+          sections: receipt.workingSet.sections,
+          persisted: receipt.workingSet.persisted,
         }
       : undefined,
   };
@@ -1601,22 +2005,65 @@ function scopeFilterExpr(scope: string): string {
   return `scope = '${safeScope}'`;
 }
 
+function stripScopeTagLinePrefix(rawLine: string): string {
+  let line = rawLine.trimStart();
+
+  for (let i = 0; i < 6; i += 1) {
+    const next = line.replace(
+      /^(?:>+\s*|[-+*•‣▪◦·–—−・]+\s*|\[[ xX✓☑☐☒]\]\s*|\(\d{1,3}\)\s*|\d{1,3}[.)-]\s*|[a-zA-Z][.)-]\s*)/,
+      "",
+    );
+    if (next === line) break;
+    line = next.trimStart();
+  }
+
+  return line;
+}
+
 function extractScopeFromText(rawText: unknown): string | undefined {
   if (typeof rawText !== "string") return undefined;
 
-  const matches = [...rawText.matchAll(/\[(ISO|SCOPE):\s*([^\]]+)\]/gi)];
+  const lines = rawText.split(/\r?\n/).slice(0, 200);
+  let inCodeFence = false;
+  let inRelevantMemoriesBlock = false;
   let isoScope: string | undefined;
   let scopeScope: string | undefined;
 
-  for (const [, kind, value] of matches) {
-    const scope = value.trim();
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (/^(```|~~~)/.test(line)) {
+      inCodeFence = !inCodeFence;
+      continue;
+    }
+
+    if (line.includes("<relevant-memories>")) {
+      inRelevantMemoriesBlock = true;
+      continue;
+    }
+
+    if (line.includes("</relevant-memories>")) {
+      inRelevantMemoriesBlock = false;
+      continue;
+    }
+
+    if (inCodeFence || inRelevantMemoriesBlock || !line) {
+      continue;
+    }
+
+    const stripped = stripScopeTagLinePrefix(rawLine);
+    const match = stripped.match(/^\[(ISO|SCOPE)\s*:\s*([^\]]+)\]/i);
+    if (!match) continue;
+
+    const kind = match[1]?.toUpperCase();
+    const scope = (match[2] ?? "").trim();
     if (!scope) continue;
 
-    if (kind.toUpperCase() === "ISO" && !isoScope) {
+    if (kind === "ISO" && !isoScope) {
       isoScope = scope;
     }
 
-    if (kind.toUpperCase() === "SCOPE" && !scopeScope) {
+    if (kind === "SCOPE" && !scopeScope) {
       scopeScope = scope;
     }
   }
@@ -1734,10 +2181,15 @@ type ScopeRecallPlan = {
   origin: "primary" | "fallback";
 };
 
-function buildScopeRecallPlan(primaryScope: string, cfg: ScopePolicyConfig): ScopeRecallPlan[] {
+function buildScopeRecallPlan(
+  primaryScope: string,
+  cfg: ScopePolicyConfig,
+  options: { allowFallback?: boolean } = {},
+): ScopeRecallPlan[] {
   const ordered: ScopeRecallPlan[] = [{ scope: primaryScope, origin: "primary" }];
+  const allowFallback = options.allowFallback ?? true;
 
-  if (!cfg.enabled || cfg.fallbackScopes.length === 0) {
+  if (!allowFallback || !cfg.enabled || cfg.fallbackScopes.length === 0) {
     return ordered;
   }
 
@@ -1906,6 +2358,8 @@ async function runScopedTieredRecall(input: {
   searchLimit: number;
   plans: RecallTierPlan[];
   scopePolicy: ScopePolicyConfig;
+  allowFallback?: boolean;
+  fallbackSuppressedReason?: RecallFallbackSuppressedReason | null;
   search: (args: {
     query: string;
     scope: string;
@@ -1920,7 +2374,17 @@ async function runScopedTieredRecall(input: {
   const vecResults: RecallResult[] = [];
   const rejected: RecallRejectionReason[] = [];
 
-  const scopePlan = buildScopeRecallPlan(input.primaryScope, input.scopePolicy);
+  const fallbackConfigured = input.scopePolicy.enabled && input.scopePolicy.fallbackScopes.length > 0;
+  const allowFallback = input.allowFallback ?? true;
+  const suppressedReason: RecallFallbackSuppressedReason | null = fallbackConfigured
+    ? allowFallback
+      ? null
+      : (input.fallbackSuppressedReason ?? "disabled")
+    : input.scopePolicy.enabled
+      ? "no_fallback_scopes"
+      : "disabled";
+
+  const scopePlan = buildScopeRecallPlan(input.primaryScope, input.scopePolicy, { allowFallback });
   const consultedScopes: string[] = [];
   const usedScopes: string[] = [];
   let primaryCount = 0;
@@ -1978,10 +2442,12 @@ async function runScopedTieredRecall(input: {
     vecResults,
     rejected: uniqueReasons(rejected),
     fallback: {
+      eligible: fallbackConfigured && allowFallback,
       consulted: consultedScopes.length > 0,
       consultedScopes,
       usedScopes,
       contributed: Math.max(0, selected.length - primaryCount),
+      suppressedReason,
     },
   };
 }
@@ -2139,6 +2605,13 @@ class MemoryDB {
     await this.table!.add(rows);
   }
 
+  async upsertById(row: MemoryRow): Promise<void> {
+    await this.ensureInitialized();
+    const safe = String(row.id ?? "").replace(/'/g, "''");
+    await this.table!.delete(`id = '${safe}'`);
+    await this.table!.add([row]);
+  }
+
   async listScalars(): Promise<MemoryScalarRow[]> {
     await this.ensureInitialized();
     const rows = await this.table!.query().select([...MEMORY_SCALAR_COLUMNS]).toArray();
@@ -2158,6 +2631,53 @@ class MemoryDB {
       .query()
       .select([...MEMORY_SCALAR_COLUMNS])
       .where(where);
+
+    type QueryWithOrderBy = {
+      orderBy?: (expr: string) => { limit: (limit: number) => { toArray: () => Promise<any[]> } };
+      limit: (limit: number) => { toArray: () => Promise<any[]> };
+    };
+
+    const maybeOrderedQuery = query as unknown as QueryWithOrderBy;
+
+    const rows =
+      typeof maybeOrderedQuery.orderBy === "function"
+        ? await maybeOrderedQuery.orderBy("createdAt DESC").limit(safeLimit).toArray()
+        : await maybeOrderedQuery.limit(Math.min(1024, safeLimit * 4)).toArray();
+
+    return rows
+      .map((row) => toMemoryScalarRow(row))
+      .filter((row) => row.id && row.id !== "__schema__")
+      .sort((a, b) => {
+        if (b.createdAt !== a.createdAt) return b.createdAt - a.createdAt;
+        return a.id.localeCompare(b.id);
+      })
+      .slice(0, safeLimit);
+  }
+
+  async listRecentByScopeCategories(scope: string, categories: MemoryCategory[], limit = 64): Promise<MemoryScalarRow[]> {
+    await this.ensureInitialized();
+
+    const safeLimit = Math.max(1, Math.min(256, Math.floor(limit)));
+    const normalizedCategories = Array.from(
+      new Set(
+        categories
+          .map((category) => normalizeAdminCategory(category))
+          .filter((category): category is MemoryCategory => Boolean(category)),
+      ),
+    );
+
+    const whereParts = [scopeFilterExpr(scope)];
+    if (normalizedCategories.length > 0) {
+      const categoriesExpr = normalizedCategories
+        .map((category) => `'${String(category).replace(/'/g, "''")}'`)
+        .join(", ");
+      whereParts.push(`category IN (${categoriesExpr})`);
+    }
+
+    const query = this.table!
+      .query()
+      .select([...MEMORY_SCALAR_COLUMNS])
+      .where(whereParts.join(" AND "));
 
     type QueryWithOrderBy = {
       orderBy?: (expr: string) => { limit: (limit: number) => { toArray: () => Promise<any[]> } };
@@ -2412,6 +2932,7 @@ const memoryEngineConfigSchema = {
         "autoCapture",
         "scopePolicy",
         "budget",
+        "workingSet",
         "receipts",
         "docsColdLane",
       ],
@@ -2513,7 +3034,15 @@ const memoryEngineConfigSchema = {
       const obj = raw as Record<string, unknown>;
       assertAllowedKeys(
         obj,
-        ["enabled", "defaultScope", "fallbackScopes", "fallbackMarker", "validationMode", "maxScopeLength"],
+        [
+          "enabled",
+          "defaultScope",
+          "fallbackScopes",
+          "fallbackMarker",
+          "skipFallbackOnInvalidScope",
+          "validationMode",
+          "maxScopeLength",
+        ],
         "scopePolicy config",
       );
       return {
@@ -2523,6 +3052,8 @@ const memoryEngineConfigSchema = {
           ? obj.fallbackScopes.filter((item): item is string => typeof item === "string")
           : undefined,
         fallbackMarker: typeof obj.fallbackMarker === "boolean" ? obj.fallbackMarker : undefined,
+        skipFallbackOnInvalidScope:
+          typeof obj.skipFallbackOnInvalidScope === "boolean" ? obj.skipFallbackOnInvalidScope : undefined,
         validationMode:
           obj.validationMode === "none" || obj.validationMode === "normalize" || obj.validationMode === "strict"
             ? obj.validationMode
@@ -2547,6 +3078,28 @@ const memoryEngineConfigSchema = {
           obj.overflowAction === "truncate_oldest" || obj.overflowAction === "truncate_tail"
             ? obj.overflowAction
             : undefined,
+      };
+    };
+
+    const parseWorkingSet = (raw: unknown): PluginConfig["workingSet"] => {
+      if (raw == null) return undefined;
+      if (typeof raw === "boolean") return raw;
+      if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("workingSet must be a boolean or object");
+      }
+      const obj = raw as Record<string, unknown>;
+      assertAllowedKeys(
+        obj,
+        ["enabled", "persist", "maxChars", "maxItemsPerSection", "maxGoalChars", "maxItemChars"],
+        "workingSet config",
+      );
+      return {
+        enabled: typeof obj.enabled === "boolean" ? obj.enabled : undefined,
+        persist: typeof obj.persist === "boolean" ? obj.persist : undefined,
+        maxChars: typeof obj.maxChars === "number" ? obj.maxChars : undefined,
+        maxItemsPerSection: typeof obj.maxItemsPerSection === "number" ? obj.maxItemsPerSection : undefined,
+        maxGoalChars: typeof obj.maxGoalChars === "number" ? obj.maxGoalChars : undefined,
+        maxItemChars: typeof obj.maxItemChars === "number" ? obj.maxItemChars : undefined,
       };
     };
 
@@ -2642,6 +3195,7 @@ const memoryEngineConfigSchema = {
       autoCapture: parseAutoCapture(cfg.autoCapture),
       scopePolicy: parseScopePolicy(cfg.scopePolicy),
       budget: parseBudget(cfg.budget),
+      workingSet: parseWorkingSet(cfg.workingSet),
       receipts: parseReceipts(cfg.receipts),
       docsColdLane: parseDocsColdLane(cfg.docsColdLane),
     };
@@ -2739,6 +3293,11 @@ const memoryEngineConfigSchema = {
       help: "Emit scope fallback marker when fallback scopes are consulted",
       advanced: true,
     },
+    "scopePolicy.skipFallbackOnInvalidScope": {
+      label: "Scope Invalid Fallback Guard",
+      help: "When strict validation fails, suppress fallback scopes and stay in defaultScope only",
+      advanced: true,
+    },
     "scopePolicy.maxScopeLength": {
       label: "Scope Max Length",
       help: "Maximum allowed scope length after normalization/validation",
@@ -2762,6 +3321,36 @@ const memoryEngineConfigSchema = {
     "budget.overflowAction": {
       label: "Budget Overflow Action",
       help: "truncate_oldest (default) or truncate_tail",
+      advanced: true,
+    },
+    "workingSet.enabled": {
+      label: "Working Set",
+      help: "Deterministic per-scope synthesis injected before regular recall slots",
+      advanced: true,
+    },
+    "workingSet.persist": {
+      label: "Working Set Persist",
+      help: "Upsert working_set:<scope> memory row for operator auditability",
+      advanced: true,
+    },
+    "workingSet.maxChars": {
+      label: "Working Set Max Chars",
+      help: "Hard cap for synthesized working set text",
+      advanced: true,
+    },
+    "workingSet.maxItemsPerSection": {
+      label: "Working Set Max Items/Section",
+      help: "Maximum bullets per working set section",
+      advanced: true,
+    },
+    "workingSet.maxGoalChars": {
+      label: "Working Set Goal Max Chars",
+      help: "Maximum characters kept for Goal line",
+      advanced: true,
+    },
+    "workingSet.maxItemChars": {
+      label: "Working Set Item Max Chars",
+      help: "Maximum characters kept per bullet",
       advanced: true,
     },
     "receipts.enabled": {
@@ -2841,6 +3430,7 @@ const memoryPlugin = {
     const autoCaptureCfg = resolveAutoCaptureConfig(cfg.autoCapture);
     const scopePolicyCfg = resolveScopePolicyConfig(cfg.scopePolicy);
     const budgetCfg = resolveRecallBudgetConfig(cfg.budget);
+    const workingSetCfg = resolveWorkingSetConfig(cfg.workingSet);
     const receiptsCfg = resolveReceiptsConfig(cfg.receipts);
     const docsColdLaneCfg = resolveDocsColdLaneConfig(cfg.docsColdLane);
 
@@ -2863,7 +3453,7 @@ const memoryPlugin = {
     const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model, embeddingClampCfg) : null;
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, lazyInit=true)`,
     );
 
     const resolveAdminFilters = (input: {
@@ -3654,6 +4244,11 @@ const memoryPlugin = {
             }
           }
 
+          const allowScopeFallback = !(scopePolicyCfg.skipFallbackOnInvalidScope && scopeResolved.invalid);
+          const scopeFallbackSuppressedReason: RecallFallbackSuppressedReason | null = allowScopeFallback
+            ? null
+            : "invalid_scope";
+
           const tiered = await runScopedTieredRecall({
             query: normalizedQuery,
             primaryScope: scope,
@@ -3661,6 +4256,8 @@ const memoryPlugin = {
             searchLimit: Math.min(searchLimit, MAX_RECALL_LIMIT),
             plans,
             scopePolicy: scopePolicyCfg,
+            allowFallback: allowScopeFallback,
+            fallbackSuppressedReason: scopeFallbackSuppressedReason,
             search: async ({ query: textQuery, scope: targetScope, labels, searchLimit }) => {
               const ftsPromise = db.fullTextSearch(textQuery, searchLimit, targetScope, labels).catch(() => []);
               const vecPromise = vector
@@ -3671,6 +4268,16 @@ const memoryPlugin = {
               return { ftsResults, vecResults };
             },
           });
+
+          if (scopePolicyCfg.fallbackMarker && scopeFallbackSuppressedReason) {
+            api.logger.info(
+              `openclaw-mem-engine:scopeFallbackSuppressed ${JSON.stringify({
+                scope,
+                reason: scopeFallbackSuppressedReason,
+                validationMode: scopePolicyCfg.validationMode,
+              })}`,
+            );
+          }
 
           if (scopePolicyCfg.fallbackMarker && tiered.fallback.consulted) {
             api.logger.info(
@@ -4362,6 +4969,7 @@ const memoryPlugin = {
             fallback?: RecallFallbackReceipt;
             budget?: RecallBudgetReceipt;
             coldLane?: RecallColdLaneReceipt;
+            workingSet?: RecallWorkingSetReceipt;
           }) => {
             if (!receiptsCfg.enabled) return undefined;
             return buildRecallLifecycleReceipt({
@@ -4379,6 +4987,7 @@ const memoryPlugin = {
               fallback: input.fallback,
               budget: input.budget,
               coldLane: input.coldLane,
+              workingSet: input.workingSet,
             });
           };
 
@@ -4436,6 +5045,11 @@ const memoryPlugin = {
               plans.push({ tier: "unknown", labels: ["unknown"] });
             }
 
+            const allowScopeFallback = !(scopePolicyCfg.skipFallbackOnInvalidScope && scopeInfo.invalid);
+            const scopeFallbackSuppressedReason: RecallFallbackSuppressedReason | null = allowScopeFallback
+              ? null
+              : "invalid_scope";
+
             const tiered = await runScopedTieredRecall({
               query: trimmedPrompt,
               primaryScope: scopeInfo.scope,
@@ -4443,6 +5057,8 @@ const memoryPlugin = {
               searchLimit,
               plans,
               scopePolicy: scopePolicyCfg,
+              allowFallback: allowScopeFallback,
+              fallbackSuppressedReason: scopeFallbackSuppressedReason,
               search: async ({ query: textQuery, scope, labels, searchLimit }) => {
                 const [ftsResults, vecResults] = await Promise.all([
                   db.fullTextSearch(textQuery, searchLimit, scope, labels).catch(() => []),
@@ -4453,6 +5069,16 @@ const memoryPlugin = {
             });
 
             const combinedRejected = uniqueReasons([...(preRejected ?? []), ...(tiered.rejected ?? [])]);
+
+            if (scopePolicyCfg.fallbackMarker && scopeFallbackSuppressedReason) {
+              api.logger.info(
+                `openclaw-mem-engine:scopeFallbackSuppressed ${JSON.stringify({
+                  scope: scopeInfo.scope,
+                  reason: scopeFallbackSuppressedReason,
+                  validationMode: scopePolicyCfg.validationMode,
+                })}`,
+              );
+            }
 
             if (scopePolicyCfg.fallbackMarker && tiered.fallback.consulted) {
               api.logger.info(
@@ -4465,7 +5091,9 @@ const memoryPlugin = {
               );
             }
 
-            const selected = tiered.selected.slice(0, limit);
+            const selected = tiered.selected
+              .slice(0, limit)
+              .filter((hit) => !isWorkingSetMemoryId(String(hit.row.id ?? "")));
             const recallNowMs = Date.now();
             const staleTodoDropCount = selected.filter(
               (hit) =>
@@ -4512,6 +5140,75 @@ const memoryPlugin = {
               coldLaneReceipt = docs.receipt;
             }
 
+            const workingSetRows = workingSetCfg.enabled
+              ? await db
+                  .listRecentByScopeCategories(scopeInfo.scope, ["preference", "decision", "todo"], 36)
+                  .catch(() => [] as MemoryScalarRow[])
+              : [];
+
+            const workingSetBundle = buildWorkingSetBundle({
+              scope: scopeInfo.scope,
+              prompt: trimmedPrompt,
+              rows: workingSetRows,
+              nowMs: recallNowMs,
+              cfg: workingSetCfg,
+            });
+
+            let workingSetReceipt: RecallWorkingSetReceipt | undefined = workingSetBundle.receipt;
+            let workingSetSlot = workingSetBundle.slot;
+
+            if (workingSetSlot && workingSetCfg.persist) {
+              let vector = Array.from<number>({ length: vectorDim }).fill(0);
+              let trustTier = "system_working_set";
+
+              if (embeddings) {
+                try {
+                  vector = await embeddings.embed(workingSetSlot.text);
+                } catch {
+                  trustTier = "system_working_set_noembed";
+                }
+              } else {
+                trustTier = "system_working_set_noembed";
+              }
+
+              const workingSetRow: MemoryRow = {
+                id: workingSetSlot.id,
+                text: workingSetSlot.text,
+                vector,
+                createdAt: recallNowMs,
+                category: "other",
+                importance: 0.96,
+                importance_label: "must_remember",
+                scope: scopeInfo.scope,
+                trust_tier: trustTier,
+              };
+
+              try {
+                await db.upsertById(workingSetRow);
+                workingSetReceipt = {
+                  ...(workingSetReceipt ?? {
+                    enabled: true,
+                    generated: true,
+                    id: workingSetSlot.id,
+                    chars: workingSetSlot.text.length,
+                    sections: {
+                      goal: false,
+                      constraints: 0,
+                      decisions: 0,
+                      nextActions: 0,
+                      openQuestions: 0,
+                    },
+                    persisted: false,
+                  }),
+                  persisted: true,
+                };
+              } catch (err) {
+                api.logger.warn(
+                  `openclaw-mem-engine:workingSet.persist_failed ${JSON.stringify({ scope: scopeInfo.scope, error: String(err ?? "unknown").slice(0, 240) })}`,
+                );
+              }
+            }
+
             const memorySlots: PackedMemorySlot[] = selectedForInjection.map((hit) => {
               const normalizedImportance = toImportanceRecord(hit.row.importance);
               const normalizedLabel = resolveImportanceLabel(normalizedImportance, hit.row.importance_label);
@@ -4532,7 +5229,9 @@ const memoryPlugin = {
               importanceLabel: "unknown",
             }));
 
-            const slots: PackedMemorySlot[] = [...memorySlots, ...docsSlots];
+            const slots: PackedMemorySlot[] = workingSetSlot
+              ? [workingSetSlot, ...memorySlots, ...docsSlots]
+              : [...memorySlots, ...docsSlots];
 
             if (slots.length === 0) {
               const receipt = emitAutoRecallReceipt({
@@ -4545,6 +5244,7 @@ const memoryPlugin = {
                 injectedCount: 0,
                 fallback: tiered.fallback,
                 coldLane: coldLaneReceipt,
+                workingSet: workingSetReceipt,
               });
               if (receipt) {
                 api.logger.info(`openclaw-mem-engine:autoRecall.receipt ${JSON.stringify(receipt)}`);
@@ -4562,6 +5262,7 @@ const memoryPlugin = {
               injectedCount: slots.length,
               fallback: tiered.fallback,
               coldLane: coldLaneReceipt,
+              workingSet: workingSetReceipt,
             });
 
             const seedReceiptComment = seedReceipt ? renderAutoRecallReceiptComment(seedReceipt, receiptsCfg) : "";
@@ -4585,6 +5286,7 @@ const memoryPlugin = {
                 fallback: tiered.fallback,
                 budget: finalBudget.budget,
                 coldLane: coldLaneReceipt,
+                workingSet: workingSetReceipt,
               });
 
               const candidateReceiptComment = candidateReceipt
@@ -4867,6 +5569,7 @@ export const __debugReceipts = {
   resolveReceiptsConfig,
   resolveScopePolicyConfig,
   resolveRecallBudgetConfig,
+  resolveWorkingSetConfig,
   resolveAutoCaptureConfig,
   todoDedupeCutoffMs,
   isTodoWithinDedupeWindow,

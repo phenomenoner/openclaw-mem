@@ -36,9 +36,18 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
    - Config knobs: `receipts.enabled`, `receipts.verbosity`, `receipts.maxItems` (default: enabled + low + 3)
    - Acceptance met: recall path is auditable without exposing memory text in receipts by default.
 
-3) **Namespace & scope hygiene**
-   - Ensure safe defaults: project isolation, explicit scope tags, no cross-project bleed
-   - Acceptance: same user runs 2 projects; recall doesn’t cross unless explicitly allowed
+3) ✅ **Namespace & scope hygiene**
+   - Shipped hardening:
+     - line-anchored scope tag parsing (`[ISO]` / `[SCOPE]`) that ignores code fences + injected `<relevant-memories>` blocks
+     - `scopePolicy.skipFallbackOnInvalidScope=true` (default) to suppress fallback on invalid strict scopes
+     - explicit `scopeFallbackSuppressed` marker for operator debugging
+   - Acceptance met: same user runs 2 projects; recall doesn’t cross unless explicitly allowed
+
+4) ✅ **Step4 rollout wiring: deterministic Working Set + operator receipts**
+   - Added config-gated Working Set (`workingSet.enabled`, default off for canary)
+   - Deterministic synthesis from recent per-scope preference/decision/todo rows + prompt questions
+   - Pinned injection before normal recall slots; optional upsert persistence (`working_set:<scope>`)
+   - Recall receipts now include `workingSet` summary + `whySummary` / `whyTheseIds`
 
 ### P1 — Quality parity (makes it feel “pro”)
 4) **Fusion/ranking improvements (still deterministic)**
@@ -67,4 +76,4 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
   - logs Decision/Tech Note if it changes ops posture
 
 ## Next slice (recommended)
-P0-3 (namespace/scope hygiene) next, then P1-4 (fusion/ranking improvements).
+P1-5 (fusion/ranking improvements) next, then lifecycle MVP archive-first.

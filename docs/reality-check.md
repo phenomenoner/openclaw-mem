@@ -59,6 +59,7 @@ node --experimental-transform-types tools/mem-engine-receipts-debug.mjs
 Expected:
 - prints one synthetic recall lifecycle receipt (`openclaw-mem-engine.recall.receipt.v1`)
 - prints one synthetic autoCapture lifecycle receipt (`openclaw-mem-engine.autoCapture.receipt.v1`)
+- recall payload includes operator-legible explainability fields: `whySummary` + `whyTheseIds`
 - payload contains IDs/scores/counts only (no memory content text)
 
 ---
@@ -85,6 +86,7 @@ Expected:
 - Auto-capture plugin (`extensions/openclaw-mem`) — captures tool results to JSONL
 - Backend-aware annotations (records backend + memory tool actions for observability)
 - Gateway-assisted semantic recall (Route A): `index` + `semantic` — depends on OpenClaw gateway + `memory_search`
+- Mem-engine scope hardening + receipt UX pass shipped; deterministic Working Set is rollout-ready behind `workingSet.enabled`
 
 ### Near-term roadmap — **ROADMAP**
 

@@ -61,6 +61,12 @@ Recommended flow:
 
 ## Improvement list (ranked by OpenClaw user value)
 
+### Progress update (current cycle)
+- ✅ Scope hardening pass shipped (`skipFallbackOnInvalidScope` default-on + hardened scope-tag extraction).
+- ✅ Receipt UX pass shipped (`whySummary` + `whyTheseIds` + explicit fallback suppression markers).
+- ✅ Step4 wiring shipped behind canary flag (`workingSet.enabled`, deterministic synthesis + pinned injection + optional `working_set:<scope>` persistence).
+
+
 ### P0 — Immediate wins (days)
 
 These should be high-impact and low-risk.

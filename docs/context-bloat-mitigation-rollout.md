@@ -17,17 +17,22 @@ Already installed + enabled:
 - `openclaw-mem-engine`:
   - `autoRecall.enabled=true` (small recall injection; capped)
   - `autoCapture.enabled=true` (captures preference/decision; TODO capture currently off)
-  - **scope inference** from `[ISO:...]` / `[SCOPE:...]`
+  - **scope inference hardening** from `[ISO:...]` / `[SCOPE:...]` (line-anchored, ignores code fences / injected `<relevant-memories>` blocks)
   - **scope filtering during recall** (autoRecall searches within resolved scope)
+  - **scope fallback hardening**: invalid scope tags suppress fallback scopes when `scopePolicy.skipFallbackOnInvalidScope=true` (default)
+  - recall receipts include `whySummary` / `whyTheseIds` (operator-legible selection reasons)
 - OpenClaw compaction posture:
   - `agents.defaults.compaction.mode = safeguard`
   - pre-compaction `memoryFlush` writes durable notes to `memory/YYYY-MM-DD.md`
 
 Not yet “fully installed + enabled” (relative to the 5-item ideal):
-- a true per-thread **Working Set** blob (Goal/Constraints/Decisions/Open questions/Next)
 - **hierarchical summaries** (micro/macro) as a first-class recall surface (not just disk files)
 - **budgeted packing** across strata (Working Set vs long-term vs receipts)
-- scope is supported, but not yet “automatic by default” without tagging; also no controlled fallback rules
+- always-on scope tags are still operator-driven (`[ISO]` / `[SCOPE]`), not inferred from arbitrary prose
+
+Now available for canary rollout:
+- deterministic **Working Set** synthesis + pinned injection (`workingSet.enabled`)
+- hardened fallback behavior on invalid scopes (`scopePolicy.skipFallbackOnInvalidScope=true`)
 
 ---
 
@@ -68,11 +73,12 @@ We treat an item as DONE when it:
 Scope filtering already exists; what’s missing is a **default** and a **safe fallback policy**.
 
 **Minimal change (code + config)**
-Add a `namespace` block (names illustrative):
+Add a `scopePolicy` block (shipped names):
 - `defaultScope`: used when neither explicit scope nor `[ISO]/[SCOPE]` is present
 - `fallbackScopes`: allowlisted ordered list, consulted only if primary scope returns <limit
-- `fallbackLog`: emit a receipt marker whenever fallback happens
-- `scopeValidation`: validate scope at write-time (reduce scope poisoning)
+- `fallbackMarker`: emit a receipt/log marker whenever fallback happens
+- `validationMode`: validate scope at write-time (reduce scope poisoning)
+- `skipFallbackOnInvalidScope`: if scope tag is invalid under strict validation, suppress fallback scopes
 
 Suggested safe defaults (day-1 behavior mostly unchanged):
 - `defaultScope = "global"`
@@ -123,7 +129,7 @@ Add a deterministic **max injected chars** ceiling (or token estimate) on the fi
 ---
 
 ### Step 4 — Rolling Working Set (deterministic synthesis + pinned injection)
-**Target**: always inject a small, structured state blob (~300–800 tokens) that stabilizes the thread.
+**Status**: shipped in engine codepath; rollout is config-gated (`workingSet.enabled`, default `false`).
 
 **Minimal implementation (no LLM)**
 Synthesize a Working Set from *existing captured signal*:
@@ -133,12 +139,16 @@ Synthesize a Working Set from *existing captured signal*:
 - Next actions: recent TODOs
 - Open questions: simple heuristic from user text (`?`) (optional)
 
-Store 1 record per scope (or per session) as a single memory row:
+Store 1 record per scope as a single memory row:
 - `category="other"`
 - `id="working_set:<scope>"`
+- upsert semantics (one active row per scope) when `workingSet.persist=true`
 
 **Injection rule**
-- on `before_agent_start`: inject Working Set **before** normal autoRecall results
+- on `before_agent_start`: inject Working Set **before** normal autoRecall results (pinned first slot)
+
+**Explainability**
+- recall receipts carry `workingSet` summary (`generated`, `id`, `chars`, section counts, `persisted`)
 
 **Success**
 - agent stops re-deriving state from long transcript
@@ -187,29 +197,31 @@ Store 1 record per scope (or per session) as a single memory row:
 (Names are not finalized; this is the *shape* we want.)
 
 ```yaml
-namespace:
+scopePolicy:
+  enabled: true
   defaultScope: global
-  fallbackScopes: []          # opt-in to ['global'] only
-  scopeValidation: strict
-  fallbackLog: true
+  fallbackScopes: []
+  fallbackMarker: true
+  validationMode: strict
+  skipFallbackOnInvalidScope: true
 
 budget:
   enabled: false              # enable in Step 2
-  maxChars: 12000
-  minRecentSlots: 3
+  maxChars: 1800
+  minRecentSlots: 1
   overflowAction: truncate_oldest
 
-capture:
-  todo:
-    enabled: false            # enable in Step 3
-    rateLimitPerTurn: 5
-    dedupeWindowHours: 24
-    staleTtlDays: 7
+autoCapture:
+  captureTodo: false          # enable in Step 3
+  maxTodoPerTurn: 1
+  todoDedupeWindowHours: 24
+  todoStaleTtlDays: 7
 
 workingSet:
   enabled: false              # enable in Step 4
-  synthesisMode: deterministic
-  maxInputChars: 4000
+  persist: true
+  maxChars: 1200
+  maxItemsPerSection: 3
 
 summarization:
   micro:
@@ -225,8 +237,9 @@ summarization:
 
 ## 1-day acceptance check (after each step, and end-to-end)
 - **Token audit**: sample active conversations → injected chars ≤ `budget.maxChars`.
-- **Scope integrity**: query 3 distinct scopes → no cross-scope leakage; fallback receipts appear only when expected.
+- **Scope integrity**: query 3 distinct scopes → no cross-scope leakage; fallback/suppressed-fallback receipts appear only when expected.
 - **Working set freshness**: working set updates as conversation evolves.
+- **Explainability**: recall receipt shows `whySummary` + `whyTheseIds` + `workingSet` in one screen.
 - **Kill-switch drill**: disable workingSet/todo/budget → effect within 60s.
 
 ---

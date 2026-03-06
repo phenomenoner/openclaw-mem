@@ -113,17 +113,29 @@ def test_strict_scope_validation_falls_back_to_default():
     assert invalid_ok is False
 
 
+def test_scope_extraction_hardening_markers_present():
+    ts = INDEX_TS.read_text("utf-8")
+    assert "stripScopeTagLinePrefix" in ts
+    assert "inRelevantMemoriesBlock" in ts
+    assert "skipFallbackOnInvalidScope" in ts
+
+
 def test_scope_budget_contract_markers_present_in_ts_and_schema():
     ts = INDEX_TS.read_text("utf-8")
     plugin = json.loads(PLUGIN_JSON.read_text("utf-8"))
 
     # TS contract markers for rollout step 1/2
     assert "openclaw-mem-engine:scopeFallback" in ts
+    assert "openclaw-mem-engine:scopeFallbackSuppressed" in ts
     assert "openclaw-mem-engine:contextBudget" in ts
     assert "validationMode === \"strict\"" in ts
     assert "overflowAction === \"truncate_oldest\"" in ts
     assert "input.cfg.overflowAction === \"truncate_tail\"" in ts
     assert "minRecentSlotsHonored" in ts
+    assert "whySummary" in ts
+    assert "whyTheseIds" in ts
+    assert 'WORKING_SET_ID_PREFIX = "working_set:"' in ts
+    assert "buildWorkingSetBundle" in ts
 
     # Budget marker must not be gated by scope fallback marker.
     assert "initialBudget.budget.truncated && scopePolicyCfg.fallbackMarker" not in ts
@@ -132,9 +144,14 @@ def test_scope_budget_contract_markers_present_in_ts_and_schema():
     # Config surface defaults
     scope_policy = plugin["configSchema"]["properties"]["scopePolicy"]["oneOf"][1]["properties"]
     budget = plugin["configSchema"]["properties"]["budget"]["oneOf"][1]["properties"]
+    working_set = plugin["configSchema"]["properties"]["workingSet"]["oneOf"][1]["properties"]
 
     assert scope_policy["defaultScope"]["default"] == "global"
     assert scope_policy["fallbackScopes"]["default"] == []
+    assert scope_policy["skipFallbackOnInvalidScope"]["default"] is True
     assert scope_policy["validationMode"]["default"] == "strict"
     assert budget["enabled"]["default"] is True
     assert budget["overflowAction"]["default"] == "truncate_oldest"
+    assert working_set["enabled"]["default"] is False
+    assert working_set["persist"]["default"] is True
+    assert working_set["maxItemsPerSection"]["default"] == 3
