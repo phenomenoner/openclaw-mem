@@ -25,6 +25,7 @@ import unicodedata
 import urllib.error
 import urllib.request
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -148,6 +149,9 @@ EPISODIC_DEFAULT_REFS_CAP_BYTES = 4 * 1024
 EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES = 8 * 1024
 EPISODIC_FOLLOW_DEFAULT_POLL_INTERVAL_MS = 1000
 EPISODIC_FOLLOW_MIN_POLL_INTERVAL_MS = 100
+EPISODIC_FOLLOW_DEFAULT_ROTATE_ON_IDLE_SECONDS = 0.0  # disabled
+EPISODIC_FOLLOW_DEFAULT_ROTATE_MIN_BYTES = 1 * 1024 * 1024
+EPISODIC_FOLLOW_ROTATE_LOCK_SUFFIX = ".lock"
 EPISODIC_MAX_QUERY_LIMIT = 500
 EPISODIC_REDACT_PLACEHOLDER = "[REDACTED]"
 EPISODIC_DEFAULT_RETENTION_DAYS = {
@@ -623,6 +627,50 @@ def _write_json_file_atomic(path: Path, payload: Dict[str, Any]) -> None:
                 tmp_path.unlink()
             except Exception:
                 pass
+
+
+
+
+
+def _episodic_lock_path(target: Path) -> Path:
+    return target.with_name(target.name + EPISODIC_FOLLOW_ROTATE_LOCK_SUFFIX)
+
+
+@contextmanager
+def _episodic_flock(lock_path: Path, *, exclusive: bool, timeout_s: float = 5.0):
+    """Best-effort advisory file lock (POSIX flock).
+
+    Uses a dedicated lock file so rotations don't race writers holding the
+    spool file descriptor.
+
+    timeout_s=0 blocks indefinitely; otherwise it retries until timeout.
+    """
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fp = lock_path.open("a", encoding="utf-8")
+    try:
+        import fcntl  # POSIX only
+
+        flags = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        if timeout_s <= 0:
+            fcntl.flock(fp.fileno(), flags)
+        else:
+            deadline = time.monotonic() + float(timeout_s)
+            while True:
+                try:
+                    fcntl.flock(fp.fileno(), flags | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f"timed out acquiring lock: {lock_path}")
+                    time.sleep(0.05)
+
+        yield fp
+    finally:
+        try:
+            fp.close()
+        except Exception:
+            pass
 
 
 @dataclass
@@ -7077,7 +7125,8 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
     trailing_partial_bytes = 0
     errors_sample: List[str] = []
 
-    with spool_path.open("a", encoding="utf-8") as spool_fp:
+    lock_path = _episodic_lock_path(spool_path)
+    with _episodic_flock(lock_path, exclusive=False, timeout_s=30), spool_path.open("a", encoding="utf-8") as spool_fp:
         for fp in files:
             files_seen += 1
             key = str(fp)
@@ -7549,6 +7598,14 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
             getattr(args, "poll_interval_ms", EPISODIC_FOLLOW_DEFAULT_POLL_INTERVAL_MS)
         )
         idle_exit_seconds = float(getattr(args, "idle_exit_seconds", 0.0) or 0.0)
+        rotate_on_idle_seconds = float(
+            getattr(args, "rotate_on_idle_seconds", EPISODIC_FOLLOW_DEFAULT_ROTATE_ON_IDLE_SECONDS)
+            or 0.0
+        )
+        rotate_min_bytes = int(
+            getattr(args, "rotate_min_bytes", EPISODIC_FOLLOW_DEFAULT_ROTATE_MIN_BYTES)
+            or EPISODIC_FOLLOW_DEFAULT_ROTATE_MIN_BYTES
+        )
 
         if payload_cap <= 0 or conversation_payload_cap <= 0 or refs_cap <= 0:
             raise ValueError("payload/refs caps must be > 0")
@@ -7567,6 +7624,17 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
             )
         if idle_exit_seconds < 0:
             raise ValueError("--idle-exit-seconds must be >= 0")
+        if rotate_on_idle_seconds < 0:
+            raise ValueError("--rotate-on-idle-seconds must be >= 0")
+        if rotate_min_bytes <= 0:
+            raise ValueError("--rotate-min-bytes must be > 0")
+        if rotate_on_idle_seconds > 0 and not follow:
+            raise ValueError("--rotate-on-idle-seconds requires --follow")
+        if rotate_on_idle_seconds > 0:
+            try:
+                import fcntl  # noqa: F401
+            except Exception:
+                raise ValueError("--rotate-on-idle-seconds requires POSIX fcntl/flock")
     except ValueError as e:
         _emit({"kind": "openclaw-mem.episodes.ingest.v0", "ok": False, "error": str(e)}, True)
         sys.exit(2)
@@ -7660,8 +7728,78 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     aggregate_refs_truncated = 0
     aggregate_redacted_late = 0
     aggregate_lines_total = 0
+    rotate_attempts = 0
+    rotate_applied = 0
+    rotate_errors = 0
+    rotate_last_rotated_to: Optional[str] = None
 
     last_cycle: Optional[Dict[str, Any]] = None
+
+    lock_path = _episodic_lock_path(source_path)
+
+    def _try_rotate_on_idle() -> Optional[str]:
+        if rotate_on_idle_seconds <= 0:
+            return None
+        try:
+            st = source_path.stat()
+        except FileNotFoundError:
+            return None
+        size = int(st.st_size)
+        if size <= 0 or size < rotate_min_bytes:
+            return None
+        # Require writer-idle too (mtime wallclock)
+        try:
+            if (time.time() - float(st.st_mtime)) < rotate_on_idle_seconds:
+                return None
+        except Exception:
+            return None
+        state = _read_json_file(state_path)
+        offset = _episodic_state_int(state.get("offset")) or 0
+        # Only rotate when fully caught up on a newline boundary
+        if offset != size:
+            return None
+        try:
+            with _episodic_flock(lock_path, exclusive=True, timeout_s=1.0):
+                st2 = source_path.stat()
+                size2 = int(st2.st_size)
+                if size2 <= 0 or size2 < rotate_min_bytes:
+                    return None
+                state2 = _read_json_file(state_path)
+                offset2 = _episodic_state_int(state2.get("offset")) or 0
+                if offset2 != size2:
+                    return None
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                rotated_path = source_path.with_name(f"{source_path.name}.{stamp}.idle-rotated")
+                suffix = 1
+                while rotated_path.exists():
+                    suffix += 1
+                    rotated_path = source_path.with_name(f"{source_path.name}.{stamp}.idle-rotated.{suffix}")
+                source_path.rename(rotated_path)
+                try:
+                    # New empty spool for writer
+                    with source_path.open("w", encoding="utf-8"):
+                        pass
+                except Exception:
+                    # Best-effort rollback: restore original spool path
+                    try:
+                        rotated_path.rename(source_path)
+                    except Exception:
+                        pass
+                    raise
+                st_new = source_path.stat()
+                state_payload = {
+                    "schema": EPISODIC_INGEST_STATE_SCHEMA,
+                    "file": str(source_path),
+                    "offset": 0,
+                    "dev": int(st_new.st_dev),
+                    "inode": int(st_new.st_ino),
+                    "size": int(st_new.st_size),
+                    "updated_at": _utcnow_iso(),
+                }
+                _write_json_file_atomic(state_path, state_payload)
+                return str(rotated_path)
+        except TimeoutError:
+            return None
 
     try:
         while True:
@@ -7725,6 +7863,19 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
                 stop_reason = "idle_timeout"
                 break
 
+            if rotate_on_idle_seconds > 0 and (not cycle_activity) and (now - last_activity) >= rotate_on_idle_seconds:
+                rotate_attempts += 1
+                try:
+                    rotated_to = _try_rotate_on_idle()
+                except Exception:
+                    rotate_errors += 1
+                    rotated_to = None
+                if rotated_to:
+                    rotate_applied += 1
+                    rotate_last_rotated_to = rotated_to
+                    cycle_activity = True
+                    last_activity = now
+
             if not cycle_activity:
                 time.sleep(poll_interval_ms / 1000.0)
     except KeyboardInterrupt:
@@ -7767,6 +7918,15 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
             "duration_ms": duration_ms,
             "stop_reason": (stop_reason or "signal") if stop_requested else stop_reason,
             "signal": stop_signal_name,
+        },
+        "rotate_on_idle": {
+            "enabled": rotate_on_idle_seconds > 0,
+            "idle_seconds": rotate_on_idle_seconds,
+            "min_bytes": rotate_min_bytes,
+            "attempts": rotate_attempts,
+            "rotated": rotate_applied,
+            "errors": rotate_errors,
+            "last_rotated_to": rotate_last_rotated_to,
         },
         "source": {
             "file": str(source_path),
@@ -8406,6 +8566,8 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--follow", action="store_true", help="Run as a tailer daemon (poll spool + ingest continuously until interrupted)")
     e.add_argument("--poll-interval-ms", type=int, default=EPISODIC_FOLLOW_DEFAULT_POLL_INTERVAL_MS, help="Follow mode poll interval in ms (default: 1000, min: 100)")
     e.add_argument("--idle-exit-seconds", type=float, default=0.0, help="Optional follow auto-exit after N idle seconds (default: 0 = never)")
+    e.add_argument("--rotate-on-idle-seconds", type=float, default=EPISODIC_FOLLOW_DEFAULT_ROTATE_ON_IDLE_SECONDS, help="Follow mode: rotate spool when fully caught up and idle for N seconds (default: 0 = disabled)")
+    e.add_argument("--rotate-min-bytes", type=int, default=EPISODIC_FOLLOW_DEFAULT_ROTATE_MIN_BYTES, help="Follow mode: only rotate when spool size >= N bytes (default: 1MB)")
     e.add_argument("--truncate", action="store_true", help="Truncate source spool after fully consuming current snapshot")
     e.add_argument("--rotate", action="store_true", help="Rotate source spool after fully consuming current snapshot")
     e.set_defaults(func=cmd_episodes_ingest)

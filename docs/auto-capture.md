@@ -81,6 +81,9 @@ uv run python -m openclaw_mem episodes ingest \
 Useful follow flags:
 - `--poll-interval-ms <N>`: idle polling interval (low CPU when idle; default `1000`, min `100`)
 - `--idle-exit-seconds <N>`: optional auto-exit after N idle seconds (`0` = never; useful for supervised jobs/tests)
+- `--rotate-on-idle-seconds <N>`: when fully caught up and idle, rotate the spool to keep it bounded (`0` = disabled)
+- `--rotate-min-bytes <N>`: only rotate when spool size is at least N bytes (default: 1MB)
+- follow mode uses a sibling lock file (e.g. `openclaw-mem-episodes.jsonl.lock`) to avoid racing writers during rotation
 - `--follow` cannot be combined with `--truncate`/`--rotate` (maintenance actions stay batch-only)
 
 ---

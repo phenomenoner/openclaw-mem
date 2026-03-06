@@ -222,7 +222,7 @@ Scope derivation for conversation text:
 */2 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --payload-cap-bytes 4096 --json >/dev/null 2>&1
 
 # ingest daemon (systemd/supervisor/pm2 screen/tmux)
-cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --conversation-payload-cap-bytes 4096 --follow --poll-interval-ms 1000 --json
+cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --conversation-payload-cap-bytes 4096 --follow --poll-interval-ms 1000 --rotate-on-idle-seconds 60 --rotate-min-bytes 1048576 --json
 ```
 
 Follow mode notes:
@@ -230,6 +230,7 @@ Follow mode notes:
 - safely resets offset when spool is truncated/replaced (inode/dev or size shrink detection)
 - low CPU when idle (sleep-based polling)
 - graceful stop on SIGINT/SIGTERM
+- optional `--rotate-on-idle-seconds` keeps the JSONL spool bounded; rotation is coordinated via a sibling lock file (`<spool>.lock`)
 
 ### Legacy fallback: periodic ingest pump
 
