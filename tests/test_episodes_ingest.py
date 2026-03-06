@@ -489,6 +489,56 @@ class TestEpisodesIngestCli(unittest.TestCase):
             self.assertEqual([x["event_id"] for x in out["items"]], ["f-1", "f-2"])
         conn.close()
 
+    def test_episodes_ingest_follow_rotate_on_idle(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td) / "episodes.jsonl"
+            state = Path(td) / "state.json"
+
+            rows = [
+                json.dumps(self._event(event_id="r-1", ts_ms=1000, session_id="s-rot"), ensure_ascii=False),
+                json.dumps(self._event(event_id="r-2", ts_ms=1001, session_id="s-rot"), ensure_ascii=False),
+            ]
+            spool.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+            receipt = self._run(
+                conn,
+                [
+                    "episodes",
+                    "ingest",
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(state),
+                    "--follow",
+                    "--poll-interval-ms",
+                    "100",
+                    "--rotate-on-idle-seconds",
+                    "0.1",
+                    "--rotate-min-bytes",
+                    "1",
+                    "--idle-exit-seconds",
+                    "0.5",
+                    "--json",
+                ],
+            )
+
+            self.assertTrue(receipt["rotate_on_idle"]["enabled"])
+            self.assertGreaterEqual(receipt["rotate_on_idle"]["attempts"], 1)
+            self.assertGreaterEqual(receipt["rotate_on_idle"]["rotated"], 1)
+
+            # rotated spool should exist and new spool should be empty
+            rotated = list(Path(td).glob("episodes.jsonl.*.idle-rotated*"))
+            self.assertGreaterEqual(len(rotated), 1)
+            self.assertEqual(spool.read_text(encoding="utf-8"), "")
+
+            out = self._run(
+                conn,
+                ["episodes", "query", "--scope", "proj-ingest", "--session-id", "s-rot", "--json"],
+            )
+            self.assertEqual([x["event_id"] for x in out["items"]], ["r-1", "r-2"])
+        conn.close()
+
     def test_episodes_ingest_follow_rejects_rotate_truncate_combo(self):
         conn = _connect(":memory:")
         with tempfile.TemporaryDirectory() as td:
