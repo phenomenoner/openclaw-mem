@@ -60,6 +60,11 @@ Think of each node as a “system test point”.
 ---
 
 ### Node 5 — Operator UX + delivery surface works
+
+**Current baseline status (this workspace):**
+- **PASS** — `last_verified=2026-03-06` (Asia/Taipei)
+- Receipt: `lyria-working-ledger` D28 (`commit 8255c8c`) — `/flush` ACK observed; no duplicate visible replies
+
 **Verify (OpenClaw):**
 - `/flush` works and sends a brief ACK.
 - `/compact` still behaves; no duplicate replies.
