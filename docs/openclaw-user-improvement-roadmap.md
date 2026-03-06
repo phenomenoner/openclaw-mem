@@ -78,8 +78,9 @@ These should be high-impact and low-risk.
 
 - **Recall ranking that matches operator expectations**
   - Improve deterministic ranking so “the obvious memory” is returned first.
-  - Candidate approach (still deterministic): importance tier → scope match → recency boost → hybrid score.
-  - Acceptance: on a small golden set, top-1/top-3 improves without increasing noise.
+  - Candidate approach (still deterministic): split **retention** from **activation**; use Working Set as backbone lane, then quota-mix hot recall (`must` cap + `nice` floor + wildcard) instead of letting `must_remember` fill the whole budget.
+  - Spec: `docs/specs/auto-recall-activation-vs-retention-v1.md`
+  - Acceptance: on a small golden set, top-1/top-3 improves without increasing noise, and large `must_remember` pools no longer wash out turn-relevant memories.
 
 - **Explainability that answers the operator’s question**
   - Receipts already exist; make them *more legible* for humans.

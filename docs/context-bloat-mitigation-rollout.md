@@ -146,9 +146,11 @@ Store 1 record per scope as a single memory row:
 
 **Injection rule**
 - on `before_agent_start`: inject Working Set **before** normal autoRecall results (pinned first slot)
+- treat Working Set as the **backbone lane**; normal autoRecall is the **hot recall lane** and should not waste slots re-injecting the same durable content by default
 
 **Explainability**
 - recall receipts carry `workingSet` summary (`generated`, `id`, `chars`, section counts, `persisted`)
+- follow-on selection policy and receipt changes are tracked in `docs/specs/auto-recall-activation-vs-retention-v1.md`
 
 **Success**
 - agent stops re-deriving state from long transcript
