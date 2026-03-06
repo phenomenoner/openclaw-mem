@@ -41,6 +41,7 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 - Benchmark/eval plan pointers: [Go →](thought-links.md) · [Go →](rerank-poc-plan.md)
 - Importance grading (MVP v1): [Go →](importance-grading.md)
 - Context engineering lessons (local-first): [Go →](context-engineering-lessons.md)
+- Product roadmap (OpenClaw users): [Go →](openclaw-user-improvement-roadmap.md)
 - Roadmap (engineering): [Go →](roadmap.md)
 - Context bloat mitigation rollout plan (down‑N minimal changes): [Go →](context-bloat-mitigation-rollout.md)
 - Mem Engine (optional slot backend): [Go →](mem-engine.md)

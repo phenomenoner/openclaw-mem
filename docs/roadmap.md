@@ -6,6 +6,9 @@ Guiding stance: ship early, stay local-first, and keep every change **non-destru
 
 Status tags used here: **DONE / PARTIAL / ROADMAP**.
 
+Operator-first / product view:
+- **OpenClaw user improvement roadmap (product-facing)**: [Go →](openclaw-user-improvement-roadmap.md)
+
 ## Principles (what we optimize for)
 
 - **Sidecar-first, optional slot owner**: `openclaw-mem` remains the ops sidecar by default. We may additionally ship an optional slot backend (**openclaw-mem-engine**) to replace `memory-lancedb` when enabled — still rollbackable via a one-line slot switch.

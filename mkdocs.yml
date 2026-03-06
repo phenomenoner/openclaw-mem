@@ -39,6 +39,8 @@ nav:
       - Graphic memory (GraphRAG-lite PRD): specs/graphic-memory-graphrag-lite-prd.md
   - Reference:
       - Ecosystem fit: ecosystem-fit.md
+      - Product roadmap (OpenClaw users): openclaw-user-improvement-roadmap.md
+      - Roadmap (engineering): roadmap.md
       - Completeness roadmap: completeness-roadmap.md
       - Engine (slot backend): mem-engine.md
       - Engine admin ops (P0-1): mem-engine-admin-ops.md
