@@ -65,6 +65,7 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(_normalize_importance_scorer_value("Heuristic v1"), "heuristic-v1")
         self.assertEqual(_normalize_importance_scorer_value(" heuristic-v1 "), "heuristic-v1")
         self.assertEqual(_normalize_importance_scorer_value("heuristic-v2"), "heuristic-v2")
+        self.assertEqual(_normalize_importance_scorer_value("Heuristic v2"), "heuristic-v2")
         self.assertEqual(_normalize_importance_scorer_value("off"), "off")
         self.assertEqual(_normalize_importance_scorer_value(""), "")
 

@@ -732,6 +732,8 @@ def _normalize_importance_scorer_value(value: str) -> str:
     v = v.replace("_", "-").replace(" ", "")
     if v in {"heuristicv1", "heuristic-v1"}:
         return "heuristic-v1"
+    if v in {"heuristicv2", "heuristic-v2"}:
+        return "heuristic-v2"
     return v
 
 
