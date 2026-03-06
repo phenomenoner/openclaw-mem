@@ -117,6 +117,12 @@ Automation truth (dev):
 
   - Note: also accepts additional bullet glyphs like ▪ ◦ ・ – — − and checkbox glyphs like [☐]/[☑]/[☒] (see QUICKSTART.md for the full list).
   - Example formats: `TODO: rotate runbook`, `【TODO】 rotate runbook`, `<TODO> rotate runbook`, `＜TODO＞rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`.
+
+  - Example run:
+
+    ```bash
+    uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
+    ```
   - Example run:
 
     ```bash
