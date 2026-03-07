@@ -70,6 +70,32 @@ Acceptance criteria:
 - In `--use-graph=auto`, trigger is deterministic + traceable (`--trace` shows trigger reason).
 - Graph failures are fail-open and never break pack.
 
+### 1.7a) Graphic Memory query plane (operator-facing graph interface)
+
+Status: **ROADMAP**.
+
+- Problem: operators need a practical query layer over stable topology + runtime drift + provenance, but today those relationships are scattered across YAML, cron state, and receipts.
+- Decision: keep repo-backed topology as the source of truth; add a **derived query plane** under `openclaw-mem`.
+- Target architecture:
+  - source of truth = structured files (YAML / markdown / receipts)
+  - derived cache = SQLite graph tables
+  - first shippable slice = YAML-only query helper for one-hop operator questions
+- Initial operator questions:
+  - what depends on this node?
+  - what does this node feed/write?
+  - which jobs write this artifact?
+  - which jobs are background but not human-facing?
+  - where does graph truth drift from live state?
+
+Artifacts:
+- Spec: `docs/specs/graphic-memory-query-plane-v0.md`
+
+Acceptance criteria:
+- YAML remains the editable truth; the derived graph is rebuildable/disposable.
+- A-fast can ship bounded query value before SQLite lands.
+- A-deep installs deterministic refresh + drift/provenance boundaries.
+- Runtime graph failures remain fail-open and do not break baseline memory/pack flows.
+
 ### 1.6) Sunrise rollout (Stage A→B→C)
 
 Status: **PARTIAL** (Stage A running; Stage B/C pending).
