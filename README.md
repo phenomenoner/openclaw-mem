@@ -121,11 +121,6 @@ Automation truth (dev):
   - Example run:
 
     ```bash
-    uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
-    ```
-  - Example run:
-
-    ```bash
     uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
     ```
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
