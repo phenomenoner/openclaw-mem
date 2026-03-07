@@ -419,6 +419,8 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem graph auto-status --json
 
 Automation examples:
 
+`--scope` is an actual filter token here: graph retrieval stays within normalized `detail.scope` matches instead of treating scope as a soft hint.
+
 ```bash
 OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
 

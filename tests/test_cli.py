@@ -483,6 +483,102 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_graph_scope_filter_isolation_for_index_and_preflight(self):
+        conn = _connect(":memory:")
+
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:00:00Z",
+                        "kind": "tool",
+                        "tool_name": "exec",
+                        "summary": "alpha one",
+                        "detail": {"scope": "proj-a"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:01:00Z",
+                        "kind": "tool",
+                        "tool_name": "read",
+                        "summary": "alpha two",
+                        "detail": {"scope": "proj-b"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "ts": "2026-02-04T13:02:00Z",
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "alpha three",
+                        "detail": {"scope": "proj-a"},
+                    }
+                ),
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        index_args = type(
+            "Args",
+            (),
+            {
+                "query": "alpha",
+                "scope": "proj-a",
+                "limit": 10,
+                "window": 1,
+                "suggest_limit": 10,
+                "budget_tokens": 120,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_index(conn, index_args)
+        index_out = json.loads(buf.getvalue())
+
+        top_refs = [item["recordRef"] for item in index_out["top_candidates"]]
+        self.assertIn("obs:1", top_refs)
+        self.assertIn("obs:3", top_refs)
+        self.assertNotIn("obs:2", top_refs)
+        self.assertNotIn("obs:2", index_out["index_text"])
+
+        preflight_args = type(
+            "Args",
+            (),
+            {
+                "query": "alpha",
+                "scope": "proj-a",
+                "limit": 10,
+                "window": 1,
+                "suggest_limit": 10,
+                "budget_tokens": 120,
+                "take": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_preflight(conn, preflight_args)
+        preflight_out = json.loads(buf.getvalue())
+
+        selected_refs = preflight_out["selection"]["recordRefs"]
+        self.assertIn("obs:1", selected_refs)
+        self.assertIn("obs:3", selected_refs)
+        self.assertNotIn("obs:2", selected_refs)
+        self.assertNotIn("obs:2", preflight_out["bundle_text"])
+
+        conn.close()
 
     def test_graph_auto_status_reports_flags_and_invalid_values(self):
         from unittest.mock import patch
