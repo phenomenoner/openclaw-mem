@@ -86,7 +86,8 @@ Key stance: **sidecar governs; engine serves**.
   - cap: <=6 memories
   - escapes memory text to reduce prompt-injection risk
   - emits bounded lifecycle receipt (`openclaw-mem-engine.recall.receipt.v1`) with skip reason / tier counts / top IDs
-  - injects a compact autoRecall wrapper comment (IDs only; no memory text in receipt)
+  - in `receipts.verbosity=high`, injects a compact autoRecall wrapper comment (IDs only; no memory text in receipt)
+    - default `low` keeps receipts in logs only (no prompt-side comment)
 
 ### autoCapture (strict)
 - Hook: `agent_end`

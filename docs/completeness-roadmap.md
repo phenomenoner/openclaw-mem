@@ -30,7 +30,7 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
 2) ✅ **Receipts/debug transparency for recall lifecycle (P0-2)**
    - Shipped bounded lifecycle receipt (`openclaw-mem-engine.recall.receipt.v1`) for:
      - manual `memory_recall` tool results (`details.receipt.lifecycle`)
-     - `autoRecall` hook logs + injection wrapper comment
+     - `autoRecall` hook logs + optional injection wrapper comment (`receipts.verbosity=high`)
    - Includes: skip status/reason, tiers searched, tier counts (candidates/selected), `ftsTop` / `vecTop` / `fusedTop` (IDs + scores only), final injected count
    - Explicit rejection reasons now emitted: `trivial_prompt`, `no_query`, `no_results_must`, `no_results_nice`, `provider_unavailable`, `budget_cap`
    - Config knobs: `receipts.enabled`, `receipts.verbosity`, `receipts.maxItems` (default: enabled + low + 3)

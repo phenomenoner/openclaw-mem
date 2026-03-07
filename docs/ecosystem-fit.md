@@ -43,7 +43,7 @@ We track completeness against <https://github.com/win4r/memory-lancedb-pro> at t
 | Policy tiers (must/nice/unknown fallback) | ✅ | ✅ |
 | Receipts/debug top-hits (auditable) | ✅ (varies) | ✅ (`ftsTop` / `vecTop` / `fusedTop`, tier counts, skip reasons) |
 | Admin ops (list/stats/export/import) | ✅ | ✅ (tool + CLI parity layer, sanitized deterministic export, import dedupe/dry-run) |
-| AutoRecall hook (conservative) | ✅ | ✅ (M1/P0-2: skip trivial prompts, cap K, escape injection, receipt comment) |
+| AutoRecall hook (conservative) | ✅ | ✅ (M1/P0-2: skip trivial prompts, cap K, escape injection, optional receipt comment in high verbosity) |
 | AutoCapture hook (strict) | ✅ | ✅ (M1/P0-2: category allowlist + secret-skip + dedupe + caps + lifecycle receipt) |
 | One-line rollback | ➖ | ✅ (`plugins.slots.memory` switch) |
 
