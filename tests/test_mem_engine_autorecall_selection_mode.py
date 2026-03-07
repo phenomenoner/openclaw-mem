@@ -15,6 +15,8 @@ def test_autorecall_selection_mode_markers_present_in_ts():
 
     # Selection implementation + receipt explainability
     assert "function selectTierQuotaV1(" in ts
+    assert "if (selectionMode === 'tier_first_v1') {" in ts
+    assert "if (selected.length >= input.limit) {\n        rejected.push('budget_cap');\n        break;\n      }" in ts
     assert "selectionMode === 'tier_quota_v1'" in ts
     assert "quota: input.quota," in ts
     assert "selection: {\n                mode: autoRecallCfg.selectionMode," in ts

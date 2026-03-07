@@ -2509,6 +2509,61 @@ async function runTieredRecall(input: {
   const ftsResults: RecallResult[] = [];
   const vecResults: RecallResult[] = [];
   const rejected: RecallRejectionReason[] = [];
+  const selectionMode = input.selection?.mode ?? 'tier_first_v1';
+
+  if (selectionMode === 'tier_first_v1') {
+    const selected: RecallResult[] = [];
+    const seen = new Set<string>();
+
+    for (const plan of input.plans) {
+      const { ftsResults: tierFts, vecResults: tierVec } = await input.search({
+        query: input.query,
+        scope: input.scope,
+        labels: plan.labels,
+        searchLimit: input.searchLimit,
+      });
+
+      ftsResults.push(...tierFts);
+      vecResults.push(...tierVec);
+
+      const fused = fuseRecall({ vector: tierVec, fts: tierFts, limit: input.searchLimit }).order;
+
+      let added = 0;
+      for (const hit of fused) {
+        if (selected.length >= input.limit) break;
+        if (seen.has(hit.row.id)) continue;
+        seen.add(hit.row.id);
+        selected.push(hit);
+        added += 1;
+      }
+
+      tierCounts.push({
+        tier: plan.tier,
+        labels: plan.labels,
+        candidates: fused.length,
+        selected: added,
+      });
+
+      if (fused.length === 0 && plan.missReason) {
+        rejected.push(plan.missReason);
+      }
+
+      if (selected.length >= input.limit) {
+        rejected.push('budget_cap');
+        break;
+      }
+    }
+
+    return {
+      selected,
+      tierCounts,
+      ftsResults,
+      vecResults,
+      rejected: uniqueReasons(rejected),
+      selectionMode,
+    };
+  }
+
   const buckets: RecallTierBucket[] = [];
 
   for (const plan of input.plans) {
@@ -2537,16 +2592,11 @@ async function runTieredRecall(input: {
     }
   }
 
-  const selectionMode = input.selection?.mode ?? 'tier_first_v1';
-
-  const selectedResult =
-    selectionMode === 'tier_quota_v1'
-      ? selectTierQuotaV1({
-          buckets,
-          limit: input.limit,
-          quotas: input.selection?.quotas ?? DEFAULT_AUTO_RECALL_CONFIG.quotas,
-        })
-      : selectTierFirst(buckets, input.limit);
+  const selectedResult = selectTierQuotaV1({
+    buckets,
+    limit: input.limit,
+    quotas: input.selection?.quotas ?? DEFAULT_AUTO_RECALL_CONFIG.quotas,
+  });
 
   for (const tierCount of tierCounts) {
     tierCount.selected = selectedResult.selectedByTier[tierCount.tier] ?? 0;
@@ -2563,7 +2613,7 @@ async function runTieredRecall(input: {
     vecResults,
     rejected: uniqueReasons(rejected),
     selectionMode,
-    quota: selectionMode === 'tier_quota_v1' && 'quota' in selectedResult ? selectedResult.quota : undefined,
+    quota: selectedResult.quota,
   };
 }
 
