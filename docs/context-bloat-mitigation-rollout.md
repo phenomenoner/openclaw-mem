@@ -16,7 +16,7 @@ Already installed + enabled:
 - Sidecar capture plugin: `openclaw-mem` (writes JSONL observations)
 - `openclaw-mem-engine`:
   - `autoRecall.enabled=true` (small recall injection; capped)
-  - `autoCapture.enabled=true` (captures preference/decision; TODO capture currently off)
+  - `autoCapture.enabled=true` (captures preference/decision; guarded TODO capture is off by default)
   - **scope inference** from `[ISO:...]` / `[SCOPE:...]`
   - **scope filtering during recall** (autoRecall searches within resolved scope)
 - OpenClaw compaction posture:
