@@ -42,6 +42,7 @@ import {
   isTodoStale,
 } from "./todoGuardrails.js";
 import { docsIngestWithCli, docsSearchWithCli } from "./docsColdLane.js";
+import { runTierFirstV1, selectTierQuotaV1 } from "./tierSelection.js";
 
 // ============================================================================
 // Config
@@ -2370,126 +2371,6 @@ type TieredRecallResult = {
   quota?: RecallQuotaSummary;
 };
 
-function selectTierFirst(
-  buckets: RecallTierBucket[],
-  limit: number,
-): {
-  selected: RecallResult[];
-  selectedByTier: Record<string, number>;
-} {
-  const selected: RecallResult[] = [];
-  const seen = new Set<string>();
-  const selectedByTier: Record<string, number> = {};
-
-  for (const bucket of buckets) {
-    if (selected.length >= limit) break;
-
-    let added = 0;
-    for (const hit of bucket.fused) {
-      if (selected.length >= limit) break;
-      if (seen.has(hit.row.id)) continue;
-      seen.add(hit.row.id);
-      selected.push(hit);
-      added += 1;
-    }
-
-    selectedByTier[bucket.plan.tier] = added;
-  }
-
-  return { selected, selectedByTier };
-}
-
-function selectTierQuotaV1(input: {
-  buckets: RecallTierBucket[];
-  limit: number;
-  quotas: {
-    mustMax: number;
-    niceMin: number;
-    unknownMax: number;
-  };
-}): {
-  selected: RecallResult[];
-  selectedByTier: Record<string, number>;
-  quota: RecallQuotaSummary;
-} {
-  const selected: RecallResult[] = [];
-  const seen = new Set<string>();
-  const selectedByTier: Record<string, number> = {};
-
-  const bucketByTier = new Map<string, RecallTierBucket>();
-  for (const bucket of input.buckets) {
-    bucketByTier.set(bucket.plan.tier, bucket);
-  }
-
-  const mustCandidates = bucketByTier.get('must')?.fused.length ?? 0;
-  const niceCandidates = bucketByTier.get('nice')?.fused.length ?? 0;
-  const unknownCandidates = bucketByTier.get('unknown')?.fused.length ?? 0;
-
-  const niceTarget = Math.min(input.quotas.niceMin, input.limit, niceCandidates);
-  const mustTarget = Math.min(input.quotas.mustMax, Math.max(0, input.limit - niceTarget), mustCandidates);
-  const unknownTarget = Math.min(
-    input.quotas.unknownMax,
-    Math.max(0, input.limit - niceTarget - mustTarget),
-    unknownCandidates,
-  );
-
-  const takeFromTier = (tierName: string, count: number) => {
-    if (count <= 0 || selected.length >= input.limit) return;
-
-    const bucket = bucketByTier.get(tierName);
-    if (!bucket) return;
-
-    let taken = 0;
-    for (const hit of bucket.fused) {
-      if (taken >= count || selected.length >= input.limit) break;
-      if (seen.has(hit.row.id)) continue;
-      seen.add(hit.row.id);
-      selected.push(hit);
-      taken += 1;
-      selectedByTier[tierName] = (selectedByTier[tierName] ?? 0) + 1;
-    }
-  };
-
-  takeFromTier('must', mustTarget);
-  takeFromTier('nice', niceTarget);
-  takeFromTier('unknown', unknownTarget);
-
-  const wildcardPool: Array<{ tier: string; hit: RecallResult }> = [];
-  for (const bucket of input.buckets) {
-    for (const hit of bucket.fused) {
-      if (seen.has(hit.row.id)) continue;
-      wildcardPool.push({ tier: bucket.plan.tier, hit });
-    }
-  }
-
-  wildcardPool.sort((a, b) => {
-    if (b.hit.score !== a.hit.score) return b.hit.score - a.hit.score;
-    const idDiff = a.hit.row.id.localeCompare(b.hit.row.id);
-    if (idDiff !== 0) return idDiff;
-    return a.tier.localeCompare(b.tier);
-  });
-
-  let wildcardUsed = 0;
-  for (const candidate of wildcardPool) {
-    if (selected.length >= input.limit) break;
-    if (seen.has(candidate.hit.row.id)) continue;
-    seen.add(candidate.hit.row.id);
-    selected.push(candidate.hit);
-    selectedByTier[candidate.tier] = (selectedByTier[candidate.tier] ?? 0) + 1;
-    wildcardUsed += 1;
-  }
-
-  return {
-    selected,
-    selectedByTier,
-    quota: {
-      mustMax: input.quotas.mustMax,
-      niceMin: input.quotas.niceMin,
-      unknownMax: input.quotas.unknownMax,
-      wildcardUsed,
-    },
-  };
-}
 
 async function runTieredRecall(input: {
   query: string;
@@ -2512,50 +2393,23 @@ async function runTieredRecall(input: {
   const selectionMode = input.selection?.mode ?? 'tier_first_v1';
 
   if (selectionMode === 'tier_first_v1') {
-    const selected: RecallResult[] = [];
-    const seen = new Set<string>();
+    const tierFirstResult = await runTierFirstV1({
+      query: input.query,
+      scope: input.scope,
+      limit: input.limit,
+      searchLimit: input.searchLimit,
+      plans: input.plans,
+      search: input.search,
+      fuseRecall,
+    });
 
-    for (const plan of input.plans) {
-      const { ftsResults: tierFts, vecResults: tierVec } = await input.search({
-        query: input.query,
-        scope: input.scope,
-        labels: plan.labels,
-        searchLimit: input.searchLimit,
-      });
-
-      ftsResults.push(...tierFts);
-      vecResults.push(...tierVec);
-
-      const fused = fuseRecall({ vector: tierVec, fts: tierFts, limit: input.searchLimit }).order;
-
-      let added = 0;
-      for (const hit of fused) {
-        if (selected.length >= input.limit) break;
-        if (seen.has(hit.row.id)) continue;
-        seen.add(hit.row.id);
-        selected.push(hit);
-        added += 1;
-      }
-
-      tierCounts.push({
-        tier: plan.tier,
-        labels: plan.labels,
-        candidates: fused.length,
-        selected: added,
-      });
-
-      if (fused.length === 0 && plan.missReason) {
-        rejected.push(plan.missReason);
-      }
-
-      if (selected.length >= input.limit) {
-        rejected.push('budget_cap');
-        break;
-      }
-    }
+    tierCounts.push(...tierFirstResult.tierCounts);
+    ftsResults.push(...tierFirstResult.ftsResults);
+    vecResults.push(...tierFirstResult.vecResults);
+    rejected.push(...tierFirstResult.rejected);
 
     return {
-      selected,
+      selected: tierFirstResult.selected,
       tierCounts,
       ftsResults,
       vecResults,
