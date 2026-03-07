@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - new tools: `memory_docs_ingest`, `memory_docs_search`
   - `memory_recall` + `autoRecall` now optionally consult docs cold lane only when hot lane is insufficient (`minHotItems`)
   - bounded receipt/log markers: `openclaw-mem-engine:docsColdLane.ingest`, `openclaw-mem-engine:docsColdLane.search`, plus optional `coldLane` block in recall lifecycle receipts.
+- Hotfixed autoRecall prompt hygiene for default installations:
+  - prompt-side autoRecall receipt comments are now suppressed by default when `receipts.verbosity=low`
+  - the injected memory wrapper guard line now uses a less echo-prone machine-style policy string to reduce user-facing control-plane/meta leaks
 
 ### Docs
 
