@@ -138,6 +138,13 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertGreaterEqual(out["signals"]["duplication"]["groups"], 1)
         self.assertGreaterEqual(out["signals"]["bloat"]["count"], 1)
         self.assertGreaterEqual(out["signals"]["weakly_connected"]["count"], 1)
+        self.assertEqual(out["source"]["total_rows"], before_count)
+        self.assertEqual(out["source"]["coverage_pct"], 100.0)
+        self.assertEqual(out["source"]["sample_order"], "id_desc_recent_window")
+        self.assertEqual(out["signals"]["staleness"]["excluded_must_remember"], 0)
+        self.assertEqual(out["signals"]["duplication"]["fingerprint_algo"], "normalize_v1")
+        self.assertEqual(out["policy"]["query_only_enforced"], True)
+        self.assertEqual(out["warnings"], [])
 
         rec_types = {r["type"] for r in out.get("recommendations", [])}
         self.assertIn("mark_stale_candidate", rec_types)
@@ -150,6 +157,51 @@ class TestOptimizeReview(unittest.TestCase):
 
         after_count = conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
         self.assertEqual(before_count, after_count)
+        self.assertEqual(conn.execute("PRAGMA query_only").fetchone()[0], 0)
+
+        conn.close()
+
+    def test_optimize_review_reports_sampling_warning_when_limit_is_partial(self):
+        conn = _connect(":memory:")
+        for i in range(5):
+            _insert_observation(
+                conn,
+                {
+                    "ts": _iso_days_ago(90 - i),
+                    "kind": "note",
+                    "tool_name": "memory_store",
+                    "summary": f"legacy note {i}",
+                    "detail": {"importance": {"score": 0.4, "label": "ignore"}},
+                },
+            )
+        conn.commit()
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 2,
+                "stale_days": 60,
+                "duplicate_min_count": 2,
+                "bloat_summary_chars": 240,
+                "bloat_detail_bytes": 4096,
+                "orphan_min_tokens": 2,
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_review(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["source"]["rows_scanned"], 2)
+        self.assertEqual(out["source"]["total_rows"], 5)
+        self.assertEqual(out["source"]["coverage_pct"], 40.0)
+        self.assertEqual(out["warnings"][0]["code"], "sample_is_recent_window")
+        self.assertEqual(out["policy"]["writes_performed"], 0)
+        self.assertEqual(conn.execute("PRAGMA query_only").fetchone()[0], 0)
 
         conn.close()
 

@@ -208,15 +208,24 @@ def build_memory_health_review(
     orphan_min_tokens = max(1, int(orphan_min_tokens))
     top = max(1, int(top))
 
-    rows = conn.execute(
-        """
-        SELECT id, ts, kind, tool_name, summary, summary_en, detail_json
-        FROM observations
-        ORDER BY id DESC
-        LIMIT ?
-        """,
-        (row_limit,),
-    ).fetchall()
+    prev_query_only = int(conn.execute("PRAGMA query_only").fetchone()[0])
+    if not prev_query_only:
+        conn.execute("PRAGMA query_only = ON")
+
+    try:
+        total_rows = int(conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0])
+        rows = conn.execute(
+            """
+            SELECT id, ts, kind, tool_name, summary, summary_en, detail_json
+            FROM observations
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (row_limit,),
+        ).fetchall()
+    finally:
+        if not prev_query_only:
+            conn.execute("PRAGMA query_only = OFF")
 
     now = datetime.now(timezone.utc)
     prepared: List[Dict[str, Any]] = []
@@ -250,12 +259,14 @@ def build_memory_health_review(
 
     # Staleness
     stale_items: List[Dict[str, Any]] = []
+    excluded_must_remember = 0
     for it in prepared:
         if it["age_days"] is None:
             continue
         if it["age_days"] < stale_days:
             continue
         if it["importance"] == "must_remember":
+            excluded_must_remember += 1
             continue
         stale_items.append(
             {
@@ -350,6 +361,18 @@ def build_memory_health_review(
 
     weak_items.sort(key=lambda x: (x["token_count"], x["id"]), reverse=True)
 
+    rows_scanned = len(prepared)
+    coverage_pct = round((rows_scanned / total_rows) * 100, 1) if total_rows > 0 else 100.0
+    warnings: List[Dict[str, Any]] = []
+    if total_rows > rows_scanned:
+        warnings.append(
+            {
+                "code": "sample_is_recent_window",
+                "message": "Report scans the most recent rows only; staleness/duplication signals may be incomplete outside the current sample window.",
+                "sample_order": "id_desc_recent_window",
+            }
+        )
+
     report: Dict[str, Any] = {
         "kind": "openclaw-mem.optimize.review.v0",
         "ts": now.isoformat(),
@@ -360,18 +383,23 @@ def build_memory_health_review(
         "source": {
             "table": "observations",
             "row_limit": row_limit,
-            "rows_scanned": len(prepared),
+            "rows_scanned": rows_scanned,
+            "total_rows": total_rows,
+            "coverage_pct": coverage_pct,
+            "sample_order": "id_desc_recent_window",
         },
         "signals": {
             "staleness": {
                 "count": len(stale_items),
                 "threshold_days": stale_days,
+                "excluded_must_remember": excluded_must_remember,
                 "items": stale_items[:top],
             },
             "duplication": {
                 "groups": len(dup_items),
                 "duplicate_rows": duplicate_rows,
                 "min_count": duplicate_min_count,
+                "fingerprint_algo": "normalize_v1",
                 "items": dup_items[:top],
             },
             "bloat": {
@@ -383,6 +411,7 @@ def build_memory_health_review(
             "weakly_connected": {
                 "count": len(weak_items),
                 "orphan_min_tokens": orphan_min_tokens,
+                "rare_token_max_freq": max_common_freq,
                 "items": weak_items[:top],
             },
         },
@@ -390,7 +419,9 @@ def build_memory_health_review(
             "mode": "recommendation-first",
             "writes_performed": 0,
             "memory_mutation": "none",
+            "query_only_enforced": True,
         },
+        "warnings": warnings,
     }
 
     report["recommendations"] = _build_recommendations(report)
@@ -408,7 +439,11 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
 
     lines = [
         "openclaw-mem optimize review (recommendation-only)",
-        f"rows scanned: {src.get('rows_scanned', 0)}/{src.get('row_limit', 0)}",
+        (
+            "rows scanned: "
+            f"{src.get('rows_scanned', 0)}/{src.get('row_limit', 0)} "
+            f"(total_rows={src.get('total_rows', 0)}, coverage={src.get('coverage_pct', 0)}%, sample_order={src.get('sample_order', 'unknown')})"
+        ),
         (
             "signals: "
             f"stale={stale.get('count', 0)} | "
@@ -417,6 +452,12 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
             f"weakly_connected={weak.get('count', 0)}"
         ),
     ]
+
+    warnings = report.get("warnings", [])
+    if warnings:
+        lines.append("warnings:")
+        for w in warnings:
+            lines.append(f"- {w.get('code')}: {w.get('message')}")
 
     recs = report.get("recommendations", [])
     if recs:
