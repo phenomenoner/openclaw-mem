@@ -51,6 +51,7 @@ from openclaw_mem.docs_memory import (
     rrf_components,
 )
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
+from openclaw_mem.optimization import build_memory_health_review, render_memory_health_review
 
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
@@ -1412,6 +1413,25 @@ def cmd_backend(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     }
 
     _emit(out, args.json)
+
+
+def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    report = build_memory_health_review(
+        conn,
+        limit=int(getattr(args, "limit", 1000)),
+        stale_days=int(getattr(args, "stale_days", 60)),
+        duplicate_min_count=int(getattr(args, "duplicate_min_count", 2)),
+        bloat_summary_chars=int(getattr(args, "bloat_summary_chars", 240)),
+        bloat_detail_bytes=int(getattr(args, "bloat_detail_bytes", 4096)),
+        orphan_min_tokens=int(getattr(args, "orphan_min_tokens", 2)),
+        top=int(getattr(args, "top", 10)),
+    )
+
+    if args.json:
+        _emit(report, True)
+        return
+
+    print(render_memory_health_review(report))
 
 
 def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -8201,6 +8221,21 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("backend", help="Inspect active OpenClaw memory backend + fallback posture")
     add_common(sp)
     sp.set_defaults(func=cmd_backend)
+
+    sp = sub.add_parser("optimize", help="Recommendation-first memory optimization helpers (zero-write)")
+    add_common(sp)
+    osub = sp.add_subparsers(dest="optimize_cmd", required=True)
+
+    o = osub.add_parser("review", help="Review memory health signals and emit recommendations (no writes)")
+    add_common(o)
+    o.add_argument("--limit", type=int, default=1000, help="Max observation rows to scan (default: 1000)")
+    o.add_argument("--stale-days", type=int, default=60, help="Staleness threshold in days (default: 60)")
+    o.add_argument("--duplicate-min-count", dest="duplicate_min_count", type=int, default=2, help="Min rows per duplicate cluster (default: 2)")
+    o.add_argument("--bloat-summary-chars", dest="bloat_summary_chars", type=int, default=240, help="Summary length threshold for bloat candidates (default: 240)")
+    o.add_argument("--bloat-detail-bytes", dest="bloat_detail_bytes", type=int, default=4096, help="detail_json size threshold for bloat candidates in bytes (default: 4096)")
+    o.add_argument("--orphan-min-tokens", dest="orphan_min_tokens", type=int, default=2, help="Minimum token count for weakly connected candidates (default: 2)")
+    o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per signal in output (default: 10)")
+    o.set_defaults(func=cmd_optimize_review)
 
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)

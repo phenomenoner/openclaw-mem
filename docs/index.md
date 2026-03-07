@@ -63,6 +63,9 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --json search "gateway t
 
 # Build a compact recall bundle
 uv run --python 3.13 --frozen -- python -m openclaw_mem pack --query "gateway timeout" --limit 8 --trace --json
+
+# Recommendation-only memory health review (zero-write)
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize review --limit 500 --json
 ```
 
 ## What’s new (v1.0.4, since v1.0.1)

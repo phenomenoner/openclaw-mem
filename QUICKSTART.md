@@ -176,6 +176,14 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --ta
 ---
 
 
+## Step 6.5: Recommendation-only memory health review (optional)
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize review --json --limit 500
+```
+
+This command is zero-write by design in v0.1: it only reports candidates (staleness, duplication, bloat, weakly-connected memories) and suggestions.
+
 ## Step 7: Autograde toggle (optional)
 
 `openclaw-mem` can auto-score importance during ingest/harvest with `heuristic-v1`.

@@ -1,7 +1,7 @@
 # Spec — Self-Optimizing Memory Loop v0
 
 ## Status
-- Stage: concept/spec-ready
+- Stage: **partial implementation shipped** (v0.1 observer/reporter)
 - Scope: `openclaw-mem` dev branch only
 - Posture: **shadow/recommendation-first**
 
@@ -127,40 +127,36 @@ Not auto-apply:
 - changing system prompts/config
 - cross-scope promotion without evidence
 
-## Repo shape (proposed)
+## Repo shape (current v0.1)
 
 ```text
 docs/specs/
   self-optimizing-memory-loop-v0.md
 
 openclaw_mem/
-  optimization/
-    observe.py
-    propose.py
-    verify.py
-    policy.py
+  optimization.py
 
 tests/
-  test_optimization_observe.py
-  test_optimization_propose.py
-  test_optimization_policy.py
+  test_optimize_review.py
 ```
 
 ## Suggested first shipped slice
-### v0.1 — recommendation-only
-- add a tiny optimization proposal record shape
-- generate proposals from a small number of signals:
-  - user correction
-  - repeated low-value recall
-  - repeated same-query miss
+### v0.1 — recommendation-only (**shipped**)
+- CLI: `openclaw-mem optimize review`
+- bounded input surface: `observations` table only (row limit configurable; default 1000)
+- low-risk signals implemented:
+  - staleness
+  - duplication
+  - bloat
+  - weakly-connected candidates
+- structured report: `openclaw-mem.optimize.review.v0`
 - no auto-apply
-- emit receipts only
+- zero writes to memory rows (observe + propose only)
 
 ### v0.2 — operator review lane
-- a review/report command:
-  - `openclaw-mem optimize review --limit 20`
-- summarize top proposals by confidence and type
-- allow explicit operator acceptance/rejection
+- keep `optimize review` contract stable and add optional markdown report output
+- add proposal acceptance/rejection workflow as explicit operator action only
+- keep recommendation budgets bounded (top-N / per-signal caps)
 
 ### v0.3 — bounded low-risk apply (flagged)
 - optional `--apply-low-risk`

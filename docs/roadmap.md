@@ -127,7 +127,7 @@ Acceptance criteria:
 
 ### 1.5a) Self-optimizing memory loop (shadow/recommendation-first)
 
-Status: **ROADMAP**.
+Status: **PARTIAL** (v0.1 recommendation observer shipped; apply path still roadmap).
 
 - Problem: the memory layer can capture and recall, but does not yet systematically learn from repeated misses, user corrections, low-value recalls, or strong evidence that certain memories should be promoted/demoted/merged.
 - Decision: add a conservative loop:
@@ -140,6 +140,12 @@ Status: **ROADMAP**.
   - no autonomous prompt rewriting
   - no silent deletion
   - no hidden config mutation
+
+Shipped v0.1 slice:
+- `openclaw-mem optimize review` (zero-write observer/reporter)
+- bounded source-of-truth scan (`observations`, default limit 1000)
+- low-risk signals: staleness, duplication, bloat, weakly-connected candidates
+- outputs structured report `openclaw-mem.optimize.review.v0` with recommendations (no mutation)
 
 Artifacts:
 - Spec: `docs/specs/self-optimizing-memory-loop-v0.md`

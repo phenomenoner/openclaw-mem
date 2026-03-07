@@ -58,6 +58,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **PARTIAL**: embeddings/hybrid/rerank; AI compression (LLM-assisted, hard caps + rollback; see `docs/ai-compression.md`); dual-language fields.
 - **PARTIAL**: OpenClaw plugin capture + backend annotations; Route A semantic recall (`index`, `semantic`).
 - **PARTIAL (dev)**: Context Packer (`pack`) with redaction-safe `--trace` receipts (exists, not yet auto-wired; see `docs/automation-status.md`).
+- **PARTIAL (dev)**: Self-optimizing memory observer v0.1 (`optimize review`) for recommendation-only health signals (staleness/duplication/bloat/weakly-connected) with zero writes.
 - **ROADMAP**: lifecycle manager (ref/last_used_at decay + archive-first); packaging/console scripts; graph semantic memory.
   - Spec (dev): `docs/specs/graphic-memory-graphrag-lite-prd.md`
   - v0 automation knobs (dev): `docs/specs/graphic-memory-auto-capture-auto-recall.md`
@@ -183,6 +184,9 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem profile --json --recent-
 
 # 1.6) Check active OpenClaw memory backend + fallback posture
 uv run --python 3.13 --frozen -- python -m openclaw_mem backend --json
+
+# 1.7) Recommendation-only memory health review (zero-write)
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize review --json --limit 500
 
 # 2) Ingest JSONL observations
 uv run --python 3.13 --frozen -- python -m openclaw_mem ingest --file observations.jsonl --json

@@ -38,6 +38,7 @@ uv run python -m openclaw_mem --db "$DB" --json ingest --file /tmp/openclaw-mem-
 uv run python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
 uv run python -m openclaw_mem --db "$DB" --json timeline 2 --window 2
 uv run python -m openclaw_mem --db "$DB" --json get 2
+uv run python -m openclaw_mem --db "$DB" --json optimize review --limit 200
 ```
 
 **Expected output shape (minimal):**
@@ -49,6 +50,7 @@ uv run python -m openclaw_mem --db "$DB" --json get 2
   - `{ "inserted": 2, "ids": [1,2] }`
 - `search` returns a JSON array of compact rows containing at least: `id`, `ts`, `kind`, `summary`, plus `snippet` and `score` (it does **not** include `detail_json`).
 - `timeline` and `get` return JSON arrays of full rows containing at least: `id`, `ts`, `kind`, `summary`, and `detail_json`.
+- `optimize review` returns a recommendation-only report (`openclaw-mem.optimize.review.v0`) with signal counts and non-destructive recommendations.
 
 ### 3) Engine receipt debug smoke (local-only, no memory text)
 
@@ -79,6 +81,7 @@ Expected:
 - Hybrid retrieval (`hybrid`) + optional rerank providers — requires network/provider; still being evaluated
 - AI compression (`summarize`) — requires an API key
 - Dual-language fields (`--text-en`, EN embedding table) — shipped, still evolving
+- Recommendation-only optimization observer (`optimize review`) — shipped in v0.1 scope; proposes only, never mutates stored memories
 
 ### OpenClaw integration — **PARTIAL**
 
