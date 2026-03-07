@@ -48,6 +48,26 @@
       "label": "Auto Recall",
       "help": "Inject a bounded, sanitized memory context before agent start"
     },
+    "autoRecall.selectionMode": {
+      "label": "Auto Recall Selection Mode",
+      "help": "tier_first_v1 (rollback/default) or tier_quota_v1 (quota mixed recall)",
+      "advanced": true
+    },
+    "autoRecall.quotas.mustMax": {
+      "label": "Auto Recall Must Max",
+      "help": "Tier-quota mode: preferred cap for must_remember picks before wildcard spill",
+      "advanced": true
+    },
+    "autoRecall.quotas.niceMin": {
+      "label": "Auto Recall Nice Min",
+      "help": "Tier-quota mode: minimum nice_to_have picks when available",
+      "advanced": true
+    },
+    "autoRecall.quotas.unknownMax": {
+      "label": "Auto Recall Unknown Max",
+      "help": "Tier-quota mode: preferred cap for unknown picks before wildcard spill",
+      "advanced": true
+    },
     "autoCapture.enabled": {
       "label": "Auto Capture",
       "help": "Capture strict user-origin preference/decision memories on agent end"
@@ -302,6 +322,38 @@
                 "minimum": 1,
                 "maximum": 6,
                 "default": 2
+              },
+              "selectionMode": {
+                "type": "string",
+                "enum": [
+                  "tier_first_v1",
+                  "tier_quota_v1"
+                ],
+                "default": "tier_first_v1"
+              },
+              "quotas": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "mustMax": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5,
+                    "default": 2
+                  },
+                  "niceMin": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5,
+                    "default": 2
+                  },
+                  "unknownMax": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5,
+                    "default": 1
+                  }
+                }
               }
             }
           }

@@ -4,6 +4,7 @@
 - Version: v1 draft
 - State: approved direction for implementation
 - Scope: `openclaw-mem-engine` autoRecall selection policy + receipts
+- Implementation note (2026-03-07): phase-1 hotfix landed behind `autoRecall.selectionMode=tier_quota_v1`; default remains `tier_first_v1` for rollback-first safety.
 
 ## Problem
 

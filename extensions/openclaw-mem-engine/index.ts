@@ -49,6 +49,14 @@ import { docsIngestWithCli, docsSearchWithCli } from "./docsColdLane.js";
 
 type MemoryCategory = "preference" | "fact" | "decision" | "entity" | "todo" | "other";
 
+type AutoRecallSelectionMode = "tier_first_v1" | "tier_quota_v1";
+
+type AutoRecallQuotasInput = {
+  mustMax?: number;
+  niceMin?: number;
+  unknownMax?: number;
+};
+
 const MemoryCategorySchema = Type.Union([
   Type.Literal("preference"),
   Type.Literal("fact"),
@@ -65,6 +73,8 @@ type AutoRecallConfigInput = {
   trivialMinChars?: number;
   includeUnknownFallback?: boolean;
   tierSearchMultiplier?: number;
+  selectionMode?: AutoRecallSelectionMode;
+  quotas?: AutoRecallQuotasInput;
 };
 
 type AutoCaptureConfigInput = {
@@ -202,6 +212,12 @@ type AutoRecallConfig = {
   trivialMinChars: number;
   includeUnknownFallback: boolean;
   tierSearchMultiplier: number;
+  selectionMode: AutoRecallSelectionMode;
+  quotas: {
+    mustMax: number;
+    niceMin: number;
+    unknownMax: number;
+  };
 };
 
 type AutoCaptureConfig = {
@@ -259,6 +275,12 @@ const DEFAULT_AUTO_RECALL_CONFIG: AutoRecallConfig = {
   trivialMinChars: 8,
   includeUnknownFallback: true,
   tierSearchMultiplier: 2,
+  selectionMode: "tier_first_v1",
+  quotas: {
+    mustMax: 2,
+    niceMin: 2,
+    unknownMax: 1,
+  },
 };
 
 const DEFAULT_AUTO_CAPTURE_CONFIG: AutoCaptureConfig = {
@@ -505,19 +527,52 @@ function normalizeNumberInRange(
 
 function resolveAutoRecallConfig(input: PluginConfig["autoRecall"]): AutoRecallConfig {
   const defaults = DEFAULT_AUTO_RECALL_CONFIG;
+  const cloneDefaults = (): AutoRecallConfig => ({
+    ...defaults,
+    quotas: { ...defaults.quotas },
+  });
+
   if (input === false) {
-    return { ...defaults, enabled: false };
+    return { ...cloneDefaults(), enabled: false };
   }
 
   if (input === true || input == null) {
-    return { ...defaults };
+    return cloneDefaults();
   }
 
-  if (typeof input !== "object") {
-    return { ...defaults };
+  if (typeof input !== "object" || Array.isArray(input)) {
+    return cloneDefaults();
   }
 
   const raw = input as AutoRecallConfigInput;
+  const selectionMode: AutoRecallSelectionMode =
+    raw.selectionMode === "tier_quota_v1" || raw.selectionMode === "tier_first_v1"
+      ? raw.selectionMode
+      : defaults.selectionMode;
+
+  const rawQuotas =
+    raw.quotas && typeof raw.quotas === "object" && !Array.isArray(raw.quotas)
+      ? raw.quotas
+      : ({} as AutoRecallQuotasInput);
+
+  const quotas = {
+    mustMax: normalizeNumberInRange(rawQuotas.mustMax, defaults.quotas.mustMax, {
+      min: 0,
+      max: AUTO_RECALL_MAX_ITEMS,
+      integer: true,
+    }),
+    niceMin: normalizeNumberInRange(rawQuotas.niceMin, defaults.quotas.niceMin, {
+      min: 0,
+      max: AUTO_RECALL_MAX_ITEMS,
+      integer: true,
+    }),
+    unknownMax: normalizeNumberInRange(rawQuotas.unknownMax, defaults.quotas.unknownMax, {
+      min: 0,
+      max: AUTO_RECALL_MAX_ITEMS,
+      integer: true,
+    }),
+  };
+
   return {
     enabled: normalizeBoolean(raw.enabled, defaults.enabled),
     maxItems: normalizeNumberInRange(raw.maxItems, defaults.maxItems, {
@@ -537,6 +592,8 @@ function resolveAutoRecallConfig(input: PluginConfig["autoRecall"]): AutoRecallC
       max: 6,
       integer: true,
     }),
+    selectionMode,
+    quotas,
   };
 }
 
@@ -1621,6 +1678,13 @@ type RecallWhySummary = {
   fromFallbackScope: number;
 };
 
+type RecallQuotaSummary = {
+  mustMax: number;
+  niceMin: number;
+  unknownMax: number;
+  wildcardUsed: number;
+};
+
 type RecallFallbackSuppressedReason = "invalid_scope" | "disabled" | "no_fallback_scopes";
 
 type RecallFallbackReceipt = {
@@ -1697,6 +1761,8 @@ type RecallLifecycleReceipt = {
   rejected: RecallRejectionReason[];
   scope: string;
   scopeMode: ScopeMode;
+  selectionMode?: AutoRecallSelectionMode;
+  quota?: RecallQuotaSummary;
   tiersSearched: string[];
   tierCounts: RecallTierReceipt[];
   ftsTop: RecallReceiptRankedHit[];
@@ -1869,6 +1935,8 @@ function buildRecallLifecycleReceipt(input: {
   rejected?: RecallRejectionReason[];
   scope: string;
   scopeMode: ScopeMode;
+  selectionMode?: AutoRecallSelectionMode;
+  quota?: RecallQuotaSummary;
   tierCounts: RecallTierReceipt[];
   ftsResults: RecallResult[];
   vecResults: RecallResult[];
@@ -1902,6 +1970,8 @@ function buildRecallLifecycleReceipt(input: {
     rejected: uniqueReasons(input.rejected ?? []),
     scope: input.scope,
     scopeMode: input.scopeMode,
+    selectionMode: input.selectionMode,
+    quota: input.quota,
     tiersSearched: tierCounts.map((item) => item.tier),
     tierCounts,
     ftsTop: buildRankedHits(input.ftsResults, input.cfg),
@@ -1953,6 +2023,8 @@ function renderAutoRecallReceiptComment(receipt: RecallLifecycleReceipt, cfg: Re
     verbosity: receipt.verbosity,
     skipped: receipt.skipped,
     skipReason: receipt.skipReason,
+    selectionMode: receipt.selectionMode,
+    quota: receipt.quota,
     tiersSearched: receipt.tiersSearched,
     fusedTop: receipt.fusedTop,
     whySummary: receipt.whySummary,
@@ -2274,31 +2346,170 @@ type RecallTierPlan = {
   missReason?: RecallRejectionReason;
 };
 
+type RecallTierSelectionConfig = {
+  mode: AutoRecallSelectionMode;
+  quotas: {
+    mustMax: number;
+    niceMin: number;
+    unknownMax: number;
+  };
+};
+
+type RecallTierBucket = {
+  plan: RecallTierPlan;
+  fused: RecallResult[];
+};
+
+type TieredRecallResult = {
+  selected: RecallResult[];
+  tierCounts: RecallTierReceipt[];
+  ftsResults: RecallResult[];
+  vecResults: RecallResult[];
+  rejected: RecallRejectionReason[];
+  selectionMode: AutoRecallSelectionMode;
+  quota?: RecallQuotaSummary;
+};
+
+function selectTierFirst(
+  buckets: RecallTierBucket[],
+  limit: number,
+): {
+  selected: RecallResult[];
+  selectedByTier: Record<string, number>;
+} {
+  const selected: RecallResult[] = [];
+  const seen = new Set<string>();
+  const selectedByTier: Record<string, number> = {};
+
+  for (const bucket of buckets) {
+    if (selected.length >= limit) break;
+
+    let added = 0;
+    for (const hit of bucket.fused) {
+      if (selected.length >= limit) break;
+      if (seen.has(hit.row.id)) continue;
+      seen.add(hit.row.id);
+      selected.push(hit);
+      added += 1;
+    }
+
+    selectedByTier[bucket.plan.tier] = added;
+  }
+
+  return { selected, selectedByTier };
+}
+
+function selectTierQuotaV1(input: {
+  buckets: RecallTierBucket[];
+  limit: number;
+  quotas: {
+    mustMax: number;
+    niceMin: number;
+    unknownMax: number;
+  };
+}): {
+  selected: RecallResult[];
+  selectedByTier: Record<string, number>;
+  quota: RecallQuotaSummary;
+} {
+  const selected: RecallResult[] = [];
+  const seen = new Set<string>();
+  const selectedByTier: Record<string, number> = {};
+
+  const bucketByTier = new Map<string, RecallTierBucket>();
+  for (const bucket of input.buckets) {
+    bucketByTier.set(bucket.plan.tier, bucket);
+  }
+
+  const mustCandidates = bucketByTier.get('must')?.fused.length ?? 0;
+  const niceCandidates = bucketByTier.get('nice')?.fused.length ?? 0;
+  const unknownCandidates = bucketByTier.get('unknown')?.fused.length ?? 0;
+
+  const niceTarget = Math.min(input.quotas.niceMin, input.limit, niceCandidates);
+  const mustTarget = Math.min(input.quotas.mustMax, Math.max(0, input.limit - niceTarget), mustCandidates);
+  const unknownTarget = Math.min(
+    input.quotas.unknownMax,
+    Math.max(0, input.limit - niceTarget - mustTarget),
+    unknownCandidates,
+  );
+
+  const takeFromTier = (tierName: string, count: number) => {
+    if (count <= 0 || selected.length >= input.limit) return;
+
+    const bucket = bucketByTier.get(tierName);
+    if (!bucket) return;
+
+    let taken = 0;
+    for (const hit of bucket.fused) {
+      if (taken >= count || selected.length >= input.limit) break;
+      if (seen.has(hit.row.id)) continue;
+      seen.add(hit.row.id);
+      selected.push(hit);
+      taken += 1;
+      selectedByTier[tierName] = (selectedByTier[tierName] ?? 0) + 1;
+    }
+  };
+
+  takeFromTier('must', mustTarget);
+  takeFromTier('nice', niceTarget);
+  takeFromTier('unknown', unknownTarget);
+
+  const wildcardPool: Array<{ tier: string; hit: RecallResult }> = [];
+  for (const bucket of input.buckets) {
+    for (const hit of bucket.fused) {
+      if (seen.has(hit.row.id)) continue;
+      wildcardPool.push({ tier: bucket.plan.tier, hit });
+    }
+  }
+
+  wildcardPool.sort((a, b) => {
+    if (b.hit.score !== a.hit.score) return b.hit.score - a.hit.score;
+    const idDiff = a.hit.row.id.localeCompare(b.hit.row.id);
+    if (idDiff !== 0) return idDiff;
+    return a.tier.localeCompare(b.tier);
+  });
+
+  let wildcardUsed = 0;
+  for (const candidate of wildcardPool) {
+    if (selected.length >= input.limit) break;
+    if (seen.has(candidate.hit.row.id)) continue;
+    seen.add(candidate.hit.row.id);
+    selected.push(candidate.hit);
+    selectedByTier[candidate.tier] = (selectedByTier[candidate.tier] ?? 0) + 1;
+    wildcardUsed += 1;
+  }
+
+  return {
+    selected,
+    selectedByTier,
+    quota: {
+      mustMax: input.quotas.mustMax,
+      niceMin: input.quotas.niceMin,
+      unknownMax: input.quotas.unknownMax,
+      wildcardUsed,
+    },
+  };
+}
+
 async function runTieredRecall(input: {
   query: string;
   scope: string;
   limit: number;
   searchLimit: number;
   plans: RecallTierPlan[];
+  selection?: RecallTierSelectionConfig;
   search: (args: {
     query: string;
     scope: string;
     labels: ImportanceLabel[];
     searchLimit: number;
   }) => Promise<{ ftsResults: RecallResult[]; vecResults: RecallResult[] }>;
-}): Promise<{
-  selected: RecallResult[];
-  tierCounts: RecallTierReceipt[];
-  ftsResults: RecallResult[];
-  vecResults: RecallResult[];
-  rejected: RecallRejectionReason[];
-}> {
-  const selected: RecallResult[] = [];
-  const seen = new Set<string>();
+}): Promise<TieredRecallResult> {
   const tierCounts: RecallTierReceipt[] = [];
   const ftsResults: RecallResult[] = [];
   const vecResults: RecallResult[] = [];
   const rejected: RecallRejectionReason[] = [];
+  const buckets: RecallTierBucket[] = [];
 
   for (const plan of input.plans) {
     const { ftsResults: tierFts, vecResults: tierVec } = await input.search({
@@ -2312,34 +2523,48 @@ async function runTieredRecall(input: {
     vecResults.push(...tierVec);
 
     const fused = fuseRecall({ vector: tierVec, fts: tierFts, limit: input.searchLimit }).order;
-
-    let added = 0;
-    for (const hit of fused) {
-      if (seen.has(hit.row.id)) continue;
-      seen.add(hit.row.id);
-      selected.push(hit);
-      added += 1;
-      if (selected.length >= input.limit) break;
-    }
+    buckets.push({ plan, fused });
 
     tierCounts.push({
       tier: plan.tier,
       labels: plan.labels,
       candidates: fused.length,
-      selected: added,
+      selected: 0,
     });
 
     if (fused.length === 0 && plan.missReason) {
       rejected.push(plan.missReason);
     }
-
-    if (selected.length >= input.limit) {
-      rejected.push("budget_cap");
-      break;
-    }
   }
 
-  return { selected, tierCounts, ftsResults, vecResults, rejected: uniqueReasons(rejected) };
+  const selectionMode = input.selection?.mode ?? 'tier_first_v1';
+
+  const selectedResult =
+    selectionMode === 'tier_quota_v1'
+      ? selectTierQuotaV1({
+          buckets,
+          limit: input.limit,
+          quotas: input.selection?.quotas ?? DEFAULT_AUTO_RECALL_CONFIG.quotas,
+        })
+      : selectTierFirst(buckets, input.limit);
+
+  for (const tierCount of tierCounts) {
+    tierCount.selected = selectedResult.selectedByTier[tierCount.tier] ?? 0;
+  }
+
+  if (selectedResult.selected.length >= input.limit) {
+    rejected.push('budget_cap');
+  }
+
+  return {
+    selected: selectedResult.selected,
+    tierCounts,
+    ftsResults,
+    vecResults,
+    rejected: uniqueReasons(rejected),
+    selectionMode,
+    quota: selectionMode === 'tier_quota_v1' && 'quota' in selectedResult ? selectedResult.quota : undefined,
+  };
 }
 
 type ScopedTieredRecallResult = {
@@ -2349,6 +2574,8 @@ type ScopedTieredRecallResult = {
   vecResults: RecallResult[];
   rejected: RecallRejectionReason[];
   fallback: RecallFallbackReceipt;
+  selectionMode: AutoRecallSelectionMode;
+  quota?: RecallQuotaSummary;
 };
 
 async function runScopedTieredRecall(input: {
@@ -2358,6 +2585,7 @@ async function runScopedTieredRecall(input: {
   searchLimit: number;
   plans: RecallTierPlan[];
   scopePolicy: ScopePolicyConfig;
+  selection?: RecallTierSelectionConfig;
   allowFallback?: boolean;
   fallbackSuppressedReason?: RecallFallbackSuppressedReason | null;
   search: (args: {
@@ -2379,20 +2607,31 @@ async function runScopedTieredRecall(input: {
   const suppressedReason: RecallFallbackSuppressedReason | null = fallbackConfigured
     ? allowFallback
       ? null
-      : (input.fallbackSuppressedReason ?? "disabled")
+      : (input.fallbackSuppressedReason ?? 'disabled')
     : input.scopePolicy.enabled
-      ? "no_fallback_scopes"
-      : "disabled";
+      ? 'no_fallback_scopes'
+      : 'disabled';
 
   const scopePlan = buildScopeRecallPlan(input.primaryScope, input.scopePolicy, { allowFallback });
   const consultedScopes: string[] = [];
   const usedScopes: string[] = [];
   let primaryCount = 0;
+  let wildcardUsed = 0;
+
+  const selectionMode = input.selection?.mode ?? 'tier_first_v1';
+  const selectionQuota =
+    selectionMode === 'tier_quota_v1'
+      ? {
+          mustMax: input.selection?.quotas.mustMax ?? DEFAULT_AUTO_RECALL_CONFIG.quotas.mustMax,
+          niceMin: input.selection?.quotas.niceMin ?? DEFAULT_AUTO_RECALL_CONFIG.quotas.niceMin,
+          unknownMax: input.selection?.quotas.unknownMax ?? DEFAULT_AUTO_RECALL_CONFIG.quotas.unknownMax,
+        }
+      : undefined;
 
   for (const plan of scopePlan) {
     if (selected.length >= input.limit) break;
 
-    if (plan.origin === "fallback") {
+    if (plan.origin === 'fallback') {
       consultedScopes.push(plan.scope);
     }
 
@@ -2403,13 +2642,14 @@ async function runScopedTieredRecall(input: {
       limit: remaining,
       searchLimit: input.searchLimit,
       plans: input.plans,
+      selection: input.selection,
       search: input.search,
     });
 
     ftsResults.push(...tiered.ftsResults);
     vecResults.push(...tiered.vecResults);
 
-    const tierPrefix = plan.origin === "fallback" ? `${plan.scope}:` : "";
+    const tierPrefix = plan.origin === 'fallback' ? `${plan.scope}:` : '';
     tierCounts.push(
       ...tiered.tierCounts.map((tier) => ({
         ...tier,
@@ -2426,7 +2666,11 @@ async function runScopedTieredRecall(input: {
       if (selected.length >= input.limit) break;
     }
 
-    if (plan.origin === "primary") {
+    if (selectionMode === 'tier_quota_v1' && tiered.quota) {
+      wildcardUsed += tiered.quota.wildcardUsed;
+    }
+
+    if (plan.origin === 'primary') {
       primaryCount = selected.length;
     } else if (added > 0) {
       usedScopes.push(plan.scope);
@@ -2449,6 +2693,14 @@ async function runScopedTieredRecall(input: {
       contributed: Math.max(0, selected.length - primaryCount),
       suppressedReason,
     },
+    selectionMode,
+    quota:
+      selectionMode === 'tier_quota_v1' && selectionQuota
+        ? {
+            ...selectionQuota,
+            wildcardUsed,
+          }
+        : undefined,
   };
 }
 
@@ -2968,9 +3220,35 @@ const memoryEngineConfigSchema = {
       const obj = raw as Record<string, unknown>;
       assertAllowedKeys(
         obj,
-        ["enabled", "maxItems", "skipTrivialPrompts", "trivialMinChars", "includeUnknownFallback", "tierSearchMultiplier"],
+        [
+          "enabled",
+          "maxItems",
+          "skipTrivialPrompts",
+          "trivialMinChars",
+          "includeUnknownFallback",
+          "tierSearchMultiplier",
+          "selectionMode",
+          "quotas",
+        ],
         "autoRecall config",
       );
+
+      let quotas: AutoRecallConfigInput["quotas"] | undefined;
+      if (obj.quotas != null) {
+        if (typeof obj.quotas !== "object" || Array.isArray(obj.quotas)) {
+          throw new Error("autoRecall.quotas must be an object");
+        }
+
+        const quotasObj = obj.quotas as Record<string, unknown>;
+        assertAllowedKeys(quotasObj, ["mustMax", "niceMin", "unknownMax"], "autoRecall.quotas config");
+
+        quotas = {
+          mustMax: typeof quotasObj.mustMax === "number" ? quotasObj.mustMax : undefined,
+          niceMin: typeof quotasObj.niceMin === "number" ? quotasObj.niceMin : undefined,
+          unknownMax: typeof quotasObj.unknownMax === "number" ? quotasObj.unknownMax : undefined,
+        };
+      }
+
       return {
         enabled: typeof obj.enabled === "boolean" ? obj.enabled : undefined,
         maxItems: typeof obj.maxItems === "number" ? obj.maxItems : undefined,
@@ -2980,6 +3258,11 @@ const memoryEngineConfigSchema = {
           typeof obj.includeUnknownFallback === "boolean" ? obj.includeUnknownFallback : undefined,
         tierSearchMultiplier:
           typeof obj.tierSearchMultiplier === "number" ? obj.tierSearchMultiplier : undefined,
+        selectionMode:
+          obj.selectionMode === "tier_first_v1" || obj.selectionMode === "tier_quota_v1"
+            ? obj.selectionMode
+            : undefined,
+        quotas,
       };
     };
 
@@ -3243,6 +3526,26 @@ const memoryEngineConfigSchema = {
     "autoRecall.enabled": {
       label: "Auto Recall",
       help: "Inject a bounded, sanitized memory context before agent start",
+    },
+    "autoRecall.selectionMode": {
+      label: "Auto Recall Selection Mode",
+      help: "tier_first_v1 (rollback/default) or tier_quota_v1 (quota mixed recall)",
+      advanced: true,
+    },
+    "autoRecall.quotas.mustMax": {
+      label: "Auto Recall Must Max",
+      help: "Tier-quota mode: preferred cap for must_remember picks before wildcard spill",
+      advanced: true,
+    },
+    "autoRecall.quotas.niceMin": {
+      label: "Auto Recall Nice Min",
+      help: "Tier-quota mode: minimum nice_to_have picks when available",
+      advanced: true,
+    },
+    "autoRecall.quotas.unknownMax": {
+      label: "Auto Recall Unknown Max",
+      help: "Tier-quota mode: preferred cap for unknown picks before wildcard spill",
+      advanced: true,
     },
     "autoCapture.enabled": {
       label: "Auto Capture",
@@ -4966,6 +5269,8 @@ const memoryPlugin = {
             vecResults?: RecallResult[];
             fusedResults?: RecallResult[];
             injectedCount?: number;
+            selectionMode?: AutoRecallSelectionMode;
+            quota?: RecallQuotaSummary;
             fallback?: RecallFallbackReceipt;
             budget?: RecallBudgetReceipt;
             coldLane?: RecallColdLaneReceipt;
@@ -4979,6 +5284,8 @@ const memoryPlugin = {
               rejected: input.rejected,
               scope: scopeInfo.scope,
               scopeMode: scopeInfo.scopeMode,
+              selectionMode: input.selectionMode,
+              quota: input.quota,
               tierCounts: input.tierCounts ?? [],
               ftsResults: input.ftsResults ?? [],
               vecResults: input.vecResults ?? [],
@@ -5057,6 +5364,14 @@ const memoryPlugin = {
               searchLimit,
               plans,
               scopePolicy: scopePolicyCfg,
+              selection: {
+                mode: autoRecallCfg.selectionMode,
+                quotas: {
+                  mustMax: autoRecallCfg.quotas.mustMax,
+                  niceMin: autoRecallCfg.quotas.niceMin,
+                  unknownMax: autoRecallCfg.quotas.unknownMax,
+                },
+              },
               allowFallback: allowScopeFallback,
               fallbackSuppressedReason: scopeFallbackSuppressedReason,
               search: async ({ query: textQuery, scope, labels, searchLimit }) => {
@@ -5242,6 +5557,8 @@ const memoryPlugin = {
                 vecResults: tiered.vecResults,
                 fusedResults: selectedForInjection,
                 injectedCount: 0,
+                selectionMode: tiered.selectionMode,
+                quota: tiered.quota,
                 fallback: tiered.fallback,
                 coldLane: coldLaneReceipt,
                 workingSet: workingSetReceipt,
@@ -5260,6 +5577,8 @@ const memoryPlugin = {
               vecResults: tiered.vecResults,
               fusedResults: selectedForInjection,
               injectedCount: slots.length,
+              selectionMode: tiered.selectionMode,
+              quota: tiered.quota,
               fallback: tiered.fallback,
               coldLane: coldLaneReceipt,
               workingSet: workingSetReceipt,
@@ -5283,6 +5602,8 @@ const memoryPlugin = {
                 vecResults: tiered.vecResults,
                 fusedResults: selectedForInjection,
                 injectedCount: finalBudget.keptSlots,
+                selectionMode: tiered.selectionMode,
+                quota: tiered.quota,
                 fallback: tiered.fallback,
                 budget: finalBudget.budget,
                 coldLane: coldLaneReceipt,
