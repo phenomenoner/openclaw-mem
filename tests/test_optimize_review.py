@@ -33,6 +33,8 @@ class TestOptimizeReview(unittest.TestCase):
                 "9000",
                 "--orphan-min-tokens",
                 "4",
+                "--scope",
+                "finlife/mvp",
                 "--top",
                 "7",
             ]
@@ -46,6 +48,7 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertEqual(args.bloat_summary_chars, 320)
         self.assertEqual(args.bloat_detail_bytes, 9000)
         self.assertEqual(args.orphan_min_tokens, 4)
+        self.assertEqual(args.scope, "finlife/mvp")
         self.assertEqual(args.top, 7)
 
     def test_optimize_review_json_reports_signals_and_keeps_store_read_only(self):
@@ -202,6 +205,72 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertEqual(out["warnings"][0]["code"], "sample_is_recent_window")
         self.assertEqual(out["policy"]["writes_performed"], 0)
         self.assertEqual(conn.execute("PRAGMA query_only").fetchone()[0], 0)
+
+        conn.close()
+
+
+    def test_optimize_review_scope_filter_limits_dataset(self):
+        conn = _connect(":memory:")
+
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(5),
+                "kind": "task",
+                "tool_name": "memory_store",
+                "summary": "TODO stabilize cache invalidation policy",
+                "detail": {"scope": "alpha", "importance": {"score": 0.5}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(4),
+                "kind": "task",
+                "tool_name": "memory_store",
+                "summary": "TODO stabilize cache invalidation policy",
+                "detail": {"scope": "alpha", "importance": {"score": 0.52}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(3),
+                "kind": "task",
+                "tool_name": "memory_store",
+                "summary": "TODO stabilize cache invalidation policy",
+                "detail": {"scope": "beta", "importance": {"score": 0.54}},
+            },
+        )
+        conn.commit()
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 100,
+                "stale_days": 60,
+                "duplicate_min_count": 2,
+                "bloat_summary_chars": 240,
+                "bloat_detail_bytes": 4096,
+                "orphan_min_tokens": 2,
+                "scope": "alpha",
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_review(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["source"]["scope"], "alpha")
+        self.assertEqual(out["source"]["rows_scanned"], 2)
+        self.assertEqual(out["source"]["total_rows"], 2)
+        self.assertEqual(out["source"]["coverage_pct"], 100.0)
+        self.assertEqual(out["signals"]["duplication"]["groups"], 1)
+        self.assertEqual(out["signals"]["duplication"]["duplicate_rows"], 1)
 
         conn.close()
 

@@ -41,6 +41,20 @@ _WORD_TOKEN_RE = re.compile(r"[a-z0-9_]{3,}")
 _CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
 
 
+def _normalize_scope_token(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    token = str(raw).strip().lower()
+    if not token:
+        return None
+    token = re.sub(r"[\s]+", "-", token)
+    token = re.sub(r"[^a-z0-9._:/-]+", "-", token)
+    token = re.sub(r"-+", "-", token)
+    token = re.sub(r"^[-./:_]+", "", token)
+    token = re.sub(r"[-./:_]+$", "", token)
+    return token or None
+
+
 def _parse_iso_utc(ts: Any) -> Optional[datetime]:
     if not isinstance(ts, str) or not ts.strip():
         return None
@@ -199,6 +213,7 @@ def build_memory_health_review(
     bloat_detail_bytes: int = 4096,
     orphan_min_tokens: int = 2,
     top: int = 10,
+    scope: Optional[str] = None,
 ) -> Dict[str, Any]:
     row_limit = max(1, int(limit))
     stale_days = max(1, int(stale_days))
@@ -207,21 +222,38 @@ def build_memory_health_review(
     bloat_detail_bytes = max(256, int(bloat_detail_bytes))
     orphan_min_tokens = max(1, int(orphan_min_tokens))
     top = max(1, int(top))
+    scope_norm = _normalize_scope_token(scope)
 
     prev_query_only = int(conn.execute("PRAGMA query_only").fetchone()[0])
     if not prev_query_only:
         conn.execute("PRAGMA query_only = ON")
 
     try:
-        total_rows = int(conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0])
+        scope_clause = ""
+        params_total: List[Any] = []
+        params_rows: List[Any] = [row_limit]
+        if scope_norm:
+            scope_clause = (
+                " WHERE lower(json_extract("
+                "CASE WHEN json_valid(detail_json) THEN detail_json ELSE '{}' END, '$.scope')) = ?"
+            )
+            params_total.append(scope_norm)
+            params_rows = [scope_norm, row_limit]
+
+        total_rows = int(
+            conn.execute(
+                f"SELECT COUNT(*) FROM observations{scope_clause}",
+                params_total,
+            ).fetchone()[0]
+        )
         rows = conn.execute(
-            """
+            f"""
             SELECT id, ts, kind, tool_name, summary, summary_en, detail_json
-            FROM observations
+            FROM observations{scope_clause}
             ORDER BY id DESC
             LIMIT ?
             """,
-            (row_limit,),
+            params_rows,
         ).fetchall()
     finally:
         if not prev_query_only:
@@ -385,6 +417,7 @@ def build_memory_health_review(
             "row_limit": row_limit,
             "rows_scanned": rows_scanned,
             "total_rows": total_rows,
+            "scope": scope_norm,
             "coverage_pct": coverage_pct,
             "sample_order": "id_desc_recent_window",
         },

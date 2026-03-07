@@ -1425,6 +1425,7 @@ def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         bloat_detail_bytes=int(getattr(args, "bloat_detail_bytes", 4096)),
         orphan_min_tokens=int(getattr(args, "orphan_min_tokens", 2)),
         top=int(getattr(args, "top", 10)),
+        scope=getattr(args, "scope", None),
     )
 
     if args.json:
@@ -8302,6 +8303,7 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--bloat-summary-chars", dest="bloat_summary_chars", type=int, default=240, help="Summary length threshold for bloat candidates (default: 240)")
     o.add_argument("--bloat-detail-bytes", dest="bloat_detail_bytes", type=int, default=4096, help="detail_json size threshold for bloat candidates in bytes (default: 4096)")
     o.add_argument("--orphan-min-tokens", dest="orphan_min_tokens", type=int, default=2, help="Minimum token count for weakly connected candidates (default: 2)")
+    o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
     o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per signal in output (default: 10)")
     o.set_defaults(func=cmd_optimize_review)
 
