@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - same-scope, time-bounded TODO dedupe window
   - deterministic recall-time stale TODO TTL filtering
   - bounded `openclaw-mem-engine:todoGuardrail` drop markers and receipt counters for TODO rate-limit/dedupe drops.
+- Hardened TODO guardrail helper fallback behavior (`todoGuardrails.js`): invalid/non-finite dedupe window or stale TTL inputs now deterministically clamp to a safe 1-unit window instead of producing `NaN` cutoffs that silently disable filtering.
 - Added installable **Docs Memory cold lane** to `openclaw-mem-engine`:
   - new config surface `docsColdLane` (`enabled`, `sourceRoots`, `sourceGlobs`, `scopeMappingStrategy`, `maxChunkChars`, bounded recall knobs)
   - new tools: `memory_docs_ingest`, `memory_docs_search`
@@ -47,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `README.md`, `docs/auto-capture.md`, and `docs/deployment.md` with a manual-vs-auto episodic guide and verification steps.
 
 ### Testing
+- Added guardrail regression coverage for invalid/non-finite TODO dedupe and stale-TTL inputs in `extensions/openclaw-mem-engine/todoGuardrails.test.mjs`.
 - Added task-marker regression coverage for ASCII angle wrappers (`<TODO>...`) in parser and triage flows, plus heuristic fixture parity (`tc31`).
 - Added episodic ingest regression tests (`tests/test_episodes_ingest.py`) for offset state handling, invalid JSON lines, bounded payload behavior, and deterministic query ordering after ingest.
 - Added conversation extractor regression tests (`tests/test_episodes_extract_sessions.py`) for scope-tag parsing, PII redaction, payload truncation, and redacted/null payload policy.
