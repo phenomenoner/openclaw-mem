@@ -125,6 +125,31 @@ Acceptance criteria:
 - Empty-policy recall returns `ignore` tier and still yields results if any memory exists.
 - receipts include both engine and writeback summaries.
 
+### 1.5a) Self-optimizing memory loop (shadow/recommendation-first)
+
+Status: **ROADMAP**.
+
+- Problem: the memory layer can capture and recall, but does not yet systematically learn from repeated misses, user corrections, low-value recalls, or strong evidence that certain memories should be promoted/demoted/merged.
+- Decision: add a conservative loop:
+  - observe
+  - propose
+  - verify
+  - optionally apply (later, low-risk only)
+- v0 posture:
+  - recommendation/shadow mode only
+  - no autonomous prompt rewriting
+  - no silent deletion
+  - no hidden config mutation
+
+Artifacts:
+- Spec: `docs/specs/self-optimizing-memory-loop-v0.md`
+
+Acceptance criteria:
+- proposal generation does not mutate source truth by default
+- proposal receipts are inspectable and bounded
+- the loop is fail-open; disabling it preserves current behavior
+- only low-risk metadata changes are even considered for future auto-apply
+
 ### 1) Importance grading rollout (MVP v1)
 
 Status: **PARTIAL** (baseline shipped; benchmark pass pending).

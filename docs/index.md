@@ -48,6 +48,7 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 - Graphic memory (spec/PRD, dev): [Go →](specs/graphic-memory-graphrag-lite-prd.md)
 - Graphic memory query plane v0 (implementation plan): [Go →](specs/graphic-memory-query-plane-v0.md)
 - Graphic memory auto-capture + auto-recall v0 knobs: [Go →](specs/graphic-memory-auto-capture-auto-recall.md)
+- Self-optimizing memory loop v0 (shadow/recommendation-first): [Go →](specs/self-optimizing-memory-loop-v0.md)
 - Upgrade checklist (system upgrades): [Go →](upgrade-checklist.md)
 - Release checklist (repo rule): [Go →](release-checklist.md)
 
