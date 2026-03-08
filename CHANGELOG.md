@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Added self-optimizing memory v0.1 observer/reporter command: `openclaw-mem optimize review` (recommendation-first, zero-write).
+  - bounded source scan over `observations` (default limit: 1000)
+  - computes low-risk signals: staleness, duplication, bloat, weakly-connected candidates
+  - emits structured report `openclaw-mem.optimize.review.v0` + recommendation list (no mutation path)
+- `optimize review --scope` now uses the same scope-token normalization for filtering as duplicate clustering (for example `Alpha Team` and `alpha-team` are treated consistently).
+- Graphic Memory `graph index` / `graph preflight` / `graph export` now enforce `--scope` as a normalized `detail.scope` filter (including CJK fallback + neighborhood expansion), instead of treating it as an advisory hint.
+- Added an initial deterministic query-plane foundation module (`openclaw_mem.graph`) with rebuildable SQLite schema + refresh contract (`topology -> graph_nodes/graph_edges`) and refresh metadata receipts (`schema_version`, digest, counts, source path).
 - Expanded episodic auto-mode flow to full conversation coverage:
   - `extensions/openclaw-mem` emits bounded episodic spool JSONL for `tool.call`, `tool.result`, and `ops.alert` under feature flag `config.episodes.enabled`.
   - added extractor lane `openclaw-mem episodes extract-sessions` to tail OpenClaw session JSONL and emit `conversation.user` / `conversation.assistant` with offset-state tracking.
@@ -30,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - same-scope, time-bounded TODO dedupe window
   - deterministic recall-time stale TODO TTL filtering
   - bounded `openclaw-mem-engine:todoGuardrail` drop markers and receipt counters for TODO rate-limit/dedupe drops.
+- Hardened TODO guardrail helper fallback behavior (`todoGuardrails.js`): invalid/non-finite dedupe window or stale TTL inputs now deterministically clamp to a safe 1-unit window instead of producing `NaN` cutoffs that silently disable filtering.
 - Added installable **Docs Memory cold lane** to `openclaw-mem-engine`:
   - new config surface `docsColdLane` (`enabled`, `sourceRoots`, `sourceGlobs`, `scopeMappingStrategy`, `maxChunkChars`, bounded recall knobs)
   - new tools: `memory_docs_ingest`, `memory_docs_search`
@@ -41,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Docs
 
+- Documented self-optimizing memory v0.1 observer command (`optimize review`) in `README.md`, `QUICKSTART.md`, `docs/reality-check.md`, `docs/roadmap.md`, and `docs/specs/self-optimizing-memory-loop-v0.md`.
+- Expanded triage marker docs to include ASCII/full-width angle wrappers (`<TODO> ...`, `＜TODO＞ ...`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
+- Expanded `README.md` triage marker docs to match current parser separators/wrapper coverage (`;` / `；` / `.` / `。` separators plus extended bracket wrapper examples already documented in QUICKSTART/upgrade checklist).
 - Aligned triage marker docs with parser support by documenting `[☒]` checklist marker in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 - Removed duplicate legacy `uv run python -m openclaw_mem triage --mode tasks ...` example blocks; docs now keep only the frozen `uv run --python 3.13 --frozen -- python -m openclaw_mem ...` form.
 - Standardized README and `docs/upgrade-checklist.md` command examples to deterministic 'uv run --python 3.13 --frozen -- python -m openclaw_mem ...' form.
@@ -48,11 +59,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `README.md`, `docs/auto-capture.md`, and `docs/deployment.md` with a manual-vs-auto episodic guide and verification steps.
 
 ### Testing
+- Added `tests/test_optimize_review.py` coverage for parser wiring, structured report shape, signal generation, and read-only behavior of `optimize review`.
+- Added guardrail regression coverage for invalid/non-finite TODO dedupe and stale-TTL inputs in `extensions/openclaw-mem-engine/todoGuardrails.test.mjs`.
+- Added task-marker regression coverage for ASCII angle wrappers (`<TODO>...`) in parser and triage flows, plus heuristic fixture parity (`tc31`).
 - Added episodic ingest regression tests (`tests/test_episodes_ingest.py`) for offset state handling, invalid JSON lines, bounded payload behavior, and deterministic query ordering after ingest.
 - Added conversation extractor regression tests (`tests/test_episodes_extract_sessions.py`) for scope-tag parsing, PII redaction, payload truncation, and redacted/null payload policy.
 - Added plugin contract checks (`tests/test_plugin_episodic_spool.py`) for episodic spool schema + event-type emission markers.
 - `test_triage_json_contract_v0` now writes a temporary cron jobs fixture and passes `--cron-jobs-path`, preventing host-state coupling to `~/.openclaw/cron/jobs.json`.
 - Added docs-cold-lane contract tests (`test_mem_engine_docs_cold_lane.py`) for config schema defaults, trust/provenance markers, and runtime marker wiring.
+- Added `tests/test_graph_refresh.py` coverage for deterministic topology refresh, schema/meta initialization, JSON topology loading, and unknown-node edge rejection.
 
 ## [1.0.3] - 2026-02-28
 

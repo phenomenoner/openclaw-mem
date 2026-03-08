@@ -47,7 +47,9 @@ OpenClaw tool results → JSONL capture → harvest → SQLite (FTS) → progres
 - Mem Engine (optional slot backend): [Go →](mem-engine.md)
 - Docs memory (spec): [Go →](specs/docs-memory-hybrid-search-v0.md)
 - Graphic memory (spec/PRD, dev): [Go →](specs/graphic-memory-graphrag-lite-prd.md)
+- Graphic memory query plane v0 (implementation plan): [Go →](specs/graphic-memory-query-plane-v0.md)
 - Graphic memory auto-capture + auto-recall v0 knobs: [Go →](specs/graphic-memory-auto-capture-auto-recall.md)
+- Self-optimizing memory loop v0 (shadow/recommendation-first): [Go →](specs/self-optimizing-memory-loop-v0.md)
 - Upgrade checklist (system upgrades): [Go →](upgrade-checklist.md)
 - Release checklist (repo rule): [Go →](release-checklist.md)
 
@@ -62,6 +64,9 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --json search "gateway t
 
 # Build a compact recall bundle
 uv run --python 3.13 --frozen -- python -m openclaw_mem pack --query "gateway timeout" --limit 8 --trace --json
+
+# Recommendation-only memory health review (zero-write)
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize review --limit 500 --json
 ```
 
 ## What’s new (v1.0.4, since v1.0.1)

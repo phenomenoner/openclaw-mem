@@ -75,6 +75,32 @@ Acceptance criteria:
 - In `--use-graph=auto`, trigger is deterministic + traceable (`--trace` shows trigger reason).
 - Graph failures are fail-open and never break pack.
 
+### 1.7a) Graphic Memory query plane (operator-facing graph interface)
+
+Status: **ROADMAP**.
+
+- Problem: operators need a practical query layer over stable topology + runtime drift + provenance, but today those relationships are scattered across YAML, cron state, and receipts.
+- Decision: keep repo-backed topology as the source of truth; add a **derived query plane** under `openclaw-mem`.
+- Target architecture:
+  - source of truth = structured files (YAML / markdown / receipts)
+  - derived cache = SQLite graph tables
+  - first shippable slice = YAML-only query helper for one-hop operator questions
+- Initial operator questions:
+  - what depends on this node?
+  - what does this node feed/write?
+  - which jobs write this artifact?
+  - which jobs are background but not human-facing?
+  - where does graph truth drift from live state?
+
+Artifacts:
+- Spec: `docs/specs/graphic-memory-query-plane-v0.md`
+
+Acceptance criteria:
+- YAML remains the editable truth; the derived graph is rebuildable/disposable.
+- A-fast can ship bounded query value before SQLite lands.
+- A-deep installs deterministic refresh + drift/provenance boundaries.
+- Runtime graph failures remain fail-open and do not break baseline memory/pack flows.
+
 ### 1.6) Sunrise rollout (Stage A→B→C)
 
 Status: **PARTIAL** (Stage A running; Stage B/C pending).
@@ -103,6 +129,37 @@ Acceptance criteria:
 - A smoke writeback run updates `importance`, `importance_label`, `scope`, `trust_tier`, `category` only when missing.
 - Empty-policy recall returns `ignore` tier and still yields results if any memory exists.
 - receipts include both engine and writeback summaries.
+
+### 1.5a) Self-optimizing memory loop (shadow/recommendation-first)
+
+Status: **PARTIAL** (v0.1 recommendation observer shipped; apply path still roadmap).
+
+- Problem: the memory layer can capture and recall, but does not yet systematically learn from repeated misses, user corrections, low-value recalls, or strong evidence that certain memories should be promoted/demoted/merged.
+- Decision: add a conservative loop:
+  - observe
+  - propose
+  - verify
+  - optionally apply (later, low-risk only)
+- v0 posture:
+  - recommendation/shadow mode only
+  - no autonomous prompt rewriting
+  - no silent deletion
+  - no hidden config mutation
+
+Shipped v0.1 slice:
+- `openclaw-mem optimize review` (zero-write observer/reporter)
+- bounded source-of-truth scan (`observations`, default limit 1000)
+- low-risk signals: staleness, duplication, bloat, weakly-connected candidates
+- outputs structured report `openclaw-mem.optimize.review.v0` with recommendations (no mutation)
+
+Artifacts:
+- Spec: `docs/specs/self-optimizing-memory-loop-v0.md`
+
+Acceptance criteria:
+- proposal generation does not mutate source truth by default
+- proposal receipts are inspectable and bounded
+- the loop is fail-open; disabling it preserves current behavior
+- only low-risk metadata changes are even considered for future auto-apply
 
 ### 1) Importance grading rollout (MVP v1)
 

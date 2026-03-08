@@ -94,6 +94,7 @@ Expected value:
 - Local-first recall paths that keep routine retrievals fast and inexpensive.
 - Backend-aware annotations that make failures easier to root-cause.
 - Deterministic triage for heartbeat/ops workflows, so important issues surface early.
+- Recommendation-first memory health observer (`optimize review`) for bounded cleanup proposals without mutating canonical memory rows.
 
 In short: OpenClaw backends provide the canonical memory APIs; `openclaw-mem` makes the memory system easier to operate, audit, and trust over time.
 

@@ -1,9 +1,17 @@
 export const MS_PER_HOUR = 60 * 60 * 1000;
 export const MS_PER_DAY = 24 * MS_PER_HOUR;
 
+function normalizePositiveInteger(value, fallback = 1) {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const floored = Math.floor(n);
+  if (floored < 1) return 1;
+  return floored;
+}
+
 export function todoDedupeCutoffMs(nowMs, dedupeWindowHours) {
   const safeNow = Number.isFinite(nowMs) ? nowMs : Date.now();
-  const windowHours = Math.max(1, Math.floor(dedupeWindowHours));
+  const windowHours = normalizePositiveInteger(dedupeWindowHours, 1);
   return safeNow - windowHours * MS_PER_HOUR;
 }
 
@@ -15,7 +23,7 @@ export function isTodoWithinDedupeWindow(createdAt, nowMs, dedupeWindowHours) {
 
 export function todoStaleCutoffMs(nowMs, ttlDays) {
   const safeNow = Number.isFinite(nowMs) ? nowMs : Date.now();
-  const windowDays = Math.max(1, Math.floor(ttlDays));
+  const windowDays = normalizePositiveInteger(ttlDays, 1);
   return safeNow - windowDays * MS_PER_DAY;
 }
 

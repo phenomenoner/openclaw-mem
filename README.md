@@ -58,6 +58,7 @@ Expected output (minimal): `status` prints a JSON object with `count/min_ts/max_
 - **PARTIAL**: embeddings/hybrid/rerank; AI compression (LLM-assisted, hard caps + rollback; see `docs/ai-compression.md`); dual-language fields.
 - **PARTIAL**: OpenClaw plugin capture + backend annotations; Route A semantic recall (`index`, `semantic`).
 - **PARTIAL (dev)**: Context Packer (`pack`) with redaction-safe `--trace` receipts (exists, not yet auto-wired; see `docs/automation-status.md`).
+- **PARTIAL (dev)**: Self-optimizing memory observer v0.1 (`optimize review`) for recommendation-only health signals (staleness/duplication/bloat/weakly-connected) with zero writes.
 - **ROADMAP**: lifecycle manager (ref/last_used_at decay + archive-first); packaging/console scripts; graph semantic memory.
   - Spec (dev): `docs/specs/graphic-memory-graphrag-lite-prd.md`
   - v0 automation knobs (dev): `docs/specs/graphic-memory-auto-capture-auto-recall.md`
@@ -113,10 +114,14 @@ Automation truth (dev):
   - `tasks`
 - `triage --mode tasks` extraction is deterministic:
   - matches `kind == "task"`, or
-  - `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `‣` / `∙` / `·`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`), followed by `:`, `：`, whitespace, `-`, `－`, `–`, `—`, `−`, or end-of-string.
+  - `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`, `〈TODO〉 ...`, `〖TODO〗 ...`, `〘TODO〙 ...`, `‹TODO› ...`, `<TODO> ...`, `＜TODO＞ ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `▪` / `‣` / `∙` / `·` / `◦` / `・` / `–` / `—` / `−`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` / `[☒]` / `[✅]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`, `〔TODO〕buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`, `«TODO»buy milk`, `〈TODO〉buy milk`, `〖TODO〗buy milk`, `〘TODO〙buy milk`, `‹TODO›buy milk`, `<TODO>buy milk`, `＜TODO＞buy milk`), followed by `:`, `：`, `;`, `；`, whitespace, `-`, `.`, `。`, `－`, `–`, `—`, `−`, or end-of-string.
 
-  - Note: also accepts additional bullet glyphs like ▪ ◦ ・ – — − and checkbox glyphs like [☐]/[☑]/[☒] (see QUICKSTART.md for the full list).
-  - Example formats: `TODO: rotate runbook`, `【TODO】 rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`.
+  - Example formats: `TODO: rotate runbook`, `{TODO}: rotate runbook`, `【TODO】 rotate runbook`, `「TODO」 rotate runbook`, `『TODO』 rotate runbook`, `《TODO》 rotate runbook`, `«TODO» rotate runbook`, `〈TODO〉 rotate runbook`, `〖TODO〗 rotate runbook`, `〘TODO〙 rotate runbook`, `‹TODO› rotate runbook`, `<TODO> rotate runbook`, `＜TODO＞rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`, `TODO; rotate runbook`, `TASK；follow up on release checklist`.
+  - Example run:
+
+    ```bash
+    uv run python -m openclaw_mem triage --mode tasks --tasks-since-minutes 1440 --importance-min 0.7 --json
+    ```
 
   - Example run:
 
@@ -126,7 +131,7 @@ Automation truth (dev):
 - Includes dedupe state to avoid repeating the same alert every heartbeat.
 - **Ops profile surface (DONE)**: `profile --json` for quick state snapshots (counts, importance labels, top tools/kinds, recent rows, embedding stats).
 - **Importance grading (MVP v1 baseline shipped)**: canonical `detail_json.importance` objects + deterministic `heuristic-v1` scorer + regression tests.
-  - Enable autograde on `ingest`/`harvest`: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (or `--importance-scorer {heuristic-v1|off}`)
+  - Enable autograde on `ingest`/`harvest`: `OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1` (alias: `heuristic_v1`; or `--importance-scorer {heuristic-v1|off}`)
   - Ingest/harvest JSON receipts include grading counters + `label_counts` for ops trend tracking.
   - Notes: `docs/importance-grading.md`
   - Canonical ingest/harvest receipt contract (aggregate-only): `docs/importance-grading.md`
@@ -185,6 +190,9 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem profile --json --recent-
 
 # 1.6) Check active OpenClaw memory backend + fallback posture
 uv run --python 3.13 --frozen -- python -m openclaw_mem backend --json
+
+# 1.7) Recommendation-only memory health review (zero-write)
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize review --json --limit 500
 
 # 2) Ingest JSONL observations
 uv run --python 3.13 --frozen -- python -m openclaw_mem ingest --file observations.jsonl --json
@@ -416,6 +424,8 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem graph auto-status --json
 ```
 
 Automation examples:
+
+`--scope` is an actual filter token here: graph retrieval stays within normalized `detail.scope` matches instead of treating scope as a soft hint.
 
 ```bash
 OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200

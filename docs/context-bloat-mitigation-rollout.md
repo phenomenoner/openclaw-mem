@@ -16,7 +16,7 @@ Already installed + enabled:
 - Sidecar capture plugin: `openclaw-mem` (writes JSONL observations)
 - `openclaw-mem-engine`:
   - `autoRecall.enabled=true` (small recall injection; capped)
-  - `autoCapture.enabled=true` (captures preference/decision; TODO capture currently off)
+  - `autoCapture.enabled=true` (captures preference/decision; guarded TODO capture is off by default)
   - **scope inference hardening** from `[ISO:...]` / `[SCOPE:...]` (line-anchored, ignores code fences / injected `<relevant-memories>` blocks)
   - **scope filtering during recall** (autoRecall searches within resolved scope)
   - **scope fallback hardening**: invalid scope tags suppress fallback scopes when `scopePolicy.skipFallbackOnInvalidScope=true` (default)

@@ -25,3 +25,17 @@ test('todo stale ttl helper is deterministic', () => {
   assert.equal(isTodoStale(now - 8 * 24 * 60 * 60 * 1000, now, 7), true);
   assert.equal(isTodoStale(now - 6 * 24 * 60 * 60 * 1000, now, 7), false);
 });
+
+test('todo guardrails clamp invalid windows to safe defaults', () => {
+  const now = 1_700_000_000_000;
+
+  const dedupeFallbackCutoff = todoDedupeCutoffMs(now, undefined);
+  assert.equal(dedupeFallbackCutoff, now - 1 * 60 * 60 * 1000);
+  assert.equal(isTodoWithinDedupeWindow(now - 30 * 60 * 1000, now, Number.NaN), true);
+  assert.equal(isTodoWithinDedupeWindow(now - 2 * 60 * 60 * 1000, now, Number.NaN), false);
+
+  const staleFallbackCutoff = todoStaleCutoffMs(now, Number.POSITIVE_INFINITY);
+  assert.equal(staleFallbackCutoff, now - 1 * 24 * 60 * 60 * 1000);
+  assert.equal(isTodoStale(now - 2 * 24 * 60 * 60 * 1000, now, null), true);
+  assert.equal(isTodoStale(now - 12 * 60 * 60 * 1000, now, null), false);
+});

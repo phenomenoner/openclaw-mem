@@ -60,11 +60,8 @@ See: `docs/showcase/inside-out-demo.md`.
 ## Step 3: Ingest sample data
 
 ```bash
-printf '%s\n' \
-  '{"ts":"2026-02-05T10:00:00Z","kind":"tool","tool_name":"web_search","summary":"searched for OpenClaw","detail":{"results":5}}' \
-  '{"ts":"2026-02-05T10:01:00Z","kind":"tool","tool_name":"web_fetch","summary":"fetched openclaw.ai","detail":{"ok":true}}' \
-  '{"ts":"2026-02-05T10:02:00Z","kind":"tool","tool_name":"exec","summary":"ran git status","detail":{"exit_code":0}}' \
-  > ./sample.jsonl
+# Generate a tiny synthetic JSONL file (no private/user data)
+python3 ./scripts/make_sample_jsonl.py --out ./sample.jsonl
 
 uv run --python 3.13 --frozen -- python -m openclaw_mem ingest --file ./sample.jsonl --json
 ```
@@ -165,11 +162,9 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --ta
 
 Task matching rules in `--mode tasks` are deterministic:
 - `kind == "task"`, or
-- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`, `〈TODO〉 ...`, `〖TODO〗 ...`, `〘TODO〙 ...`, `‹TODO› ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `▪` / `‣` / `∙` / `·` / `◦` / `・` / `–` / `—` / `−`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` / `[☒]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`, `〔TODO〕buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`, `«TODO»buy milk`, `〈TODO〉buy milk`, `〖TODO〗buy milk`, `〘TODO〙buy milk`, `‹TODO›buy milk`), followed by `:`, `：`, `;`, `；`, whitespace, `-`, `.`, `。`, `－`, `–`, `—`, `−`, or end-of-string.
-- Example formats: `TODO: rotate runbook`, `{TODO}: rotate runbook`, `【TODO】 rotate runbook`, `「TODO」 rotate runbook`, `『TODO』 rotate runbook`, `《TODO》 rotate runbook`, `«TODO» rotate runbook`, `〈TODO〉 rotate runbook`, `〖TODO〗 rotate runbook`, `〘TODO〙 rotate runbook`, `‹TODO› rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`, `TODO; rotate runbook`, `TASK；follow up on release checklist`.
-
-
-  - More accepted compact examples: `> - (1) [ ] TASK: clean desk`, `>> (iv) [ ] TODO: clean desk`.
+- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`, `〈TODO〉 ...`, `〖TODO〗 ...`, `〘TODO〙 ...`, `‹TODO› ...`, `<TODO> ...`, `＜TODO＞ ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `▪` / `‣` / `∙` / `·` / `◦` / `・` / `–` / `—` / `−`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` / `[☒]` / `[✅]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`, `〔TODO〕buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`, `«TODO»buy milk`, `〈TODO〉buy milk`, `〖TODO〗buy milk`, `〘TODO〙buy milk`, `‹TODO›buy milk`, `<TODO>buy milk`, `＜TODO＞buy milk`), followed by `:`, `：`, `;`, `；`, whitespace, `-`, `.`, `。`, `－`, `–`, `—`, `−`, or end-of-string.
+- Example formats: `TODO: rotate runbook`, `{TODO}: rotate runbook`, `【TODO】 rotate runbook`, `「TODO」 rotate runbook`, `『TODO』 rotate runbook`, `《TODO》 rotate runbook`, `«TODO» rotate runbook`, `〈TODO〉 rotate runbook`, `〖TODO〗 rotate runbook`, `〘TODO〙 rotate runbook`, `‹TODO› rotate runbook`, `<TODO> rotate runbook`, `＜TODO＞rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`, `TODO; rotate runbook`, `TASK；follow up on release checklist`.
+- More accepted compact examples: `> - (1) [ ] TASK: clean desk`, `>> (iv) [ ] TODO: clean desk`.
 - Example run:
 
 ```bash
@@ -178,6 +173,13 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --ta
 
 ---
 
+## Step 6.5: Recommendation-only memory health review (optional)
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize review --json --limit 500
+```
+
+This command is zero-write by design in v0.1: it only reports candidates (staleness, duplication, bloat, weakly-connected memories) and suggestions.
 
 ## Step 7: Autograde toggle (optional)
 

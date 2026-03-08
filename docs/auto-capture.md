@@ -58,7 +58,7 @@ openclaw-mem episodes replay <session_id> ...
 2) Run conversation extraction on a short cadence (cron/systemd timer):
 
 ```bash
-uv run python -m openclaw_mem episodes extract-sessions \
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes extract-sessions \
   --sessions-root ~/.openclaw/sessions \
   --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
   --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json \
@@ -69,7 +69,7 @@ uv run python -m openclaw_mem episodes extract-sessions \
 3) Run ingest in **follow mode** (recommended default):
 
 ```bash
-uv run python -m openclaw_mem episodes ingest \
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes ingest \
   --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl \
   --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json \
   --conversation-payload-cap-bytes 4096 \
@@ -107,14 +107,14 @@ Retention defaults:
 
 ```bash
 # Extract once + run ingest daemon (Ctrl+C to stop)
-uv run python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json
-uv run python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --follow --poll-interval-ms 1000 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --follow --poll-interval-ms 1000 --json
 
 # Summary-only (default)
-uv run python -m openclaw_mem episodes query --global --limit 20 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes query --global --limit 20 --json
 
 # Payload opt-in
-uv run python -m openclaw_mem episodes query --global --limit 20 --include-payload --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes query --global --limit 20 --include-payload --json
 ```
 
 ---

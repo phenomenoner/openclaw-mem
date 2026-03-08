@@ -51,6 +51,7 @@ from openclaw_mem.docs_memory import (
     rrf_components,
 )
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
+from openclaw_mem.optimization import build_memory_health_review, render_memory_health_review
 
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
@@ -732,6 +733,8 @@ def _normalize_importance_scorer_value(value: str) -> str:
     v = v.replace("_", "-").replace(" ", "")
     if v in {"heuristicv1", "heuristic-v1"}:
         return "heuristic-v1"
+    if v in {"heuristicv2", "heuristic-v2"}:
+        return "heuristic-v2"
     return v
 
 
@@ -1412,6 +1415,26 @@ def cmd_backend(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(out, args.json)
 
 
+def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    report = build_memory_health_review(
+        conn,
+        limit=int(getattr(args, "limit", 1000)),
+        stale_days=int(getattr(args, "stale_days", 60)),
+        duplicate_min_count=int(getattr(args, "duplicate_min_count", 2)),
+        bloat_summary_chars=int(getattr(args, "bloat_summary_chars", 240)),
+        bloat_detail_bytes=int(getattr(args, "bloat_detail_bytes", 4096)),
+        orphan_min_tokens=int(getattr(args, "orphan_min_tokens", 2)),
+        top=int(getattr(args, "top", 10)),
+        scope=getattr(args, "scope", None),
+    )
+
+    if args.json:
+        _emit(report, True)
+        return
+
+    print(render_memory_health_review(report))
+
+
 def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _apply_importance_scorer_override(args)
 
@@ -1483,7 +1506,13 @@ def _cjk_terms(query: str, max_terms: int = 16) -> List[str]:
     return out
 
 
-def _search_cjk_fallback(conn: sqlite3.Connection, query: str, limit: int) -> List[sqlite3.Row]:
+def _search_cjk_fallback(
+    conn: sqlite3.Connection,
+    query: str,
+    limit: int,
+    *,
+    scope: Optional[str] = None,
+) -> List[sqlite3.Row]:
     terms = _cjk_terms(query)
     if not terms:
         return []
@@ -1494,18 +1523,29 @@ def _search_cjk_fallback(conn: sqlite3.Connection, query: str, limit: int) -> Li
     score_expr = " + ".join(["CASE WHEN o.summary LIKE ? THEN 1 ELSE 0 END" for _ in like_vals])
     where_expr = " OR ".join(["o.summary LIKE ?" for _ in like_vals])
 
+    scope_norm = _normalize_scope_token(scope)
+    scope_clause = ""
+    params: List[Any] = [*like_vals, *like_vals]
+    if scope_norm:
+        scope_clause = (
+            " AND lower(json_extract("
+            "CASE WHEN json_valid(o.detail_json) THEN o.detail_json ELSE '{}' END, '$.scope')) = ?"
+        )
+        params.append(scope_norm)
+
     sql = f"""
         SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
                o.summary AS snippet,
                o.summary_en AS snippet_en,
-               -1.0 * ({score_expr}) AS score
+               -1.0 * ({score_expr}) AS score,
+               o.detail_json AS detail_json
         FROM observations o
-        WHERE {where_expr}
+        WHERE ({where_expr}){scope_clause}
         ORDER BY score ASC, o.id DESC
         LIMIT ?;
     """
 
-    params = [*like_vals, *like_vals, int(limit)]
+    params.append(int(limit))
     return conn.execute(sql, params).fetchall()
 
 
@@ -3259,7 +3299,13 @@ def _pack_graph_stage1_keywords(query: str) -> dict:
     }
 
 
-def _pack_graph_probe_observations(conn: sqlite3.Connection, query: str, *, probe_limit: int) -> dict:
+def _pack_graph_probe_observations(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    probe_limit: int,
+    scope: Optional[str] = None,
+) -> dict:
     """Lightweight deterministic FTS probe (semantic-by-retrieval).
 
     Returns redaction-safe aggregate-only stats.
@@ -3274,7 +3320,7 @@ def _pack_graph_probe_observations(conn: sqlite3.Connection, query: str, *, prob
         return {"ran": False, "reason": "empty_after_strip"}
 
     started = time.perf_counter()
-    rows = _graph_search_rows(conn, q, int(max(1, probe_limit)))
+    rows = _graph_search_rows(conn, q, int(max(1, probe_limit)), scope=scope)
     dt_ms = int((time.perf_counter() - started) * 1000)
 
     scores = []
@@ -3363,7 +3409,12 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
         t_marginal = float(getattr(args, "graph_probe_t_marginal", -2.0) or -2.0)
         n_min = int(max(1, int(getattr(args, "graph_probe_n_min", 3) or 3)))
 
-        probe = _pack_graph_probe_observations(conn, query, probe_limit=probe_limit)
+        probe = _pack_graph_probe_observations(
+            conn,
+            query,
+            probe_limit=probe_limit,
+            scope=out.get("scope"),
+        )
         out["probe"] = {
             "ran": bool(probe.get("ran")),
             "latency_ms": int(probe.get("latency_ms") or 0),
@@ -4015,8 +4066,8 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     Accepted forms:
     - plain marker: `TODO ...`
-    - bracketed marker: `[TODO] ...`, `(TASK) ...`, `【REMINDER】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`, `〈TODO〉 ...`, `〖TODO〗 ...`, `〘TODO〙 ...`, or `‹TODO› ...`
-    - compact no-space bracketed marker: `[TODO]buy milk`, `(TASK)review PR`, `【REMINDER】pay rent`, `【TODO】buy milk`, `〔TODO〕buy milk`, `{TODO}buy milk`, `〖TODO〗buy milk`, `〘TODO〙buy milk`
+    - bracketed marker: `[TODO] ...`, `(TASK) ...`, `【REMINDER】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`, `〈TODO〉 ...`, `〖TODO〗 ...`, `〘TODO〙 ...`, `‹TODO› ...`, or `<TODO> ...`
+    - compact no-space bracketed marker: `[TODO]buy milk`, `(TASK)review PR`, `【REMINDER】pay rent`, `【TODO】buy milk`, `〔TODO〕buy milk`, `{TODO}buy milk`, `〖TODO〗buy milk`, `〘TODO〙buy milk`, `<TODO>buy milk`
 
     Optional leading markdown wrappers are tolerated before markers:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
@@ -4051,7 +4102,7 @@ def _summary_has_task_marker(summary: str) -> bool:
     markers = ("TODO", "TASK", "REMINDER")
     separators = {":", "：", ";", "；", "-", ".", "。", "－", "–", "—", "−"}
     bullet_prefixes = {"-", "*", "+", "•", "▪", "‣", "∙", "·", "◦", "・", "–", "—", "−"}
-    checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑", "☒"}
+    checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑", "☒", "✅"}
     ordered_prefix_sep = {".", ")", "-", "－", "–", "—", "−"}
 
     def _has_valid_suffix(text: str, idx: int, *, allow_compact: bool = False) -> bool:
@@ -4265,7 +4316,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
     - kind == 'task' OR
     - summary starts with TODO/TASK/REMINDER marker
       (case-insensitive; width-normalized via NFKC; supports plain or
-      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』`/`〖TODO〗`/`〘TODO〙` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`〔TODO〕buy milk`/`「TODO」buy milk`/`『TODO』buy milk`/`〖TODO〗buy milk`/`〘TODO〙buy milk`), plus optional leading
+      bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』`/`〖TODO〗`/`〘TODO〙`/`<TODO>`/`＜TODO＞` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`〔TODO〕buy milk`/`「TODO」buy milk`/`『TODO』buy milk`/`〖TODO〗buy milk`/`〘TODO〙buy milk`/`<TODO>buy milk`/`＜TODO＞buy milk`), plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
       (`-`/`*`/`+`/`•`/`▪`/`‣`/`∙`/`·`/`◦`/`・`/`–`/`—`/`−`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`/`[☒]`), and ordered-list prefixes like
       `1.`/`1)`/`1-`/`（1）`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
@@ -5532,43 +5583,71 @@ def _graph_fts_sanitize_query(q: str) -> str:
     return " ".join(parts).strip()
 
 
-def _graph_search_rows(conn: sqlite3.Connection, query: str, limit: int) -> List[sqlite3.Row]:
+def _graph_search_rows(
+    conn: sqlite3.Connection,
+    query: str,
+    limit: int,
+    *,
+    scope: Optional[str] = None,
+) -> List[sqlite3.Row]:
     q = (query or "").strip()
     if not q:
         return []
 
-    def _run(match_q: str) -> List[sqlite3.Row]:
+    limit_n = max(1, int(limit))
+    scope_norm = _normalize_scope_token(scope)
+    fetch_limit = limit_n if not scope_norm else max(limit_n, limit_n * 8, limit_n + 40)
+
+    def _run(match_q: str, fetch_n: int) -> List[sqlite3.Row]:
         return conn.execute(
             """
             SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
                    snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
                    snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
-                   bm25(observations_fts) AS score
+                   bm25(observations_fts) AS score,
+                   o.detail_json AS detail_json
             FROM observations_fts
             JOIN observations o ON o.id = observations_fts.rowid
             WHERE observations_fts MATCH ?
             ORDER BY score ASC
             LIMIT ?;
             """,
-            (match_q, int(limit)),
+            (match_q, int(fetch_n)),
         ).fetchall()
 
+    def _apply_scope(rows_in: List[sqlite3.Row]) -> List[sqlite3.Row]:
+        if not scope_norm:
+            return rows_in[:limit_n]
+
+        out: List[sqlite3.Row] = []
+        for r in rows_in:
+            detail = _pack_parse_detail_json(r["detail_json"])
+            row_scope = _normalize_scope_token(detail.get("scope"))
+            if row_scope == scope_norm:
+                out.append(r)
+            if len(out) >= limit_n:
+                break
+        return out
+
     try:
-        rows = _run(q)
+        rows = _run(q, fetch_limit)
     except sqlite3.OperationalError:
         # Common failure mode: hyphenated terms in a "search bar" style query.
         q2 = _graph_fts_sanitize_query(q)
         if q2 and q2 != q:
             try:
-                rows = _run(q2)
+                rows = _run(q2, fetch_limit)
             except sqlite3.OperationalError:
                 rows = []
         else:
             rows = []
 
+    rows = _apply_scope(rows)
+
     # Fallback for CJK keyword queries when FTS5 tokenizer cannot split terms well.
     if not rows and _has_cjk(q):
-        rows = _search_cjk_fallback(conn, q, int(limit))
+        rows = _search_cjk_fallback(conn, q, int(fetch_limit), scope=scope_norm)
+        rows = rows[:limit_n]
 
     return rows
 
@@ -5602,7 +5681,7 @@ def _graph_index_payload(
     suggest_limit: int,
     budget_tokens: int,
 ) -> Dict[str, Any]:
-    rows = _graph_search_rows(conn, query, limit)
+    rows = _graph_search_rows(conn, query, limit, scope=scope)
 
     # Candidate list (L0)
     candidates: List[Dict[str, Any]] = []
@@ -5624,19 +5703,25 @@ def _graph_index_payload(
         )
 
     # Neighborhood suggestions (simple deterministic link-graph): timeline adjacency.
+    scope_norm = _normalize_scope_token(scope)
     neighbor_support: Dict[int, List[int]] = {}
     if window and cand_ids:
         seen = set(cand_ids)
         for oid in cand_ids:
             lo, hi = oid - window, oid + window
             nrows = conn.execute(
-                "SELECT id FROM observations WHERE id BETWEEN ? AND ? ORDER BY id",
+                "SELECT id, detail_json FROM observations WHERE id BETWEEN ? AND ? ORDER BY id",
                 (lo, hi),
             ).fetchall()
             for nr in nrows:
-                nid = int(nr[0])
+                nid = int(nr["id"])
                 if nid in seen:
                     continue
+                if scope_norm:
+                    detail = _pack_parse_detail_json(nr["detail_json"])
+                    row_scope = _normalize_scope_token(detail.get("scope"))
+                    if row_scope != scope_norm:
+                        continue
                 neighbor_support.setdefault(nid, []).append(oid)
 
     suggested_next: List[Dict[str, Any]] = []
@@ -6704,8 +6789,9 @@ def cmd_graph_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None
     limit = max(1, int(getattr(args, "limit", 12)))
     window = max(0, int(getattr(args, "window", 2)))
 
-    rows = _graph_search_rows(conn, query, limit)
+    rows = _graph_search_rows(conn, query, limit, scope=scope)
     cand_ids = [int(r["id"]) for r in rows]
+    scope_norm = _normalize_scope_token(scope)
 
     nodes: Dict[int, Dict[str, Any]] = {}
     edges: List[Dict[str, Any]] = []
@@ -6734,11 +6820,16 @@ def cmd_graph_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None
         for oid in cand_ids:
             lo, hi = oid - window, oid + window
             nrows = conn.execute(
-                "SELECT id FROM observations WHERE id BETWEEN ? AND ? ORDER BY id",
+                "SELECT id, detail_json FROM observations WHERE id BETWEEN ? AND ? ORDER BY id",
                 (lo, hi),
             ).fetchall()
             for nr in nrows:
-                nid = int(nr[0])
+                nid = int(nr["id"])
+                if scope_norm:
+                    detail = _pack_parse_detail_json(nr["detail_json"])
+                    row_scope = _normalize_scope_token(detail.get("scope"))
+                    if row_scope != scope_norm:
+                        continue
                 add_node(nid)
                 if nid == oid:
                     continue
@@ -8200,6 +8291,22 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.set_defaults(func=cmd_backend)
 
+    sp = sub.add_parser("optimize", help="Recommendation-first memory optimization helpers (zero-write)")
+    add_common(sp)
+    osub = sp.add_subparsers(dest="optimize_cmd", required=True)
+
+    o = osub.add_parser("review", help="Review memory health signals and emit recommendations (no writes)")
+    add_common(o)
+    o.add_argument("--limit", type=int, default=1000, help="Max observation rows to scan (default: 1000)")
+    o.add_argument("--stale-days", type=int, default=60, help="Staleness threshold in days (default: 60)")
+    o.add_argument("--duplicate-min-count", dest="duplicate_min_count", type=int, default=2, help="Min rows per duplicate cluster (default: 2)")
+    o.add_argument("--bloat-summary-chars", dest="bloat_summary_chars", type=int, default=240, help="Summary length threshold for bloat candidates (default: 240)")
+    o.add_argument("--bloat-detail-bytes", dest="bloat_detail_bytes", type=int, default=4096, help="detail_json size threshold for bloat candidates in bytes (default: 4096)")
+    o.add_argument("--orphan-min-tokens", dest="orphan_min_tokens", type=int, default=2, help="Minimum token count for weakly connected candidates (default: 2)")
+    o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
+    o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per signal in output (default: 10)")
+    o.set_defaults(func=cmd_optimize_review)
+
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)
     sp.add_argument("--file", help="JSONL file path (default: stdin)")
@@ -8426,7 +8533,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = gsub.add_parser("index", help="Build an L0 IndexPack for a query (budgeted, injection-ready)")
     g.add_argument("query", help="Query text")
-    g.add_argument("--scope", help="Optional project/scope hint (string; v0 is advisory)")
+    g.add_argument("--scope", help="Optional scope filter token (matches detail.scope after normalization)")
     g.add_argument("--limit", type=int, default=12, help="Max candidate hits to consider (default: 12)")
     g.add_argument("--window", type=int, default=2, help="Timeline window for neighborhood suggestions (default: 2)")
     g.add_argument("--suggest-limit", dest="suggest_limit", type=int, default=6, help="Max suggested expansions (default: 6)")
@@ -8441,7 +8548,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = gsub.add_parser("preflight", help="Run index+selection+pack in one deterministic step")
     g.add_argument("query", help="Query text")
-    g.add_argument("--scope", help="Optional project/scope hint (string; v0 is advisory)")
+    g.add_argument("--scope", help="Optional scope filter token (matches detail.scope after normalization)")
     g.add_argument("--limit", type=int, default=12, help="Max candidate hits to consider (default: 12)")
     g.add_argument("--window", type=int, default=2, help="Timeline window for neighborhood suggestions (default: 2)")
     g.add_argument("--suggest-limit", dest="suggest_limit", type=int, default=6, help="Max suggested expansions (default: 6)")
@@ -8472,7 +8579,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = gsub.add_parser("export", help="Export a small graph.json artifact around query hits (portable artifact)")
     g.add_argument("--query", required=True, help="Query text")
-    g.add_argument("--scope", help="Optional project/scope hint (string; v0 is advisory)")
+    g.add_argument("--scope", help="Optional scope filter token (matches detail.scope after normalization)")
     g.add_argument("--to", required=True, help="Output path for graph.json")
     g.add_argument("--limit", type=int, default=12)
     g.add_argument("--window", type=int, default=2)

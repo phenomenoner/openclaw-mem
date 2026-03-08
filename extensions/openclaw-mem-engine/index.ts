@@ -3464,7 +3464,7 @@ const memoryEngineConfigSchema = {
     },
     "autoCapture.maxTodoPerTurn": {
       label: "TODO Max Per Turn",
-      help: "Per-turn TODO capture cap (default 1)",
+      help: "Per-turn TODO capture cap (default 1; max 3)",
       advanced: true,
     },
     "autoCapture.todoDedupeWindowHours": {
