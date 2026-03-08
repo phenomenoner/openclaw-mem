@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - bounded source scan over `observations` (default limit: 1000)
   - computes low-risk signals: staleness, duplication, bloat, weakly-connected candidates
   - emits structured report `openclaw-mem.optimize.review.v0` + recommendation list (no mutation path)
+- `optimize review --scope` now uses the same scope-token normalization for filtering as duplicate clustering (for example `Alpha Team` and `alpha-team` are treated consistently).
 - Graphic Memory `graph index` / `graph preflight` / `graph export` now enforce `--scope` as a normalized `detail.scope` filter (including CJK fallback + neighborhood expansion), instead of treating it as an advisory hint.
 - Expanded episodic auto-mode flow to full conversation coverage:
   - `extensions/openclaw-mem` emits bounded episodic spool JSONL for `tool.call`, `tool.result`, and `ops.alert` under feature flag `config.episodes.enabled`.

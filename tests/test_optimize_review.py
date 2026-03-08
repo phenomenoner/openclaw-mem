@@ -275,6 +275,71 @@ class TestOptimizeReview(unittest.TestCase):
         conn.close()
 
 
+    def test_optimize_review_scope_filter_normalizes_scope_tokens(self):
+        conn = _connect(":memory:")
+
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(5),
+                "kind": "task",
+                "tool_name": "memory_store",
+                "summary": "TODO stabilize normalization policy",
+                "detail": {"scope": "Alpha Team", "importance": {"score": 0.5}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(4),
+                "kind": "task",
+                "tool_name": "memory_store",
+                "summary": "TODO stabilize normalization policy",
+                "detail": {"scope": "alpha-team", "importance": {"score": 0.52}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(3),
+                "kind": "task",
+                "tool_name": "memory_store",
+                "summary": "TODO stabilize normalization policy",
+                "detail": {"scope": "alpha_team_two", "importance": {"score": 0.54}},
+            },
+        )
+        conn.commit()
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 100,
+                "stale_days": 60,
+                "duplicate_min_count": 2,
+                "bloat_summary_chars": 240,
+                "bloat_detail_bytes": 4096,
+                "orphan_min_tokens": 2,
+                "scope": "ALPHA team",
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_review(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["source"]["scope"], "alpha-team")
+        self.assertEqual(out["source"]["rows_scanned"], 2)
+        self.assertEqual(out["source"]["total_rows"], 2)
+        self.assertEqual(out["signals"]["duplication"]["groups"], 1)
+        self.assertEqual(out["signals"]["duplication"]["duplicate_rows"], 1)
+
+        conn.close()
+
+
     def test_optimize_review_duplicate_signal_is_scope_isolated(self):
         conn = _connect(":memory:")
 

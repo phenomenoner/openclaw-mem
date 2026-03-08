@@ -233,8 +233,9 @@ def build_memory_health_review(
         params_total: List[Any] = []
         params_rows: List[Any] = [row_limit]
         if scope_norm:
+            conn.create_function("ocm_scope_norm", 1, _normalize_scope_token)
             scope_clause = (
-                " WHERE lower(json_extract("
+                " WHERE ocm_scope_norm(json_extract("
                 "CASE WHEN json_valid(detail_json) THEN detail_json ELSE '{}' END, '$.scope')) = ?"
             )
             params_total.append(scope_norm)
