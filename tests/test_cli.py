@@ -218,6 +218,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("[☒]TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("[✅]TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("(TASK)clean old notes"))
+        self.assertTrue(_summary_has_task_marker("〔REMINDER〕clean old notes"))
         self.assertTrue(_summary_has_task_marker("1.TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("1)TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("(1)TODO clean old notes"))
