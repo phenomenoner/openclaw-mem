@@ -25,6 +25,11 @@ def test_todo_guardrail_contract_markers_and_schema_defaults():
     # Default behavior is unchanged until explicitly enabled.
     assert auto_capture["captureTodo"]["default"] is False
 
+    # Auto-capture bounds/defaults must match index.ts runtime normalization.
+    assert auto_capture["maxItemsPerTurn"]["default"] == 2
+    assert auto_capture["maxItemsPerTurn"]["minimum"] == 1
+    assert auto_capture["maxItemsPerTurn"]["maximum"] == 3
+
     # Step 3 TODO guardrails defaults + bounds.
     assert auto_capture["maxTodoPerTurn"]["default"] == 1
     assert auto_capture["maxTodoPerTurn"]["minimum"] == 0
