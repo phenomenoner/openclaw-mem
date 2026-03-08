@@ -5134,7 +5134,7 @@ def _extract_writeback_updates(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
     if label:
         updates["importance_label"] = label
 
-    scope = str(detail_obj.get("scope") or row["kind"] or "").strip()
+    scope = _normalize_scope_token(detail_obj.get("scope") or row["kind"])
     if scope:
         updates["scope"] = scope
 
