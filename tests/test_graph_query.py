@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -100,6 +101,52 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(lineage["downstream_count"], 0)
             self.assertEqual(lineage["upstream"][0]["provenance"], "docs/topology.yaml#L31")
             self.assertEqual(lineage["upstream"][0]["metadata"], {"lane": "A-deep"})
+
+    def test_queries_tolerate_malformed_persisted_json(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job", "tags": ["background"]},
+                {"id": "artifact.receipt", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.receipt",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L40",
+                    "metadata": {"lane": "A-deep"},
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path)
+
+            conn = sqlite3.connect(str(db_path))
+            try:
+                with conn:
+                    conn.execute(
+                        "UPDATE graph_nodes SET tags_json = ?, metadata_json = ? WHERE node_id = ?",
+                        ('{"bad":"shape"}', '["not-an-object"]', "cron.job.alpha"),
+                    )
+                    conn.execute(
+                        "UPDATE graph_edges SET metadata_json = ? WHERE src_id = ? AND dst_id = ? AND edge_type = ?",
+                        ('["not-an-object"]', "cron.job.alpha", "artifact.receipt", "writes"),
+                    )
+            finally:
+                conn.close()
+
+            filtered = query_filter_nodes(db_path=db_path, node_type="cron_job")
+            self.assertTrue(filtered["ok"])
+            self.assertEqual(filtered["count"], 1)
+            self.assertEqual(filtered["nodes"][0]["tags"], [])
+            self.assertEqual(filtered["nodes"][0]["metadata"], {})
+
+            lineage = query_lineage(db_path=db_path, node_id="artifact.receipt")
+            self.assertTrue(lineage["ok"])
+            self.assertEqual(lineage["upstream_count"], 1)
+            self.assertEqual(lineage["upstream"][0]["metadata"], {})
 
 
 if __name__ == "__main__":
