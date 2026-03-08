@@ -284,6 +284,7 @@ def build_memory_health_review(
             "age_days": age_days,
             "detail_bytes": len(detail_raw.encode("utf-8")) if isinstance(detail_raw, str) else 0,
             "summary_chars": len(summary),
+            "scope": _normalize_scope_token(detail_obj.get("scope")),
             "importance": _importance_label(detail_obj),
         }
         item["token_count"] = len(item["tokens"])
@@ -312,23 +313,25 @@ def build_memory_health_review(
         )
     stale_items.sort(key=lambda x: (x["age_days"], x["id"]), reverse=True)
 
-    # Duplication (fingerprint cluster)
-    fp_map: Dict[str, List[Dict[str, Any]]] = {}
+    # Duplication (fingerprint cluster, scope-isolated)
+    fp_map: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
     for it in prepared:
         fp = it["fingerprint"]
         if not fp or len(fp) < 8:
             continue
-        fp_map.setdefault(fp, []).append(it)
+        scope_key = it["scope"] or "__global__"
+        fp_map.setdefault((scope_key, fp), []).append(it)
 
     dup_items: List[Dict[str, Any]] = []
     duplicate_rows = 0
-    for fp, group in fp_map.items():
+    for (scope_key, fp), group in fp_map.items():
         if len(group) < duplicate_min_count:
             continue
         ordered = sorted(group, key=lambda x: x["id"])
         duplicate_rows += len(ordered) - 1
         dup_items.append(
             {
+                "scope": None if scope_key == "__global__" else scope_key,
                 "fingerprint": fp,
                 "count": len(ordered),
                 "ids": [g["id"] for g in ordered],
@@ -337,7 +340,7 @@ def build_memory_health_review(
                 "sample_summary": ordered[0]["summary_preview"],
             }
         )
-    dup_items.sort(key=lambda x: (x["count"], x["latest_id"]), reverse=True)
+    dup_items.sort(key=lambda x: (x["count"], x["latest_id"], x.get("scope") or ""), reverse=True)
 
     # Bloat
     bloat_items: List[Dict[str, Any]] = []
@@ -433,6 +436,7 @@ def build_memory_health_review(
                 "duplicate_rows": duplicate_rows,
                 "min_count": duplicate_min_count,
                 "fingerprint_algo": "normalize_v1",
+                "scope_isolated": True,
                 "items": dup_items[:top],
             },
             "bloat": {

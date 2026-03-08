@@ -275,5 +275,58 @@ class TestOptimizeReview(unittest.TestCase):
         conn.close()
 
 
+    def test_optimize_review_duplicate_signal_is_scope_isolated(self):
+        conn = _connect(":memory:")
+
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(2),
+                "kind": "task",
+                "tool_name": "memory_store",
+                "summary": "TODO confirm rollout checklist",
+                "detail": {"scope": "alpha", "importance": {"score": 0.55}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "task",
+                "tool_name": "memory_store",
+                "summary": "TODO confirm rollout checklist",
+                "detail": {"scope": "beta", "importance": {"score": 0.56}},
+            },
+        )
+        conn.commit()
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 100,
+                "stale_days": 60,
+                "duplicate_min_count": 2,
+                "bloat_summary_chars": 240,
+                "bloat_detail_bytes": 4096,
+                "orphan_min_tokens": 2,
+                "scope": None,
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_review(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["signals"]["duplication"]["groups"], 0)
+        self.assertEqual(out["signals"]["duplication"]["duplicate_rows"], 0)
+        self.assertEqual(out["signals"]["duplication"]["scope_isolated"], True)
+
+        conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()
