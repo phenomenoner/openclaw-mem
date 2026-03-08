@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from openclaw_mem import __version__
 from openclaw_mem.importance import is_parseable_importance, label_from_score, parse_importance_score
+from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
 
 
 _STOPWORDS: Set[str] = {
@@ -40,19 +41,6 @@ _STOPWORDS: Set[str] = {
 _WORD_TOKEN_RE = re.compile(r"[a-z0-9_]{3,}")
 _CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
 
-
-def _normalize_scope_token(raw: Any) -> Optional[str]:
-    if raw is None:
-        return None
-    token = str(raw).strip().lower()
-    if not token:
-        return None
-    token = re.sub(r"[\s]+", "-", token)
-    token = re.sub(r"[^a-z0-9._:/-]+", "-", token)
-    token = re.sub(r"-+", "-", token)
-    token = re.sub(r"^[-./:_]+", "", token)
-    token = re.sub(r"[-./:_]+$", "", token)
-    return token or None
 
 
 def _parse_iso_utc(ts: Any) -> Optional[datetime]:

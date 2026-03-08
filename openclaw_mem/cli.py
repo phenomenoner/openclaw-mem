@@ -59,6 +59,7 @@ from openclaw_mem.graph.query import (
     query_upstream,
     query_writers,
 )
+from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
 
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
@@ -198,19 +199,6 @@ EPISODIC_TOOL_OUTPUT_PATTERNS: Tuple[re.Pattern[str], ...] = (
 def _utcnow_ts_ms() -> int:
     return int(time.time() * 1000)
 
-
-def _normalize_scope_token(raw: Any) -> Optional[str]:
-    if raw is None:
-        return None
-    token = str(raw).strip().lower()
-    if not token:
-        return None
-    token = re.sub(r"[\s]+", "-", token)
-    token = re.sub(r"[^a-z0-9._:/-]+", "-", token)
-    token = re.sub(r"-+", "-", token)
-    token = re.sub(r"^[-./:_]+", "", token)
-    token = re.sub(r"[-./:_]+$", "", token)
-    return token or None
 
 
 def _normalize_episodic_scope(raw: Any) -> str:
