@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any, Optional
 
 
 def normalize_scope_token(raw: Any) -> Optional[str]:
     if raw is None:
         return None
-    token = str(raw).strip().lower()
+    token = unicodedata.normalize("NFKC", str(raw)).strip().lower()
     if not token:
         return None
     token = re.sub(r"[\s]+", "-", token)
