@@ -126,6 +126,98 @@ def _preview(text: str, limit: int = 120) -> str:
     return t[: max(16, limit - 1)].rstrip() + "…"
 
 
+def _to_nonnegative_int(raw: Any) -> Optional[int]:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw if raw >= 0 else None
+    if isinstance(raw, float) and raw.is_integer():
+        iv = int(raw)
+        return iv if iv >= 0 else None
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        if re.fullmatch(r"\d+", s):
+            return int(s)
+    return None
+
+
+def _sum_nonnegative_int_values(raw: Any) -> Optional[int]:
+    if not isinstance(raw, dict):
+        return None
+    total = 0
+    seen = 0
+    for v in raw.values():
+        iv = _to_nonnegative_int(v)
+        if iv is None:
+            continue
+        total += iv
+        seen += 1
+    if seen == 0:
+        return None
+    return total
+
+
+def _extract_recall_result_count(detail_obj: Dict[str, Any]) -> Optional[int]:
+    for key in ("result_count", "results_count"):
+        iv = _to_nonnegative_int(detail_obj.get(key))
+        if iv is not None:
+            return iv
+
+    direct_results = detail_obj.get("results")
+    if isinstance(direct_results, list):
+        return len(direct_results)
+    iv = _to_nonnegative_int(direct_results)
+    if iv is not None:
+        return iv
+
+    details_obj = detail_obj.get("details")
+    if isinstance(details_obj, dict):
+        nested_results = details_obj.get("results")
+        if isinstance(nested_results, list):
+            return len(nested_results)
+        iv = _to_nonnegative_int(nested_results)
+        if iv is not None:
+            return iv
+
+    receipt = detail_obj.get("receipt")
+    if isinstance(receipt, dict):
+        lifecycle = receipt.get("lifecycle")
+        if isinstance(lifecycle, dict):
+            for key in ("selected_total", "selectedTotal", "result_count", "results_count"):
+                iv = _to_nonnegative_int(lifecycle.get(key))
+                if iv is not None:
+                    return iv
+
+            selected_counts = lifecycle.get("selected_counts")
+            iv = _sum_nonnegative_int_values(selected_counts)
+            if iv is not None:
+                return iv
+
+            selected_counts = lifecycle.get("selectedCounts")
+            iv = _sum_nonnegative_int_values(selected_counts)
+            if iv is not None:
+                return iv
+
+    return None
+
+
+def _extract_recall_query(detail_obj: Dict[str, Any]) -> Optional[str]:
+    candidates: List[Any] = [
+        detail_obj.get("query"),
+        (detail_obj.get("args") or {}).get("query") if isinstance(detail_obj.get("args"), dict) else None,
+        (detail_obj.get("input") or {}).get("query") if isinstance(detail_obj.get("input"), dict) else None,
+        (detail_obj.get("request") or {}).get("query") if isinstance(detail_obj.get("request"), dict) else None,
+    ]
+
+    for c in candidates:
+        q = _normalize_summary(c)
+        if len(q) >= 3:
+            return q
+    return None
+
+
 def _build_recommendations(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     recs: List[Dict[str, Any]] = []
 
@@ -200,6 +292,27 @@ def _build_recommendations(report: Dict[str, Any]) -> List[Dict[str, Any]]:
             }
         )
 
+    misses = report["signals"].get("repeated_misses", {})
+    if misses.get("groups", 0) > 0:
+        recs.append(
+            {
+                "type": "widen_scope_candidate",
+                "priority": "medium",
+                "confidence": 0.67,
+                "why": (
+                    f"{misses['groups']} repeated no-result memory_recall query patterns detected"
+                ),
+                "evidence": {
+                    "groups": misses["groups"],
+                    "miss_events": misses["miss_events"],
+                    "sample_queries": [it["query"] for it in misses["items"][:3]],
+                    "sample_ids": [it["latest_id"] for it in misses["items"][:5]],
+                },
+                "suggested_action": "Review scope/query constraints and capture missing canonical memory for high-repeat misses.",
+                "safe_for_auto_apply": False,
+            }
+        )
+
     return recs
 
 
@@ -212,6 +325,7 @@ def build_memory_health_review(
     bloat_summary_chars: int = 240,
     bloat_detail_bytes: int = 4096,
     orphan_min_tokens: int = 2,
+    miss_min_count: int = 2,
     top: int = 10,
     scope: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -221,6 +335,7 @@ def build_memory_health_review(
     bloat_summary_chars = max(80, int(bloat_summary_chars))
     bloat_detail_bytes = max(256, int(bloat_detail_bytes))
     orphan_min_tokens = max(1, int(orphan_min_tokens))
+    miss_min_count = max(2, int(miss_min_count))
     top = max(1, int(top))
     scope_norm = _normalize_scope_token(scope)
 
@@ -267,6 +382,10 @@ def build_memory_health_review(
         summary = _normalize_summary(r["summary_en"] or r["summary"] or "")
         detail_raw = r["detail_json"] or ""
         detail_obj = _parse_detail(detail_raw)
+        tool_name = str(r["tool_name"] or "")
+        tool_name_norm = tool_name.strip().lower()
+        recall_query = _extract_recall_query(detail_obj) if tool_name_norm == "memory_recall" else None
+        recall_result_count = _extract_recall_result_count(detail_obj) if tool_name_norm == "memory_recall" else None
         dt = _parse_iso_utc(r["ts"])
         age_days = None
         if dt is not None:
@@ -277,6 +396,7 @@ def build_memory_health_review(
             "ts": r["ts"],
             "kind": r["kind"],
             "tool_name": r["tool_name"],
+            "tool_name_norm": tool_name_norm,
             "summary": summary,
             "summary_preview": _preview(summary),
             "fingerprint": _fingerprint_summary(summary),
@@ -287,6 +407,8 @@ def build_memory_health_review(
             "summary_chars": len(summary),
             "scope": _normalize_scope_token(detail_obj.get("scope")),
             "importance": _importance_label(detail_obj),
+            "recall_query": recall_query,
+            "recall_result_count": recall_result_count,
         }
         item["token_count"] = len(item["tokens"])
         prepared.append(item)
@@ -397,6 +519,37 @@ def build_memory_health_review(
 
     weak_items.sort(key=lambda x: (x["token_count"], x["id"]), reverse=True)
 
+    # Repeated memory_recall misses (same normalized query + scope, no results)
+    miss_map: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
+    for it in prepared:
+        if it["tool_name_norm"] != "memory_recall":
+            continue
+        if not it["recall_query"]:
+            continue
+        if it["recall_result_count"] is None or it["recall_result_count"] > 0:
+            continue
+        scope_key = it["scope"] or "__global__"
+        miss_map.setdefault((scope_key, it["recall_query"]), []).append(it)
+
+    repeated_miss_items: List[Dict[str, Any]] = []
+    repeated_miss_events = 0
+    for (scope_key, query), group in miss_map.items():
+        if len(group) < miss_min_count:
+            continue
+        ordered = sorted(group, key=lambda x: x["id"])
+        repeated_miss_events += len(ordered)
+        repeated_miss_items.append(
+            {
+                "scope": None if scope_key == "__global__" else scope_key,
+                "query": query,
+                "count": len(ordered),
+                "ids": [g["id"] for g in ordered],
+                "latest_id": ordered[-1]["id"],
+                "latest_ts": ordered[-1]["ts"],
+            }
+        )
+    repeated_miss_items.sort(key=lambda x: (x["count"], x["latest_id"], x["query"]), reverse=True)
+
     rows_scanned = len(prepared)
     coverage_pct = round((rows_scanned / total_rows) * 100, 1) if total_rows > 0 else 100.0
     warnings: List[Dict[str, Any]] = []
@@ -452,6 +605,13 @@ def build_memory_health_review(
                 "rare_token_max_freq": max_common_freq,
                 "items": weak_items[:top],
             },
+            "repeated_misses": {
+                "groups": len(repeated_miss_items),
+                "miss_events": repeated_miss_events,
+                "min_count": miss_min_count,
+                "tool_name": "memory_recall",
+                "items": repeated_miss_items[:top],
+            },
         },
         "policy": {
             "mode": "recommendation-first",
@@ -474,6 +634,7 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
     dup = sig.get("duplication", {})
     bloat = sig.get("bloat", {})
     weak = sig.get("weakly_connected", {})
+    misses = sig.get("repeated_misses", {})
 
     lines = [
         "openclaw-mem optimize review (recommendation-only)",
@@ -487,7 +648,8 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
             f"stale={stale.get('count', 0)} | "
             f"duplicates={dup.get('groups', 0)} groups ({dup.get('duplicate_rows', 0)} extra rows) | "
             f"bloat={bloat.get('count', 0)} | "
-            f"weakly_connected={weak.get('count', 0)}"
+            f"weakly_connected={weak.get('count', 0)} | "
+            f"repeated_misses={misses.get('groups', 0)} groups ({misses.get('miss_events', 0)} events)"
         ),
     ]
 

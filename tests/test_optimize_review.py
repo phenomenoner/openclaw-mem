@@ -33,6 +33,8 @@ class TestOptimizeReview(unittest.TestCase):
                 "9000",
                 "--orphan-min-tokens",
                 "4",
+                "--miss-min-count",
+                "5",
                 "--scope",
                 "finlife/mvp",
                 "--top",
@@ -48,6 +50,7 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertEqual(args.bloat_summary_chars, 320)
         self.assertEqual(args.bloat_detail_bytes, 9000)
         self.assertEqual(args.orphan_min_tokens, 4)
+        self.assertEqual(args.miss_min_count, 5)
         self.assertEqual(args.scope, "finlife/mvp")
         self.assertEqual(args.top, 7)
 
@@ -161,6 +164,87 @@ class TestOptimizeReview(unittest.TestCase):
         after_count = conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
         self.assertEqual(before_count, after_count)
         self.assertEqual(conn.execute("PRAGMA query_only").fetchone()[0], 0)
+
+        conn.close()
+
+    def test_optimize_review_reports_repeated_memory_recall_misses(self):
+        conn = _connect(":memory:")
+
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "tool",
+                "tool_name": "memory_recall",
+                "summary": "memory recall miss 1",
+                "detail": {"scope": "alpha", "query": "Cache Invalidation Policy", "results": []},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "tool",
+                "tool_name": "memory_recall",
+                "summary": "memory recall miss 2",
+                "detail": {"scope": "alpha", "query": "cache invalidation policy", "results": 0},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "tool",
+                "tool_name": "memory_recall",
+                "summary": "memory recall successful",
+                "detail": {"scope": "alpha", "query": "cache invalidation policy", "results": [{"id": "x"}]},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "tool",
+                "tool_name": "memory_recall",
+                "summary": "memory recall miss beta",
+                "detail": {"scope": "beta", "query": "cache invalidation policy", "results": 0},
+            },
+        )
+        conn.commit()
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 1000,
+                "stale_days": 60,
+                "duplicate_min_count": 2,
+                "bloat_summary_chars": 240,
+                "bloat_detail_bytes": 4096,
+                "orphan_min_tokens": 2,
+                "miss_min_count": 2,
+                "scope": None,
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_review(conn, args)
+
+        out = json.loads(buf.getvalue())
+        misses = out["signals"]["repeated_misses"]
+        self.assertEqual(misses["groups"], 1)
+        self.assertEqual(misses["miss_events"], 2)
+        self.assertEqual(misses["min_count"], 2)
+        self.assertEqual(misses["items"][0]["scope"], "alpha")
+        self.assertEqual(misses["items"][0]["query"], "cache invalidation policy")
+        self.assertEqual(misses["items"][0]["count"], 2)
+
+        rec_types = {r["type"] for r in out.get("recommendations", [])}
+        self.assertIn("widen_scope_candidate", rec_types)
+        self.assertEqual(out["policy"]["writes_performed"], 0)
 
         conn.close()
 
