@@ -16,29 +16,29 @@ This page is intentionally factual.
 
 ```bash
 uv sync --locked
-uv run python -m openclaw_mem --help
+uv run --python 3.13 --frozen -- python -m openclaw_mem --help
 ```
 
 > Note: this repo defines the `openclaw-mem` console entrypoint, so `uv run openclaw-mem ...` is supported after dependency install (`uv sync --locked`).
-> `uv run python -m openclaw_mem ...` remains a reliable fallback while troubleshooting entrypoint resolution.
+> The docs use `uv run --python 3.13 --frozen -- python -m openclaw_mem ...` as the most explicit source-checkout form.
 
 ### 2) Local DB smoke test (no OpenClaw required)
 
 ```bash
 DB=/tmp/openclaw-mem-realitycheck.sqlite
 
-uv run python -m openclaw_mem --db "$DB" --json status
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json status
 
 cat > /tmp/openclaw-mem-sample.jsonl <<'JSONL'
 {"ts":"2026-02-12T08:10:00Z","kind":"tool","tool_name":"web_search","summary":"searched docs status markers","detail":{"query":"status markers DONE PARTIAL ROADMAP"}}
 {"ts":"2026-02-12T08:11:00Z","kind":"note","summary":"Docs updated","detail":{"path":"README.md"}}
 JSONL
 
-uv run python -m openclaw_mem --db "$DB" --json ingest --file /tmp/openclaw-mem-sample.jsonl
-uv run python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
-uv run python -m openclaw_mem --db "$DB" --json timeline 2 --window 2
-uv run python -m openclaw_mem --db "$DB" --json get 2
-uv run python -m openclaw_mem --db "$DB" --json optimize review --limit 200
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json ingest --file /tmp/openclaw-mem-sample.jsonl
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json timeline 2 --window 2
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json get 2
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize review --limit 200
 ```
 
 **Expected output shape (minimal):**
