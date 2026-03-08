@@ -292,6 +292,12 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.graph_cmd, "export")
         self.assertEqual(a.query, "hello")
 
+        a = build_parser().parse_args(["graph", "query", "upstream", "artifact.daily-mission"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "query")
+        self.assertEqual(a.graph_query_cmd, "upstream")
+        self.assertEqual(a.node_id, "artifact.daily-mission")
+
 
     def test_writeback_lancedb_parser_accepts_flags(self):
         a = build_parser().parse_args([

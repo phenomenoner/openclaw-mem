@@ -52,6 +52,13 @@ from openclaw_mem.docs_memory import (
 )
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 from openclaw_mem.optimization import build_memory_health_review, render_memory_health_review
+from openclaw_mem.graph.query import (
+    query_downstream,
+    query_filter_nodes,
+    query_lineage,
+    query_upstream,
+    query_writers,
+)
 
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
@@ -6859,6 +6866,73 @@ def cmd_graph_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None
     _emit(payload, bool(args.json))
 
 
+def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    query_cmd = str(getattr(args, "graph_query_cmd", "") or "").strip().lower()
+    db_path = str(getattr(args, "db", "") or "").strip()
+
+    if not db_path:
+        _emit({"error": "missing --db"}, True)
+        sys.exit(2)
+
+    try:
+        if query_cmd == "upstream":
+            result = query_upstream(db_path=db_path, node_id=getattr(args, "node_id", None))
+        elif query_cmd == "downstream":
+            result = query_downstream(db_path=db_path, node_id=getattr(args, "node_id", None))
+        elif query_cmd == "lineage":
+            result = query_lineage(db_path=db_path, node_id=getattr(args, "node_id", None))
+        elif query_cmd == "writers":
+            result = query_writers(db_path=db_path, artifact_id=getattr(args, "artifact_id", None))
+        elif query_cmd == "filter":
+            result = query_filter_nodes(
+                db_path=db_path,
+                tag=getattr(args, "tag", None),
+                not_tag=getattr(args, "not_tag", None),
+                node_type=getattr(args, "node_type", None),
+            )
+        else:
+            raise ValueError(f"unsupported graph query command: {query_cmd}")
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+    except sqlite3.OperationalError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+
+    payload = {
+        "kind": "openclaw-mem.graph.query.v0",
+        "ts": _utcnow_iso(),
+        "query_cmd": query_cmd,
+        "result": result,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    if query_cmd == "filter":
+        print(f"count={int(result.get('count', 0))}")
+        for node in list(result.get("nodes") or []):
+            print(f"{node.get('id')} type={node.get('type')} tags={','.join(node.get('tags') or [])}")
+        return
+
+    edges = list(result.get("edges") or [])
+    if query_cmd == "lineage":
+        upstream = list(result.get("upstream") or [])
+        downstream = list(result.get("downstream") or [])
+        print(f"upstream_count={len(upstream)} downstream_count={len(downstream)}")
+        for edge in upstream:
+            print(f"UP {edge.get('src')} --{edge.get('type')}--> {edge.get('dst')}")
+        for edge in downstream:
+            print(f"DOWN {edge.get('src')} --{edge.get('type')}--> {edge.get('dst')}")
+        return
+
+    print(f"count={int(result.get('count', 0))}")
+    for edge in edges:
+        print(f"{edge.get('src')} --{edge.get('type')}--> {edge.get('dst')}")
+
+
 def cmd_episodes_append(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
         event_type = _normalize_episodic_type(getattr(args, "type", None))
@@ -8560,6 +8634,31 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
     g.set_defaults(func=cmd_graph_auto_status)
+
+    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter)")
+    qsub = g.add_subparsers(dest="graph_query_cmd", required=True)
+
+    q = qsub.add_parser("upstream", help="List incoming edges into node_id")
+    q.add_argument("node_id", help="Target node id")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("downstream", help="List outgoing edges from node_id")
+    q.add_argument("node_id", help="Source node id")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("lineage", help="List both upstream and downstream edges for node_id")
+    q.add_argument("node_id", help="Target node id")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("writers", help="List writes edges that target artifact_id")
+    q.add_argument("artifact_id", help="Artifact node id")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("filter", help="Filter nodes by tags/type")
+    q.add_argument("--tag", help="Require tag")
+    q.add_argument("--not-tag", dest="not_tag", help="Exclude tag")
+    q.add_argument("--node-type", dest="node_type", help="Require node type")
+    q.set_defaults(func=cmd_graph_query)
 
     g = gsub.add_parser("capture-git", help="Capture recent git commits as observations (idempotent)")
     g.add_argument("--repo", action="append", required=True, help="Git repository path (repeatable)")
