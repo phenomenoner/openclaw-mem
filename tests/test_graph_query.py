@@ -217,6 +217,42 @@ class TestGraphQuery(unittest.TestCase):
                 query_refresh_receipts(db_path=db_path, limit=1)
             self.assertIn("graph schema missing required tables", str(ctx.exception))
 
+    def test_queries_reject_db_with_missing_schema_version_meta(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology({"nodes": [], "edges": []}, db_path=db_path)
+
+            conn = sqlite3.connect(str(db_path))
+            try:
+                with conn:
+                    conn.execute("DELETE FROM graph_meta WHERE key = ?", ("schema_version",))
+            finally:
+                conn.close()
+
+            with self.assertRaises(ValueError) as ctx:
+                query_refresh_receipts(db_path=db_path, limit=1)
+            self.assertIn("graph schema missing required meta key: schema_version", str(ctx.exception))
+
+    def test_queries_reject_db_with_mismatched_schema_version_meta(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology({"nodes": [], "edges": []}, db_path=db_path)
+
+            conn = sqlite3.connect(str(db_path))
+            try:
+                with conn:
+                    conn.execute(
+                        "INSERT INTO graph_meta(key, value) VALUES (?, ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        ("schema_version", "999"),
+                    )
+            finally:
+                conn.close()
+
+            with self.assertRaises(ValueError) as ctx:
+                query_refresh_receipts(db_path=db_path, limit=1)
+            self.assertIn("graph schema version mismatch", str(ctx.exception))
+
     def test_query_provenance_rejects_limit_above_cap(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db_path = Path(td) / "graph.db"

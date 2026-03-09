@@ -45,6 +45,27 @@ def connect_graph_db_for_query(
             "graph schema missing required tables: " + ", ".join(missing_tables)
         )
 
+    try:
+        schema_row = conn.execute(
+            "SELECT value FROM graph_meta WHERE key = ?",
+            ("schema_version",),
+        ).fetchone()
+    except sqlite3.Error as exc:
+        conn.close()
+        raise ValueError(f"failed to read graph schema version: {db_file}: {exc}") from exc
+
+    if schema_row is None or schema_row[0] is None:
+        conn.close()
+        raise ValueError("graph schema missing required meta key: schema_version")
+
+    schema_version = str(schema_row[0]).strip()
+    if schema_version != str(GRAPH_SCHEMA_VERSION):
+        conn.close()
+        raise ValueError(
+            "graph schema version mismatch: "
+            f"expected {GRAPH_SCHEMA_VERSION}, got {schema_version or 'missing'}"
+        )
+
     return conn
 
 
