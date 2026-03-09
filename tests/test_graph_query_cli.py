@@ -133,6 +133,53 @@ class TestGraphQueryCli(unittest.TestCase):
             self.assertEqual(out["result"]["receipts"][0]["source_path"], "docs/topology.yaml")
             conn.close()
 
+    def test_cmd_graph_query_drift_json_payload(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "cron.job.beta", "type": "cron_job"},
+            ],
+            "edges": [],
+        }
+        runtime = {
+            "nodes": [
+                {"id": "cron.job.alpha", "status": "ok"},
+                {"id": "cron.job.beta", "status": "stale"},
+                {"id": "cron.job.gamma", "status": "ok"},
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "mem.sqlite"
+            runtime_path = Path(td) / "runtime.json"
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+
+            conn = _connect(str(db_path))
+            refresh_topology(topology, db_path=db_path)
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "graph_query_cmd": "drift",
+                    "db": str(db_path),
+                    "live_json": str(runtime_path),
+                    "limit": 20,
+                    "json": True,
+                },
+            )()
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_query(conn, args)
+
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["query_cmd"], "drift")
+            self.assertEqual(out["result"]["missing_in_runtime"]["count"], 0)
+            self.assertEqual(out["result"]["runtime_only"]["count"], 1)
+            self.assertEqual(out["result"]["non_ok_nodes"]["count"], 1)
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

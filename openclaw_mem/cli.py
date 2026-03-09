@@ -52,6 +52,7 @@ from openclaw_mem.docs_memory import (
 )
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 from openclaw_mem.optimization import build_memory_health_review, render_memory_health_review
+from openclaw_mem.graph.drift import query_drift
 from openclaw_mem.graph.query import (
     query_downstream,
     query_filter_nodes,
@@ -6882,6 +6883,12 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             )
         elif query_cmd == "receipts":
             result = query_refresh_receipts(db_path=db_path, limit=getattr(args, "limit", 10))
+        elif query_cmd == "drift":
+            result = query_drift(
+                db_path=db_path,
+                live_json_path=getattr(args, "live_json", None),
+                limit=getattr(args, "limit", 50),
+            )
         else:
             raise ValueError(f"unsupported graph query command: {query_cmd}")
     except ValueError as e:
@@ -6916,6 +6923,21 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 f"id={receipt.get('id')} refreshed_at={receipt.get('refreshed_at')} "
                 f"nodes={receipt.get('node_count')} edges={receipt.get('edge_count')}"
             )
+        return
+
+    if query_cmd == "drift":
+        print(
+            f"topology_nodes={int(result.get('topology_node_count', 0))} "
+            f"runtime_nodes={int(result.get('runtime_node_count', 0))}"
+        )
+        missing = result.get("missing_in_runtime") or {}
+        runtime_only = result.get("runtime_only") or {}
+        non_ok = result.get("non_ok_nodes") or {}
+        print(f"missing_in_runtime={int(missing.get('count', 0))}")
+        print(f"runtime_only={int(runtime_only.get('count', 0))}")
+        print(f"non_ok_nodes={int(non_ok.get('count', 0))}")
+        for item in list(non_ok.get("items") or []):
+            print(f"non_ok:{item.get('node_id')} status={item.get('status')}")
         return
 
     edges = list(result.get("edges") or [])
@@ -8636,7 +8658,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
     g.set_defaults(func=cmd_graph_auto_status)
 
-    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter/receipts)")
+    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter/receipts/drift)")
     qsub = g.add_subparsers(dest="graph_query_cmd", required=True)
 
     q = qsub.add_parser("upstream", help="List incoming edges into node_id")
@@ -8663,6 +8685,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     q = qsub.add_parser("receipts", help="List recent deterministic refresh receipts")
     q.add_argument("--limit", type=int, default=10, help="Max receipts to return (default: 10)")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("drift", help="Compare topology graph nodes against runtime state JSON")
+    q.add_argument("--live-json", dest="live_json", required=True, help="Runtime state JSON path (nodes/status_by_node)")
+    q.add_argument("--limit", type=int, default=50, help="Max node ids to include per drift bucket (default: 50)")
     q.set_defaults(func=cmd_graph_query)
 
     g = gsub.add_parser("capture-git", help="Capture recent git commits as observations (idempotent)")

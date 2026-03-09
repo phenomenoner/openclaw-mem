@@ -1,3 +1,4 @@
+from .drift import query_drift
 from .query import (
     query_downstream,
     query_filter_nodes,
@@ -12,6 +13,7 @@ from .schema import GRAPH_SCHEMA_VERSION, ensure_graph_schema
 __all__ = [
     "GRAPH_SCHEMA_VERSION",
     "ensure_graph_schema",
+    "query_drift",
     "query_downstream",
     "query_filter_nodes",
     "query_lineage",
