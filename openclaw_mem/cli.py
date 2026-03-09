@@ -52,6 +52,17 @@ from openclaw_mem.docs_memory import (
 )
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 from openclaw_mem.optimization import build_memory_health_review, render_memory_health_review
+from openclaw_mem.graph.drift import query_drift
+from openclaw_mem.graph.query import (
+    query_downstream,
+    query_filter_nodes,
+    query_lineage,
+    query_provenance,
+    query_refresh_receipts,
+    query_upstream,
+    query_writers,
+)
+from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
 
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
@@ -191,19 +202,6 @@ EPISODIC_TOOL_OUTPUT_PATTERNS: Tuple[re.Pattern[str], ...] = (
 def _utcnow_ts_ms() -> int:
     return int(time.time() * 1000)
 
-
-def _normalize_scope_token(raw: Any) -> Optional[str]:
-    if raw is None:
-        return None
-    token = str(raw).strip().lower()
-    if not token:
-        return None
-    token = re.sub(r"[\s]+", "-", token)
-    token = re.sub(r"[^a-z0-9._:/-]+", "-", token)
-    token = re.sub(r"-+", "-", token)
-    token = re.sub(r"^[-./:_]+", "", token)
-    token = re.sub(r"[-./:_]+$", "", token)
-    return token or None
 
 
 def _normalize_episodic_scope(raw: Any) -> str:
@@ -1424,6 +1422,7 @@ def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         bloat_summary_chars=int(getattr(args, "bloat_summary_chars", 240)),
         bloat_detail_bytes=int(getattr(args, "bloat_detail_bytes", 4096)),
         orphan_min_tokens=int(getattr(args, "orphan_min_tokens", 2)),
+        miss_min_count=int(getattr(args, "miss_min_count", 2)),
         top=int(getattr(args, "top", 10)),
         scope=getattr(args, "scope", None),
     )
@@ -4071,7 +4070,7 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     Optional leading markdown wrappers are tolerated before markers:
     - blockquotes: `>` (repeatable; whitespace optional before nested wrappers/marker)
-    - list bullets: `-`, `*`, `+`, `•`, `▪`, `‣`, `∙`, `·`, `◦`, `・`, `–`, `—`, `−` (whitespace optional before nested wrappers/marker)
+    - list bullets: `-`, `*`, `+`, `•`, `▪`, `‣`, `∙`, `·`, `●`, `○`, `◦`, `・`, `–`, `—`, `−` (whitespace optional before nested wrappers/marker)
     - markdown checkboxes: `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` / `[☒]` (whitespace optional before nested wrappers/marker)
     - ordered-list prefixes: `1.` / `1)` / `1-` / `（1）` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)` (whitespace optional before nested wrappers/marker)
 
@@ -4101,7 +4100,7 @@ def _summary_has_task_marker(summary: str) -> bool:
 
     markers = ("TODO", "TASK", "REMINDER")
     separators = {":", "：", ";", "；", "-", ".", "。", "－", "–", "—", "−"}
-    bullet_prefixes = {"-", "*", "+", "•", "▪", "‣", "∙", "·", "◦", "・", "–", "—", "−"}
+    bullet_prefixes = {"-", "*", "+", "•", "▪", "‣", "∙", "·", "●", "○", "◦", "・", "–", "—", "−"}
     checkbox_markers = {" ", "x", "X", "✓", "✔", "☐", "☑", "☒", "✅"}
     ordered_prefix_sep = {".", ")", "-", "－", "–", "—", "−"}
 
@@ -4318,7 +4317,7 @@ def _triage_tasks(conn: sqlite3.Connection, *, since_ts: str, importance_min: fl
       (case-insensitive; width-normalized via NFKC; supports plain or
       bracketed forms like `[TODO]`/`(TASK)`/`【TODO】`/`〔TODO〕`/`「TODO」`/`『TODO』`/`〖TODO〗`/`〘TODO〙`/`<TODO>`/`＜TODO＞` (including compact no-space forms like `[TODO]buy milk`/`【TODO】buy milk`/`〔TODO〕buy milk`/`「TODO」buy milk`/`『TODO』buy milk`/`〖TODO〗buy milk`/`〘TODO〙buy milk`/`<TODO>buy milk`/`＜TODO＞buy milk`), plus optional leading
       markdown wrappers like `>` blockquotes, list/checklist prefixes
-      (`-`/`*`/`+`/`•`/`▪`/`‣`/`∙`/`·`/`◦`/`・`/`–`/`—`/`−`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`/`[☒]`), and ordered-list prefixes like
+      (`-`/`*`/`+`/`•`/`▪`/`‣`/`∙`/`·`/`●`/`○`/`◦`/`・`/`–`/`—`/`−`, `[ ]`/`[x]`/`[✓]`/`[✔]`/`[☐]`/`[☑]`/`[☒]`), and ordered-list prefixes like
       `1.`/`1)`/`1-`/`（1）`/`(1)`/`a.`/`a)`/`(a)`/`iv.`/`iv)`/`(iv)`; whitespace is optional
       between wrappers and the next wrapper/marker;
       accepts ':', whitespace, ';', '；', '-', '－', '–', '—', '−', or marker-only)
@@ -5138,7 +5137,7 @@ def _extract_writeback_updates(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
     if label:
         updates["importance_label"] = label
 
-    scope = str(detail_obj.get("scope") or row["kind"] or "").strip()
+    scope = _normalize_scope_token(detail_obj.get("scope") or row["kind"])
     if scope:
         updates["scope"] = scope
 
@@ -6858,6 +6857,143 @@ def cmd_graph_export(conn: sqlite3.Connection, args: argparse.Namespace) -> None
     _emit(payload, bool(args.json))
 
 
+def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    query_cmd = str(getattr(args, "graph_query_cmd", "") or "").strip().lower()
+    db_path = str(getattr(args, "db", "") or "").strip()
+
+    if not db_path:
+        _emit({"error": "missing --db"}, True)
+        sys.exit(2)
+
+    try:
+        if query_cmd == "upstream":
+            result = query_upstream(db_path=db_path, node_id=getattr(args, "node_id", None))
+        elif query_cmd == "downstream":
+            result = query_downstream(db_path=db_path, node_id=getattr(args, "node_id", None))
+        elif query_cmd == "lineage":
+            result = query_lineage(db_path=db_path, node_id=getattr(args, "node_id", None))
+        elif query_cmd == "writers":
+            result = query_writers(db_path=db_path, artifact_id=getattr(args, "artifact_id", None))
+        elif query_cmd == "filter":
+            result = query_filter_nodes(
+                db_path=db_path,
+                tag=getattr(args, "tag", None),
+                not_tag=getattr(args, "not_tag", None),
+                node_type=getattr(args, "node_type", None),
+            )
+        elif query_cmd == "receipts":
+            result = query_refresh_receipts(
+                db_path=db_path,
+                limit=getattr(args, "limit", 10),
+                source_path=getattr(args, "source_path", None),
+                topology_digest=getattr(args, "topology_digest", None),
+            )
+        elif query_cmd == "provenance":
+            result = query_provenance(
+                db_path=db_path,
+                node_id=getattr(args, "node_id", None),
+                edge_type=getattr(args, "edge_type", None),
+                limit=getattr(args, "limit", 20),
+                min_edge_count=getattr(args, "min_edge_count", 1),
+            )
+        elif query_cmd == "drift":
+            result = query_drift(
+                db_path=db_path,
+                live_json_path=getattr(args, "live_json", None),
+                limit=getattr(args, "limit", 50),
+            )
+        else:
+            raise ValueError(f"unsupported graph query command: {query_cmd}")
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+    except sqlite3.OperationalError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+
+    payload = {
+        "kind": "openclaw-mem.graph.query.v0",
+        "ts": _utcnow_iso(),
+        "query_cmd": query_cmd,
+        "result": result,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    if query_cmd == "filter":
+        print(f"count={int(result.get('count', 0))}")
+        for node in list(result.get("nodes") or []):
+            print(f"{node.get('id')} type={node.get('type')} tags={','.join(node.get('tags') or [])}")
+        return
+
+    if query_cmd == "receipts":
+        receipts = list(result.get("receipts") or [])
+        print(
+            f"count={int(result.get('count', 0))} "
+            f"total_count={int(result.get('total_count', 0))}"
+        )
+        for receipt in receipts:
+            print(
+                f"id={receipt.get('id')} refreshed_at={receipt.get('refreshed_at')} "
+                f"nodes={receipt.get('node_count')} edges={receipt.get('edge_count')} "
+                f"source={receipt.get('source_path')}"
+            )
+        return
+
+    if query_cmd == "provenance":
+        print(
+            f"count={int(result.get('count', 0))} "
+            f"total_distinct={int(result.get('total_distinct', 0))}"
+        )
+        for item in list(result.get("items") or []):
+            edge_types = list(item.get("edge_types") or [])
+            if edge_types:
+                edge_types_summary = ",".join(
+                    f"{str(edge.get('edge_type'))}:{int(edge.get('edge_count', 0))}"
+                    for edge in edge_types
+                )
+            else:
+                edge_types_summary = ""
+            line = f"{item.get('provenance')} edges={item.get('edge_count')}"
+            if edge_types_summary:
+                line += f" edge_types={edge_types_summary}"
+            print(line)
+        return
+
+    if query_cmd == "drift":
+        print(
+            f"topology_nodes={int(result.get('topology_node_count', 0))} "
+            f"runtime_nodes={int(result.get('runtime_node_count', 0))}"
+        )
+        missing = result.get("missing_in_runtime") or {}
+        runtime_only = result.get("runtime_only") or {}
+        non_ok = result.get("non_ok_nodes") or {}
+        print(f"missing_in_runtime={int(missing.get('count', 0))}")
+        print(f"runtime_only={int(runtime_only.get('count', 0))}")
+        print(f"non_ok_nodes={int(non_ok.get('count', 0))}")
+        for item in list(non_ok.get("items") or []):
+            print(f"non_ok:{item.get('node_id')} status={item.get('status')}")
+        return
+
+    edges = list(result.get("edges") or [])
+    if query_cmd == "lineage":
+        upstream = list(result.get("upstream") or [])
+        downstream = list(result.get("downstream") or [])
+        print(f"upstream_count={len(upstream)} downstream_count={len(downstream)}")
+        for edge in upstream:
+            print(f"UP {edge.get('src')} --{edge.get('type')}--> {edge.get('dst')}")
+        for edge in downstream:
+            print(f"DOWN {edge.get('src')} --{edge.get('type')}--> {edge.get('dst')}")
+        return
+
+    print(f"count={int(result.get('count', 0))}")
+    for edge in edges:
+        print(f"{edge.get('src')} --{edge.get('type')}--> {edge.get('dst')}")
+
+
 def cmd_episodes_append(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
         event_type = _normalize_episodic_type(getattr(args, "type", None))
@@ -8303,6 +8439,7 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--bloat-summary-chars", dest="bloat_summary_chars", type=int, default=240, help="Summary length threshold for bloat candidates (default: 240)")
     o.add_argument("--bloat-detail-bytes", dest="bloat_detail_bytes", type=int, default=4096, help="detail_json size threshold for bloat candidates in bytes (default: 4096)")
     o.add_argument("--orphan-min-tokens", dest="orphan_min_tokens", type=int, default=2, help="Minimum token count for weakly connected candidates (default: 2)")
+    o.add_argument("--miss-min-count", dest="miss_min_count", type=int, default=2, help="Min repeated no-result memory_recall events per query/scope group (default: 2)")
     o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
     o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per signal in output (default: 10)")
     o.set_defaults(func=cmd_optimize_review)
@@ -8558,6 +8695,49 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
     g.set_defaults(func=cmd_graph_auto_status)
+
+    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter/receipts/provenance/drift)")
+    qsub = g.add_subparsers(dest="graph_query_cmd", required=True)
+
+    q = qsub.add_parser("upstream", help="List incoming edges into node_id")
+    q.add_argument("node_id", help="Target node id")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("downstream", help="List outgoing edges from node_id")
+    q.add_argument("node_id", help="Source node id")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("lineage", help="List both upstream and downstream edges for node_id")
+    q.add_argument("node_id", help="Target node id")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("writers", help="List writes edges that target artifact_id")
+    q.add_argument("artifact_id", help="Artifact node id")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("filter", help="Filter nodes by tags/type")
+    q.add_argument("--tag", help="Require tag")
+    q.add_argument("--not-tag", dest="not_tag", help="Exclude tag")
+    q.add_argument("--node-type", dest="node_type", help="Require node type")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("receipts", help="List recent deterministic refresh receipts")
+    q.add_argument("--limit", type=int, default=10, help="Max receipts to return (default: 10)")
+    q.add_argument("--source-path", dest="source_path", help="Optional exact source_path filter")
+    q.add_argument("--topology-digest", dest="topology_digest", help="Optional exact topology_digest filter")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("provenance", help="List provenance references with edge counts")
+    q.add_argument("--node-id", dest="node_id", help="Optional node id filter (matches src or dst)")
+    q.add_argument("--edge-type", dest="edge_type", help="Optional edge type filter")
+    q.add_argument("--min-edge-count", dest="min_edge_count", type=int, default=1, help="Only include provenance groups with at least this many edges (default: 1)")
+    q.add_argument("--limit", type=int, default=20, help="Max provenance rows to return (default: 20)")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("drift", help="Compare topology graph nodes against runtime state JSON")
+    q.add_argument("--live-json", dest="live_json", required=True, help="Runtime state JSON path (nodes/status_by_node)")
+    q.add_argument("--limit", type=int, default=50, help="Max node ids to include per drift bucket (default: 50)")
+    q.set_defaults(func=cmd_graph_query)
 
     g = gsub.add_parser("capture-git", help="Capture recent git commits as observations (idempotent)")
     g.add_argument("--repo", action="append", required=True, help="Git repository path (repeatable)")

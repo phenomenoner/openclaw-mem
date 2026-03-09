@@ -129,6 +129,8 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("‣ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("▪ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("◦ TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("● TODO buy milk"))
+        self.assertTrue(_summary_has_task_marker("○ TODO buy milk"))
         self.assertTrue(_summary_has_task_marker("∙ [ ] TASK: clean desk"))
         self.assertTrue(_summary_has_task_marker("· [x] [REMINDER] renew domain"))
         self.assertTrue(_summary_has_task_marker("- [✓] TODO buy milk"))
@@ -163,6 +165,8 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("▪[x]TODO clean pipeline"))
         self.assertTrue(_summary_has_task_marker("·[ ]TASK sync branch"))
         self.assertTrue(_summary_has_task_marker("◦[x]TODO compact pipeline"))
+        self.assertTrue(_summary_has_task_marker("●[x]TODO compact pipeline"))
+        self.assertTrue(_summary_has_task_marker("○[x]TODO compact pipeline"))
         self.assertTrue(_summary_has_task_marker("- (I)[ ] TODO reorder docs"))
         self.assertTrue(_summary_has_task_marker(">>‣TODO audit logs"))
         self.assertTrue(_summary_has_task_marker("—TODO audit logs"))
@@ -218,6 +222,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("[☒]TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("[✅]TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("(TASK)clean old notes"))
+        self.assertTrue(_summary_has_task_marker("〔REMINDER〕clean old notes"))
         self.assertTrue(_summary_has_task_marker("1.TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("1)TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("(1)TODO clean old notes"))
@@ -291,6 +296,12 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.cmd, "graph")
         self.assertEqual(a.graph_cmd, "export")
         self.assertEqual(a.query, "hello")
+
+        a = build_parser().parse_args(["graph", "query", "upstream", "artifact.daily-mission"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "query")
+        self.assertEqual(a.graph_query_cmd, "upstream")
+        self.assertEqual(a.node_id, "artifact.daily-mission")
 
 
     def test_writeback_lancedb_parser_accepts_flags(self):
@@ -1630,6 +1641,67 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["tasks"]["found_new"], 1)
         self.assertEqual(out["tasks"]["matches"][0]["summary"], "- [ ] TODO: rotate on-call notes")
+
+        conn.close()
+
+    def test_triage_tasks_accepts_emoji_checkbox_prefixed_task_marker(self):
+        import tempfile
+        from datetime import datetime, timezone
+
+        conn = _connect(":memory:")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        sample = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "ts": now,
+                        "kind": "note",
+                        "tool_name": "memory_store",
+                        "summary": "- [✅] TODO: rotate on-call notes",
+                        "detail": {"importance": 0.9},
+                    }
+                )
+            ]
+        )
+
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(sample)
+            args = type("Args", (), {"file": None, "json": True})()
+            with redirect_stdout(io.StringIO()):
+                cmd_ingest(conn, args)
+        finally:
+            sys.stdin = old_stdin
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as st:
+            state_path = st.name
+
+        args = type(
+            "Args",
+            (),
+            {
+                "mode": "tasks",
+                "since_minutes": 60,
+                "limit": 10,
+                "keywords": None,
+                "cron_jobs_path": None,
+                "tasks_since_minutes": 1440,
+                "importance_min": 0.7,
+                "state_path": state_path,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cmd_triage(conn, args)
+
+        self.assertEqual(cm.exception.code, 10)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["tasks"]["found_new"], 1)
+        self.assertEqual(out["tasks"]["matches"][0]["summary"], "- [✅] TODO: rotate on-call notes")
 
         conn.close()
 
