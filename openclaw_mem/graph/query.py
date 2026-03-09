@@ -5,6 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .schema import connect_graph_db_for_query
+
 
 _MAX_RECEIPTS_LIMIT = 200
 
@@ -107,7 +109,7 @@ def _query_edges(
     where_sql: str,
     where_args: Tuple[Any, ...],
 ) -> List[Dict[str, Any]]:
-    conn = sqlite3.connect(str(Path(db_path)))
+    conn = connect_graph_db_for_query(db_path)
     try:
         node_map = _load_node_map(conn)
         edges = _edge_rows(conn, where_sql=where_sql, where_args=where_args)
@@ -173,7 +175,7 @@ def query_filter_nodes(
     exclude_tag = (not_tag or "").strip()
     only_type = (node_type or "").strip()
 
-    conn = sqlite3.connect(str(Path(db_path)))
+    conn = connect_graph_db_for_query(db_path)
     try:
         node_map = _load_node_map(conn)
     finally:
@@ -226,7 +228,7 @@ def query_lineage(*, db_path: str | Path, node_id: str) -> Dict[str, Any]:
 def query_refresh_receipts(*, db_path: str | Path, limit: int = 10) -> Dict[str, Any]:
     limit_int = _parse_limit(limit, max_limit=_MAX_RECEIPTS_LIMIT)
 
-    conn = sqlite3.connect(str(Path(db_path)))
+    conn = connect_graph_db_for_query(db_path)
     try:
         rows = conn.execute(
             "SELECT id, refreshed_at, source_path, topology_digest, node_count, edge_count "

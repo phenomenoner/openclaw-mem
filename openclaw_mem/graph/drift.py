@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+
+from .schema import connect_graph_db_for_query
 
 
 _NON_OK_STATUSES = {"stale", "error", "missing"}
@@ -87,7 +88,7 @@ def query_drift(*, db_path: str | Path, live_json_path: str | Path, limit: int =
     if not live_path.is_file():
         raise ValueError(f"live runtime JSON not found: {live_path}")
 
-    conn = sqlite3.connect(str(Path(db_path)))
+    conn = connect_graph_db_for_query(db_path)
     try:
         rows = conn.execute("SELECT node_id FROM graph_nodes ORDER BY node_id").fetchall()
     finally:

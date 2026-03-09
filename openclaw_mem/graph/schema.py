@@ -1,8 +1,51 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
+from typing import Iterable
 
 GRAPH_SCHEMA_VERSION = 1
+
+
+_REQUIRED_GRAPH_TABLES = (
+    "graph_nodes",
+    "graph_edges",
+    "graph_meta",
+    "graph_refresh_receipts",
+)
+
+
+def connect_graph_db_for_query(
+    db_path: str | Path,
+    *,
+    required_tables: Iterable[str] = _REQUIRED_GRAPH_TABLES,
+) -> sqlite3.Connection:
+    db_file = Path(str(db_path or "")).resolve()
+    if not str(db_path or "").strip():
+        raise ValueError("db_path is required")
+    if not db_file.is_file():
+        raise ValueError(f"graph db not found: {db_file}")
+
+    try:
+        conn = sqlite3.connect(str(db_file))
+    except sqlite3.Error as exc:
+        raise ValueError(f"failed to open graph db: {db_file}: {exc}") from exc
+
+    try:
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type = ?", ("table",)).fetchall()
+    except sqlite3.Error as exc:
+        conn.close()
+        raise ValueError(f"failed to inspect graph db schema: {db_file}: {exc}") from exc
+
+    existing_tables = {str(row[0]) for row in rows}
+    missing_tables = [name for name in required_tables if name not in existing_tables]
+    if missing_tables:
+        conn.close()
+        raise ValueError(
+            "graph schema missing required tables: " + ", ".join(missing_tables)
+        )
+
+    return conn
 
 
 _SCHEMA_SQL = """

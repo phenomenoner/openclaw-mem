@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -82,6 +83,23 @@ class TestGraphDrift(unittest.TestCase):
             self.assertEqual(out["missing_in_runtime"]["count"], 2)
             self.assertEqual(len(out["missing_in_runtime"]["node_ids"]), 1)
             self.assertTrue(out["missing_in_runtime"]["truncated"])
+
+    def test_query_drift_requires_graph_schema(self) -> None:
+        runtime = {"nodes": [{"id": "n1", "status": "ok"}]}
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            runtime_path = Path(td) / "runtime.json"
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx_missing:
+                query_drift(db_path=db_path, live_json_path=runtime_path)
+            self.assertIn("graph db not found", str(ctx_missing.exception))
+
+            sqlite3.connect(str(db_path)).close()
+            with self.assertRaises(ValueError) as ctx_schema:
+                query_drift(db_path=db_path, live_json_path=runtime_path)
+            self.assertIn("graph schema missing required tables", str(ctx_schema.exception))
 
     def test_query_drift_rejects_limit_above_cap(self) -> None:
         topology = {

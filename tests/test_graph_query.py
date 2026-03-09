@@ -133,6 +133,23 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(out["receipts"][0]["node_count"], 2)
             self.assertEqual(out["receipts"][0]["edge_count"], 1)
 
+    def test_queries_require_existing_graph_db(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "missing.db"
+
+            with self.assertRaises(ValueError) as ctx:
+                query_upstream(db_path=db_path, node_id="artifact.daily-mission")
+            self.assertIn("graph db not found", str(ctx.exception))
+
+    def test_queries_reject_db_without_graph_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            sqlite3.connect(str(db_path)).close()
+
+            with self.assertRaises(ValueError) as ctx:
+                query_refresh_receipts(db_path=db_path, limit=1)
+            self.assertIn("graph schema missing required tables", str(ctx.exception))
+
     def test_query_refresh_receipts_rejects_limit_above_cap(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db_path = Path(td) / "graph.db"
