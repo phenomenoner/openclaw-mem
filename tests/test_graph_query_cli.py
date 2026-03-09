@@ -251,6 +251,58 @@ class TestGraphQueryCli(unittest.TestCase):
             )
             conn.close()
 
+    def test_cmd_graph_query_provenance_plaintext_includes_edge_types(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "cron.job.beta", "type": "cron_job"},
+                {"id": "artifact.receipt", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.receipt",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L42",
+                },
+                {
+                    "src": "cron.job.beta",
+                    "dst": "artifact.receipt",
+                    "type": "alerts_to",
+                    "provenance": "docs/topology.yaml#L42",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "mem.sqlite"
+            conn = _connect(str(db_path))
+            refresh_topology(topology, db_path=db_path)
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "graph_query_cmd": "provenance",
+                    "db": str(db_path),
+                    "node_id": None,
+                    "edge_type": None,
+                    "min_edge_count": 1,
+                    "limit": 10,
+                    "json": False,
+                },
+            )()
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_query(conn, args)
+
+            text = buf.getvalue()
+            self.assertIn("count=1 total_distinct=1", text)
+            self.assertIn("docs/topology.yaml#L42 edges=2", text)
+            self.assertIn("edge_types=alerts_to:1,writes:1", text)
+            conn.close()
+
     def test_cmd_graph_query_drift_json_payload(self) -> None:
         topology = {
             "nodes": [

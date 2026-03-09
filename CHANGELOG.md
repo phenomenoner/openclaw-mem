@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `openclaw-mem graph query provenance` for deterministic provenance-cardinality reads (with optional node/edge-type filters) so operators can inspect lineage source concentration without mutating graph truth.
 - `graph query provenance` now also returns per-provenance `edge_types` breakdowns (`edge_type` + count) to expose lineage concentration without requiring extra follow-up queries.
 - `graph query provenance` now trims blank/whitespace provenance keys before grouping and supports `--min-edge-count` for bounded high-signal concentration views.
+- Plain-text `graph query provenance` output now includes per-provenance `edge_types=<type:count,...>` summaries so non-JSON operator checks retain concentration detail.
 - `graph query receipts` now supports optional exact filters (`--source-path`, `--topology-digest`) and returns `total_count` alongside paged `count`, so operators can inspect receipt history slices without losing overall cardinality.
 - Expanded episodic auto-mode flow to full conversation coverage:
   - `extensions/openclaw-mem` emits bounded episodic spool JSONL for `tool.call`, `tool.result`, and `ops.alert` under feature flag `config.episodes.enabled`.
@@ -82,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `tests/test_graph_refresh.py` coverage for deterministic topology refresh, schema/meta initialization, JSON topology loading, and unknown-node edge rejection.
 - Added regression coverage for `graph query provenance` in both query-layer and CLI JSON contract tests (`tests/test_graph_query.py`, `tests/test_graph_query_cli.py`).
 - Added provenance guardrail tests for whitespace provenance exclusion and `min_edge_count` filtering in query-layer and CLI paths.
+- Added CLI plain-text coverage for provenance output `edge_types` summaries (`tests/test_graph_query_cli.py`).
 
 ## [1.0.3] - 2026-02-28
 

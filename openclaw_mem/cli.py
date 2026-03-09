@@ -6949,7 +6949,18 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             f"total_distinct={int(result.get('total_distinct', 0))}"
         )
         for item in list(result.get("items") or []):
-            print(f"{item.get('provenance')} edges={item.get('edge_count')}")
+            edge_types = list(item.get("edge_types") or [])
+            if edge_types:
+                edge_types_summary = ",".join(
+                    f"{str(edge.get('edge_type'))}:{int(edge.get('edge_count', 0))}"
+                    for edge in edge_types
+                )
+            else:
+                edge_types_summary = ""
+            line = f"{item.get('provenance')} edges={item.get('edge_count')}"
+            if edge_types_summary:
+                line += f" edge_types={edge_types_summary}"
+            print(line)
         return
 
     if query_cmd == "drift":
