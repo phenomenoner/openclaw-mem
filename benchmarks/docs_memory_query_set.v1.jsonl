@@ -1,0 +1,20 @@
+{"query":"docs memory hybrid search v0", "expects":["docs/specs/docs-memory-hybrid-search-v0.md"], "hints":["docs-memory-hybrid-search-v0"]}
+{"query":"graphic memory query plane v0", "expects":["docs/specs/graphic-memory-query-plane-v0.md"], "hints":["graphic-memory-query-plane-v0"]}
+{"query":"graphic memory auto capture auto recall", "expects":["docs/specs/graphic-memory-auto-capture-auto-recall.md"]}
+{"query":"context budget sidecar v0", "expects":["docs/specs/context-budget-sidecar-v0.md"]}
+{"query":"episodic auto capture v0", "expects":["docs/specs/episodic-auto-capture-v0.md"]}
+{"query":"mem engine versioning safety net", "expects":["docs/specs/mem-engine-versioning-safety-net-v0.md"]}
+{"query":"graph preflight trigger policy", "expects":["docs/specs/graphic-memory-preflight-trigger-policy.md"]}
+{"query":"inside out demo", "expects":["docs/showcase/inside-out-demo.md"]}
+{"query":"install modes", "expects":["docs/install-modes.md"]}
+{"query":"privacy export rules redaction", "expects":["docs/privacy-export-rules.md"]}
+{"query":"upgrade checklist", "expects":["docs/upgrade-checklist.md"]}
+{"query":"dual language memory strategy query_en", "expects":["docs/dual-language-memory-strategy.md"]}
+{"query":"db concurrency", "expects":["docs/db-concurrency.md"]}
+{"query":"architecture", "expects":["docs/architecture.md"]}
+{"query":"release checklist", "expects":["docs/release-checklist.md"]}
+{"query":"automation status", "expects":["docs/automation-status.md"]}
+{"query":"obsidian durable graph", "expects":["docs/obsidian_durable_graph.md"]}
+{"query":"context pack trace", "expects":["docs/context-pack.md"]}
+{"query":"rerank poc plan", "expects":["docs/rerank-poc-plan.md"]}
+{"query":"thought links", "expects":["docs/thought-links.md"]}

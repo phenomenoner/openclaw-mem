@@ -10,11 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Added self-optimizing memory v0.1 observer/reporter command: `openclaw-mem optimize review` (recommendation-first, zero-write).
   - bounded source scan over `observations` (default limit: 1000)
-  - computes low-risk signals: staleness, duplication, bloat, weakly-connected candidates
+  - computes low-risk signals: staleness, duplication, bloat, weakly-connected candidates, and repeated no-result `memory_recall` miss patterns
   - emits structured report `openclaw-mem.optimize.review.v0` + recommendation list (no mutation path)
 - `optimize review --scope` now uses the same scope-token normalization for filtering as duplicate clustering (for example `Alpha Team` and `alpha-team` are treated consistently).
+- `optimize review` now adds a repeated no-result `memory_recall` miss signal (`signals.repeated_misses`) plus a recommendation-first `widen_scope_candidate` proposal, with optional threshold tuning via `--miss-min-count`.
 - Graphic Memory `graph index` / `graph preflight` / `graph export` now enforce `--scope` as a normalized `detail.scope` filter (including CJK fallback + neighborhood expansion), instead of treating it as an advisory hint.
 - Added an initial deterministic query-plane foundation module (`openclaw_mem.graph`) with rebuildable SQLite schema + refresh contract (`topology -> graph_nodes/graph_edges`) and refresh metadata receipts (`schema_version`, digest, counts, source path).
+- Added `openclaw-mem graph query ...` CLI subcommands for deterministic topology reads (`upstream`, `downstream`, `lineage`, `writers`, `filter`) with structured receipt payload `openclaw-mem.graph.query.v0`.
+- Added `openclaw-mem graph query drift --live-json <path> --db <path>` to compare stable topology nodes against runtime-state snapshots (missing/runtime-only/non-ok buckets) without mutating topology truth.
 - Expanded episodic auto-mode flow to full conversation coverage:
   - `extensions/openclaw-mem` emits bounded episodic spool JSONL for `tool.call`, `tool.result`, and `ops.alert` under feature flag `config.episodes.enabled`.
   - added extractor lane `openclaw-mem episodes extract-sessions` to tail OpenClaw session JSONL and emit `conversation.user` / `conversation.assistant` with offset-state tracking.
@@ -43,15 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - new tools: `memory_docs_ingest`, `memory_docs_search`
   - `memory_recall` + `autoRecall` now optionally consult docs cold lane only when hot lane is insufficient (`minHotItems`)
   - bounded receipt/log markers: `openclaw-mem-engine:docsColdLane.ingest`, `openclaw-mem-engine:docsColdLane.search`, plus optional `coldLane` block in recall lifecycle receipts.
-- Hotfixed autoRecall prompt hygiene for default installations:
-  - prompt-side autoRecall receipt comments are now suppressed by default when `receipts.verbosity=low`
-  - the injected memory wrapper guard line now uses a less echo-prone machine-style policy string to reduce user-facing control-plane/meta leaks
 
 ### Docs
 
+- Reframed `README.md` as a slimmer product/entry page focused on value, audience, adoption paths, and a quick local proof.
+- Added `docs/about.md` and `docs/install-modes.md` so the docs site has a product-facing story plus one install/setup decision page.
+- Reworked `docs/index.md`, `docs/quickstart.md`, and `mkdocs.yml` navigation into a coherent entry flow: about -> install path -> quickstart -> reality check -> reference.
 - Documented self-optimizing memory v0.1 observer command (`optimize review`) in `README.md`, `QUICKSTART.md`, `docs/reality-check.md`, `docs/roadmap.md`, and `docs/specs/self-optimizing-memory-loop-v0.md`.
 - Expanded triage marker docs to include ASCII/full-width angle wrappers (`<TODO> ...`, `＜TODO＞ ...`) in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 - Expanded `README.md` triage marker docs to match current parser separators/wrapper coverage (`;` / `；` / `.` / `。` separators plus extended bracket wrapper examples already documented in QUICKSTART/upgrade checklist).
+- Added a direct README pointer to task-marker acceptance details in `docs/upgrade-checklist.md`, so operators can verify accepted TODO/TASK/REMINDER forms without hunting through docs.
 - Aligned triage marker docs with parser support by documenting `[☒]` checklist marker in `README.md`, `QUICKSTART.md`, and `docs/upgrade-checklist.md`.
 - Removed duplicate legacy `uv run python -m openclaw_mem triage --mode tasks ...` example blocks; docs now keep only the frozen `uv run --python 3.13 --frozen -- python -m openclaw_mem ...` form.
 - Standardized README and `docs/upgrade-checklist.md` command examples to deterministic 'uv run --python 3.13 --frozen -- python -m openclaw_mem ...' form.
@@ -59,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `README.md`, `docs/auto-capture.md`, and `docs/deployment.md` with a manual-vs-auto episodic guide and verification steps.
 
 ### Testing
-- Added `tests/test_optimize_review.py` coverage for parser wiring, structured report shape, signal generation, and read-only behavior of `optimize review`.
+- Added `tests/test_optimize_review.py` coverage for parser wiring, structured report shape, signal generation, repeated miss detection (`memory_recall` no-result patterns), and read-only behavior of `optimize review`.
 - Added guardrail regression coverage for invalid/non-finite TODO dedupe and stale-TTL inputs in `extensions/openclaw-mem-engine/todoGuardrails.test.mjs`.
 - Added task-marker regression coverage for ASCII angle wrappers (`<TODO>...`) in parser and triage flows, plus heuristic fixture parity (`tc31`).
 - Added episodic ingest regression tests (`tests/test_episodes_ingest.py`) for offset state handling, invalid JSON lines, bounded payload behavior, and deterministic query ordering after ingest.
@@ -68,6 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `test_triage_json_contract_v0` now writes a temporary cron jobs fixture and passes `--cron-jobs-path`, preventing host-state coupling to `~/.openclaw/cron/jobs.json`.
 - Added docs-cold-lane contract tests (`test_mem_engine_docs_cold_lane.py`) for config schema defaults, trust/provenance markers, and runtime marker wiring.
 - Added `tests/test_graph_refresh.py` coverage for deterministic topology refresh, schema/meta initialization, JSON topology loading, and unknown-node edge rejection.
+
+### Benchmarks
+- Added a fixed docs-memory query set for repeatable benchmark runs (`benchmarks/docs_memory_query_set.v1.jsonl`).
 
 ## [1.0.3] - 2026-02-28
 
@@ -146,7 +153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2026-02-13
 
 ### Release readiness
-- Marked Phase 4 baseline as reached for first-stable release grooming (docs alignment pass).
+- Marked Phase 4 baseline as reached for first-stable release grooming.
 - Clarified importance grading MVP v1 rollout status: ingest/harvest JSON summaries are shipped (`total_seen`, `graded_filled`, `skipped_existing`, `skipped_disabled`, `scorer_errors`, `label_counts`).
 - Added explicit benchmark-plan pointers in docs (`docs/thought-links.md`, `docs/rerank-poc-plan.md`) to guide pre-stable quality checks.
 
@@ -220,101 +227,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `triage --mode heartbeat` now includes: observations scan + cron-errors scan + tasks scan.
 - Version bump to `0.5.6`.
-
-## [0.5.5] - 2026-02-06
-
-### Added
-- `openclaw-mem triage --mode cron-errors`: deterministic scan of OpenClaw cron job store (`~/.openclaw/cron/jobs.json`) for jobs whose `lastStatus != ok`.
-- `openclaw-mem triage --mode heartbeat` now includes both: observations scan + cron error scan.
-
-### Changed
-- Version bump to `0.5.5`.
-
-## [0.5.4] - 2026-02-06
-
-### Added
-- `openclaw-mem triage`: deterministic local scan over recent observations (for cron/heartbeat), with non-zero exit code when attention is needed.
-
-### Changed
-- Version bump to `0.5.4`.
-- License: MIT → Apache-2.0.
-
-## [0.5.2] - 2026-02-06
-
-### Changed
-- Packaging/version alignment: bump Python package to `0.5.2` (fixes mismatch vs git tags).
-- Plugin manifest version aligned to `0.5.2`.
-
-### Docs
-- Deployment guidance: recommended `excludeTools` defaults + logrotate examples.
-- Privacy export rules checklist updated ("export requires --yes") now marked done.
-
-### Testing
-- Unit tests passing (see CI / local run).
-
-## [0.5.1] - 2026-02-06
-
-### Added
-- Route A semantic recall: `openclaw-mem index` + `openclaw-mem semantic` using OpenClaw Gateway `/tools/invoke` → `memory_search` (black-box embeddings).
-
-### Testing
-- Added Route A tests (snippet→obs id extraction + ranking).
-
-## [0.5.0] - 2026-02-06
-
-### Added
-- Gateway routing for `summarize` (`--gateway`, `OPENCLAW_MEM_USE_GATEWAY=1`).
-- Auto-ingest workflow: `openclaw-mem harvest`.
-
-## [0.4.1] - 2026-02-06
-
-### Changed
-- Packaging/version alignment: bump package version to `0.4.1`.
-- Documentation updates (README/CHANGELOG) to reflect that Phase 4 functionality is already shipped.
-
-### Testing
-- 26 unit/integration tests passing.
-
-## [0.4.0] - 2026-02-06
-
-### Added
-- Phase 4 complete release marker (hybrid RRF search + proactive memory tools).
-
-## [0.3.0] - 2026-02-06
-
-### Added
-
-#### Phase 4: Hybrid Search + Proactive Memory Tools
-- Reciprocal Rank Fusion (RRF) implementation for robust hybrid ranking (FTS + vector)
-- `openclaw-mem hybrid` command (RRF fusion)
-- `openclaw-mem store` command (store + embed + append to `memory/YYYY-MM-DD.md`)
-- Plugin tools exposed to the agent: `memory_store` and `memory_recall`
-
-## [0.2.0] - 2026-02-06
-
-### Added
-- Phase 3 vector search (`embed` + `vsearch`)
-- API key auto-resolution from env or `~/.openclaw/openclaw.json` (`agents.defaults.memorySearch.remote.apiKey`)
-
-## [0.1.0-m0] - 2026-02-05
-
-### Added
-- Initial M0 release with CLI-first observation store
-- FTS5 full-text search
-- Progressive disclosure (3-layer search)
-- Basic plugin for auto-capture (tool_result_persist hook)
-
----
-
-## Future Roadmap
-
-### Next (Optional)
-- Weighted hybrid scoring (tuned BM25 + embeddings weights)
-- Optional sqlite-vec acceleration
-- Vector index fingerprint + rebuild workflow
-
-### Integration (Planned)
-- Automated ingestion (cron job or systemd timer)
-- OpenClaw gateway plugin hooks for session lifecycle
-- Memory deduplication and versioning
-- Backup and migration utilities
