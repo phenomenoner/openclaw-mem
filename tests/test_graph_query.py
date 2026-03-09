@@ -9,6 +9,7 @@ from openclaw_mem.graph.query import (
     query_downstream,
     query_filter_nodes,
     query_lineage,
+    query_provenance,
     query_refresh_receipts,
     query_upstream,
     query_writers,
@@ -102,6 +103,64 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(lineage["downstream_count"], 0)
             self.assertEqual(lineage["upstream"][0]["provenance"], "docs/topology.yaml#L31")
             self.assertEqual(lineage["upstream"][0]["metadata"], {"lane": "A-deep"})
+
+    def test_query_provenance_groups_and_filters_edges(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "cron.job.beta", "type": "cron_job"},
+                {"id": "artifact.daily-mission", "type": "artifact"},
+                {"id": "artifact.alert", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.daily-mission",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L10",
+                },
+                {
+                    "src": "cron.job.beta",
+                    "dst": "artifact.daily-mission",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L10",
+                },
+                {
+                    "src": "cron.job.beta",
+                    "dst": "artifact.alert",
+                    "type": "alerts_to",
+                    "provenance": "docs/topology.yaml#L14",
+                },
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.alert",
+                    "type": "alerts_to",
+                    "provenance": "",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path)
+
+            out = query_provenance(db_path=db_path, limit=10)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["query"], "provenance")
+            self.assertEqual(out["total_distinct"], 2)
+            self.assertEqual(out["count"], 2)
+            self.assertEqual(out["items"][0]["provenance"], "docs/topology.yaml#L10")
+            self.assertEqual(out["items"][0]["edge_count"], 2)
+
+            filtered = query_provenance(
+                db_path=db_path,
+                node_id="artifact.daily-mission",
+                edge_type="writes",
+                limit=10,
+            )
+            self.assertEqual(filtered["total_distinct"], 1)
+            self.assertEqual(filtered["count"], 1)
+            self.assertEqual(filtered["items"][0]["edge_count"], 2)
 
     def test_query_refresh_receipts_returns_recent_runs(self) -> None:
         topology = {

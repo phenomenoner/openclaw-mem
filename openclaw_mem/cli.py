@@ -57,6 +57,7 @@ from openclaw_mem.graph.query import (
     query_downstream,
     query_filter_nodes,
     query_lineage,
+    query_provenance,
     query_refresh_receipts,
     query_upstream,
     query_writers,
@@ -6883,6 +6884,13 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             )
         elif query_cmd == "receipts":
             result = query_refresh_receipts(db_path=db_path, limit=getattr(args, "limit", 10))
+        elif query_cmd == "provenance":
+            result = query_provenance(
+                db_path=db_path,
+                node_id=getattr(args, "node_id", None),
+                edge_type=getattr(args, "edge_type", None),
+                limit=getattr(args, "limit", 20),
+            )
         elif query_cmd == "drift":
             result = query_drift(
                 db_path=db_path,
@@ -6923,6 +6931,15 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 f"id={receipt.get('id')} refreshed_at={receipt.get('refreshed_at')} "
                 f"nodes={receipt.get('node_count')} edges={receipt.get('edge_count')}"
             )
+        return
+
+    if query_cmd == "provenance":
+        print(
+            f"count={int(result.get('count', 0))} "
+            f"total_distinct={int(result.get('total_distinct', 0))}"
+        )
+        for item in list(result.get("items") or []):
+            print(f"{item.get('provenance')} edges={item.get('edge_count')}")
         return
 
     if query_cmd == "drift":
@@ -8658,7 +8675,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
     g.set_defaults(func=cmd_graph_auto_status)
 
-    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter/receipts/drift)")
+    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter/receipts/provenance/drift)")
     qsub = g.add_subparsers(dest="graph_query_cmd", required=True)
 
     q = qsub.add_parser("upstream", help="List incoming edges into node_id")
@@ -8685,6 +8702,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     q = qsub.add_parser("receipts", help="List recent deterministic refresh receipts")
     q.add_argument("--limit", type=int, default=10, help="Max receipts to return (default: 10)")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("provenance", help="List provenance references with edge counts")
+    q.add_argument("--node-id", dest="node_id", help="Optional node id filter (matches src or dst)")
+    q.add_argument("--edge-type", dest="edge_type", help="Optional edge type filter")
+    q.add_argument("--limit", type=int, default=20, help="Max provenance rows to return (default: 20)")
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("drift", help="Compare topology graph nodes against runtime state JSON")

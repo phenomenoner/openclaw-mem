@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an initial deterministic query-plane foundation module (`openclaw_mem.graph`) with rebuildable SQLite schema + refresh contract (`topology -> graph_nodes/graph_edges`) and refresh metadata receipts (`schema_version`, digest, counts, source path).
 - Added `openclaw-mem graph query ...` CLI subcommands for deterministic topology reads (`upstream`, `downstream`, `lineage`, `writers`, `filter`) with structured receipt payload `openclaw-mem.graph.query.v0`.
 - Added `openclaw-mem graph query drift --live-json <path> --db <path>` to compare stable topology nodes against runtime-state snapshots (missing/runtime-only/non-ok buckets) without mutating topology truth.
+- Added `openclaw-mem graph query provenance` for deterministic provenance-cardinality reads (with optional node/edge-type filters) so operators can inspect lineage source concentration without mutating graph truth.
 - Expanded episodic auto-mode flow to full conversation coverage:
   - `extensions/openclaw-mem` emits bounded episodic spool JSONL for `tool.call`, `tool.result`, and `ops.alert` under feature flag `config.episodes.enabled`.
   - added extractor lane `openclaw-mem episodes extract-sessions` to tail OpenClaw session JSONL and emit `conversation.user` / `conversation.assistant` with offset-state tracking.
@@ -76,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `test_triage_json_contract_v0` now writes a temporary cron jobs fixture and passes `--cron-jobs-path`, preventing host-state coupling to `~/.openclaw/cron/jobs.json`.
 - Added docs-cold-lane contract tests (`test_mem_engine_docs_cold_lane.py`) for config schema defaults, trust/provenance markers, and runtime marker wiring.
 - Added `tests/test_graph_refresh.py` coverage for deterministic topology refresh, schema/meta initialization, JSON topology loading, and unknown-node edge rejection.
+- Added regression coverage for `graph query provenance` in both query-layer and CLI JSON contract tests (`tests/test_graph_query.py`, `tests/test_graph_query_cli.py`).
 
 ## [1.0.3] - 2026-02-28
 

@@ -225,6 +225,66 @@ def query_lineage(*, db_path: str | Path, node_id: str) -> Dict[str, Any]:
     }
 
 
+def query_provenance(
+    *,
+    db_path: str | Path,
+    node_id: Optional[str] = None,
+    edge_type: Optional[str] = None,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    limit_int = _parse_limit(limit, max_limit=_MAX_RECEIPTS_LIMIT)
+    node = (node_id or "").strip()
+    edge_kind = (edge_type or "").strip()
+
+    where_parts = ["provenance != ''"]
+    where_args: List[Any] = []
+    if node:
+        where_parts.append("(src_id = ? OR dst_id = ?)")
+        where_args.extend([node, node])
+    if edge_kind:
+        where_parts.append("edge_type = ?")
+        where_args.append(edge_kind)
+
+    where_sql = " AND ".join(where_parts)
+
+    conn = connect_graph_db_for_query(db_path)
+    try:
+        total_row = conn.execute(
+            f"SELECT COUNT(DISTINCT provenance) FROM graph_edges WHERE {where_sql}",
+            tuple(where_args),
+        ).fetchone()
+        rows = conn.execute(
+            f"SELECT provenance, COUNT(*) AS edge_count FROM graph_edges WHERE {where_sql} "
+            "GROUP BY provenance ORDER BY edge_count DESC, provenance ASC LIMIT ?",
+            tuple(where_args) + (limit_int,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        items.append(
+            {
+                "provenance": str(row[0]),
+                "edge_count": int(row[1]),
+            }
+        )
+
+    total_distinct = int(total_row[0]) if total_row and total_row[0] is not None else 0
+
+    return {
+        "ok": True,
+        "query": "provenance",
+        "filters": {
+            "node_id": node or None,
+            "edge_type": edge_kind or None,
+        },
+        "count": len(items),
+        "total_distinct": total_distinct,
+        "items": items,
+    }
+
+
 def query_refresh_receipts(*, db_path: str | Path, limit: int = 10) -> Dict[str, Any]:
     limit_int = _parse_limit(limit, max_limit=_MAX_RECEIPTS_LIMIT)
 
