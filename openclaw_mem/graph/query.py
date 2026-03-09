@@ -246,27 +246,46 @@ def query_provenance(
         where_args.append(edge_kind)
 
     where_sql = " AND ".join(where_parts)
+    where_args_tuple = tuple(where_args)
 
     conn = connect_graph_db_for_query(db_path)
     try:
         total_row = conn.execute(
             f"SELECT COUNT(DISTINCT provenance) FROM graph_edges WHERE {where_sql}",
-            tuple(where_args),
+            where_args_tuple,
         ).fetchone()
         rows = conn.execute(
             f"SELECT provenance, COUNT(*) AS edge_count FROM graph_edges WHERE {where_sql} "
             "GROUP BY provenance ORDER BY edge_count DESC, provenance ASC LIMIT ?",
-            tuple(where_args) + (limit_int,),
+            where_args_tuple + (limit_int,),
+        ).fetchall()
+        detail_rows = conn.execute(
+            f"SELECT provenance, edge_type, COUNT(*) AS edge_count FROM graph_edges WHERE {where_sql} "
+            "GROUP BY provenance, edge_type "
+            "ORDER BY provenance ASC, edge_count DESC, edge_type ASC",
+            where_args_tuple,
         ).fetchall()
     finally:
         conn.close()
 
+    edge_types_by_provenance: Dict[str, List[Dict[str, Any]]] = {}
+    for row in detail_rows:
+        provenance = str(row[0])
+        edge_types_by_provenance.setdefault(provenance, []).append(
+            {
+                "edge_type": str(row[1]),
+                "edge_count": int(row[2]),
+            }
+        )
+
     items: List[Dict[str, Any]] = []
     for row in rows:
+        provenance = str(row[0])
         items.append(
             {
-                "provenance": str(row[0]),
+                "provenance": provenance,
                 "edge_count": int(row[1]),
+                "edge_types": edge_types_by_provenance.get(provenance, []),
             }
         )
 

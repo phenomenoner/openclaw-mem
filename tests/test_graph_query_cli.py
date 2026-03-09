@@ -183,6 +183,10 @@ class TestGraphQueryCli(unittest.TestCase):
             self.assertEqual(out["result"]["total_distinct"], 1)
             self.assertEqual(out["result"]["count"], 1)
             self.assertEqual(out["result"]["items"][0]["edge_count"], 2)
+            self.assertEqual(
+                out["result"]["items"][0]["edge_types"],
+                [{"edge_type": "writes", "edge_count": 2}],
+            )
             conn.close()
 
     def test_cmd_graph_query_drift_json_payload(self) -> None:

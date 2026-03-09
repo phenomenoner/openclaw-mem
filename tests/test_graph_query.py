@@ -151,6 +151,10 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(out["count"], 2)
             self.assertEqual(out["items"][0]["provenance"], "docs/topology.yaml#L10")
             self.assertEqual(out["items"][0]["edge_count"], 2)
+            self.assertEqual(
+                out["items"][0]["edge_types"],
+                [{"edge_type": "writes", "edge_count": 2}],
+            )
 
             filtered = query_provenance(
                 db_path=db_path,
@@ -161,6 +165,10 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(filtered["total_distinct"], 1)
             self.assertEqual(filtered["count"], 1)
             self.assertEqual(filtered["items"][0]["edge_count"], 2)
+            self.assertEqual(
+                filtered["items"][0]["edge_types"],
+                [{"edge_type": "writes", "edge_count": 2}],
+            )
 
     def test_query_refresh_receipts_returns_recent_runs(self) -> None:
         topology = {
@@ -208,6 +216,15 @@ class TestGraphQuery(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 query_refresh_receipts(db_path=db_path, limit=1)
             self.assertIn("graph schema missing required tables", str(ctx.exception))
+
+    def test_query_provenance_rejects_limit_above_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology({"nodes": [], "edges": []}, db_path=db_path)
+
+            with self.assertRaises(ValueError) as ctx:
+                query_provenance(db_path=db_path, limit=201)
+            self.assertIn("limit must be <= 200", str(ctx.exception))
 
     def test_query_refresh_receipts_rejects_limit_above_cap(self) -> None:
         with tempfile.TemporaryDirectory() as td:
