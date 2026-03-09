@@ -65,6 +65,7 @@ If that works, the product story is real: you already have a local memory ledger
 - **About the product:** [`docs/about.md`](docs/about.md)
 - **Choose an install path:** [`docs/install-modes.md`](docs/install-modes.md)
 - **Detailed quickstart:** [`QUICKSTART.md`](QUICKSTART.md)
+- **Triage task-marker acceptance (TASK/TODO/REMINDER forms):** [`docs/upgrade-checklist.md`](docs/upgrade-checklist.md)
 - **Docs site:** <https://phenomenoner.github.io/openclaw-mem/>
 - **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
 - **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
