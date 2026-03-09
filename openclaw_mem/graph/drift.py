@@ -7,11 +7,21 @@ from typing import Any, Dict, List, Tuple
 
 
 _NON_OK_STATUSES = {"stale", "error", "missing"}
+_MAX_DRIFT_LIMIT = 200
 
 
 def _normalize_status(raw: Any) -> str:
     token = str(raw or "").strip().lower()
     return token or "unknown"
+
+
+def _parse_limit(raw: int, *, max_limit: int) -> int:
+    limit_int = int(raw)
+    if limit_int <= 0:
+        raise ValueError("limit must be > 0")
+    if limit_int > max_limit:
+        raise ValueError(f"limit must be <= {max_limit}")
+    return limit_int
 
 
 def _bounded_ids(items: List[str], *, limit: int) -> Tuple[List[str], bool]:
@@ -69,9 +79,7 @@ def _load_runtime_state(path: Path) -> Tuple[Dict[str, str], List[str]]:
 
 
 def query_drift(*, db_path: str | Path, live_json_path: str | Path, limit: int = 50) -> Dict[str, Any]:
-    limit_int = int(limit)
-    if limit_int <= 0:
-        raise ValueError("limit must be > 0")
+    limit_int = _parse_limit(limit, max_limit=_MAX_DRIFT_LIMIT)
 
     live_path = Path(str(live_json_path or "").strip())
     if not str(live_path):

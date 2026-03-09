@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
+_MAX_RECEIPTS_LIMIT = 200
+
+
 def _json_load_object(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, str) and raw.strip():
         try:
@@ -31,6 +34,15 @@ def _json_load_tags(raw: Any) -> List[str]:
                     out.append(token)
             return sorted(set(out))
     return []
+
+
+def _parse_limit(raw: int, *, max_limit: int) -> int:
+    limit_int = int(raw)
+    if limit_int <= 0:
+        raise ValueError("limit must be > 0")
+    if limit_int > max_limit:
+        raise ValueError(f"limit must be <= {max_limit}")
+    return limit_int
 
 
 def _load_node_map(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]]:
@@ -212,9 +224,7 @@ def query_lineage(*, db_path: str | Path, node_id: str) -> Dict[str, Any]:
 
 
 def query_refresh_receipts(*, db_path: str | Path, limit: int = 10) -> Dict[str, Any]:
-    limit_int = int(limit)
-    if limit_int <= 0:
-        raise ValueError("limit must be > 0")
+    limit_int = _parse_limit(limit, max_limit=_MAX_RECEIPTS_LIMIT)
 
     conn = sqlite3.connect(str(Path(db_path)))
     try:

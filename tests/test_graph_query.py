@@ -133,6 +133,15 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(out["receipts"][0]["node_count"], 2)
             self.assertEqual(out["receipts"][0]["edge_count"], 1)
 
+    def test_query_refresh_receipts_rejects_limit_above_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology({"nodes": [], "edges": []}, db_path=db_path)
+
+            with self.assertRaises(ValueError) as ctx:
+                query_refresh_receipts(db_path=db_path, limit=201)
+            self.assertIn("limit must be <= 200", str(ctx.exception))
+
     def test_queries_tolerate_malformed_persisted_json(self) -> None:
         topology = {
             "nodes": [

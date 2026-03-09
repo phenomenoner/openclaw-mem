@@ -83,6 +83,25 @@ class TestGraphDrift(unittest.TestCase):
             self.assertEqual(len(out["missing_in_runtime"]["node_ids"]), 1)
             self.assertTrue(out["missing_in_runtime"]["truncated"])
 
+    def test_query_drift_rejects_limit_above_cap(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "n1", "type": "node"},
+            ],
+            "edges": [],
+        }
+        runtime = {"nodes": [{"id": "n1", "status": "ok"}]}
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            runtime_path = Path(td) / "runtime.json"
+            refresh_topology(topology, db_path=db_path)
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                query_drift(db_path=db_path, live_json_path=runtime_path, limit=201)
+            self.assertIn("limit must be <= 200", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
