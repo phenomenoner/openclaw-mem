@@ -72,6 +72,13 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         self.assertIsNotNone(row)
         return dict(row)
 
+    def _assert_canonical_label_counts_keys(self, out: dict) -> None:
+        self.assertIsInstance(out.get("label_counts"), dict)
+        self.assertEqual(
+            set(out["label_counts"].keys()),
+            {"must_remember", "nice_to_have", "ignore", "unknown"},
+        )
+
     def test_ingest_autogrades_importance_when_missing_via_cli_override(self):
         jsonl_path = Path(self.tmpdir.name) / "obs.jsonl"
         obs = {
@@ -97,6 +104,7 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         self.assertEqual(out["skipped_disabled"], 0)
         self.assertEqual(out["scorer_errors"], 0)
         self.assertEqual(sum(out["label_counts"].values()), 1)
+        self._assert_canonical_label_counts_keys(out)
 
         row = self._read_only_row()
         detail = json.loads(row["detail_json"])
@@ -285,6 +293,7 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         self.assertEqual(out.get("total_seen"), 1)
         self.assertEqual(out.get("graded_filled"), 1)
         self.assertEqual(out.get("scorer_errors"), 0)
+        self._assert_canonical_label_counts_keys(out)
 
         row = self._read_only_row()
         detail = json.loads(row["detail_json"])
