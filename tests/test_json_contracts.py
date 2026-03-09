@@ -66,7 +66,25 @@ class TestJsonContracts(unittest.TestCase):
         except json.JSONDecodeError:
             self.fail(f"Invalid JSON output:\\n{result.stdout}")
 
-    def test_harvest_json_contract_v0(self):
+    def _assert_exact_keys(self, payload, expected, label):
+        actual_keys = set(payload.keys())
+        expected_keys = set(expected)
+        missing = sorted(expected_keys - actual_keys)
+        extra = sorted(actual_keys - expected_keys)
+        if missing or extra:
+            self.fail(f"{label} keys drifted: missing={missing} extra={extra}")
+
+    def _assert_version_v0(self, payload):
+        self.assertIsInstance(payload["version"], dict)
+        self.assertEqual(payload["version"].get("schema"), "v0")
+        self.assertIn("openclaw_mem", payload["version"])
+        self._assert_exact_keys(payload["version"], {"openclaw_mem", "schema"}, "version")
+
+    def _write_source_observation(self, obs):
+        line = json.dumps(obs, ensure_ascii=False)
+        self.source.write_text(line + "\n", encoding="utf-8")
+
+    def test_harvest_json_contract_v0_empty_source(self):
         out = self._run_json_ok(
             "harvest",
             "--source",
@@ -77,19 +95,85 @@ class TestJsonContracts(unittest.TestCase):
 
         self.assertEqual(out["kind"], "openclaw-mem.harvest.v0")
         self.assertIsInstance(out["ts"], str)
-        self.assertIsInstance(out["version"], dict)
-        self.assertEqual(out["version"].get("schema"), "v0")
-        self.assertIn("openclaw_mem", out["version"])
-        self.assertIn("total_seen", out)
-        self.assertIn("graded_filled", out)
-        self.assertIn("skipped_existing", out)
-        self.assertIn("skipped_disabled", out)
-        self.assertIn("scorer_errors", out)
-        self.assertIn("label_counts", out)
+        self._assert_version_v0(out)
+        self._assert_exact_keys(
+            out,
+            {
+                "kind",
+                "ts",
+                "version",
+                "ok",
+                "processed_files",
+                "ingested",
+                "reason",
+                "total_seen",
+                "graded_filled",
+                "skipped_existing",
+                "skipped_disabled",
+                "scorer_errors",
+                "label_counts",
+            },
+            "harvest(empty)",
+        )
         self.assertEqual(
             out["label_counts"],
             {"must_remember": 0, "nice_to_have": 0, "ignore": 0, "unknown": 0},
         )
+
+    def test_harvest_json_contract_v0_ingested(self):
+        self._write_source_observation(
+            {
+                "kind": "test.observation",
+                "summary": "contract payload sample",
+                "tool_name": "test",
+                "detail": {"note": "no explicit importance"},
+            }
+        )
+
+        out = self._run_json_ok(
+            "harvest",
+            "--source",
+            str(self.source),
+            "--no-embed",
+            "--no-update-index",
+        )
+
+        self.assertEqual(out["kind"], "openclaw-mem.harvest.v0")
+        self.assertIsInstance(out["ts"], str)
+        self._assert_version_v0(out)
+        self._assert_exact_keys(
+            out,
+            {
+                "kind",
+                "ts",
+                "version",
+                "ok",
+                "ingested",
+                "processed_files",
+                "files",
+                "recovered",
+                "rotated",
+                "source",
+                "archive",
+                "total_seen",
+                "graded_filled",
+                "skipped_existing",
+                "skipped_disabled",
+                "scorer_errors",
+                "label_counts",
+                "embedded",
+            },
+            "harvest(ingested)",
+        )
+        self.assertEqual(out["ingested"], 1)
+        self.assertEqual(out["processed_files"], 1)
+        self.assertEqual(out["embedded"], 0)
+        self.assertEqual(out["archive"], "deleted")
+        self.assertEqual(out["source"], str(self.source))
+        self.assertFalse(out["recovered"])
+        self.assertTrue(out["rotated"])
+        self.assertEqual(len(out["files"]), 1)
+        self.assertNotIn("embed_error", out)
 
     def test_triage_json_contract_v0(self):
         # triage uses exit codes for automation:
@@ -115,27 +199,68 @@ class TestJsonContracts(unittest.TestCase):
 
         self.assertEqual(out["kind"], "openclaw-mem.triage.v0")
         self.assertIsInstance(out["ts"], str)
-        self.assertIsInstance(out["version"], dict)
-        self.assertEqual(out["version"].get("schema"), "v0")
-        self.assertIn("openclaw_mem", out["version"])
-        self.assertIn("needs_attention", out)
-        self.assertIn("observations", out)
-        self.assertIn("cron", out)
-        self.assertIn("tasks", out)
+        self._assert_version_v0(out)
+        self._assert_exact_keys(
+            out,
+            {
+                "kind",
+                "ts",
+                "version",
+                "ok",
+                "mode",
+                "dedupe",
+                "since_minutes",
+                "since_utc",
+                "keywords",
+                "cron_jobs_path",
+                "tasks_since_minutes",
+                "tasks_since_utc",
+                "importance_min",
+                "state_path",
+                "needs_attention",
+                "observations",
+                "cron",
+                "tasks",
+            },
+            "triage",
+        )
+        self._assert_exact_keys(out["observations"], {"found_total", "found_new", "matches"}, "triage.observations")
+        self._assert_exact_keys(out["cron"], {"found_total", "found_new", "matches"}, "triage.cron")
+        self._assert_exact_keys(out["tasks"], {"found_total", "found_new", "matches"}, "triage.tasks")
 
     def test_profile_json_contract_v0(self):
         out = self._run_json_ok("profile")
 
         self.assertEqual(out["kind"], "openclaw-mem.profile.v0")
         self.assertIsInstance(out["ts"], str)
-        self.assertIsInstance(out["version"], dict)
-        self.assertEqual(out["version"].get("schema"), "v0")
-        self.assertIn("openclaw_mem", out["version"])
-        self.assertIn("db", out)
-        self.assertIn("observations", out)
-        self.assertIn("importance", out)
-        self.assertIn("embeddings", out)
-        self.assertIn("recent", out)
+        self._assert_version_v0(out)
+        self._assert_exact_keys(
+            out,
+            {
+                "kind",
+                "ts",
+                "version",
+                "db",
+                "observations",
+                "importance",
+                "embeddings",
+                "recent",
+            },
+            "profile",
+        )
+        self._assert_exact_keys(
+            out["observations"],
+            {"count", "min_ts", "max_ts", "kinds", "tools"},
+            "profile.observations",
+        )
+        self._assert_exact_keys(
+            out["importance"],
+            {"present", "missing", "label_counts", "avg_score"},
+            "profile.importance",
+        )
+        self._assert_exact_keys(out["embeddings"], {"original", "english"}, "profile.embeddings")
+        self._assert_exact_keys(out["embeddings"]["original"], {"count", "models"}, "profile.embeddings.original")
+        self._assert_exact_keys(out["embeddings"]["english"], {"count", "models"}, "profile.embeddings.english")
 
 
 if __name__ == "__main__":
