@@ -229,6 +229,7 @@ class TestGraphQueryCli(unittest.TestCase):
                     "db": str(db_path),
                     "node_id": "artifact.receipt",
                     "edge_type": "writes",
+                    "min_edge_count": 2,
                     "limit": 10,
                     "json": True,
                 },
@@ -242,6 +243,7 @@ class TestGraphQueryCli(unittest.TestCase):
             self.assertEqual(out["query_cmd"], "provenance")
             self.assertEqual(out["result"]["total_distinct"], 1)
             self.assertEqual(out["result"]["count"], 1)
+            self.assertEqual(out["result"]["filters"]["min_edge_count"], 2)
             self.assertEqual(out["result"]["items"][0]["edge_count"], 2)
             self.assertEqual(
                 out["result"]["items"][0]["edge_types"],

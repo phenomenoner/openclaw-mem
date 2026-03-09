@@ -6895,6 +6895,7 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 node_id=getattr(args, "node_id", None),
                 edge_type=getattr(args, "edge_type", None),
                 limit=getattr(args, "limit", 20),
+                min_edge_count=getattr(args, "min_edge_count", 1),
             )
         elif query_cmd == "drift":
             result = query_drift(
@@ -8718,6 +8719,7 @@ def build_parser() -> argparse.ArgumentParser:
     q = qsub.add_parser("provenance", help="List provenance references with edge counts")
     q.add_argument("--node-id", dest="node_id", help="Optional node id filter (matches src or dst)")
     q.add_argument("--edge-type", dest="edge_type", help="Optional edge type filter")
+    q.add_argument("--min-edge-count", dest="min_edge_count", type=int, default=1, help="Only include provenance groups with at least this many edges (default: 1)")
     q.add_argument("--limit", type=int, default=20, help="Max provenance rows to return (default: 20)")
     q.set_defaults(func=cmd_graph_query)
 

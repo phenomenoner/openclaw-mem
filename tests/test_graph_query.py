@@ -170,6 +170,78 @@ class TestGraphQuery(unittest.TestCase):
                 [{"edge_type": "writes", "edge_count": 2}],
             )
 
+    def test_query_provenance_ignores_whitespace_and_supports_min_edge_count(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "cron.job.beta", "type": "cron_job"},
+                {"id": "cron.job.gamma", "type": "cron_job"},
+                {"id": "artifact.daily-mission", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.daily-mission",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L10",
+                },
+                {
+                    "src": "cron.job.beta",
+                    "dst": "artifact.daily-mission",
+                    "type": "alerts_to",
+                    "provenance": "docs/topology.yaml#L20",
+                },
+                {
+                    "src": "cron.job.gamma",
+                    "dst": "artifact.daily-mission",
+                    "type": "feeds",
+                    "provenance": "docs/topology.yaml#L20",
+                },
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.daily-mission",
+                    "type": "blocks",
+                    "provenance": "   ",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path)
+
+            out = query_provenance(db_path=db_path, min_edge_count=2, limit=10)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["total_distinct"], 1)
+            self.assertEqual(out["count"], 1)
+            self.assertEqual(out["filters"]["min_edge_count"], 2)
+            self.assertEqual(out["items"][0]["provenance"], "docs/topology.yaml#L20")
+            self.assertEqual(out["items"][0]["edge_count"], 2)
+            self.assertEqual(
+                out["items"][0]["edge_types"],
+                [
+                    {"edge_type": "alerts_to", "edge_count": 1},
+                    {"edge_type": "feeds", "edge_count": 1},
+                ],
+            )
+
+            broad = query_provenance(db_path=db_path, min_edge_count=1, limit=10)
+            self.assertEqual(broad["total_distinct"], 2)
+            self.assertEqual(broad["count"], 2)
+            self.assertEqual(
+                [item["provenance"] for item in broad["items"]],
+                ["docs/topology.yaml#L20", "docs/topology.yaml#L10"],
+            )
+
+    def test_query_provenance_rejects_invalid_min_edge_count(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology({"nodes": [], "edges": []}, db_path=db_path)
+
+            with self.assertRaises(ValueError) as ctx:
+                query_provenance(db_path=db_path, min_edge_count=0)
+            self.assertIn("min_edge_count must be > 0", str(ctx.exception))
+
     def test_query_refresh_receipts_returns_recent_runs(self) -> None:
         topology = {
             "nodes": [
