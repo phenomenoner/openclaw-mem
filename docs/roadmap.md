@@ -72,7 +72,7 @@ Acceptance criteria:
 
 ### 1.7a) Graphic Memory query plane (operator-facing graph interface)
 
-Status: **ROADMAP**.
+Status: **PARTIAL** (query-plane foundation + deterministic query CLI shipped; deeper provenance integration pending).
 
 - Problem: operators need a practical query layer over stable topology + runtime drift + provenance, but today those relationships are scattered across YAML, cron state, and receipts.
 - Decision: keep repo-backed topology as the source of truth; add a **derived query plane** under `openclaw-mem`.
@@ -80,6 +80,10 @@ Status: **ROADMAP**.
   - source of truth = structured files (YAML / markdown / receipts)
   - derived cache = SQLite graph tables
   - first shippable slice = YAML-only query helper for one-hop operator questions
+- Shipped slice (Unreleased):
+  - deterministic query-plane foundation module + SQLite refresh contract
+  - `graph query` commands for `upstream` / `downstream` / `lineage` / `writers` / `filter`
+  - `graph query drift --live-json <path> --db <path>` for stable-topology vs runtime-state checks
 - Initial operator questions:
   - what depends on this node?
   - what does this node feed/write?
