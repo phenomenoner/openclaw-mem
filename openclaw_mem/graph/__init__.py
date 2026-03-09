@@ -2,6 +2,7 @@ from .query import (
     query_downstream,
     query_filter_nodes,
     query_lineage,
+    query_refresh_receipts,
     query_upstream,
     query_writers,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "query_downstream",
     "query_filter_nodes",
     "query_lineage",
+    "query_refresh_receipts",
     "query_upstream",
     "query_writers",
     "refresh_topology",

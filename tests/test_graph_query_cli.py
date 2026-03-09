@@ -91,6 +91,48 @@ class TestGraphQueryCli(unittest.TestCase):
             self.assertEqual(out["result"]["nodes"][0]["id"], "cron.job.alpha")
             conn.close()
 
+    def test_cmd_graph_query_receipts_json_payload(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "artifact.receipt", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.receipt",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L42",
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "mem.sqlite"
+            conn = _connect(str(db_path))
+            refresh_topology(topology, db_path=db_path, source_path="docs/topology.yaml")
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "graph_query_cmd": "receipts",
+                    "db": str(db_path),
+                    "limit": 5,
+                    "json": True,
+                },
+            )()
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_query(conn, args)
+
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["query_cmd"], "receipts")
+            self.assertEqual(out["result"]["count"], 1)
+            self.assertEqual(out["result"]["receipts"][0]["source_path"], "docs/topology.yaml")
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

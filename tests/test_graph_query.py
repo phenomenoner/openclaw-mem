@@ -9,6 +9,7 @@ from openclaw_mem.graph.query import (
     query_downstream,
     query_filter_nodes,
     query_lineage,
+    query_refresh_receipts,
     query_upstream,
     query_writers,
 )
@@ -101,6 +102,36 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(lineage["downstream_count"], 0)
             self.assertEqual(lineage["upstream"][0]["provenance"], "docs/topology.yaml#L31")
             self.assertEqual(lineage["upstream"][0]["metadata"], {"lane": "A-deep"})
+
+    def test_query_refresh_receipts_returns_recent_runs(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job", "tags": ["background"]},
+                {"id": "artifact.receipt", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.receipt",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L31",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path, source_path="docs/topology-a.yaml")
+            refresh_topology(topology, db_path=db_path, source_path="docs/topology-b.yaml")
+
+            out = query_refresh_receipts(db_path=db_path, limit=1)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["query"], "receipts")
+            self.assertEqual(out["count"], 1)
+            self.assertEqual(len(out["receipts"]), 1)
+            self.assertEqual(out["receipts"][0]["source_path"], "docs/topology-b.yaml")
+            self.assertEqual(out["receipts"][0]["node_count"], 2)
+            self.assertEqual(out["receipts"][0]["edge_count"], 1)
 
     def test_queries_tolerate_malformed_persisted_json(self) -> None:
         topology = {

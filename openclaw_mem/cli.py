@@ -56,6 +56,7 @@ from openclaw_mem.graph.query import (
     query_downstream,
     query_filter_nodes,
     query_lineage,
+    query_refresh_receipts,
     query_upstream,
     query_writers,
 )
@@ -6879,6 +6880,8 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 not_tag=getattr(args, "not_tag", None),
                 node_type=getattr(args, "node_type", None),
             )
+        elif query_cmd == "receipts":
+            result = query_refresh_receipts(db_path=db_path, limit=getattr(args, "limit", 10))
         else:
             raise ValueError(f"unsupported graph query command: {query_cmd}")
     except ValueError as e:
@@ -6903,6 +6906,16 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         print(f"count={int(result.get('count', 0))}")
         for node in list(result.get("nodes") or []):
             print(f"{node.get('id')} type={node.get('type')} tags={','.join(node.get('tags') or [])}")
+        return
+
+    if query_cmd == "receipts":
+        receipts = list(result.get("receipts") or [])
+        print(f"count={int(result.get('count', 0))}")
+        for receipt in receipts:
+            print(
+                f"id={receipt.get('id')} refreshed_at={receipt.get('refreshed_at')} "
+                f"nodes={receipt.get('node_count')} edges={receipt.get('edge_count')}"
+            )
         return
 
     edges = list(result.get("edges") or [])
@@ -8623,7 +8636,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
     g.set_defaults(func=cmd_graph_auto_status)
 
-    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter)")
+    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter/receipts)")
     qsub = g.add_subparsers(dest="graph_query_cmd", required=True)
 
     q = qsub.add_parser("upstream", help="List incoming edges into node_id")
@@ -8646,6 +8659,10 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--tag", help="Require tag")
     q.add_argument("--not-tag", dest="not_tag", help="Exclude tag")
     q.add_argument("--node-type", dest="node_type", help="Require node type")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("receipts", help="List recent deterministic refresh receipts")
+    q.add_argument("--limit", type=int, default=10, help="Max receipts to return (default: 10)")
     q.set_defaults(func=cmd_graph_query)
 
     g = gsub.add_parser("capture-git", help="Capture recent git commits as observations (idempotent)")

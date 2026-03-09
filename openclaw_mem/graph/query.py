@@ -209,3 +209,40 @@ def query_lineage(*, db_path: str | Path, node_id: str) -> Dict[str, Any]:
         "upstream": upstream,
         "downstream": downstream,
     }
+
+
+def query_refresh_receipts(*, db_path: str | Path, limit: int = 10) -> Dict[str, Any]:
+    limit_int = int(limit)
+    if limit_int <= 0:
+        raise ValueError("limit must be > 0")
+
+    conn = sqlite3.connect(str(Path(db_path)))
+    try:
+        rows = conn.execute(
+            "SELECT id, refreshed_at, source_path, topology_digest, node_count, edge_count "
+            "FROM graph_refresh_receipts "
+            "ORDER BY id DESC LIMIT ?",
+            (limit_int,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    receipts: List[Dict[str, Any]] = []
+    for row in rows:
+        receipts.append(
+            {
+                "id": int(row[0]),
+                "refreshed_at": str(row[1]),
+                "source_path": str(row[2]),
+                "topology_digest": str(row[3]),
+                "node_count": int(row[4]),
+                "edge_count": int(row[5]),
+            }
+        )
+
+    return {
+        "ok": True,
+        "query": "receipts",
+        "count": len(receipts),
+        "receipts": receipts,
+    }

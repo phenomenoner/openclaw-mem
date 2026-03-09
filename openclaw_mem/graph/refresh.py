@@ -212,6 +212,11 @@ def refresh_topology(topology: Dict[str, Any], *, db_path: str | Path, source_pa
                     "edge_count": str(len(edges)),
                 },
             )
+            conn.execute(
+                "INSERT INTO graph_refresh_receipts(refreshed_at, source_path, topology_digest, node_count, edge_count) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (refreshed_at, source_path or "", digest, len(nodes), len(edges)),
+            )
     finally:
         conn.close()
 

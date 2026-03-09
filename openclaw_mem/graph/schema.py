@@ -33,6 +33,18 @@ CREATE TABLE IF NOT EXISTS graph_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS graph_refresh_receipts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  refreshed_at TEXT NOT NULL,
+  source_path TEXT NOT NULL,
+  topology_digest TEXT NOT NULL,
+  node_count INTEGER NOT NULL,
+  edge_count INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_graph_refresh_receipts_refreshed_at
+ON graph_refresh_receipts(refreshed_at DESC);
 """
 
 
