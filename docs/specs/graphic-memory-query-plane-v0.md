@@ -99,7 +99,7 @@ tests/
 ### Stage-2 derived SQLite CLI
 - `openclaw-mem graph refresh --topology <path> --db <path>`
 - `openclaw-mem graph query upstream --node <id> --db <path>`
-- `openclaw-mem graph drift --topology <path> --db <path> --live-cron-json <path>`
+- `openclaw-mem graph query drift --live-json <path> --db <path>`
 - `openclaw-mem graph health --db <path> --stale-hours 24`
 
 ### Stage-3 provenance / receipts

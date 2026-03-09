@@ -45,6 +45,10 @@ class TestGraphRefresh(unittest.TestCase):
                 digest = conn.execute(
                     "SELECT value FROM graph_meta WHERE key='topology_digest'"
                 ).fetchone()[0]
+                receipt_count = conn.execute("SELECT COUNT(*) FROM graph_refresh_receipts").fetchone()[0]
+                latest_receipt = conn.execute(
+                    "SELECT topology_digest, node_count, edge_count FROM graph_refresh_receipts ORDER BY id DESC LIMIT 1"
+                ).fetchone()
             finally:
                 conn.close()
 
@@ -52,6 +56,11 @@ class TestGraphRefresh(unittest.TestCase):
             self.assertEqual(edge_count, 1)
             self.assertEqual(schema_version, "1")
             self.assertEqual(digest, out["topology_digest"])
+            self.assertEqual(receipt_count, 1)
+            assert latest_receipt is not None
+            self.assertEqual(latest_receipt[0], out["topology_digest"])
+            self.assertEqual(int(latest_receipt[1]), 2)
+            self.assertEqual(int(latest_receipt[2]), 1)
 
     def test_refresh_topology_is_deterministic_for_reordered_input(self) -> None:
         topology_a = {
@@ -91,6 +100,13 @@ class TestGraphRefresh(unittest.TestCase):
             out_b = refresh_topology(topology_b, db_path=db_path)
 
             self.assertEqual(out_a["topology_digest"], out_b["topology_digest"])
+
+            conn = sqlite3.connect(str(db_path))
+            try:
+                receipt_count = conn.execute("SELECT COUNT(*) FROM graph_refresh_receipts").fetchone()[0]
+            finally:
+                conn.close()
+            self.assertEqual(receipt_count, 2)
 
     def test_refresh_topology_file_json(self) -> None:
         topology = {

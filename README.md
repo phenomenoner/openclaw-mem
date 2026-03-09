@@ -56,6 +56,8 @@ python3 ./scripts/make_sample_jsonl.py --out /tmp/openclaw-mem-sample.jsonl
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json status
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json ingest --file /tmp/openclaw-mem-sample.jsonl
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json search "OpenClaw" --limit 5
+
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json timeline 2 --window 2
 ```
 
 If that works, the product story is real: you already have a local memory ledger plus a recall path you can inspect.

@@ -149,6 +149,7 @@ tests/
   - duplication
   - bloat
   - weakly-connected candidates
+  - repeated no-result `memory_recall` miss patterns
 - structured report: `openclaw-mem.optimize.review.v0`
 - no auto-apply
 - zero writes to memory rows (observe + propose only)
