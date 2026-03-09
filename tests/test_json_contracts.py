@@ -262,6 +262,127 @@ class TestJsonContracts(unittest.TestCase):
         self._assert_exact_keys(out["embeddings"]["original"], {"count", "models"}, "profile.embeddings.original")
         self._assert_exact_keys(out["embeddings"]["english"], {"count", "models"}, "profile.embeddings.english")
 
+    def test_pack_trace_json_contract_v1(self):
+        self._write_source_observation(
+            {
+                "kind": "test.observation",
+                "summary": "pack trace contract sample",
+                "tool_name": "test",
+                "detail": {"note": "trace coverage"},
+            }
+        )
+        harvest_out = self._run_json_ok(
+            "harvest",
+            "--source",
+            str(self.source),
+            "--no-embed",
+            "--no-update-index",
+        )
+        self.assertEqual(harvest_out["ingested"], 1)
+
+        out = self._run_json_ok(
+            "pack",
+            "--query",
+            "pack trace contract",
+            "--trace",
+            "--limit",
+            "3",
+            "--budget-tokens",
+            "200",
+        )
+        self._assert_exact_keys(out, {"bundle_text", "items", "citations", "trace"}, "pack")
+
+        trace = out["trace"]
+        self.assertEqual(trace["kind"], "openclaw-mem.pack.trace.v1")
+        self._assert_exact_keys(
+            trace,
+            {
+                "kind",
+                "ts",
+                "version",
+                "query",
+                "budgets",
+                "lanes",
+                "candidates",
+                "output",
+                "timing",
+                "extensions",
+            },
+            "pack.trace",
+        )
+        self.assertEqual(trace["version"].get("schema"), "v1")
+        self._assert_exact_keys(trace["version"], {"openclaw_mem", "schema"}, "pack.trace.version")
+        self._assert_exact_keys(trace["query"], {"text", "scope", "intent"}, "pack.trace.query")
+        self._assert_exact_keys(
+            trace["budgets"],
+            {"budgetTokens", "maxItems", "maxL2Items", "niceCap"},
+            "pack.trace.budgets",
+        )
+        self.assertIsInstance(trace["lanes"], list)
+        self.assertGreaterEqual(len(trace["lanes"]), 1)
+        lane = trace["lanes"][0]
+        self._assert_exact_keys(lane, {"name", "source", "searched", "retrievers"}, "pack.trace.lanes[0]")
+        if lane["retrievers"]:
+            self._assert_exact_keys(
+                lane["retrievers"][0],
+                {"kind", "topK", "k"},
+                "pack.trace.lanes[0].retrievers[0]",
+            )
+
+        self.assertIsInstance(trace["candidates"], list)
+        if trace["candidates"]:
+            candidate = trace["candidates"][0]
+            self._assert_exact_keys(
+                candidate,
+                {"id", "layer", "importance", "trust", "scores", "decision", "citations"},
+                "pack.trace.candidates[0]",
+            )
+            self._assert_exact_keys(
+                candidate["scores"],
+                {"rrf", "fts", "semantic"},
+                "pack.trace.candidates[0].scores",
+            )
+            self._assert_exact_keys(
+                candidate["decision"],
+                {"included", "reason", "rationale", "caps"},
+                "pack.trace.candidates[0].decision",
+            )
+            self._assert_exact_keys(
+                candidate["decision"]["caps"],
+                {"niceCapHit", "l2CapHit"},
+                "pack.trace.candidates[0].decision.caps",
+            )
+            self._assert_exact_keys(
+                candidate["citations"],
+                {"url", "recordRef"},
+                "pack.trace.candidates[0].citations",
+            )
+
+        self._assert_exact_keys(
+            trace["output"],
+            {
+                "includedCount",
+                "excludedCount",
+                "l2IncludedCount",
+                "citationsCount",
+                "refreshedRecordRefs",
+                "coverage",
+            },
+            "pack.trace.output",
+        )
+        self._assert_exact_keys(
+            trace["output"]["coverage"],
+            {
+                "rationaleMissingCount",
+                "citationMissingCount",
+                "allIncludedHaveRationale",
+                "allIncludedHaveCitations",
+            },
+            "pack.trace.output.coverage",
+        )
+        self._assert_exact_keys(trace["timing"], {"durationMs"}, "pack.trace.timing")
+        self.assertIsInstance(trace["extensions"], dict)
+
 
 if __name__ == "__main__":
     unittest.main()
