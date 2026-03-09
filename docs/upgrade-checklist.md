@@ -62,18 +62,21 @@ Think of each node as a “system test point”.
 ### Node 5 — Operator UX + delivery surface works
 
 **Current baseline status (this workspace):**
-- **PASS** — `last_verified=2026-03-06` (Asia/Taipei)
-- Receipt: `lyria-working-ledger` D28 (`commit 8255c8c`) — `/flush` ACK observed; no duplicate visible replies
+- **PASS / standing baseline** — closed as a routine chase item on `2026-03-10` (Asia/Taipei)
+- Baseline receipt: `lyria-working-ledger` D28 (`commit 8255c8c`) — `/flush` ACK observed; no duplicate visible replies
+- Latest explicit verification before closure: `last_verified=2026-03-06` (Asia/Taipei)
 
 **Verify (OpenClaw):**
 - `/flush` works and sends a brief ACK.
 - `/compact` still behaves; no duplicate replies.
 - cron delivery/wake behavior is stable (no duplicate notifications).
 
-**Receipt validity rule (operator policy):**
-- Node 5 receipts are valid for **7 days**, OR must be re-verified immediately after any:
+**Operator policy (current):**
+- Node 5 is treated as a **standing PASS baseline**, not a calendar-driven re-verify item.
+- Re-verify **only** after a material messaging-surface change or an actual symptom, for example:
   - gateway/Telegram config change
-  - gateway restart
+  - gateway restart / reload that may affect delivery behavior
+  - delivery routing / retry behavior change
   - observed duplicate/noisy deliveries
 
 ---
