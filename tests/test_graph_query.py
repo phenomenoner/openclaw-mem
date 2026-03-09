@@ -195,10 +195,68 @@ class TestGraphQuery(unittest.TestCase):
             self.assertTrue(out["ok"])
             self.assertEqual(out["query"], "receipts")
             self.assertEqual(out["count"], 1)
+            self.assertEqual(out["total_count"], 2)
             self.assertEqual(len(out["receipts"]), 1)
             self.assertEqual(out["receipts"][0]["source_path"], "docs/topology-b.yaml")
             self.assertEqual(out["receipts"][0]["node_count"], 2)
             self.assertEqual(out["receipts"][0]["edge_count"], 1)
+
+    def test_query_refresh_receipts_supports_source_and_digest_filters(self) -> None:
+        topology_a = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "artifact.receipt", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.receipt",
+                    "type": "writes",
+                    "provenance": "docs/topology-a.yaml#L10",
+                },
+            ],
+        }
+        topology_b = {
+            "nodes": [
+                {"id": "cron.job.beta", "type": "cron_job"},
+                {"id": "artifact.receipt", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.beta",
+                    "dst": "artifact.receipt",
+                    "type": "alerts_to",
+                    "provenance": "docs/topology-b.yaml#L20",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            out_a = refresh_topology(topology_a, db_path=db_path, source_path="docs/topology-a.yaml")
+            out_b = refresh_topology(topology_b, db_path=db_path, source_path="docs/topology-b.yaml")
+            refresh_topology(topology_a, db_path=db_path, source_path="docs/topology-a-v2.yaml")
+
+            filtered_source = query_refresh_receipts(
+                db_path=db_path,
+                source_path="docs/topology-a.yaml",
+                limit=10,
+            )
+            self.assertTrue(filtered_source["ok"])
+            self.assertEqual(filtered_source["count"], 1)
+            self.assertEqual(filtered_source["total_count"], 1)
+            self.assertEqual(filtered_source["filters"]["source_path"], "docs/topology-a.yaml")
+            self.assertEqual(filtered_source["receipts"][0]["topology_digest"], out_a["topology_digest"])
+
+            filtered_digest = query_refresh_receipts(
+                db_path=db_path,
+                topology_digest=out_b["topology_digest"],
+                limit=10,
+            )
+            self.assertEqual(filtered_digest["count"], 1)
+            self.assertEqual(filtered_digest["total_count"], 1)
+            self.assertEqual(filtered_digest["filters"]["topology_digest"], out_b["topology_digest"])
+            self.assertEqual(filtered_digest["receipts"][0]["source_path"], "docs/topology-b.yaml")
 
     def test_queries_require_existing_graph_db(self) -> None:
         with tempfile.TemporaryDirectory() as td:

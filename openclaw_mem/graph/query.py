@@ -304,16 +304,42 @@ def query_provenance(
     }
 
 
-def query_refresh_receipts(*, db_path: str | Path, limit: int = 10) -> Dict[str, Any]:
+def query_refresh_receipts(
+    *,
+    db_path: str | Path,
+    limit: int = 10,
+    source_path: Optional[str] = None,
+    topology_digest: Optional[str] = None,
+) -> Dict[str, Any]:
     limit_int = _parse_limit(limit, max_limit=_MAX_RECEIPTS_LIMIT)
+    source = (source_path or "").strip()
+    digest = (topology_digest or "").strip()
+
+    where_parts: List[str] = []
+    where_args: List[Any] = []
+    if source:
+        where_parts.append("source_path = ?")
+        where_args.append(source)
+    if digest:
+        where_parts.append("topology_digest = ?")
+        where_args.append(digest)
+
+    where_sql = ""
+    if where_parts:
+        where_sql = " WHERE " + " AND ".join(where_parts)
 
     conn = connect_graph_db_for_query(db_path)
     try:
+        total_row = conn.execute(
+            "SELECT COUNT(*) FROM graph_refresh_receipts" + where_sql,
+            tuple(where_args),
+        ).fetchone()
         rows = conn.execute(
             "SELECT id, refreshed_at, source_path, topology_digest, node_count, edge_count "
-            "FROM graph_refresh_receipts "
-            "ORDER BY id DESC LIMIT ?",
-            (limit_int,),
+            "FROM graph_refresh_receipts"
+            + where_sql
+            + " ORDER BY id DESC LIMIT ?",
+            tuple(where_args) + (limit_int,),
         ).fetchall()
     finally:
         conn.close()
@@ -331,9 +357,16 @@ def query_refresh_receipts(*, db_path: str | Path, limit: int = 10) -> Dict[str,
             }
         )
 
+    total_count = int(total_row[0]) if total_row and total_row[0] is not None else 0
+
     return {
         "ok": True,
         "query": "receipts",
+        "filters": {
+            "source_path": source or None,
+            "topology_digest": digest or None,
+        },
         "count": len(receipts),
+        "total_count": total_count,
         "receipts": receipts,
     }

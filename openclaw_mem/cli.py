@@ -6883,7 +6883,12 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 node_type=getattr(args, "node_type", None),
             )
         elif query_cmd == "receipts":
-            result = query_refresh_receipts(db_path=db_path, limit=getattr(args, "limit", 10))
+            result = query_refresh_receipts(
+                db_path=db_path,
+                limit=getattr(args, "limit", 10),
+                source_path=getattr(args, "source_path", None),
+                topology_digest=getattr(args, "topology_digest", None),
+            )
         elif query_cmd == "provenance":
             result = query_provenance(
                 db_path=db_path,
@@ -6925,11 +6930,15 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     if query_cmd == "receipts":
         receipts = list(result.get("receipts") or [])
-        print(f"count={int(result.get('count', 0))}")
+        print(
+            f"count={int(result.get('count', 0))} "
+            f"total_count={int(result.get('total_count', 0))}"
+        )
         for receipt in receipts:
             print(
                 f"id={receipt.get('id')} refreshed_at={receipt.get('refreshed_at')} "
-                f"nodes={receipt.get('node_count')} edges={receipt.get('edge_count')}"
+                f"nodes={receipt.get('node_count')} edges={receipt.get('edge_count')} "
+                f"source={receipt.get('source_path')}"
             )
         return
 
@@ -8702,6 +8711,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     q = qsub.add_parser("receipts", help="List recent deterministic refresh receipts")
     q.add_argument("--limit", type=int, default=10, help="Max receipts to return (default: 10)")
+    q.add_argument("--source-path", dest="source_path", help="Optional exact source_path filter")
+    q.add_argument("--topology-digest", dest="topology_digest", help="Optional exact topology_digest filter")
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("provenance", help="List provenance references with edge counts")
