@@ -15,7 +15,7 @@ class TestJsonContracts(unittest.TestCase):
         self.source = Path(self.tmpdir.name) / "openclaw-mem-observations.jsonl"
         self.state_path = Path(self.tmpdir.name) / "triage-state.json"
         self.cron_jobs_path = Path(self.tmpdir.name) / "jobs.json"
-        self.cron_jobs_path.write_text("{\"jobs\": []}", encoding="utf-8")
+        self.cron_jobs_path.write_text('{"jobs": []}', encoding="utf-8")
 
     def tearDown(self):
         self.tmpdir.cleanup()
@@ -122,6 +122,20 @@ class TestJsonContracts(unittest.TestCase):
         self.assertIn("observations", out)
         self.assertIn("cron", out)
         self.assertIn("tasks", out)
+
+    def test_profile_json_contract_v0(self):
+        out = self._run_json_ok("profile")
+
+        self.assertEqual(out["kind"], "openclaw-mem.profile.v0")
+        self.assertIsInstance(out["ts"], str)
+        self.assertIsInstance(out["version"], dict)
+        self.assertEqual(out["version"].get("schema"), "v0")
+        self.assertIn("openclaw_mem", out["version"])
+        self.assertIn("db", out)
+        self.assertIn("observations", out)
+        self.assertIn("importance", out)
+        self.assertIn("embeddings", out)
+        self.assertIn("recent", out)
 
 
 if __name__ == "__main__":

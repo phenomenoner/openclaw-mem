@@ -1319,6 +1319,9 @@ def cmd_profile(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     total_count = int(row["n"] or 0)
 
     data = {
+        "kind": "openclaw-mem.profile.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
         "db": args.db,
         "observations": {
             "count": total_count,
