@@ -186,6 +186,9 @@ type PluginConfig = {
   workingSet?: boolean | WorkingSetConfigInput;
   receipts?: boolean | ReceiptsConfigInput;
   docsColdLane?: boolean | DocsColdLaneConfigInput;
+  // Hard write-path guard. When enabled, reject memory_store/memory_forget/memory_import/memory_docs_ingest
+  // and disable autoCapture.
+  readOnly?: boolean;
 };
 
 const DEFAULT_DB_PATH = "~/.openclaw/memory/lancedb";
@@ -3064,6 +3067,15 @@ function resolveStateRelativePath(api: OpenClawPluginApi, input: string | undefi
   return api.resolvePath(raw);
 }
 
+function parseEnvBoolean(raw: string | undefined): boolean | undefined {
+  if (raw == null) return undefined;
+  const v = String(raw).trim().toLowerCase();
+  if (!v) return undefined;
+  if (v in {"1": true, "true": true, "yes": true, "on": true, "y": true}) return true;
+  if (v in {"0": true, "false": true, "no": true, "off": true, "n": true}) return false;
+  return undefined;
+}
+
 function assertAllowedKeys(value: Record<string, unknown>, allowed: string[], label: string): void {
   const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
   if (unknown.length === 0) return;
@@ -3093,6 +3105,7 @@ const memoryEngineConfigSchema = {
         "workingSet",
         "receipts",
         "docsColdLane",
+        "readOnly",
       ],
       "openclaw-mem-engine config",
     );
@@ -3387,6 +3400,7 @@ const memoryEngineConfigSchema = {
       workingSet: parseWorkingSet(cfg.workingSet),
       receipts: parseReceipts(cfg.receipts),
       docsColdLane: parseDocsColdLane(cfg.docsColdLane),
+      readOnly: typeof cfg.readOnly === "boolean" ? cfg.readOnly : undefined,
     };
   },
   uiHints: {
@@ -3427,6 +3441,11 @@ const memoryEngineConfigSchema = {
     tableName: {
       label: "Table Name",
       placeholder: "memories",
+      advanced: true,
+    },
+    readOnly: {
+      label: "Read-only mode",
+      help: "Reject write-path tools (memory_store/forget/import/docs_ingest) and disable autoCapture.",
       advanced: true,
     },
     "autoRecall.enabled": {
@@ -3635,6 +3654,10 @@ const memoryPlugin = {
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
 
+    const envReadOnly = parseEnvBoolean(process.env.OPENCLAW_MEM_ENGINE_READONLY);
+    const readOnlyEnabled = envReadOnly ?? Boolean(cfg.readOnly);
+    const readOnlySource = envReadOnly != null ? "env:OPENCLAW_MEM_ENGINE_READONLY" : (cfg.readOnly != null ? "config:readOnly" : "default");
+
     const autoRecallCfg = resolveAutoRecallConfig(cfg.autoRecall);
     const autoCaptureCfg = resolveAutoCaptureConfig(cfg.autoCapture);
     const scopePolicyCfg = resolveScopePolicyConfig(cfg.scopePolicy);
@@ -3662,7 +3685,7 @@ const memoryPlugin = {
     const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model, embeddingClampCfg) : null;
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
     );
 
     const resolveAdminFilters = (input: {
@@ -3878,7 +3901,7 @@ const memoryPlugin = {
       return { hits: result.items as DocsColdLaneHit[], receipt };
     };
 
-    if (docsColdLaneResolved.enabled && docsColdLaneResolved.ingestOnStart) {
+    if (docsColdLaneResolved.enabled && docsColdLaneResolved.ingestOnStart && !readOnlyEnabled) {
       void runDocsColdLaneIngest({ trigger: "startup" }).catch((err) => {
         api.logger.warn(`openclaw-mem-engine:docsColdLane.ingest failed: ${String(err)}`);
       });
@@ -4629,6 +4652,20 @@ const memoryPlugin = {
             scope: scopeInput,
           } = params as { text: string; importance?: number; category?: MemoryCategory; scope?: string };
 
+          if (readOnlyEnabled) {
+            const latencyMs = Math.round(performance.now() - t0);
+            return {
+              content: [{ type: "text", text: "Refusing to store memory: openclaw-mem-engine is running in read-only mode." }],
+              details: {
+                error: "readonly_mode",
+                tool: "memory_store",
+                readOnly: true,
+                readOnlySource,
+                receipt: { dbPath: resolvedDbPath, tableName, latencyMs },
+              },
+            };
+          }
+
           if (!embeddings) {
             return {
               content: [
@@ -4743,6 +4780,21 @@ const memoryPlugin = {
         async execute(_toolCallId: string, params: unknown) {
           const t0 = performance.now();
           const { query, memoryId } = params as { query?: string; memoryId?: string };
+
+          if (readOnlyEnabled && memoryId) {
+            const latencyMs = Math.round(performance.now() - t0);
+            return {
+              content: [{ type: "text", text: "Refusing to forget memory: openclaw-mem-engine is running in read-only mode." }],
+              details: {
+                error: "readonly_mode",
+                tool: "memory_forget",
+                readOnly: true,
+                readOnlySource,
+                id: memoryId,
+                receipt: { dbPath: resolvedDbPath, tableName, latencyMs },
+              },
+            };
+          }
 
           if (memoryId) {
             await db.deleteById(memoryId);
@@ -5004,6 +5056,21 @@ const memoryPlugin = {
             format?: AdminExportFormat;
           };
 
+          const effectiveDryRun = Boolean(parsed.dryRun) || Boolean(parsed.validateOnly);
+          if (readOnlyEnabled && !effectiveDryRun) {
+            const latencyMs = Math.round(performance.now() - t0);
+            return {
+              content: [{ type: "text", text: "Refusing to import memories: openclaw-mem-engine is running in read-only mode. Re-run with dryRun/validateOnly if you only need validation." }],
+              details: {
+                error: "readonly_mode",
+                tool: "memory_import",
+                readOnly: true,
+                readOnlySource,
+                receipt: { dbPath: resolvedDbPath, tableName, latencyMs },
+              },
+            };
+          }
+
           const result = await importMemories(parsed);
           const latencyMs = Math.round(performance.now() - t0);
 
@@ -5050,6 +5117,18 @@ const memoryPlugin = {
             maxChunkChars?: number;
             embedOnIngest?: boolean;
           };
+
+          if (readOnlyEnabled) {
+            return {
+              content: [{ type: "text", text: "Refusing to ingest docs: openclaw-mem-engine is running in read-only mode." }],
+              details: {
+                error: "readonly_mode",
+                tool: "memory_docs_ingest",
+                readOnly: true,
+                readOnlySource,
+              },
+            };
+          }
 
           const result = await runDocsColdLaneIngest({
             sourceRoots: parsed.sourceRoots,
@@ -5563,7 +5642,11 @@ const memoryPlugin = {
         });
     }
 
-    if (autoCaptureCfg.enabled) {
+    if (autoCaptureCfg.enabled && readOnlyEnabled) {
+      api.logger.info(`openclaw-mem-engine: autoCapture disabled (readOnly=${readOnlySource})`);
+    }
+
+    if (autoCaptureCfg.enabled && !readOnlyEnabled) {
       if (!embeddings) {
         api.logger.warn("openclaw-mem-engine: autoCapture enabled but embeddings are unavailable");
       } else {

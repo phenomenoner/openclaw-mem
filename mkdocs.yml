@@ -33,6 +33,9 @@ nav:
   - Choose an install path: install-modes.md
   - Quickstart: quickstart.md
   - Reality check & status: reality-check.md
+  - Showcase:
+      - Inside-Out demo: showcase/inside-out-demo.md
+      - Topology demo: showcase/topology-demo.md
   - Releases: https://github.com/phenomenoner/openclaw-mem/releases
   - Reference:
       - Ecosystem fit: ecosystem-fit.md
@@ -42,6 +45,8 @@ nav:
       - Engine admin ops: mem-engine-admin-ops.md
       - Architecture: architecture.md
       - Context pack: context-pack.md
+      - Agent memory skill (SOP): agent-memory-skill.md
+      - Agent memory skill cards: agent-memory-skill-cards.md
       - Importance grading: importance-grading.md
       - Automation status: automation-status.md
       - Roadmap: roadmap.md
@@ -50,6 +55,8 @@ nav:
       - Obsidian: obsidian.md
       - Release checklist (repo rule): release-checklist.md
   - Specs:
+      - Agent memory skill (blueprint v0): specs/agent-memory-skill-v0.md
+      - Topology knowledge (L3 blueprint v0): specs/topology-knowledge-v0.md
       - Docs memory (hybrid search v0): specs/docs-memory-hybrid-search-v0.md
       - Episodic events ledger (v0): specs/episodic-events-ledger-v0.md
       - Episodic auto-capture (v0): specs/episodic-auto-capture-v0.md

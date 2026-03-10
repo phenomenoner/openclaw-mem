@@ -72,6 +72,7 @@ Read:
 - [Quickstart](quickstart.md)
 - [Deployment guide](deployment.md)
 - [Auto-capture plugin](auto-capture.md)
+- [Agent memory skill (SOP)](agent-memory-skill.md) (recommended agent prompt contract)
 
 ### Rollback
 
@@ -108,6 +109,7 @@ Read:
 - [Mem Engine reference](mem-engine.md)
 - [Ecosystem fit](ecosystem-fit.md)
 - [Deployment guide](deployment.md)
+- [Agent memory skill (SOP)](agent-memory-skill.md) (recommended agent prompt contract)
 
 ### Rollback
 

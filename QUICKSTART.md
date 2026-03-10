@@ -188,7 +188,7 @@ This command is zero-write by design in v0.1: it only reports candidates (stalen
 Enable per-command:
 
 ```bash
-# alias accepted: heuristic_v1
+# aliases accepted: heuristic_v1, heuristic_v2
 OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 ```
 
@@ -233,9 +233,28 @@ OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run --python 3.13 --frozen -- python -m 
 
 Spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 
+## Step 8.5: Topology query smoke test (optional, dev)
+
+Load the curated topology fixture and run one deterministic query:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph topology-refresh --file ./docs/topology.json --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph query subgraph project.openclaw-mem --depth 1 --limit 20 --json
+```
+
+Use this when you want a quick read-only check that topology refresh + query plumbing is alive before deeper graph/drift debugging.
+
 ## Next steps
 
 - Full docs: `README.md`
+- Agent memory skill (SOP/manual): `docs/agent-memory-skill.md`
+- Agent memory skill cards (global + read-only carve-out):
+  - `skills/agent-memory-skill.global.md`
+  - `skills/agent-memory-skill.readonly.md`
+- Prompt wiring templates (real OpenClaw prompt surfaces):
+  - `docs/snippets/openclaw-agentturn-message.global-default.md`
+  - `docs/snippets/openclaw-agentturn-message.watchdog-readonly.md`
+  - helper: `scripts/json_escape.py`
 - Reality check & status: `docs/reality-check.md`
 - Plugin details: `docs/auto-capture.md`
 - Deployment: `docs/deployment.md`

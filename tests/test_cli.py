@@ -62,6 +62,7 @@ class TestCliM0(unittest.TestCase):
 
     def test_normalize_importance_scorer_value_accepts_common_aliases(self):
         self.assertEqual(_normalize_importance_scorer_value("heuristic_v1"), "heuristic-v1")
+        self.assertEqual(_normalize_importance_scorer_value("heuristic_v2"), "heuristic-v2")
         self.assertEqual(_normalize_importance_scorer_value("Heuristic v1"), "heuristic-v1")
         self.assertEqual(_normalize_importance_scorer_value(" heuristic-v1 "), "heuristic-v1")
         self.assertEqual(_normalize_importance_scorer_value("heuristic-v2"), "heuristic-v2")
@@ -209,6 +210,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("〘TODO〙clean old notes"))
         self.assertTrue(_summary_has_task_marker("【TODO】clean old notes"))
         self.assertTrue(_summary_has_task_marker("〔TODO〕clean old notes"))
+        self.assertTrue(_summary_has_task_marker("{TODO}clean old notes"))
         self.assertTrue(_summary_has_task_marker("-TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker("+TODO clean old notes"))
         self.assertTrue(_summary_has_task_marker(">TODO clean old notes"))
@@ -281,6 +283,11 @@ class TestCliM0(unittest.TestCase):
         a = build_parser().parse_args(["graph", "auto-status"])
         self.assertEqual(a.cmd, "graph")
         self.assertEqual(a.graph_cmd, "auto-status")
+
+        a = build_parser().parse_args(["graph", "topology-refresh", "--file", "/tmp/topology.json"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "topology-refresh")
+        self.assertEqual(a.file, "/tmp/topology.json")
 
         a = build_parser().parse_args(["graph", "capture-git", "--repo", "/tmp/repo"])
         self.assertEqual(a.cmd, "graph")

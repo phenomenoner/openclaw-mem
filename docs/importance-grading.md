@@ -43,6 +43,11 @@ These labels are meant to be used as **triage / recall priorities**, not as “t
 - `nice_to_have`: useful context, but not mission-critical (supporting notes, transient-but-helpful facts).
 - `ignore`: low-signal noise (routine logs, duplicate status, ephemeral chatter).
 
+### Where importance labels get used
+
+- **Context packing:** `openclaw-mem pack` uses the label tier (for example, the `niceCap` budget) to keep “nice-to-have” from dominating the bundle.
+- **Agent routing:** the [Agent memory skill (SOP)](agent-memory-skill.md) assumes stores are sparse and intentional; importance labels are how we keep that intent visible downstream.
+
 ### Ungraded items
 If `detail_json.importance` is missing, treat it as **unknown**.
 By default, do **not** drop/filter ungraded items unless a caller explicitly requests filtering.

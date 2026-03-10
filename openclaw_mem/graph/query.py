@@ -9,6 +9,7 @@ from .schema import connect_graph_db_for_query
 
 
 _MAX_RECEIPTS_LIMIT = 200
+_MAX_LINEAGE_DEPTH = 8
 
 
 def _json_load_object(raw: Any) -> Dict[str, Any]:
@@ -37,6 +38,34 @@ def _json_load_tags(raw: Any) -> List[str]:
             return sorted(set(out))
     return []
 
+
+def _normalize_token_list(raw: Any) -> List[str]:
+    """Normalize optional CLI-ish inputs into a stable de-duped list of non-empty strings.
+
+    Accepts: None, str (comma-separated allowed), list/tuple/set of items.
+    """
+    if raw is None:
+        return []
+    tokens: List[str] = []
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.split(",")]
+        tokens = [p for p in parts if p]
+    elif isinstance(raw, (list, tuple, set)):
+        for item in raw:
+            if item is None:
+                continue
+            if isinstance(item, str):
+                parts = [p.strip() for p in item.split(",")]
+                tokens.extend([p for p in parts if p])
+            else:
+                token = str(item).strip()
+                if token:
+                    tokens.append(token)
+    else:
+        token = str(raw).strip()
+        if token:
+            tokens.append(token)
+    return sorted(set(tokens))
 
 def _parse_limit(raw: int, *, max_limit: int) -> int:
     limit_int = int(raw)
@@ -206,18 +235,112 @@ def query_filter_nodes(
     }
 
 
-def query_lineage(*, db_path: str | Path, node_id: str) -> Dict[str, Any]:
+def _edge_identity(edge: Dict[str, Any]) -> Tuple[str, str, str, str]:
+    return (
+        str(edge.get("src") or ""),
+        str(edge.get("dst") or ""),
+        str(edge.get("type") or ""),
+        str(edge.get("provenance") or ""),
+    )
+
+
+def _lineage_traverse(
+    *,
+    start_node: str,
+    adjacency: Dict[str, List[Dict[str, Any]]],
+    node_map: Dict[str, Dict[str, Any]],
+    max_depth: int,
+    next_node_field: str,
+) -> List[Dict[str, Any]]:
+    frontier = {start_node}
+    visited_nodes = {start_node}
+    seen_edges: set[Tuple[str, str, str, str]] = set()
+    out: List[Dict[str, Any]] = []
+
+    for depth in range(1, max_depth + 1):
+        if not frontier:
+            break
+
+        next_frontier: set[str] = set()
+        for current in sorted(frontier):
+            candidates = adjacency.get(current) or []
+            for edge in candidates:
+                identity = _edge_identity(edge)
+                if identity in seen_edges:
+                    continue
+                seen_edges.add(identity)
+
+                item = dict(edge)
+                item["depth"] = depth
+                item["src_node"] = node_map.get(str(edge.get("src") or ""))
+                item["dst_node"] = node_map.get(str(edge.get("dst") or ""))
+                out.append(item)
+
+                next_node = str(edge.get(next_node_field) or "")
+                if next_node and next_node not in visited_nodes:
+                    next_frontier.add(next_node)
+
+        visited_nodes.update(next_frontier)
+        frontier = next_frontier
+
+    out.sort(
+        key=lambda edge: (
+            int(edge.get("depth", 0)),
+            str(edge.get("src") or ""),
+            str(edge.get("dst") or ""),
+            str(edge.get("type") or ""),
+            str(edge.get("provenance") or ""),
+        )
+    )
+    return out
+
+
+def query_lineage(*, db_path: str | Path, node_id: str, max_depth: int = 1) -> Dict[str, Any]:
     node = str(node_id or "").strip()
     if not node:
         raise ValueError("node_id is required")
 
-    upstream = _query_edges(db_path=db_path, where_sql="dst_id = ?", where_args=(node,))
-    downstream = _query_edges(db_path=db_path, where_sql="src_id = ?", where_args=(node,))
+    depth_int = _parse_limit(max_depth, max_limit=_MAX_LINEAGE_DEPTH)
+
+    conn = connect_graph_db_for_query(db_path)
+    try:
+        node_map = _load_node_map(conn)
+        all_edges = _edge_rows(conn, where_sql="1 = 1", where_args=())
+    finally:
+        conn.close()
+
+    upstream_by_dst: Dict[str, List[Dict[str, Any]]] = {}
+    downstream_by_src: Dict[str, List[Dict[str, Any]]] = {}
+    for edge in all_edges:
+        src = str(edge.get("src") or "")
+        dst = str(edge.get("dst") or "")
+        upstream_by_dst.setdefault(dst, []).append(edge)
+        downstream_by_src.setdefault(src, []).append(edge)
+
+    for mapping in (upstream_by_dst, downstream_by_src):
+        for key in list(mapping.keys()):
+            mapping[key].sort(key=_edge_identity)
+
+    upstream = _lineage_traverse(
+        start_node=node,
+        adjacency=upstream_by_dst,
+        node_map=node_map,
+        max_depth=depth_int,
+        next_node_field="src",
+    )
+    downstream = _lineage_traverse(
+        start_node=node,
+        adjacency=downstream_by_src,
+        node_map=node_map,
+        max_depth=depth_int,
+        next_node_field="dst",
+    )
 
     return {
         "ok": True,
         "query": "lineage",
         "node_id": node,
+        "max_depth": depth_int,
         "upstream_count": len(upstream),
         "downstream_count": len(downstream),
         "upstream": upstream,
@@ -387,3 +510,280 @@ def query_refresh_receipts(
         "total_count": total_count,
         "receipts": receipts,
     }
+
+
+_MAX_SUBGRAPH_HOPS = 6
+_MAX_SUBGRAPH_NODES_LIMIT = 500
+_MAX_SUBGRAPH_EDGES_LIMIT = 1000
+
+
+def _latest_refresh_receipt(conn: sqlite3.Connection) -> Optional[Dict[str, Any]]:
+    row = conn.execute(
+        "SELECT id, refreshed_at, source_path, topology_digest, node_count, edge_count "
+        "FROM graph_refresh_receipts ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": int(row[0]),
+        "refreshed_at": str(row[1]),
+        "source_path": str(row[2]),
+        "topology_digest": str(row[3]),
+        "node_count": int(row[4]),
+        "edge_count": int(row[5]),
+    }
+
+
+def _summarize_provenance_for_edges(edges: List[Dict[str, Any]]) -> Dict[str, Any]:
+    by_prov: Dict[str, Dict[str, Any]] = {}
+    for edge in edges:
+        prov = str(edge.get("provenance") or "").strip()
+        if not prov:
+            continue
+        entry = by_prov.setdefault(
+            prov,
+            {"provenance": prov, "edge_count": 0, "edge_types": {}},
+        )
+        entry["edge_count"] += 1
+        edge_type = str(edge.get("type") or "").strip() or "unknown"
+        edge_types: Dict[str, int] = entry["edge_types"]
+        edge_types[edge_type] = int(edge_types.get(edge_type, 0)) + 1
+
+    items: List[Dict[str, Any]] = []
+    for prov in sorted(by_prov.keys()):
+        entry = by_prov[prov]
+        edge_types = entry.get("edge_types") or {}
+        edge_types_list = [
+            {"edge_type": k, "edge_count": int(v)}
+            for k, v in sorted(edge_types.items(), key=lambda kv: (-int(kv[1]), str(kv[0])))
+        ]
+        items.append(
+            {
+                "provenance": prov,
+                "edge_count": int(entry.get("edge_count", 0)),
+                "edge_types": edge_types_list,
+            }
+        )
+
+    items.sort(key=lambda item: (-int(item.get("edge_count", 0)), str(item.get("provenance"))))
+    return {
+        "count": len(items),
+        "items": items,
+    }
+
+
+def _edge_rows_for_frontier(
+    conn: sqlite3.Connection,
+    *,
+    frontier: List[str],
+    direction: str,
+) -> List[Dict[str, Any]]:
+    if not frontier:
+        return []
+
+    ids = [str(x).strip() for x in frontier if str(x).strip()]
+    ids = sorted(set(ids))
+    placeholders = ", ".join(["?"] * len(ids))
+
+    if direction == "upstream":
+        where_sql = f"dst_id IN ({placeholders})"
+        where_args: Tuple[Any, ...] = tuple(ids)
+    elif direction == "downstream":
+        where_sql = f"src_id IN ({placeholders})"
+        where_args = tuple(ids)
+    elif direction == "both":
+        where_sql = f"(src_id IN ({placeholders}) OR dst_id IN ({placeholders}))"
+        where_args = tuple(ids) + tuple(ids)
+    else:
+        raise ValueError("direction must be one of: upstream, downstream, both")
+
+    return _edge_rows(conn, where_sql=where_sql, where_args=where_args)
+
+
+def _render_subgraph_bundle_text(
+    *,
+    center: str,
+    hops: int,
+    direction: str,
+    nodes: List[Dict[str, Any]],
+    edges: List[Dict[str, Any]],
+    edge_types: Optional[List[str]] = None,
+    include_node_types: Optional[List[str]] = None,
+) -> str:
+    lines: List[str] = []
+    edge_types_norm = sorted(set(edge_types or []))
+    node_types_norm = sorted(set(include_node_types or []))
+    filters: List[str] = []
+    if edge_types_norm:
+        filters.append("edge_types=" + ",".join(edge_types_norm))
+    if node_types_norm:
+        filters.append("include_node_types=" + ",".join(node_types_norm))
+    filters_suffix = (" " + " ".join(filters)) if filters else ""
+
+    lines.append(
+        "# Topology (bounded subgraph)\n"
+        f"center={center} hops={hops} direction={direction} nodes={len(nodes)} edges={len(edges)}{filters_suffix}\n"
+    )
+    if nodes:
+        lines.append("## Nodes")
+        for node in nodes:
+            tags = ",".join(node.get("tags") or [])
+            tag_suffix = f" tags={tags}" if tags else ""
+            lines.append(f"- {node.get('id')} type={node.get('type')}{tag_suffix}")
+        lines.append("")
+
+    lines.append("## Edges (with provenance)")
+    for edge in edges:
+        prov = str(edge.get("provenance") or "").strip()
+        prov_suffix = f"  [{prov}]" if prov else ""
+        lines.append(
+            f"- {edge.get('src')} --{edge.get('type')}--> {edge.get('dst')}{prov_suffix}"
+        )
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def query_subgraph(
+    *,
+    db_path: str | Path,
+    node_id: str,
+    hops: int = 2,
+    direction: str = "both",
+    max_nodes: int = 40,
+    max_edges: int = 80,
+    edge_types: Optional[List[str]] = None,
+    include_node_types: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    center = str(node_id or "").strip()
+    if not center:
+        raise ValueError("node_id is required")
+
+    hops_int = int(hops)
+    if hops_int < 0:
+        raise ValueError("hops must be >= 0")
+    if hops_int > _MAX_SUBGRAPH_HOPS:
+        raise ValueError(f"hops must be <= {_MAX_SUBGRAPH_HOPS}")
+
+    direction_norm = str(direction or "").strip().lower() or "both"
+    if direction_norm not in {"upstream", "downstream", "both"}:
+        raise ValueError("direction must be one of: upstream, downstream, both")
+
+    max_nodes_int = int(max_nodes)
+    max_edges_int = int(max_edges)
+    if max_nodes_int <= 0 or max_edges_int <= 0:
+        raise ValueError("max_nodes/max_edges must be > 0")
+    if max_nodes_int > _MAX_SUBGRAPH_NODES_LIMIT:
+        raise ValueError(f"max_nodes must be <= {_MAX_SUBGRAPH_NODES_LIMIT}")
+    if max_edges_int > _MAX_SUBGRAPH_EDGES_LIMIT:
+        raise ValueError(f"max_edges must be <= {_MAX_SUBGRAPH_EDGES_LIMIT}")
+
+    edge_type_allow = set(_normalize_token_list(edge_types))
+    include_type_allow = set(_normalize_token_list(include_node_types))
+
+    conn = connect_graph_db_for_query(db_path)
+    try:
+        node_map = _load_node_map(conn)
+        if center not in node_map:
+            raise ValueError(f"unknown node_id: {center}")
+
+        refresh_receipt = _latest_refresh_receipt(conn)
+
+        seen_nodes: set[str] = {center}
+        frontier: set[str] = {center}
+        seen_edges: set[Tuple[str, str, str, str]] = set()
+        selected_edges: List[Dict[str, Any]] = []
+        stopped_reason: Optional[str] = None
+
+        for _depth in range(hops_int):
+            if not frontier:
+                break
+
+            batch_edges = _edge_rows_for_frontier(
+                conn,
+                frontier=sorted(frontier),
+                direction=direction_norm,
+            )
+
+            next_frontier: set[str] = set()
+            for edge in batch_edges:
+                if edge_type_allow and str(edge.get("type") or "") not in edge_type_allow:
+                    continue
+
+                if include_type_allow:
+                    src_id = str(edge.get("src") or "")
+                    dst_id = str(edge.get("dst") or "")
+                    src_type = str((node_map.get(src_id) or {}).get("type") or "")
+                    dst_type = str((node_map.get(dst_id) or {}).get("type") or "")
+                    if src_id != center and src_type not in include_type_allow:
+                        continue
+                    if dst_id != center and dst_type not in include_type_allow:
+                        continue
+
+                key = (edge["src"], edge["dst"], edge["type"], edge["provenance"])
+                if key in seen_edges:
+                    continue
+
+                candidate_nodes = {str(edge["src"]), str(edge["dst"])}
+                projected_nodes = seen_nodes | next_frontier | candidate_nodes
+                if len(projected_nodes) > max_nodes_int:
+                    stopped_reason = "max_nodes"
+                    break
+
+                seen_edges.add(key)
+                selected_edges.append(edge)
+                next_frontier.update(candidate_nodes)
+
+                if len(selected_edges) >= max_edges_int:
+                    stopped_reason = "max_edges"
+                    break
+
+            next_frontier = next_frontier - seen_nodes
+            if next_frontier:
+                seen_nodes.update(next_frontier)
+
+            if stopped_reason:
+                break
+
+            frontier = next_frontier if next_frontier else set()
+
+        node_ids = sorted(seen_nodes)
+        nodes = [node_map[nid] for nid in node_ids if nid in node_map]
+        selected_edges.sort(key=lambda e: (e["src"], e["dst"], e["type"], e["provenance"]))
+        edges_with_nodes = _attach_nodes(selected_edges, node_map)
+
+        provenance_summary = _summarize_provenance_for_edges(selected_edges)
+        bundle_text = _render_subgraph_bundle_text(
+            center=center,
+            hops=hops_int,
+            direction=direction_norm,
+            nodes=nodes,
+            edges=selected_edges,
+            edge_types=sorted(edge_type_allow),
+            include_node_types=sorted(include_type_allow),
+        )
+
+        return {
+            "ok": True,
+            "query": "subgraph",
+            "center_node_id": center,
+            "hops": hops_int,
+            "direction": direction_norm,
+            "bounds": {
+                "max_nodes": max_nodes_int,
+                "max_edges": max_edges_int,
+            },
+            "filters": {
+                "edge_types": sorted(edge_type_allow) or None,
+                "include_node_types": sorted(include_type_allow) or None,
+            },
+            "node_count": len(nodes),
+            "edge_count": len(edges_with_nodes),
+            "stopped_reason": stopped_reason,
+            "refresh_receipt": refresh_receipt,
+            "provenance": provenance_summary,
+            "nodes": nodes,
+            "edges": edges_with_nodes,
+            "bundle_text": bundle_text,
+        }
+    finally:
+        conn.close()

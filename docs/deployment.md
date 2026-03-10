@@ -19,6 +19,25 @@ For production use, you'll want:
 
 `openclaw-mem` does not own the memory slot; it adds durable capture, local recall, and observability across both native backends.
 
+### Two different components in this repo (important)
+
+This repo currently ships **two different plugin roles**:
+
+1. **`openclaw-mem` sidecar plugin**
+   - captures/harvests durable observations
+   - does **not** own the OpenClaw memory slot
+   - is the default deployment path in this guide
+
+2. **`openclaw-mem-engine` memory-slot plugin**
+   - optional memory backend / engine
+   - owns read/write tool behavior when selected as the active memory slot
+   - its manifest is currently still marked **`0.0.1`** (treat as pre-release / controlled rollout)
+
+### Read-only carve-out: which component actually enforces it?
+
+- If you are using only the **sidecar** plugin, read-only is mostly a **prompt / runner-tooling discipline**.
+- If you are using **`openclaw-mem-engine`** as the active memory slot, set `readOnly: true` (or `OPENCLAW_MEM_ENGINE_READONLY=1`) to get **runtime-enforced** rejection of write-path operations.
+
 Detailed ownership boundaries and rollout patterns:
 - `docs/ecosystem-fit.md`
 
@@ -379,6 +398,47 @@ systemctl --user start openclaw-mem-compress.timer
 ```
 
 ## 5. Monitoring
+
+### Read-only carve-out for watchdog / healthcheck lanes
+
+If you run monitoring via an LLM-wrapped cron agent (OpenClaw `agentTurn`), treat it as a **read-only** lane:
+- allow **recall/docs** to interpret what “normal” means,
+- but **do not store** routine results.
+
+Use the drop-in read-only card:
+- `skills/agent-memory-skill.readonly.md`
+
+And keep delivery quiet on OK (emit `NO_REPLY`), only alert on anomalies.
+
+#### OpenClaw cron example (agentTurn + read-only prompt)
+
+This repo includes a copy/paste **watchdog lane** `payload.message` template:
+- `docs/snippets/openclaw-agentturn-message.watchdog-readonly.md`
+
+If your OpenClaw config is JSON, JSON-escape that multi-line message:
+
+```bash
+cd /opt/openclaw-mem
+python3 scripts/json_escape.py docs/snippets/openclaw-agentturn-message.watchdog-readonly.md
+```
+
+Then use it as the `payload.message` value (no extra quoting needed):
+
+```json
+{
+  "name": "openclaw-mem watchdog (read-only)",
+  "schedule": { "kind": "cron", "expr": "*/10 * * * *", "tz": "UTC" },
+  "sessionTarget": "isolated",
+  "wakeMode": "next-heartbeat",
+  "payload": {
+    "kind": "agentTurn",
+    "model": "google-antigravity/gemini-3-flash",
+    "thinking": "minimal",
+    "message": <PASTE_OUTPUT_OF_json_escape.py_HERE>
+  },
+  "delivery": { "mode": "none" }
+}
+```
 
 ### Health Check Script
 

@@ -59,9 +59,11 @@ from openclaw_mem.graph.query import (
     query_lineage,
     query_provenance,
     query_refresh_receipts,
+    query_subgraph,
     query_upstream,
     query_writers,
 )
+from openclaw_mem.graph.topology_extract import extract_topology_seed
 from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
 
 def _resolve_home_dir() -> str:
@@ -125,6 +127,7 @@ DEFAULT_EPISODIC_EXTRACT_STATE_PATH = os.path.join(
     "episodes-extract-state.json",
 )
 DEFAULT_OPENCLAW_SESSIONS_ROOT = os.path.join(STATE_DIR, "sessions")
+DEFAULT_CRON_JOBS_JSON = os.path.join(STATE_DIR, "cron", "jobs.json")
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 DEFAULT_GRAPH_CAPTURE_MD_INCLUDES = (".md",)
@@ -1319,6 +1322,9 @@ def cmd_profile(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     total_count = int(row["n"] or 0)
 
     data = {
+        "kind": "openclaw-mem.profile.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
         "db": args.db,
         "observations": {
             "count": total_count,
@@ -6086,6 +6092,118 @@ def cmd_graph_auto_status(conn: sqlite3.Connection, args: argparse.Namespace) ->
         )
 
 
+def cmd_graph_topology_refresh(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Deterministically refresh the topology graph (nodes/edges) from a curated file.
+
+    This is the maintenance entrypoint for L3 topology knowledge.
+    """
+
+    _ = conn
+    topology_path = str(getattr(args, "file", "") or "").strip()
+    if not topology_path:
+        _emit({"error": "missing --file"}, True)
+        sys.exit(2)
+
+    try:
+        from openclaw_mem.graph.refresh import refresh_topology_file
+
+        result = refresh_topology_file(topology_path=topology_path, db_path=str(args.db))
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    payload = {
+        "kind": "openclaw-mem.graph.topology-refresh.v0",
+        "ts": _utcnow_iso(),
+        "file": topology_path,
+        "result": result,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    # text-only mode
+    print(
+        " ".join(
+            [
+                f"ok={str(bool(result.get('ok'))).lower()}",
+                f"nodes={int(result.get('node_count') or 0)}",
+                f"edges={int(result.get('edge_count') or 0)}",
+                f"digest={result.get('topology_digest')}",
+            ]
+        )
+    )
+
+
+def cmd_graph_topology_extract(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Extract a deterministic topology seed from workspace + cron registry + cron specs."""
+
+    _ = conn
+    workspace = str(getattr(args, "workspace", "") or "").strip() or str(DEFAULT_WORKSPACE)
+    cron_jobs = str(getattr(args, "cron_jobs", "") or "").strip() or DEFAULT_CRON_JOBS_JSON
+    spec_dir = str(getattr(args, "spec_dir", "") or "").strip()
+    if not spec_dir:
+        spec_dir = str(Path(workspace) / "openclaw-async-coding-playbook" / "cron" / "jobs")
+
+    out_path = str(getattr(args, "out", "") or "").strip()
+    if not out_path:
+        _emit({"error": "missing --out"}, True)
+        sys.exit(2)
+
+    try:
+        seed = extract_topology_seed(
+            workspace=workspace,
+            cron_jobs_path=cron_jobs,
+            spec_dir=spec_dir,
+        )
+        out_file = Path(out_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(seed, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    counts = seed.get("counts") if isinstance(seed.get("counts"), dict) else {}
+    payload = {
+        "kind": "openclaw-mem.graph.topology-extract.v0",
+        "ts": _utcnow_iso(),
+        "workspace": str(Path(workspace).resolve()),
+        "cron_jobs": str(Path(cron_jobs).resolve()),
+        "spec_dir": str(Path(spec_dir).resolve()),
+        "out": str(Path(out_path).resolve()),
+        "result": {
+            "ok": True,
+            "node_count": int(counts.get("nodes") or 0),
+            "edge_count": int(counts.get("edges") or 0),
+            "repo_count": int(counts.get("repos") or 0),
+            "cron_job_count": int(counts.get("cron_jobs") or 0),
+            "spec_count": int(counts.get("spec_files") or 0),
+            "node_types": counts.get("node_types") if isinstance(counts.get("node_types"), dict) else {},
+            "edge_types": counts.get("edge_types") if isinstance(counts.get("edge_types"), dict) else {},
+        },
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    result = payload["result"]
+    print(
+        " ".join(
+            [
+                f"ok={str(bool(result.get('ok'))).lower()}",
+                f"repos={int(result.get('repo_count') or 0)}",
+                f"cron_jobs={int(result.get('cron_job_count') or 0)}",
+                f"specs={int(result.get('spec_count') or 0)}",
+                f"nodes={int(result.get('node_count') or 0)}",
+                f"edges={int(result.get('edge_count') or 0)}",
+                f"out={payload.get('out')}",
+            ]
+        )
+    )
+
+
 def _graph_capture_md_norm_ext(ext: str) -> str:
     v = str(ext or "").strip().lower()
     if not v:
@@ -6872,7 +6990,11 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         elif query_cmd == "downstream":
             result = query_downstream(db_path=db_path, node_id=getattr(args, "node_id", None))
         elif query_cmd == "lineage":
-            result = query_lineage(db_path=db_path, node_id=getattr(args, "node_id", None))
+            result = query_lineage(
+                db_path=db_path,
+                node_id=getattr(args, "node_id", None),
+                max_depth=getattr(args, "max_depth", 1),
+            )
         elif query_cmd == "writers":
             result = query_writers(db_path=db_path, artifact_id=getattr(args, "artifact_id", None))
         elif query_cmd == "filter":
@@ -6896,6 +7018,17 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 edge_type=getattr(args, "edge_type", None),
                 limit=getattr(args, "limit", 20),
                 min_edge_count=getattr(args, "min_edge_count", 1),
+            )
+        elif query_cmd == "subgraph":
+            result = query_subgraph(
+                db_path=db_path,
+                node_id=getattr(args, "node_id", None),
+                hops=getattr(args, "hops", 2),
+                direction=getattr(args, "direction", "both"),
+                max_nodes=getattr(args, "max_nodes", 40),
+                max_edges=getattr(args, "max_edges", 80),
+                edge_types=getattr(args, "edge_type", None),
+                include_node_types=getattr(args, "include_node_type", None),
             )
         elif query_cmd == "drift":
             result = query_drift(
@@ -6921,6 +7054,14 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     if bool(args.json):
         _emit(payload, True)
+        return
+
+    if query_cmd == "subgraph":
+        text = str(result.get("bundle_text") or "").rstrip()
+        if text:
+            print(text)
+        else:
+            print(f"nodes={int(result.get('node_count', 0))} edges={int(result.get('edge_count', 0))}")
         return
 
     if query_cmd == "filter":
@@ -8696,7 +8837,18 @@ def build_parser() -> argparse.ArgumentParser:
     g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
     g.set_defaults(func=cmd_graph_auto_status)
 
-    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter/receipts/provenance/drift)")
+    g = gsub.add_parser("topology-refresh", help="Refresh topology graph (nodes/edges) from a curated file")
+    g.add_argument("--file", required=True, help="Topology file path (.json; .yaml requires PyYAML)")
+    g.set_defaults(func=cmd_graph_topology_refresh)
+
+    g = gsub.add_parser("topology-extract", help="Extract a deterministic topology seed from workspace + cron + specs")
+    g.add_argument("--workspace", default=str(DEFAULT_WORKSPACE), help="Workspace root to scan for repo roots (default: cwd)")
+    g.add_argument("--cron-jobs", dest="cron_jobs", default=DEFAULT_CRON_JOBS_JSON, help=f"Cron jobs registry JSON path (default: {DEFAULT_CRON_JOBS_JSON})")
+    g.add_argument("--spec-dir", dest="spec_dir", help="Cron spec directory (default: <workspace>/openclaw-async-coding-playbook/cron/jobs)")
+    g.add_argument("--out", required=True, help="Output topology seed JSON path")
+    g.set_defaults(func=cmd_graph_topology_extract)
+
+    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/subgraph/filter/receipts/provenance/drift)")
     qsub = g.add_subparsers(dest="graph_query_cmd", required=True)
 
     q = qsub.add_parser("upstream", help="List incoming edges into node_id")
@@ -8709,10 +8861,38 @@ def build_parser() -> argparse.ArgumentParser:
 
     q = qsub.add_parser("lineage", help="List both upstream and downstream edges for node_id")
     q.add_argument("node_id", help="Target node id")
+    q.add_argument("--max-depth", dest="max_depth", type=int, default=1, help="Traversal depth in hops (default: 1; max: 8)")
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("writers", help="List writes edges that target artifact_id")
     q.add_argument("artifact_id", help="Artifact node id")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("subgraph", help="Emit a bounded subgraph around node_id (pack-style, provenance-first)")
+    q.add_argument("node_id", help="Center node id")
+    q.add_argument("--hops", type=int, default=2, help="Neighborhood hops (default: 2)")
+    q.add_argument(
+        "--direction",
+        choices=["upstream", "downstream", "both"],
+        default="both",
+        help="Edge expansion direction (default: both)",
+    )
+    q.add_argument("--max-nodes", dest="max_nodes", type=int, default=40, help="Max nodes to include (default: 40)")
+    q.add_argument("--max-edges", dest="max_edges", type=int, default=80, help="Max edges to include (default: 80)")
+    q.add_argument(
+        "--edge-type",
+        dest="edge_type",
+        action="append",
+        default=None,
+        help="Only include edges with these types (repeatable; comma-separated ok)",
+    )
+    q.add_argument(
+        "--include-node-type",
+        dest="include_node_type",
+        action="append",
+        default=None,
+        help="Only include nodes with these node types (repeatable; comma-separated ok). Center node is always included.",
+    )
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("filter", help="Filter nodes by tags/type")

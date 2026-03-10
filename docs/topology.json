@@ -1,0 +1,57 @@
+{
+  "nodes": [
+    {
+      "id": "project.openclaw-mem",
+      "type": "project",
+      "tags": ["repo"],
+      "metadata": {"repo": "phenomenoner/openclaw-mem"}
+    },
+    {
+      "id": "script.harvest",
+      "type": "script",
+      "tags": ["ops"],
+      "metadata": {"cmd": "python -m openclaw_mem harvest"}
+    },
+    {
+      "id": "artifact.openclaw-mem.sqlite",
+      "type": "artifact",
+      "tags": ["state"],
+      "metadata": {"path": "~/.openclaw/memory/openclaw-mem.sqlite"}
+    },
+    {
+      "id": "cron.job.openclaw-mem.ingest",
+      "type": "cron_job",
+      "tags": ["background"],
+      "metadata": {"purpose": "keep SQLite fresh"}
+    },
+    {
+      "id": "doc.agent-memory-skill",
+      "type": "doc",
+      "tags": ["sop"],
+      "metadata": {"path": "docs/agent-memory-skill.md"}
+    }
+  ],
+  "edges": [
+    {
+      "src": "project.openclaw-mem",
+      "dst": "doc.agent-memory-skill",
+      "type": "documents",
+      "provenance": "docs/agent-memory-skill.md",
+      "metadata": {}
+    },
+    {
+      "src": "cron.job.openclaw-mem.ingest",
+      "dst": "script.harvest",
+      "type": "runs",
+      "provenance": "docs/deployment.md",
+      "metadata": {}
+    },
+    {
+      "src": "script.harvest",
+      "dst": "artifact.openclaw-mem.sqlite",
+      "type": "writes",
+      "provenance": "docs/deployment.md",
+      "metadata": {}
+    }
+  ]
+}

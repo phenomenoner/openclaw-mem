@@ -27,9 +27,23 @@ def connect_graph_db_for_query(
         raise ValueError(f"graph db not found: {db_file}")
 
     try:
-        conn = sqlite3.connect(str(db_file))
-    except sqlite3.Error as exc:
-        raise ValueError(f"failed to open graph db: {db_file}: {exc}") from exc
+        # Hardening: open query connections as read-only when possible.
+        # - mode=ro rejects writes at the sqlite layer.
+        # NOTE: Avoid sqlite URI immutable=1 here; the topology store uses WAL and immutable
+        # can cause readers to miss recent schema/content written to -wal files.
+        uri = db_file.as_uri() + "?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
+    except sqlite3.Error:
+        try:
+            conn = sqlite3.connect(str(db_file))
+        except sqlite3.Error as exc2:
+            raise ValueError(f"failed to open graph db: {db_file}: {exc2}") from exc2
+
+    try:
+        conn.execute("PRAGMA query_only=ON")
+    except sqlite3.Error:
+        # Best-effort: older sqlite builds may not support query_only.
+        pass
 
     try:
         rows = conn.execute("SELECT name FROM sqlite_master WHERE type = ?", ("table",)).fetchall()

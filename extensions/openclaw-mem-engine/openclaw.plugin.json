@@ -44,6 +44,11 @@
       "placeholder": "memories",
       "advanced": true
     },
+    "readOnly": {
+      "label": "Read-only mode",
+      "help": "Reject write-path tools (memory_store/forget/import/docs_ingest) and disable autoCapture.",
+      "advanced": true
+    },
     "autoRecall.enabled": {
       "label": "Auto Recall",
       "help": "Inject a bounded, sanitized memory context before agent start"
@@ -283,6 +288,10 @@
       "tableName": {
         "type": "string",
         "default": "memories"
+      },
+      "readOnly": {
+        "type": "boolean",
+        "default": false
       },
       "autoRecall": {
         "oneOf": [

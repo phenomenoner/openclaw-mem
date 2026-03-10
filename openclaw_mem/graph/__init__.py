@@ -5,11 +5,13 @@ from .query import (
     query_lineage,
     query_provenance,
     query_refresh_receipts,
+    query_subgraph,
     query_upstream,
     query_writers,
 )
 from .refresh import refresh_topology, refresh_topology_file
 from .schema import GRAPH_SCHEMA_VERSION, ensure_graph_schema
+from .topology_extract import extract_topology_seed
 
 __all__ = [
     "GRAPH_SCHEMA_VERSION",
@@ -20,8 +22,10 @@ __all__ = [
     "query_lineage",
     "query_provenance",
     "query_refresh_receipts",
+    "query_subgraph",
     "query_upstream",
     "query_writers",
     "refresh_topology",
     "refresh_topology_file",
+    "extract_topology_seed",
 ]
