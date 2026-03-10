@@ -46,8 +46,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --json backend
 
 ## Step 2.1: 5-minute synthetic demo (Inside-Out Memory)
 
-This demo is **synthetic** (no private/user data) and is designed to run even
-without `OPENAI_API_KEY` (FTS-only fail-open).
+This is a synthetic transparency demo for the local recall loop: no private/user data, no hidden state, and it is designed to run even without `OPENAI_API_KEY` (FTS-only fail-open).
 
 ```bash
 ./scripts/inside_out_demo.sh
@@ -179,7 +178,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --ta
 uv run --python 3.13 --frozen -- python -m openclaw_mem optimize review --json --limit 500
 ```
 
-This command is zero-write by design in v0.1: it only reports candidates (staleness, duplication, bloat, weakly-connected memories, repeated no-result `memory_recall` misses) and suggestions.
+This command is zero-write by design in the current release: it only reports candidates (staleness, duplication, bloat, weakly-connected memories, repeated no-result `memory_recall` misses) and suggestions.
 
 ## Step 7: Autograde toggle (optional)
 
@@ -215,7 +214,7 @@ Graphic Memory automation toggles are opt-in (default OFF):
 Inspect effective toggle state:
 
 ```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem graph auto-status --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem --json graph auto-status
 ```
 
 Examples:
@@ -225,10 +224,10 @@ Examples:
 OPENCLAW_MEM_GRAPH_AUTO_RECALL=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph preflight "slow-cook benchmark drift" --scope openclaw-mem --take 12 --budget-tokens 1200
 
 # Capture recent repo commits as observations
-OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50 --json
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE=1 uv run --python 3.13 --frozen -- python -m openclaw_mem --json graph capture-git --repo /root/.openclaw/workspace/openclaw-mem-dev --since 24 --max-commits 50
 
 # Capture markdown heading sections (index-only)
-OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run --python 3.13 --frozen -- python -m openclaw_mem graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24 --json
+OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 uv run --python 3.13 --frozen -- python -m openclaw_mem --json graph capture-md --path /root/.openclaw/workspace/lyria-working-ledger --include .md --since-hours 24
 ```
 
 Spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
@@ -238,8 +237,8 @@ Spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 Load the curated topology fixture and run one deterministic query:
 
 ```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem graph topology-refresh --file ./docs/topology.json --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem graph query subgraph project.openclaw-mem --depth 1 --limit 20 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem --json graph topology-refresh --file ./docs/topology.json
+uv run --python 3.13 --frozen -- python -m openclaw_mem --json graph query subgraph project.openclaw-mem --hops 1 --max-nodes 20 --max-edges 40
 ```
 
 Use this when you want a quick read-only check that topology refresh + query plumbing is alive before deeper graph/drift debugging.

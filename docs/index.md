@@ -19,7 +19,7 @@ This docs site is organized to answer three questions in order:
 
 `openclaw-mem` is intentionally split into two layers:
 
-- **Sidecar (default)** — capture, ingest, local recall, triage, receipts
+- **Sidecar (default)** — capture, ingest, local recall, triage, graph query/drift checks, receipts
 - **Mem Engine (optional)** — memory-slot backend for hybrid recall and bounded automation
 
 That split is the core design choice: start with something inspectable and rollbackable, then add power only when it earns its keep.

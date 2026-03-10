@@ -72,7 +72,7 @@ Expected:
 - SQLite ledger + FTS5
 - JSON receipts (`--json`)
 - Progressive recall: `ingest → search → timeline → get`
-- Export with a safety confirmation step (`export --yes`)
+- Context pack command (`pack`) with fail-open baseline behavior
 - Deterministic triage for automation (`triage --mode heartbeat|cron-errors|tasks`)
 
 ### Quality layers — **PARTIAL**
@@ -80,8 +80,10 @@ Expected:
 - Embeddings + vector search (`embed`, `vsearch`) — requires an API key
 - Hybrid retrieval (`hybrid`) + optional rerank providers — requires network/provider; still being evaluated
 - AI compression (`summarize`) — requires an API key
+- Graph query plane (`graph topology-refresh`, `graph query ...`, drift/provenance checks) — shipped foundation; deeper integrations still evolving
+- Recommendation-only optimization observer (`optimize review`) — shipped in the current release scope; proposes only, never mutates stored memories
 - Dual-language fields (`--text-en`, EN embedding table) — shipped, still evolving
-- Recommendation-only optimization observer (`optimize review`) — shipped in v0.1 scope; proposes only, never mutates stored memories
+- Episodic event capture/ingest/query lane — shipped foundation; operator flows still evolving
 
 ### OpenClaw integration — **PARTIAL**
 
@@ -91,6 +93,6 @@ Expected:
 
 ### Near-term roadmap — **ROADMAP**
 
-- Package the project so `openclaw-mem` console scripts work directly via `uv sync` / pip
-- Context Packer (`pack`) for bounded, cited context bundles
-- Graph semantic memory (typed entities/edges)
+- Package/distribution ergonomics so `openclaw-mem` install/run flow is cleaner across `uv sync` / pip contexts
+- Graph roadmap depth: richer provenance wiring + higher-level operator queries on top of the shipped query plane
+- Topology seed automation (`topology-seed`) so curated graph truth is easier to bootstrap and maintain

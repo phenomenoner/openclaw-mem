@@ -1,6 +1,6 @@
 # openclaw-mem
 
-**Local-first memory sidecar for OpenClaw, with an optional hybrid memory engine when you want to own the slot.**
+**Local-first memory sidecar for OpenClaw, with an optional hybrid memory engine when you want it to become the active memory backend.**
 
 `openclaw-mem` turns your agent’s work into a durable, searchable, auditable memory trail.
 Start with a local SQLite sidecar. Keep your current OpenClaw memory backend if you want. Promote to the optional mem engine later if you need hybrid recall, policy controls, and safer automation.
@@ -8,8 +8,8 @@ Start with a local SQLite sidecar. Keep your current OpenClaw memory backend if 
 ## Why people adopt it
 
 - **Local-first by default** — JSONL + SQLite, no external database required.
-- **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
-- **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, and keep rollback simple.
+- **Inspectable recall loop** — `search → timeline → get` keeps routine lookups fast and auditable.
+- **Deterministic operator tools** — topology query/drift checks, recommendation-only optimization, and explicit JSON receipts.
 - **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
 
 ## Who it’s for
@@ -17,6 +17,13 @@ Start with a local SQLite sidecar. Keep your current OpenClaw memory backend if 
 - **OpenClaw operators** who want memory freshness, auditability, and safer rollbacks.
 - **Agent builders** who need a practical local recall surface before adding more complexity.
 - **Teams with docs / repos / decisions to remember** who want memory to stay explainable.
+
+## Core capabilities in v1.1.0
+
+- **Graph/query plane (deterministic):** `graph topology-refresh`, `graph query ...`, `graph query drift`, `graph query provenance`.
+- **Optimization observer (zero-write):** `optimize review` proposes cleanups (staleness, duplication, repeated misses) without mutating data.
+- **Episodic event lane:** append/extract/ingest/query/replay with redaction-first defaults.
+- **Optional Mem Engine upgrades:** hybrid recall controls, TODO guardrails, docs cold-lane ingest/search.
 
 ## Three adoption paths
 
@@ -53,27 +60,34 @@ uv sync --locked
 DB=/tmp/openclaw-mem.sqlite
 python3 ./scripts/make_sample_jsonl.py --out /tmp/openclaw-mem-sample.jsonl
 
+uv run --python 3.13 --frozen -- python -m openclaw_mem --help
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json status
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json ingest --file /tmp/openclaw-mem-sample.jsonl
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json search "OpenClaw" --limit 5
-
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json timeline 2 --window 2
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize review --limit 200
 ```
 
-If that works, the product story is real: you already have a local memory ledger plus a recall path you can inspect.
+If that works, your local memory ledger is active and verifiable: you already have an inspectable recall path and a safe recommendation-only optimization pass.
 
 ## Start here
 
+**Understand the product**
 - **About the product:** [`docs/about.md`](docs/about.md)
 - **Choose an install path:** [`docs/install-modes.md`](docs/install-modes.md)
-- **Detailed quickstart:** [`QUICKSTART.md`](QUICKSTART.md)
-- **Triage task-marker acceptance (TASK/TODO/REMINDER forms):** [`docs/upgrade-checklist.md`](docs/upgrade-checklist.md)
-- **Docs site:** <https://phenomenoner.github.io/openclaw-mem/>
+- **Docs site index:** [`docs/index.md`](docs/index.md)
 - **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
+
+**Get it running**
+- **Detailed quickstart:** [`QUICKSTART.md`](QUICKSTART.md)
 - **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
 - **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
-- **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
 - **Optional Mem Engine:** [`docs/mem-engine.md`](docs/mem-engine.md)
+
+**Operate and extend**
+- **Release checklist:** [`docs/release-checklist.md`](docs/release-checklist.md)
+- **Triage task-marker acceptance (TASK/TODO/REMINDER forms):** [`docs/upgrade-checklist.md`](docs/upgrade-checklist.md)
+- **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
 - **Release notes:** <https://github.com/phenomenoner/openclaw-mem/releases>
 
 ## Product shape

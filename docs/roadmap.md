@@ -85,7 +85,7 @@ Status: **PARTIAL** (query-plane foundation + deterministic query CLI shipped; d
   - source of truth = structured files (YAML / markdown / receipts)
   - derived cache = SQLite graph tables
   - first shippable slice = YAML-only query helper for one-hop operator questions
-- Shipped slice (Unreleased):
+- Shipped slice (v1.1.0):
   - deterministic query-plane foundation module + SQLite refresh contract
   - `graph query` commands for `upstream` / `downstream` / `lineage` / `writers` / `filter`
   - `graph query drift --live-json <path> --db <path>` for stable-topology vs runtime-state checks

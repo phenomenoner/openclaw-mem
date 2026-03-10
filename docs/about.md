@@ -13,7 +13,15 @@ Most agent memory stories sound good until you need one of these in production:
 - **cheap local lookup** before asking a remote semantic system again
 - **safe rollback** when a memory backend or embedding path gets weird
 
-`openclaw-mem` exists to make memory more operational, not more mystical.
+`openclaw-mem` exists to make agent memory more transparent, verifiable, and easy to audit.
+
+## What operators can do today (v1.1)
+
+- run deterministic local recall (`search → timeline → get`) against SQLite
+- inspect topology relationships and drift via `graph query ...` and `graph query drift`
+- run recommendation-only hygiene checks with `optimize review` (zero write path)
+- capture/ingest episodic events with redaction-first defaults
+- optionally promote to `openclaw-mem-engine` for hybrid recall + policy controls
 
 ## Product shape
 
