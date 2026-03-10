@@ -104,6 +104,75 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(lineage["upstream"][0]["provenance"], "docs/topology.yaml#L31")
             self.assertEqual(lineage["upstream"][0]["metadata"], {"lane": "A-deep"})
 
+
+    def test_query_lineage_supports_multi_hop_depth(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "project.finlife", "type": "project"},
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "artifact.daily-mission", "type": "artifact"},
+                {"id": "artifact.mission-report", "type": "artifact"},
+                {"id": "service.telegram", "type": "service"},
+            ],
+            "edges": [
+                {
+                    "src": "project.finlife",
+                    "dst": "cron.job.alpha",
+                    "type": "depends_on",
+                    "provenance": "docs/topology.yaml#L10",
+                },
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.daily-mission",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L20",
+                },
+                {
+                    "src": "artifact.daily-mission",
+                    "dst": "artifact.mission-report",
+                    "type": "feeds",
+                    "provenance": "docs/topology.yaml#L30",
+                },
+                {
+                    "src": "artifact.mission-report",
+                    "dst": "service.telegram",
+                    "type": "alerts_to",
+                    "provenance": "docs/topology.yaml#L40",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path)
+
+            lineage = query_lineage(
+                db_path=db_path,
+                node_id="artifact.daily-mission",
+                max_depth=2,
+            )
+            self.assertTrue(lineage["ok"])
+            self.assertEqual(lineage["max_depth"], 2)
+            self.assertEqual(lineage["upstream_count"], 2)
+            self.assertEqual(lineage["downstream_count"], 2)
+
+            upstream_depths = {(edge["src"], edge["depth"]) for edge in lineage["upstream"]}
+            self.assertIn(("cron.job.alpha", 1), upstream_depths)
+            self.assertIn(("project.finlife", 2), upstream_depths)
+
+            downstream_depths = {(edge["dst"], edge["depth"]) for edge in lineage["downstream"]}
+            self.assertIn(("artifact.mission-report", 1), downstream_depths)
+            self.assertIn(("service.telegram", 2), downstream_depths)
+
+    def test_query_lineage_rejects_max_depth_above_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology({"nodes": [], "edges": []}, db_path=db_path)
+
+            with self.assertRaises(ValueError) as ctx:
+                query_lineage(db_path=db_path, node_id="artifact.daily-mission", max_depth=9)
+            self.assertIn("limit must be <= 8", str(ctx.exception))
+
     def test_query_provenance_groups_and_filters_edges(self) -> None:
         topology = {
             "nodes": [

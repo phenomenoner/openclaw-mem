@@ -351,6 +351,67 @@ class TestGraphQueryCli(unittest.TestCase):
             self.assertIn("edge_types=alerts_to:1,writes:1", text)
             conn.close()
 
+    def test_cmd_graph_query_lineage_supports_max_depth(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "project.finlife", "type": "project"},
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "artifact.daily-mission", "type": "artifact"},
+                {"id": "artifact.report", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "project.finlife",
+                    "dst": "cron.job.alpha",
+                    "type": "depends_on",
+                    "provenance": "docs/topology.yaml#L10",
+                },
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.daily-mission",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L20",
+                },
+                {
+                    "src": "artifact.daily-mission",
+                    "dst": "artifact.report",
+                    "type": "feeds",
+                    "provenance": "docs/topology.yaml#L30",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "mem.sqlite"
+            conn = _connect(str(db_path))
+            refresh_topology(topology, db_path=db_path)
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "graph_query_cmd": "lineage",
+                    "db": str(db_path),
+                    "node_id": "artifact.daily-mission",
+                    "max_depth": 2,
+                    "json": True,
+                },
+            )()
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_query(conn, args)
+
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["query_cmd"], "lineage")
+            self.assertEqual(out["result"]["max_depth"], 2)
+            upstream_depths = {(edge["src"], edge["depth"]) for edge in out["result"]["upstream"]}
+            downstream_depths = {(edge["dst"], edge["depth"]) for edge in out["result"]["downstream"]}
+            self.assertIn(("cron.job.alpha", 1), upstream_depths)
+            self.assertIn(("project.finlife", 2), upstream_depths)
+            self.assertIn(("artifact.report", 1), downstream_depths)
+            conn.close()
+
     def test_cmd_graph_query_drift_json_payload(self) -> None:
         topology = {
             "nodes": [
