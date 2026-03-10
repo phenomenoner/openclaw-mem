@@ -37,7 +37,7 @@ Use for:
 - entrypoints, ownership, dependency/impact maps
 - stable path/module relationships
 
-> Implementation note (today): topology is often answered by **direct inspection** (rg/tree) + a **curated topo note** stored in L2. Don’t store repo maps as L1 durable memory.
+> Implementation note (today): topology can be answered by **direct inspection** (rg/tree) + a **curated topo note** stored in L2, and/or by maintaining a deterministic L3 topology graph (see `docs/specs/topology-knowledge-v0.md`). Don’t store repo maps as L1 durable memory.
 
 ### Fast contrast: which lane answers which question?
 - **Recall / L1** = preference / decision / continuity / standing rule
@@ -170,6 +170,18 @@ Curated and minimal; no raw code dumps.
 ---
 
 ## Deployment recommendation (default scope + carve-outs)
+
+### Drop-in skill cards (copy/paste)
+
+To make this deployment judgment **operational** (not just argued), this repo ships two one-screen “skill cards”:
+- **Global default card:** `skills/agent-memory-skill.global.md`
+- **Read-only carve-out card:** `skills/agent-memory-skill.readonly.md`
+
+Recommended usage:
+- Install the **global** card in your default agent prompt/skill library.
+- Use the **read-only** card for watchdog/healthcheck/lint/smoke/high-volume cron lanes.
+
+These cards are intentionally short. The rest of this page is the long-form SOP/manual.
 
 ### Default: apply almost everywhere
 

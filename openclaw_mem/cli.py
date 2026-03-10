@@ -6089,6 +6089,50 @@ def cmd_graph_auto_status(conn: sqlite3.Connection, args: argparse.Namespace) ->
         )
 
 
+def cmd_graph_topology_refresh(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Deterministically refresh the topology graph (nodes/edges) from a curated file.
+
+    This is the maintenance entrypoint for L3 topology knowledge.
+    """
+
+    _ = conn
+    topology_path = str(getattr(args, "file", "") or "").strip()
+    if not topology_path:
+        _emit({"error": "missing --file"}, True)
+        sys.exit(2)
+
+    try:
+        from openclaw_mem.graph.refresh import refresh_topology_file
+
+        result = refresh_topology_file(topology_path=topology_path, db_path=str(args.db))
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    payload = {
+        "kind": "openclaw-mem.graph.topology-refresh.v0",
+        "ts": _utcnow_iso(),
+        "file": topology_path,
+        "result": result,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    # text-only mode
+    print(
+        " ".join(
+            [
+                f"ok={str(bool(result.get('ok'))).lower()}",
+                f"nodes={int(result.get('node_count') or 0)}",
+                f"edges={int(result.get('edge_count') or 0)}",
+                f"digest={result.get('topology_digest')}",
+            ]
+        )
+    )
+
+
 def _graph_capture_md_norm_ext(ext: str) -> str:
     v = str(ext or "").strip().lower()
     if not v:
@@ -8698,6 +8742,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
     g.set_defaults(func=cmd_graph_auto_status)
+
+    g = gsub.add_parser("topology-refresh", help="Refresh topology graph (nodes/edges) from a curated file")
+    g.add_argument("--file", required=True, help="Topology file path (.json; .yaml requires PyYAML)")
+    g.set_defaults(func=cmd_graph_topology_refresh)
 
     g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter/receipts/provenance/drift)")
     qsub = g.add_subparsers(dest="graph_query_cmd", required=True)

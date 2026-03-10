@@ -64,7 +64,10 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimi
 
 ### If you are integrating with OpenClaw agents
 
-- Read the [Agent memory skill (SOP)](agent-memory-skill.md) — it defines trust-aware routing for when to recall, store, search docs, consult topology, or do nothing.
+- Read the [Agent memory skill (SOP)](agent-memory-skill.md) — trust-aware routing for when to recall, store, search docs, consult topology, or do nothing.
+- Install the drop-in skill card(s):
+  - global default: `skills/agent-memory-skill.global.md`
+  - watchdog/healthcheck/lint/smoke read-only carve-out: `skills/agent-memory-skill.readonly.md`
 
 ### If the local proof was enough
 

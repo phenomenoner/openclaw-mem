@@ -284,6 +284,11 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.cmd, "graph")
         self.assertEqual(a.graph_cmd, "auto-status")
 
+        a = build_parser().parse_args(["graph", "topology-refresh", "--file", "/tmp/topology.json"])
+        self.assertEqual(a.cmd, "graph")
+        self.assertEqual(a.graph_cmd, "topology-refresh")
+        self.assertEqual(a.file, "/tmp/topology.json")
+
         a = build_parser().parse_args(["graph", "capture-git", "--repo", "/tmp/repo"])
         self.assertEqual(a.cmd, "graph")
         self.assertEqual(a.graph_cmd, "capture-git")

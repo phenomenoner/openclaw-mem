@@ -380,6 +380,17 @@ systemctl --user start openclaw-mem-compress.timer
 
 ## 5. Monitoring
 
+### Read-only carve-out for watchdog / healthcheck lanes
+
+If you run monitoring via an LLM-wrapped cron agent (OpenClaw `agentTurn`), treat it as a **read-only** lane:
+- allow **recall/docs** to interpret what “normal” means,
+- but **do not store** routine results.
+
+Use the drop-in read-only card:
+- `skills/agent-memory-skill.readonly.md`
+
+And keep delivery quiet on OK (emit `NO_REPLY`), only alert on anomalies.
+
 ### Health Check Script
 
 ```bash

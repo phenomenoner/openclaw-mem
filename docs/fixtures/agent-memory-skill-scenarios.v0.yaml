@@ -116,3 +116,23 @@ scenarios:
     prompt: "I remember we decided to keep pack receipts minimal. What is the exact documented rule?"
     expect: docs_search
     why: "Recall may indicate a prior decision exists, but the request asks for canonical wording; use docs as source of truth and provenance."
+
+  - id: S22
+    prompt: "(watchdog lane / read-only) Healthcheck output is OK. Store this run result so we have a record."
+    expect: do_nothing
+    why: "Watchdog/healthcheck lanes are read-only by default; avoid high-volume, low-signal writes to durable memory."
+
+  - id: S23
+    prompt: "(watchdog lane) An anomaly happened. CK says: 'From now on, alert when observation count < 10.' Please remember that."
+    expect: store
+    why: "Explicit new standing rule triggered by an incident; store as a compact preference/decision (not raw logs)."
+
+  - id: S24
+    prompt: "(deterministic lint lane / read-only) Where is the canonical policy for what we are allowed to store in durable memory?"
+    expect: docs_search
+    why: "Asks for canonical wording/policy; use operator-authored docs/SOPs."
+
+  - id: S25
+    prompt: "(smoke lane / read-only) What does CK prefer for watchdog notifications?"
+    expect: recall
+    why: "Preference continuity is still recallable in read-only lanes; read-only forbids storing, not recalling."
