@@ -84,6 +84,7 @@ def _normalize_edges(raw_edges: Any, node_ids: set[str]) -> List[Dict[str, Any]]
         raise ValueError("topology.edges must be a list")
 
     edges: List[Dict[str, Any]] = []
+    seen_keys: set[Tuple[str, str, str, str]] = set()
     for idx, raw in enumerate(raw_edges):
         if not isinstance(raw, dict):
             raise ValueError(f"topology.edges[{idx}] must be an object")
@@ -100,6 +101,15 @@ def _normalize_edges(raw_edges: Any, node_ids: set[str]) -> List[Dict[str, Any]]
             raise ValueError(f"topology.edges[{idx}] unknown src node: {src}")
         if dst not in node_ids:
             raise ValueError(f"topology.edges[{idx}] unknown dst node: {dst}")
+
+        edge_key = (src, dst, edge_type, provenance)
+        if edge_key in seen_keys:
+            provenance_label = provenance or "<empty>"
+            raise ValueError(
+                "duplicate edge key: "
+                f"src={src}, dst={dst}, type={edge_type}, provenance={provenance_label}"
+            )
+        seen_keys.add(edge_key)
 
         edges.append(
             {

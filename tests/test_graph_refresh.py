@@ -134,6 +134,35 @@ class TestGraphRefresh(unittest.TestCase):
             with self.assertRaises(ValueError):
                 refresh_topology(topology, db_path=db_path)
 
+    def test_refresh_rejects_duplicate_edge_identity(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "artifact.receipt", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.receipt",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L12",
+                    "metadata": {"lane": "A-deep"},
+                },
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.receipt",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L12",
+                    "metadata": {"lane": "A-fast"},
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            with self.assertRaisesRegex(ValueError, "duplicate edge key"):
+                refresh_topology(topology, db_path=db_path)
+
 
 if __name__ == "__main__":
     unittest.main()
