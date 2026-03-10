@@ -131,6 +131,14 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem \
   graph --no-json query subgraph artifact.daily-mission --hops 2 --direction upstream
 ```
 
+Optional: tighten bounded subgraph output with filters:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem \
+  graph --no-json query subgraph artifact.daily-mission --hops 2 --direction upstream \
+  --edge-type writes --include-node-type cron_job --include-node-type artifact
+```
+
 ---
 
 ## 6) How L3 feeds ContextPack + eval safely
@@ -165,6 +173,8 @@ Monitoring lanes should treat topology + docs as reference, but avoid writing L1
 - store: 🚫 by default
 
 Use `skills/agent-memory-skill.readonly.md` to make this enforceable at the prompt layer.
+
+If you run `openclaw-mem-engine` as the active memory slot, you can also enforce this at runtime by setting plugin config `readOnly: true` (or env `OPENCLAW_MEM_ENGINE_READONLY=1`) for these lanes.
 
 ---
 

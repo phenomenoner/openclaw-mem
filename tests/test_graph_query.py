@@ -9,6 +9,7 @@ from openclaw_mem.graph.query import (
     query_downstream,
     query_filter_nodes,
     query_lineage,
+    query_subgraph,
     query_provenance,
     query_refresh_receipts,
     query_upstream,
@@ -172,6 +173,133 @@ class TestGraphQuery(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 query_lineage(db_path=db_path, node_id="artifact.daily-mission", max_depth=9)
             self.assertIn("limit must be <= 8", str(ctx.exception))
+
+
+    def test_query_subgraph_max_nodes_keeps_edge_node_consistency(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "artifact.center", "type": "artifact"},
+                {"id": "artifact.alpha", "type": "artifact"},
+                {"id": "artifact.beta", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "artifact.center",
+                    "dst": "artifact.alpha",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L10",
+                },
+                {
+                    "src": "artifact.center",
+                    "dst": "artifact.beta",
+                    "type": "alerts_to",
+                    "provenance": "docs/topology.yaml#L20",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path)
+
+            out = query_subgraph(
+                db_path=db_path,
+                node_id="artifact.center",
+                hops=1,
+                direction="both",
+                max_nodes=2,
+                max_edges=10,
+            )
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["query"], "subgraph")
+            self.assertEqual(out["stopped_reason"], "max_nodes")
+            self.assertEqual(out["node_count"], 2)
+            self.assertEqual(out["edge_count"], 1)
+
+            node_ids = {node["id"] for node in out["nodes"]}
+            self.assertEqual(node_ids, {"artifact.center", "artifact.alpha"})
+            edge = out["edges"][0]
+            self.assertIn(edge["src"], node_ids)
+            self.assertIn(edge["dst"], node_ids)
+
+    def test_query_subgraph_supports_edge_and_node_type_filters(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "project.finlife", "type": "project"},
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "artifact.daily-mission", "type": "artifact"},
+                {"id": "service.telegram", "type": "service"},
+            ],
+            "edges": [
+                {
+                    "src": "project.finlife",
+                    "dst": "cron.job.alpha",
+                    "type": "depends_on",
+                    "provenance": "docs/topology.yaml#L10",
+                },
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.daily-mission",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L20",
+                },
+                {
+                    "src": "artifact.daily-mission",
+                    "dst": "service.telegram",
+                    "type": "alerts_to",
+                    "provenance": "docs/topology.yaml#L30",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path)
+
+            filtered_edges = query_subgraph(
+                db_path=db_path,
+                node_id="artifact.daily-mission",
+                hops=2,
+                direction="upstream",
+                max_nodes=10,
+                max_edges=10,
+                edge_types=["writes"],
+            )
+            self.assertTrue(filtered_edges["ok"])
+            self.assertEqual(filtered_edges["edge_count"], 1)
+            self.assertEqual(filtered_edges["edges"][0]["type"], "writes")
+            node_ids = {node["id"] for node in filtered_edges["nodes"]}
+            self.assertEqual(node_ids, {"artifact.daily-mission", "cron.job.alpha"})
+
+            filtered_nodes = query_subgraph(
+                db_path=db_path,
+                node_id="cron.job.alpha",
+                hops=1,
+                direction="both",
+                max_nodes=10,
+                max_edges=10,
+                include_node_types=["cron_job", "artifact"],
+            )
+            self.assertEqual(filtered_nodes["edge_count"], 1)
+            node_types = {node["type"] for node in filtered_nodes["nodes"]}
+            self.assertNotIn("project", node_types)
+            self.assertEqual(node_types, {"cron_job", "artifact"})
+
+    def test_query_subgraph_rejects_max_nodes_above_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology({"nodes": [{"id": "artifact.center", "type": "artifact"}], "edges": []}, db_path=db_path)
+
+            with self.assertRaises(ValueError) as ctx:
+                query_subgraph(
+                    db_path=db_path,
+                    node_id="artifact.center",
+                    hops=1,
+                    direction="both",
+                    max_nodes=501,
+                    max_edges=10,
+                )
+            self.assertIn("max_nodes must be <= 500", str(ctx.exception))
 
     def test_query_provenance_groups_and_filters_edges(self) -> None:
         topology = {

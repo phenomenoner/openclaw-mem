@@ -101,6 +101,55 @@ class TestGraphQueryCli(unittest.TestCase):
             self.assertIn("docs/topology.yaml#L20", out["result"]["bundle_text"])
             conn.close()
 
+
+    def test_cmd_graph_query_subgraph_max_nodes_cap_is_consistent(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "artifact.center", "type": "artifact"},
+                {"id": "artifact.alpha", "type": "artifact"},
+                {"id": "artifact.beta", "type": "artifact"},
+            ],
+            "edges": [
+                {"src": "artifact.center", "dst": "artifact.alpha", "type": "writes", "provenance": "docs/topology.yaml#L10"},
+                {"src": "artifact.center", "dst": "artifact.beta", "type": "alerts_to", "provenance": "docs/topology.yaml#L20"},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "mem.sqlite"
+            conn = _connect(str(db_path))
+            refresh_topology(topology, db_path=db_path, source_path="docs/topology.yaml")
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "graph_query_cmd": "subgraph",
+                    "db": str(db_path),
+                    "node_id": "artifact.center",
+                    "hops": 1,
+                    "direction": "both",
+                    "max_nodes": 2,
+                    "max_edges": 10,
+                    "json": True,
+                },
+            )()
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_query(conn, args)
+
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["query_cmd"], "subgraph")
+            self.assertEqual(out["result"]["stopped_reason"], "max_nodes")
+            self.assertEqual(out["result"]["node_count"], 2)
+            self.assertEqual(out["result"]["edge_count"], 1)
+            node_ids = {node["id"] for node in out["result"]["nodes"]}
+            edge = out["result"]["edges"][0]
+            self.assertIn(edge["src"], node_ids)
+            self.assertIn(edge["dst"], node_ids)
+            conn.close()
+
     def test_cmd_graph_query_filter_json_payload(self) -> None:
         topology = {
             "nodes": [

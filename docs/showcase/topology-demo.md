@@ -39,6 +39,15 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem \
   --hops 2 --direction upstream
 ```
 
+Optional: tighten the output further with **edge-type** / **node-type** filters:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem \
+  graph --db /tmp/mem.sqlite --no-json query subgraph artifact.openclaw-mem.sqlite \
+  --hops 2 --direction upstream \
+  --edge-type writes --include-node-type cron_job --include-node-type artifact
+```
+
 The `subgraph` result is intentionally small:
 - bounded by `--hops`, `--max-nodes`, `--max-edges`
 - stable ordering

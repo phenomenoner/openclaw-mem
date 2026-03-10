@@ -34,3 +34,9 @@ echo
 echo "== Bounded subgraph (upstream, 2 hops) around artifact.openclaw-mem.sqlite"
 uv run --python 3.13 --frozen -- python -m openclaw_mem graph --db "$DB" --no-json \
   query subgraph artifact.openclaw-mem.sqlite --hops 2 --direction upstream
+
+echo
+echo "== Filtered subgraph (edge-type writes; node types cron_job+artifact) around artifact.openclaw-mem.sqlite"
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph --db "$DB" --no-json \
+  query subgraph artifact.openclaw-mem.sqlite --hops 2 --direction upstream \
+  --edge-type writes --include-node-type cron_job --include-node-type artifact

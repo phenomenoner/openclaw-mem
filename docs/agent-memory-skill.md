@@ -198,7 +198,10 @@ python3 scripts/json_escape.py docs/snippets/openclaw-agentturn-message.watchdog
 
 Paste the output as the value of `payload.message`.
 
-Note: the read-only carve-out is a **prompt-layer contract**. If your runner supports tool allow/deny lists, enforce it by *not granting* `memory_store` to these cron lanes.
+Note: the read-only carve-out starts as a **prompt-layer contract**, but you should enforce it at runtime when possible.
+
+- If you run **openclaw-mem-engine** as the active memory slot: set plugin config `readOnly: true` (or env `OPENCLAW_MEM_ENGINE_READONLY=1`) for watchdog-style lanes. This rejects write-path tools (`memory_store`, deletion via `memory_forget`, `memory_import`, `memory_docs_ingest`) and disables `autoCapture`.
+- Otherwise: if your runner supports tool allow/deny lists, enforce it by *not granting* `memory_store` to these cron lanes.
 
 ### Default: apply almost everywhere
 

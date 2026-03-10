@@ -54,6 +54,15 @@ If asked to “remember” routine logs/OK checks:
 - Topology: repo inspection + (if available) `openclaw-mem graph query ...`
 - Store: **disabled by default** in this lane
 
+## Runtime enforcement (recommended)
+This card is a *prompt-layer contract*. When possible, also enforce it at runtime:
+
+- If you run **openclaw-mem-engine** as your memory slot backend: set plugin config `readOnly: true`
+  (or env `OPENCLAW_MEM_ENGINE_READONLY=1`) for these lanes.
+  - This rejects: `memory_store`, `memory_forget` (deletion), `memory_import`, `memory_docs_ingest`
+  - And disables `autoCapture` write-back.
+- Otherwise: enforce by **not granting** the `memory_store` tool to these cron lanes.
+
 ---
 
 ## Task instructions (watchdog lane)

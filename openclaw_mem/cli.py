@@ -6957,6 +6957,8 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 direction=getattr(args, "direction", "both"),
                 max_nodes=getattr(args, "max_nodes", 40),
                 max_edges=getattr(args, "max_edges", 80),
+                edge_types=getattr(args, "edge_type", None),
+                include_node_types=getattr(args, "include_node_type", None),
             )
         elif query_cmd == "drift":
             result = query_drift(
@@ -8800,6 +8802,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     q.add_argument("--max-nodes", dest="max_nodes", type=int, default=40, help="Max nodes to include (default: 40)")
     q.add_argument("--max-edges", dest="max_edges", type=int, default=80, help="Max edges to include (default: 80)")
+    q.add_argument(
+        "--edge-type",
+        dest="edge_type",
+        action="append",
+        default=None,
+        help="Only include edges with these types (repeatable; comma-separated ok)",
+    )
+    q.add_argument(
+        "--include-node-type",
+        dest="include_node_type",
+        action="append",
+        default=None,
+        help="Only include nodes with these node types (repeatable; comma-separated ok). Center node is always included.",
+    )
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("filter", help="Filter nodes by tags/type")

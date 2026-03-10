@@ -39,6 +39,35 @@ def _json_load_tags(raw: Any) -> List[str]:
     return []
 
 
+def _normalize_token_list(raw: Any) -> List[str]:
+    """Normalize optional CLI-ish inputs into a stable de-duped list of non-empty strings.
+
+    Accepts: None, str (comma-separated allowed), list/tuple/set of items.
+    """
+    if raw is None:
+        return []
+    tokens: List[str] = []
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.split(",")]
+        tokens = [p for p in parts if p]
+    elif isinstance(raw, (list, tuple, set)):
+        for item in raw:
+            if item is None:
+                continue
+            if isinstance(item, str):
+                parts = [p.strip() for p in item.split(",")]
+                tokens.extend([p for p in parts if p])
+            else:
+                token = str(item).strip()
+                if token:
+                    tokens.append(token)
+    else:
+        token = str(raw).strip()
+        if token:
+            tokens.append(token)
+    return sorted(set(tokens))
+
+
 def _parse_limit(raw: int, *, max_limit: int) -> int:
     limit_int = int(raw)
     if limit_int <= 0:
@@ -579,11 +608,22 @@ def _render_subgraph_bundle_text(
     direction: str,
     nodes: List[Dict[str, Any]],
     edges: List[Dict[str, Any]],
+    edge_types: Optional[List[str]] = None,
+    include_node_types: Optional[List[str]] = None,
 ) -> str:
     lines: List[str] = []
+    edge_types_norm = sorted(set(edge_types or []))
+    node_types_norm = sorted(set(include_node_types or []))
+    filters: List[str] = []
+    if edge_types_norm:
+        filters.append("edge_types=" + ",".join(edge_types_norm))
+    if node_types_norm:
+        filters.append("include_node_types=" + ",".join(node_types_norm))
+    filters_suffix = (" " + " ".join(filters)) if filters else ""
+
     lines.append(
         "# Topology (bounded subgraph)\n"
-        f"center={center} hops={hops} direction={direction} nodes={len(nodes)} edges={len(edges)}\n"
+        f"center={center} hops={hops} direction={direction} nodes={len(nodes)} edges={len(edges)}{filters_suffix}\n"
     )
     if nodes:
         lines.append("## Nodes")
@@ -612,6 +652,8 @@ def query_subgraph(
     direction: str = "both",
     max_nodes: int = 40,
     max_edges: int = 80,
+    edge_types: Optional[List[str]] = None,
+    include_node_types: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     center = str(node_id or "").strip()
     if not center:
@@ -635,6 +677,9 @@ def query_subgraph(
         raise ValueError(f"max_nodes must be <= {_MAX_SUBGRAPH_NODES_LIMIT}")
     if max_edges_int > _MAX_SUBGRAPH_EDGES_LIMIT:
         raise ValueError(f"max_edges must be <= {_MAX_SUBGRAPH_EDGES_LIMIT}")
+
+    edge_type_allow = set(_normalize_token_list(edge_types))
+    include_type_allow = set(_normalize_token_list(include_node_types))
 
     conn = connect_graph_db_for_query(db_path)
     try:
@@ -662,30 +707,45 @@ def query_subgraph(
 
             next_frontier: set[str] = set()
             for edge in batch_edges:
+                if edge_type_allow and str(edge.get("type") or "") not in edge_type_allow:
+                    continue
+
+                if include_type_allow:
+                    src_id = str(edge.get("src") or "")
+                    dst_id = str(edge.get("dst") or "")
+                    src_type = str((node_map.get(src_id) or {}).get("type") or "")
+                    dst_type = str((node_map.get(dst_id) or {}).get("type") or "")
+                    if src_id != center and src_type not in include_type_allow:
+                        continue
+                    if dst_id != center and dst_type not in include_type_allow:
+                        continue
+
                 key = (edge["src"], edge["dst"], edge["type"], edge["provenance"])
                 if key in seen_edges:
                     continue
+
+                candidate_nodes = {str(edge["src"]), str(edge["dst"])}
+                projected_nodes = seen_nodes | next_frontier | candidate_nodes
+                if len(projected_nodes) > max_nodes_int:
+                    stopped_reason = "max_nodes"
+                    break
+
                 seen_edges.add(key)
                 selected_edges.append(edge)
-                next_frontier.add(edge["src"])
-                next_frontier.add(edge["dst"])
+                next_frontier.update(candidate_nodes)
 
                 if len(selected_edges) >= max_edges_int:
                     stopped_reason = "max_edges"
                     break
 
+            next_frontier = next_frontier - seen_nodes
+            if next_frontier:
+                seen_nodes.update(next_frontier)
+
             if stopped_reason:
                 break
 
-            next_frontier = next_frontier - seen_nodes
-            if next_frontier:
-                if len(seen_nodes) + len(next_frontier) > max_nodes_int:
-                    stopped_reason = "max_nodes"
-                    break
-                seen_nodes.update(next_frontier)
-                frontier = next_frontier
-            else:
-                frontier = set()
+            frontier = next_frontier if next_frontier else set()
 
         node_ids = sorted(seen_nodes)
         nodes = [node_map[nid] for nid in node_ids if nid in node_map]
@@ -699,6 +759,8 @@ def query_subgraph(
             direction=direction_norm,
             nodes=nodes,
             edges=selected_edges,
+            edge_types=sorted(edge_type_allow),
+            include_node_types=sorted(include_type_allow),
         )
 
         return {
@@ -710,6 +772,10 @@ def query_subgraph(
             "bounds": {
                 "max_nodes": max_nodes_int,
                 "max_edges": max_edges_int,
+            },
+            "filters": {
+                "edge_types": sorted(edge_type_allow) or None,
+                "include_node_types": sorted(include_type_allow) or None,
             },
             "node_count": len(nodes),
             "edge_count": len(edges_with_nodes),
