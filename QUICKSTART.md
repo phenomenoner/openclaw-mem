@@ -240,6 +240,10 @@ Spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 - Agent memory skill cards (global + read-only carve-out):
   - `skills/agent-memory-skill.global.md`
   - `skills/agent-memory-skill.readonly.md`
+- Prompt wiring templates (real OpenClaw prompt surfaces):
+  - `docs/snippets/openclaw-agentturn-message.global-default.md`
+  - `docs/snippets/openclaw-agentturn-message.watchdog-readonly.md`
+  - helper: `scripts/json_escape.py`
 - Reality check & status: `docs/reality-check.md`
 - Plugin details: `docs/auto-capture.md`
 - Deployment: `docs/deployment.md`

@@ -183,6 +183,23 @@ Recommended usage:
 
 These cards are intentionally short. The rest of this page is the long-form SOP/manual.
 
+### Prompt wiring (real deployment surfaces)
+
+To make this *actually* deployable on OpenClaw prompt surfaces, this repo also ships copy/paste message templates:
+
+- Default agent/system prompt add-on (global): `docs/snippets/openclaw-agentturn-message.global-default.md`
+- Cron watchdog/healthcheck `agentTurn` message (read-only): `docs/snippets/openclaw-agentturn-message.watchdog-readonly.md`
+
+If your OpenClaw config is JSON and you need to embed a multi-line `payload.message`, generate a JSON-escaped string:
+
+```bash
+python3 scripts/json_escape.py docs/snippets/openclaw-agentturn-message.watchdog-readonly.md
+```
+
+Paste the output as the value of `payload.message`.
+
+Note: the read-only carve-out is a **prompt-layer contract**. If your runner supports tool allow/deny lists, enforce it by *not granting* `memory_store` to these cron lanes.
+
 ### Default: apply almost everywhere
 
 This SOP is intended to be **global-by-default** for OpenClaw agents because it prevents the common failure modes:

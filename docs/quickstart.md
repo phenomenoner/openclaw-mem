@@ -68,6 +68,10 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimi
 - Install the drop-in skill card(s):
   - global default: `skills/agent-memory-skill.global.md`
   - watchdog/healthcheck/lint/smoke read-only carve-out: `skills/agent-memory-skill.readonly.md`
+- Use the copy/paste prompt wiring templates:
+  - `docs/snippets/openclaw-agentturn-message.global-default.md`
+  - `docs/snippets/openclaw-agentturn-message.watchdog-readonly.md`
+  - helper: `scripts/json_escape.py` (embed multi-line messages into JSON cron config)
 
 ### If the local proof was enough
 

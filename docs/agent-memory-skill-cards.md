@@ -98,3 +98,12 @@ If asked to “remember” routine logs/OK checks:
 - Topology: repo inspection + (if available) `openclaw-mem graph query ...`
 - Store: **disabled by default** in this lane
 ```
+
+## Prompt wiring templates (OpenClaw)
+
+If you want this to be copy/paste deployable on real prompt surfaces:
+
+- Default agent/system prompt add-on (global): `docs/snippets/openclaw-agentturn-message.global-default.md`
+- Cron watchdog/healthcheck `agentTurn` message (read-only): `docs/snippets/openclaw-agentturn-message.watchdog-readonly.md`
+
+For JSON configs, use `scripts/json_escape.py` to embed multi-line messages (see [Deployment](deployment.md)).

@@ -391,6 +391,36 @@ Use the drop-in read-only card:
 
 And keep delivery quiet on OK (emit `NO_REPLY`), only alert on anomalies.
 
+#### OpenClaw cron example (agentTurn + read-only prompt)
+
+This repo includes a copy/paste **watchdog lane** `payload.message` template:
+- `docs/snippets/openclaw-agentturn-message.watchdog-readonly.md`
+
+If your OpenClaw config is JSON, JSON-escape that multi-line message:
+
+```bash
+cd /opt/openclaw-mem
+python3 scripts/json_escape.py docs/snippets/openclaw-agentturn-message.watchdog-readonly.md
+```
+
+Then use it as the `payload.message` value (no extra quoting needed):
+
+```json
+{
+  "name": "openclaw-mem watchdog (read-only)",
+  "schedule": { "kind": "cron", "expr": "*/10 * * * *", "tz": "UTC" },
+  "sessionTarget": "isolated",
+  "wakeMode": "next-heartbeat",
+  "payload": {
+    "kind": "agentTurn",
+    "model": "google-antigravity/gemini-3-flash",
+    "thinking": "minimal",
+    "message": <PASTE_OUTPUT_OF_json_escape.py_HERE>
+  },
+  "delivery": { "mode": "none" }
+}
+```
+
 ### Health Check Script
 
 ```bash
