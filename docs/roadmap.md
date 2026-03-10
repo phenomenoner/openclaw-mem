@@ -100,6 +100,29 @@ Acceptance criteria:
 - A-deep installs deterministic refresh + drift/provenance boundaries.
 - Runtime graph failures remain fail-open and do not break baseline memory/pack flows.
 
+### 1.7b) Automatic topology seed (repo map → topology YAML)
+
+Status: **ROADMAP**.
+
+- Problem: our topology surfaces are still curated/demo-first; new repos/jobs/artifacts don’t automatically appear unless a human updates topology files.
+- Goal: ship a deterministic extractor that can generate a minimal, reviewable topology seed from the workspace + cron registry.
+- Non-goals: no LLM extraction, no implicit trust promotion, and no silent overwrites of operator-authored topology.
+
+Plan (v0):
+1) Build a `topology-seed` from deterministic sources:
+   - `/root/.openclaw/cron/jobs.json` (job ids, schedules, delivery targets)
+   - playbook cron job specs (`openclaw-async-coding-playbook/cron/jobs/*.md`)
+   - workspace repo roots (git + directory metadata only)
+2) Output a small YAML/JSON file + receipt (counts, provenance groups).
+3) Optional: “suggest-only” diff against a curated topology file.
+
+Acceptance criteria:
+- One command can regenerate the seed deterministically and produce a receipt.
+- Seed output is provenance-first and safe to commit (no secrets, no raw content).
+
+Artifacts:
+- Spec: `docs/specs/topology-auto-extract-v0.md`
+
 ### 1.6) Sunrise rollout (Stage A→B→C)
 
 Status: **PARTIAL** (Stage A running; Stage B/C pending).
@@ -112,6 +135,26 @@ Acceptance criteria:
 - Stage A runs stably for 3 days: `missingIds=0`, `error_count=0`.
 - Stage B canary passes 3 consecutive days: engine recall returns receipts with `policyTier` + `ftsTop/vecTop` and no tool errors.
 - Stage C is only enabled after A+B are green.
+
+### 1.6a) Read-only lane enforcement ladder (sidecar-first deployments)
+
+Status: **ROADMAP**.
+
+- Problem: in sidecar-only deployments, “read-only lanes” are still mostly a prompt/runner discipline; `exec` is the main escape hatch.
+- Goal: make read-only posture enforceable (tool surface + script-only exec + sandbox) so we can expand unattended coverage safely.
+
+Phase plan (suggested):
+- Phase 0: prompt-layer read-only card + silent-on-green (today)
+- Phase 1: tool allowlists deny memory writes + file writes; scripts-first jobs
+- Phase 2: sandbox `exec` (script-only wrapper + OS-level restrictions)
+- Phase 3: widen coverage + add sunrise watchers for each new surface
+
+Acceptance criteria:
+- A cron lane can prove “read-only” via receipts (allowed scripts + expected state paths only).
+- Rollback is one command (disable the job / remove profile) and restores baseline behavior.
+
+Artifacts:
+- Ops backlog (host): `/root/.openclaw/workspace/openclaw-async-coding-playbook/projects/openclaw-ops/ops/PRODUCT_GAPS_BACKLOG.md`
 
 ### 1.5) Writeback + recall policy loop (M1.5)
 

@@ -45,6 +45,18 @@ These are automated via OpenClaw cron jobs (so the system works without manual C
 - Receipt: `/root/.openclaw/workspace/memory/compressed/receipts/YYYY-MM-DD.json`
 - Governance: derived-by-default, no durable promotion (see `docs/ai-compression.md`)
 
+### Graphic Memory — auto-capture (git commits)
+- Job: `01761d59-adfc-4413-bd12-2ecd616e3029` (2/day: 01:13, 13:13 Asia/Taipei)
+- Spec: `/root/.openclaw/workspace/openclaw-async-coding-playbook/cron/jobs/01761d59-adfc-4413-bd12-2ecd616e3029.md`
+- DB: `/root/.openclaw/memory/openclaw-mem.sqlite`
+- State cursor (default): `OPENCLAW_STATE_DIR/memory/openclaw-mem/graph-capture-state.json`
+
+### Graphic Memory — auto-capture (markdown index-only)
+- Job: `04e3d483-40bc-4d51-822e-4a1eb2252a7b` (q12h)
+- Spec: `/root/.openclaw/workspace/openclaw-async-coding-playbook/cron/jobs/04e3d483-40bc-4d51-822e-4a1eb2252a7b.md`
+- DB: `/root/.openclaw/memory/openclaw-mem.sqlite`
+- State cursor (default): `OPENCLAW_STATE_DIR/memory/openclaw-mem/graph-capture-md-state.json`
+
 ## 3) Exists (CLI) but NOT yet auto-wired (waiting for further decisions)
 
 ### Context Packer (`pack`)

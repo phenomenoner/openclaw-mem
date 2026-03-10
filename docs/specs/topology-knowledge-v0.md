@@ -180,7 +180,8 @@ If you run `openclaw-mem-engine` as the active memory slot, you can also enforce
 
 ## 8) Open questions / v1 candidates
 
-- deterministic extractors (cron/jobs/config → topology)
+- deterministic extractors (repo map + cron registry + job specs → topology seed)
+  - see: `docs/specs/topology-auto-extract-v0.md`
 - a `graph pack-topology` subcommand that emits a bounded L3 injection bundle
 - stable node-id conventions and type registry
 - mapping topology trust tiers into ContextPack trace
