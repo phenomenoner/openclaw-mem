@@ -2,6 +2,20 @@
 
 Status: **ROADMAP** (v0 pack exists; this doc defines the direction + contract).
 
+## Shipped today vs proposed next
+
+### Shipped today
+- `openclaw-mem pack` already emits `bundle_text`
+- `items[]` are available for structured inspection
+- optional trace receipts exist for debugging selection behavior
+
+### Proposed / not yet a frozen contract
+- the exact `ContextPack.v1` JSON schema below
+- stronger L0/L1/L2 packaging conventions
+- future protected-tail / expand-style hooks
+
+Read this page as: **current behavior + forward contract**, not as a promise that every field below is already frozen.
+
 ## Why this exists
 
 Long-running OpenClaw sessions drift because the live prompt becomes a soup of:

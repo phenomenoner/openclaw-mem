@@ -201,7 +201,9 @@ Paste the output as the value of `payload.message`.
 Note: the read-only carve-out starts as a **prompt-layer contract**, but you should enforce it at runtime when possible.
 
 - If you run **openclaw-mem-engine** as the active memory slot: set plugin config `readOnly: true` (or env `OPENCLAW_MEM_ENGINE_READONLY=1`) for watchdog-style lanes. This rejects write-path tools (`memory_store`, deletion via `memory_forget`, `memory_import`, `memory_docs_ingest`) and disables `autoCapture`.
+- If you run only the **openclaw-mem sidecar**: this remains a prompt / runner-tooling contract unless your runner also supports tool allow/deny lists.
 - Otherwise: if your runner supports tool allow/deny lists, enforce it by *not granting* `memory_store` to these cron lanes.
+- For L3 graph query usage: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`).
 
 ### Default: apply almost everywhere
 

@@ -19,6 +19,25 @@ For production use, you'll want:
 
 `openclaw-mem` does not own the memory slot; it adds durable capture, local recall, and observability across both native backends.
 
+### Two different components in this repo (important)
+
+This repo currently ships **two different plugin roles**:
+
+1. **`openclaw-mem` sidecar plugin**
+   - captures/harvests durable observations
+   - does **not** own the OpenClaw memory slot
+   - is the default deployment path in this guide
+
+2. **`openclaw-mem-engine` memory-slot plugin**
+   - optional memory backend / engine
+   - owns read/write tool behavior when selected as the active memory slot
+   - its manifest is currently still marked **`0.0.1`** (treat as pre-release / controlled rollout)
+
+### Read-only carve-out: which component actually enforces it?
+
+- If you are using only the **sidecar** plugin, read-only is mostly a **prompt / runner-tooling discipline**.
+- If you are using **`openclaw-mem-engine`** as the active memory slot, set `readOnly: true` (or `OPENCLAW_MEM_ENGINE_READONLY=1`) to get **runtime-enforced** rejection of write-path operations.
+
 Detailed ownership boundaries and rollout patterns:
 - `docs/ecosystem-fit.md`
 
