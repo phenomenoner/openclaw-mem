@@ -5,6 +5,7 @@ from .query import (
     query_lineage,
     query_provenance,
     query_refresh_receipts,
+    query_subgraph,
     query_upstream,
     query_writers,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "query_lineage",
     "query_provenance",
     "query_refresh_receipts",
+    "query_subgraph",
     "query_upstream",
     "query_writers",
     "refresh_topology",

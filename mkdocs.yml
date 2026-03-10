@@ -33,6 +33,9 @@ nav:
   - Choose an install path: install-modes.md
   - Quickstart: quickstart.md
   - Reality check & status: reality-check.md
+  - Showcase:
+      - Inside-Out demo: showcase/inside-out-demo.md
+      - Topology demo: showcase/topology-demo.md
   - Releases: https://github.com/phenomenoner/openclaw-mem/releases
   - Reference:
       - Ecosystem fit: ecosystem-fit.md

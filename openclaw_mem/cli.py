@@ -59,6 +59,7 @@ from openclaw_mem.graph.query import (
     query_lineage,
     query_provenance,
     query_refresh_receipts,
+    query_subgraph,
     query_upstream,
     query_writers,
 )
@@ -6919,7 +6920,11 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         elif query_cmd == "downstream":
             result = query_downstream(db_path=db_path, node_id=getattr(args, "node_id", None))
         elif query_cmd == "lineage":
-            result = query_lineage(db_path=db_path, node_id=getattr(args, "node_id", None))
+            result = query_lineage(
+                db_path=db_path,
+                node_id=getattr(args, "node_id", None),
+                max_depth=getattr(args, "max_depth", 1),
+            )
         elif query_cmd == "writers":
             result = query_writers(db_path=db_path, artifact_id=getattr(args, "artifact_id", None))
         elif query_cmd == "filter":
@@ -6943,6 +6948,15 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 edge_type=getattr(args, "edge_type", None),
                 limit=getattr(args, "limit", 20),
                 min_edge_count=getattr(args, "min_edge_count", 1),
+            )
+        elif query_cmd == "subgraph":
+            result = query_subgraph(
+                db_path=db_path,
+                node_id=getattr(args, "node_id", None),
+                hops=getattr(args, "hops", 2),
+                direction=getattr(args, "direction", "both"),
+                max_nodes=getattr(args, "max_nodes", 40),
+                max_edges=getattr(args, "max_edges", 80),
             )
         elif query_cmd == "drift":
             result = query_drift(
@@ -6968,6 +6982,14 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     if bool(args.json):
         _emit(payload, True)
+        return
+
+    if query_cmd == "subgraph":
+        text = str(result.get("bundle_text") or "").rstrip()
+        if text:
+            print(text)
+        else:
+            print(f"nodes={int(result.get('node_count', 0))} edges={int(result.get('edge_count', 0))}")
         return
 
     if query_cmd == "filter":
@@ -8747,7 +8769,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--file", required=True, help="Topology file path (.json; .yaml requires PyYAML)")
     g.set_defaults(func=cmd_graph_topology_refresh)
 
-    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/filter/receipts/provenance/drift)")
+    g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/subgraph/filter/receipts/provenance/drift)")
     qsub = g.add_subparsers(dest="graph_query_cmd", required=True)
 
     q = qsub.add_parser("upstream", help="List incoming edges into node_id")
@@ -8760,10 +8782,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     q = qsub.add_parser("lineage", help="List both upstream and downstream edges for node_id")
     q.add_argument("node_id", help="Target node id")
+    q.add_argument("--max-depth", dest="max_depth", type=int, default=1, help="Traversal depth in hops (default: 1; max: 8)")
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("writers", help="List writes edges that target artifact_id")
     q.add_argument("artifact_id", help="Artifact node id")
+    q.set_defaults(func=cmd_graph_query)
+
+    q = qsub.add_parser("subgraph", help="Emit a bounded subgraph around node_id (pack-style, provenance-first)")
+    q.add_argument("node_id", help="Center node id")
+    q.add_argument("--hops", type=int, default=2, help="Neighborhood hops (default: 2)")
+    q.add_argument(
+        "--direction",
+        choices=["upstream", "downstream", "both"],
+        default="both",
+        help="Edge expansion direction (default: both)",
+    )
+    q.add_argument("--max-nodes", dest="max_nodes", type=int, default=40, help="Max nodes to include (default: 40)")
+    q.add_argument("--max-edges", dest="max_edges", type=int, default=80, help="Max edges to include (default: 80)")
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("filter", help="Filter nodes by tags/type")

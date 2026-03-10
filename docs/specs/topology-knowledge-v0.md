@@ -115,14 +115,20 @@ Topology queries should return:
 
 Core query shapes:
 - upstream/downstream/lineage of a node
+- bounded subgraph around a node (pack-style injection; provenance-first)
 - filter nodes by type/tag
 - list refresh receipts / provenance groups
 - drift vs runtime snapshot
 
-Example:
+Examples:
 
 ```bash
 uv run --python 3.13 --frozen -- python -m openclaw_mem graph query upstream artifact.daily-mission --json
+```
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem \
+  graph --no-json query subgraph artifact.daily-mission --hops 2 --direction upstream
 ```
 
 ---
