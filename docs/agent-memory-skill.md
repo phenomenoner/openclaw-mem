@@ -39,6 +39,11 @@ Use for:
 
 > Implementation note (today): topology is often answered by **direct inspection** (rg/tree) + a **curated topo note** stored in L2. Don’t store repo maps as L1 durable memory.
 
+### Fast contrast: which lane answers which question?
+- **Recall / L1** = preference / decision / continuity / standing rule
+- **Docs / L2** = contract / policy / how it should work / canonical wording
+- **Topology / L3** = where it lives / entrypoint / dependency / ownership / impact if touched
+
 ---
 
 ## Routing policy (do this, not vibes)
@@ -50,12 +55,19 @@ Use for:
 4. **Store** (only after confirmed durable)
 5. **Do nothing** (session-local)
 
+If the request asks for **exact policy/contract wording**, use **docs search** even when recall contains a summary.
+
 ### One-screen flow
 - Prior preference/decision/standing rule? → **Recall**
 - Documented system behavior / authored guidance? → **Docs search**
 - Repo/path/entrypoint/impact navigation? → **Topology search**
 - Did this turn produce a stable, confirmed fact worth keeping? → **Store**
 - Otherwise → **Do nothing**
+
+### Practical loop
+1. **Recall / docs / topology first** depending on the question.
+2. Answer from the best lane with provenance.
+3. **Store only if** this turn created a *newly confirmed durable fact*.
 
 ---
 
@@ -97,13 +109,16 @@ If recall/docs results are weak, conflicting, or low-confidence:
 
 ## Write discipline: what qualifies for durable memory?
 
-A candidate L1 record should pass most of:
-- **Stable** (won’t flip tomorrow)
+Store only if **all** are true:
+- **Explicit or confirmed** (not implied from vibes)
+- **Stable beyond this session**
 - **Reusable** (saves future work)
-- **Specific** (retrievable by a short query)
 - **Scoped** (global vs project vs user)
-- **Auditable** (source + receipt)
-- **Compact** (minimal words)
+- **Attributable** (source + receipt)
+- **Compact** (minimal words, retrievable later)
+
+Negative test:
+- **If you would not want to retrieve this next week as a standalone fact, do not store it.**
 
 ### Do-not-store list (minimum)
 1. raw chat transcripts
@@ -178,4 +193,5 @@ Use the fixture set to practice routing decisions and to tighten wording when hu
 - When asked “what was the policy/contract?” → **docs search**.
 - When asked “what does the user prefer / what did we decide?” → **recall**.
 - When asked “where is it / what breaks if we change it?” → **topology search**.
+- When recall and docs disagree, treat recall as a **lead**, then verify via docs or direct inspection before acting or storing.
 - Only **store** after confirmation and only in compact, retrievable form.
