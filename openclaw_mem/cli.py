@@ -63,6 +63,7 @@ from openclaw_mem.graph.query import (
     query_upstream,
     query_writers,
 )
+from openclaw_mem.graph.topology_extract import extract_topology_seed
 from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
 
 def _resolve_home_dir() -> str:
@@ -126,6 +127,7 @@ DEFAULT_EPISODIC_EXTRACT_STATE_PATH = os.path.join(
     "episodes-extract-state.json",
 )
 DEFAULT_OPENCLAW_SESSIONS_ROOT = os.path.join(STATE_DIR, "sessions")
+DEFAULT_CRON_JOBS_JSON = os.path.join(STATE_DIR, "cron", "jobs.json")
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_WORKSPACE = Path.cwd()  # Fallback if not in openclaw workspace
 DEFAULT_GRAPH_CAPTURE_MD_INCLUDES = (".md",)
@@ -6134,6 +6136,74 @@ def cmd_graph_topology_refresh(conn: sqlite3.Connection, args: argparse.Namespac
     )
 
 
+def cmd_graph_topology_extract(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Extract a deterministic topology seed from workspace + cron registry + cron specs."""
+
+    _ = conn
+    workspace = str(getattr(args, "workspace", "") or "").strip() or str(DEFAULT_WORKSPACE)
+    cron_jobs = str(getattr(args, "cron_jobs", "") or "").strip() or DEFAULT_CRON_JOBS_JSON
+    spec_dir = str(getattr(args, "spec_dir", "") or "").strip()
+    if not spec_dir:
+        spec_dir = str(Path(workspace) / "openclaw-async-coding-playbook" / "cron" / "jobs")
+
+    out_path = str(getattr(args, "out", "") or "").strip()
+    if not out_path:
+        _emit({"error": "missing --out"}, True)
+        sys.exit(2)
+
+    try:
+        seed = extract_topology_seed(
+            workspace=workspace,
+            cron_jobs_path=cron_jobs,
+            spec_dir=spec_dir,
+        )
+        out_file = Path(out_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(seed, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    counts = seed.get("counts") if isinstance(seed.get("counts"), dict) else {}
+    payload = {
+        "kind": "openclaw-mem.graph.topology-extract.v0",
+        "ts": _utcnow_iso(),
+        "workspace": str(Path(workspace).resolve()),
+        "cron_jobs": str(Path(cron_jobs).resolve()),
+        "spec_dir": str(Path(spec_dir).resolve()),
+        "out": str(Path(out_path).resolve()),
+        "result": {
+            "ok": True,
+            "node_count": int(counts.get("nodes") or 0),
+            "edge_count": int(counts.get("edges") or 0),
+            "repo_count": int(counts.get("repos") or 0),
+            "cron_job_count": int(counts.get("cron_jobs") or 0),
+            "spec_count": int(counts.get("spec_files") or 0),
+            "node_types": counts.get("node_types") if isinstance(counts.get("node_types"), dict) else {},
+            "edge_types": counts.get("edge_types") if isinstance(counts.get("edge_types"), dict) else {},
+        },
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    result = payload["result"]
+    print(
+        " ".join(
+            [
+                f"ok={str(bool(result.get('ok'))).lower()}",
+                f"repos={int(result.get('repo_count') or 0)}",
+                f"cron_jobs={int(result.get('cron_job_count') or 0)}",
+                f"specs={int(result.get('spec_count') or 0)}",
+                f"nodes={int(result.get('node_count') or 0)}",
+                f"edges={int(result.get('edge_count') or 0)}",
+                f"out={payload.get('out')}",
+            ]
+        )
+    )
+
+
 def _graph_capture_md_norm_ext(ext: str) -> str:
     v = str(ext or "").strip().lower()
     if not v:
@@ -8770,6 +8840,13 @@ def build_parser() -> argparse.ArgumentParser:
     g = gsub.add_parser("topology-refresh", help="Refresh topology graph (nodes/edges) from a curated file")
     g.add_argument("--file", required=True, help="Topology file path (.json; .yaml requires PyYAML)")
     g.set_defaults(func=cmd_graph_topology_refresh)
+
+    g = gsub.add_parser("topology-extract", help="Extract a deterministic topology seed from workspace + cron + specs")
+    g.add_argument("--workspace", default=str(DEFAULT_WORKSPACE), help="Workspace root to scan for repo roots (default: cwd)")
+    g.add_argument("--cron-jobs", dest="cron_jobs", default=DEFAULT_CRON_JOBS_JSON, help=f"Cron jobs registry JSON path (default: {DEFAULT_CRON_JOBS_JSON})")
+    g.add_argument("--spec-dir", dest="spec_dir", help="Cron spec directory (default: <workspace>/openclaw-async-coding-playbook/cron/jobs)")
+    g.add_argument("--out", required=True, help="Output topology seed JSON path")
+    g.set_defaults(func=cmd_graph_topology_extract)
 
     g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/subgraph/filter/receipts/provenance/drift)")
     qsub = g.add_subparsers(dest="graph_query_cmd", required=True)
