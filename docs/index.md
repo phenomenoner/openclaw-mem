@@ -35,6 +35,7 @@ That split is the core design choice: start with something inspectable and rollb
 
 - [Architecture](architecture.md)
 - [Context pack](context-pack.md)
+- [Agent memory skill (SOP)](agent-memory-skill.md)
 - [Importance grading](importance-grading.md)
 - [Automation status](automation-status.md)
 - [Roadmap](roadmap.md)
