@@ -121,5 +121,6 @@ This is inspired by LCM-style context assembly and improves continuity while kee
 
 - Architecture: `docs/architecture.md`
 - Roadmap: `docs/roadmap.md` (Context Packer)
+- Agent memory skill (routing contract): `docs/agent-memory-skill.md`
 - Trace schema contract: `openclaw_mem/pack_trace_v1.py`
 - Thought-links (design references): `docs/thought-links.md`

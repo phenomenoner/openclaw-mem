@@ -169,11 +169,38 @@ Curated and minimal; no raw code dumps.
 
 ---
 
+## Deployment recommendation (default scope + carve-outs)
+
+### Default: apply almost everywhere
+
+This SOP is intended to be **global-by-default** for OpenClaw agents because it prevents the common failure modes:
+- dumping raw artifacts into durable memory,
+- trust laundering (retrieval ≠ truth),
+- and lane collapse (treating docs/topology/memory as the same thing).
+
+If an agent can call `memory_recall` / `memory_store` / `memory_docs_search`, it should also have this routing contract.
+
+### Carve-outs: watchdog / healthcheck cron lanes
+
+For watchdog-style cron agents, use a **read-only variant**:
+- allow **recall** and **docs search** (to interpret what “normal” means),
+- but **do not store** by default.
+
+Only store when **(a)** an anomaly is detected and **(b)** the operator explicitly asks to persist a standing rule or decision.
+
+Rationale: cron lanes produce high-volume, low-signal observations; a store-by-default posture silently degrades long-term memory.
+
+### Relationship to ContextPack + importance grading
+
+- Treat **ContextPack / `pack --trace`** as the preferred *bounded* way to carry L1 state into a long-running task.
+- When you *do* store, set an **importance score/label** (see [Importance grading](importance-grading.md)) so packing/triage can stay selective.
+
 ## Scenario fixtures (for agreement testing)
 
 Use the fixture set to practice routing decisions and to tighten wording when humans disagree.
 
-- Fixture file: `docs/fixtures/agent-memory-skill-scenarios.v0.yaml`
+- Editable fixture (YAML): `docs/fixtures/agent-memory-skill-scenarios.v0.yaml`
+- Deterministic eval mirror (JSONL, dependency-free): `tests/data/AGENT_MEMORY_SKILL_SCENARIOS.v0.jsonl`
 - Expected label set: `recall | store | docs_search | topology_search | do_nothing`
 
 ---

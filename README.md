@@ -72,6 +72,7 @@ If that works, the product story is real: you already have a local memory ledger
 - **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
 - **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
 - **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
+- **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
 - **Optional Mem Engine:** [`docs/mem-engine.md`](docs/mem-engine.md)
 - **Release notes:** <https://github.com/phenomenoner/openclaw-mem/releases>
 

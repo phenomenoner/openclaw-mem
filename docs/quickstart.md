@@ -62,6 +62,10 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimi
 
 ## What to do next
 
+### If you are integrating with OpenClaw agents
+
+- Read the [Agent memory skill (SOP)](agent-memory-skill.md) — it defines trust-aware routing for when to recall, store, search docs, consult topology, or do nothing.
+
 ### If the local proof was enough
 
 - move to [Deployment guide](deployment.md)

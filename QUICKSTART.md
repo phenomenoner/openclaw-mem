@@ -236,6 +236,7 @@ Spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 ## Next steps
 
 - Full docs: `README.md`
+- Agent memory skill (SOP): `docs/agent-memory-skill.md`
 - Reality check & status: `docs/reality-check.md`
 - Plugin details: `docs/auto-capture.md`
 - Deployment: `docs/deployment.md`
