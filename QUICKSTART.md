@@ -188,7 +188,7 @@ This command is zero-write by design in v0.1: it only reports candidates (stalen
 Enable per-command:
 
 ```bash
-# alias accepted: heuristic_v1
+# aliases accepted: heuristic_v1, heuristic_v2
 OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run --python 3.13 --frozen -- python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
 ```
 
