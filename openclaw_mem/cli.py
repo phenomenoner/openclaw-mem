@@ -6482,6 +6482,8 @@ def _graph_capture_md_mark_seen(
 
 
 def cmd_graph_capture_md(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _apply_importance_scorer_override(args)
+
     raw_paths = list(getattr(args, "path", []) or [])
     if not raw_paths:
         _emit({"error": "missing --path"}, True)
@@ -6804,6 +6806,8 @@ def _graph_capture_git_observation_exists(conn: sqlite3.Connection, repo: str, s
 
 
 def cmd_graph_capture_git(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _apply_importance_scorer_override(args)
+
     repos = list(getattr(args, "repo", []) or [])
     if not repos:
         _emit({"error": "missing --repo"}, True)
@@ -8983,6 +8987,15 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--since", type=float, default=24, help="Fallback lookback window in hours (default: 24)")
     g.add_argument("--state", default=DEFAULT_GRAPH_CAPTURE_STATE_PATH, help=f"Capture state file (default: {DEFAULT_GRAPH_CAPTURE_STATE_PATH})")
     g.add_argument("--max-commits", dest="max_commits", type=int, default=50, help="Max commits per repo per run (default: 50)")
+    g.add_argument(
+        "--importance-scorer",
+        dest="importance_scorer",
+        default=None,
+        help=(
+            "Override importance autograde scorer for this run (env fallback: OPENCLAW_MEM_IMPORTANCE_SCORER). "
+            "Use 'heuristic-v1' to enable, or 'off' to disable."
+        ),
+    )
     g.set_defaults(func=cmd_graph_capture_git)
 
     g = gsub.add_parser("capture-md", help="Capture Markdown heading sections as index-only observations (idempotent)")
@@ -8994,6 +9007,15 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--min-heading-level", dest="min_heading_level", type=int, default=2, help="Capture headings at this level or deeper (default: 2)")
     g.add_argument("--state", default=DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH, help=f"Capture state file (default: {DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH})")
     g.add_argument("--since-hours", dest="since_hours", type=float, default=24, help="Fallback lookback window in hours for first scan (default: 24)")
+    g.add_argument(
+        "--importance-scorer",
+        dest="importance_scorer",
+        default=None,
+        help=(
+            "Override importance autograde scorer for this run (env fallback: OPENCLAW_MEM_IMPORTANCE_SCORER). "
+            "Use 'heuristic-v1' to enable, or 'off' to disable."
+        ),
+    )
     g.set_defaults(func=cmd_graph_capture_md)
 
     g = gsub.add_parser("export", help="Export a small graph.json artifact around query hits (portable artifact)")

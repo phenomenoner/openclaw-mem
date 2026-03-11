@@ -294,10 +294,18 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.graph_cmd, "capture-git")
         self.assertEqual(a.repo, ["/tmp/repo"])
 
+        a = build_parser().parse_args(["graph", "capture-git", "--repo", "/tmp/repo", "--importance-scorer", "heuristic-v1"])
+        self.assertEqual(a.graph_cmd, "capture-git")
+        self.assertEqual(a.importance_scorer, "heuristic-v1")
+
         a = build_parser().parse_args(["graph", "capture-md", "--path", "/tmp/notes"])
         self.assertEqual(a.cmd, "graph")
         self.assertEqual(a.graph_cmd, "capture-md")
         self.assertEqual(a.path, ["/tmp/notes"])
+
+        a = build_parser().parse_args(["graph", "capture-md", "--path", "/tmp/notes", "--importance-scorer", "heuristic-v1"])
+        self.assertEqual(a.graph_cmd, "capture-md")
+        self.assertEqual(a.importance_scorer, "heuristic-v1")
 
         a = build_parser().parse_args(["graph", "export", "--query", "hello", "--to", "/tmp/graph.json"])
         self.assertEqual(a.cmd, "graph")
@@ -727,6 +735,7 @@ class TestCliM0(unittest.TestCase):
                     "min_heading_level": 2,
                     "state": state_path,
                     "since_hours": 24,
+                    "importance_scorer": None,
                     "json": True,
                 },
             )()
@@ -764,6 +773,80 @@ class TestCliM0(unittest.TestCase):
             self.assertIn("section_fingerprint", detail)
             self.assertNotIn("excerpt", detail)
             self.assertNotIn("content", detail)
+
+        conn.close()
+
+    def test_graph_capture_md_importance_scorer_override_controls_autograde(self):
+        import os
+        import tempfile
+        from unittest.mock import patch
+
+        conn = _connect(":memory:")
+
+        with tempfile.TemporaryDirectory() as td:
+            state_path = os.path.join(td, "graph-capture-md-state.json")
+            md_on = os.path.join(td, "on.md")
+            md_off = os.path.join(td, "off.md")
+
+            with open(md_on, "w", encoding="utf-8") as f:
+                f.write("# T\n\n## A\nline\n")
+            with open(md_off, "w", encoding="utf-8") as f:
+                f.write("# T\n\n## B\nline\n")
+
+            with patch.dict("os.environ", {}, clear=False):
+                os.environ.pop("OPENCLAW_MEM_IMPORTANCE_SCORER", None)
+                args_on = type(
+                    "Args",
+                    (),
+                    {
+                        "path": [md_on],
+                        "include": [".md"],
+                        "exclude_glob": ["**/node_modules/**", "**/.venv/**", "**/.git/**", "**/dist/**"],
+                        "max_files": 200,
+                        "max_sections_per_file": 50,
+                        "min_heading_level": 2,
+                        "state": state_path,
+                        "since_hours": 24,
+                        "importance_scorer": "heuristic-v1",
+                        "json": True,
+                    },
+                )()
+                with redirect_stdout(io.StringIO()):
+                    cmd_graph_capture_md(conn, args_on)
+
+            row_on = conn.execute(
+                "SELECT detail_json FROM observations WHERE tool_name='graph.capture-md' AND summary LIKE '%on.md%' LIMIT 1"
+            ).fetchone()
+            self.assertIsNotNone(row_on)
+            detail_on = json.loads(row_on[0])
+            self.assertIn("importance", detail_on)
+
+            with patch.dict("os.environ", {"OPENCLAW_MEM_IMPORTANCE_SCORER": "heuristic-v1"}, clear=False):
+                args_off = type(
+                    "Args",
+                    (),
+                    {
+                        "path": [md_off],
+                        "include": [".md"],
+                        "exclude_glob": ["**/node_modules/**", "**/.venv/**", "**/.git/**", "**/dist/**"],
+                        "max_files": 200,
+                        "max_sections_per_file": 50,
+                        "min_heading_level": 2,
+                        "state": state_path,
+                        "since_hours": 24,
+                        "importance_scorer": "off",
+                        "json": True,
+                    },
+                )()
+                with redirect_stdout(io.StringIO()):
+                    cmd_graph_capture_md(conn, args_off)
+
+            row_off = conn.execute(
+                "SELECT detail_json FROM observations WHERE tool_name='graph.capture-md' AND summary LIKE '%off.md%' LIMIT 1"
+            ).fetchone()
+            self.assertIsNotNone(row_off)
+            detail_off = json.loads(row_off[0])
+            self.assertNotIn("importance", detail_off)
 
         conn.close()
 
