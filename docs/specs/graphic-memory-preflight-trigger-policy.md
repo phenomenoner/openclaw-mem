@@ -133,6 +133,11 @@ Rules:
   - composed policy surface (`openclaw-mem.pack.policy-surface.v1`):
     - mirrored between top-level `pack.policy_surface` and `trace.extensions.policy_surface`
     - composes pack-selected refs/citations, trust-policy summary, graph-provenance summary, deterministic include/exclude reason counters, and consistency booleans (`pack_items_match_citations`, trust subset checks)
+  - lifecycle usage shadow receipt (`openclaw-mem.pack.lifecycle-shadow.v1`):
+    - emitted under `trace.extensions.lifecycle_shadow`
+    - derived from real pack selection/citation/candidate decisions (not synthetic counters)
+    - append-only write to bounded SQLite shadow table `pack_lifecycle_shadow_log` (retention capped by `--pack-lifecycle-log-max-rows`)
+    - mutation contract is explicit `memory_mutation=none` / `auto_archive_applied=0` / `auto_mutation_applied=0` (usage evidence + receipts only)
 
 Acceptance (MVP):
 - OFF = no behavior change.

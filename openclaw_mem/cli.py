@@ -1024,6 +1024,27 @@ def _init_db(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_session_ts ON episodic_events(session_id, ts_ms);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_scope_type_ts ON episodic_events(scope, type, ts_ms);")
 
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {_PACK_LIFECYCLE_SHADOW_TABLE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            query_hash TEXT,
+            selection_signature TEXT NOT NULL,
+            selected_count INTEGER NOT NULL,
+            citation_count INTEGER NOT NULL,
+            candidate_count INTEGER NOT NULL,
+            receipt_json TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{_PACK_LIFECYCLE_SHADOW_TABLE}_ts ON {_PACK_LIFECYCLE_SHADOW_TABLE}(ts DESC);"
+    )
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{_PACK_LIFECYCLE_SHADOW_TABLE}_signature ON {_PACK_LIFECYCLE_SHADOW_TABLE}(selection_signature);"
+    )
+
     conn.commit()
 
 
@@ -3602,6 +3623,11 @@ def _pack_trust_apply_policy(
 
 
 _PACK_POLICY_SURFACE_V1_KIND = "openclaw-mem.pack.policy-surface.v1"
+_PACK_LIFECYCLE_SHADOW_V1_KIND = "openclaw-mem.pack.lifecycle-shadow.v1"
+_PACK_LIFECYCLE_SHADOW_TABLE = "pack_lifecycle_shadow_log"
+_PACK_LIFECYCLE_MAX_REFS = 64
+_PACK_LIFECYCLE_MAX_REASON_BUCKETS = 32
+_PACK_LIFECYCLE_LOG_MAX_ROWS_DEFAULT = 2000
 
 
 def _pack_reason_counts_by_inclusion(
@@ -3739,6 +3765,206 @@ def _pack_compose_policy_surface(
             "pack_items_missing_from_trust_selected_refs": pack_missing_from_trust,
         },
     }
+
+
+def _pack_lifecycle_shadow_mode(args: argparse.Namespace) -> str:
+    mode_raw = str(getattr(args, "pack_lifecycle_shadow", "on") or "on").strip().lower()
+    return mode_raw if mode_raw in {"off", "on"} else "on"
+
+
+def _pack_lifecycle_clip_refs(raw: Any, *, max_refs: int = _PACK_LIFECYCLE_MAX_REFS) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    cap = max(1, int(max_refs))
+
+    for item in list(raw or []):
+        ref = str(item or "").strip()
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        out.append(ref)
+        if len(out) >= cap:
+            break
+
+    return out
+
+
+def _pack_lifecycle_reason_counts(raw: Any, *, max_buckets: int = _PACK_LIFECYCLE_MAX_REASON_BUCKETS) -> Dict[str, int]:
+    if not isinstance(raw, dict):
+        return {}
+
+    rows: List[Tuple[str, int]] = []
+    for key in sorted(raw.keys(), key=lambda token: str(token)):
+        iv = _pack_graph_int(raw.get(key), 0)
+        if iv <= 0:
+            continue
+        reason = str(key or "").strip() or "unknown"
+        rows.append((reason, int(iv)))
+
+    cap = max(1, int(max_buckets))
+    if len(rows) > cap:
+        rows = rows[:cap]
+
+    return {reason: count for reason, count in rows}
+
+
+def _pack_lifecycle_counts_by_label(
+    candidates: List[pack_trace_v1.PackTraceV1Candidate],
+    *,
+    attr: str,
+) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for candidate in candidates:
+        decision = getattr(candidate, "decision", None)
+        if not bool(getattr(decision, "included", False)):
+            continue
+
+        token = str(getattr(candidate, attr, "") or "").strip() or "unknown"
+        counts[token] = int(counts.get(token, 0)) + 1
+
+    return {key: int(counts[key]) for key in sorted(counts.keys())}
+
+
+def _pack_lifecycle_selection_signature(selected_refs: List[str]) -> str:
+    joined = "\n".join(selected_refs)
+    digest = hashlib.sha256(joined.encode("utf-8")).hexdigest()[:24]
+    return f"sha256:{digest}"
+
+
+def _pack_compose_lifecycle_shadow_receipt(
+    *,
+    query_text: str,
+    selected_items: List[Dict[str, Any]],
+    citations: List[Dict[str, Any]],
+    candidate_trace: List[pack_trace_v1.PackTraceV1Candidate],
+    trust_policy: Optional[Dict[str, Any]],
+    graph_provenance_policy: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    pack_selected_refs = _pack_lifecycle_clip_refs(
+        [item.get("recordRef") for item in selected_items]
+    )
+    citation_refs = _pack_lifecycle_clip_refs(
+        [item.get("recordRef") for item in citations]
+    )
+
+    included_reason_counts = _pack_reason_counts_by_inclusion(candidate_trace, included=True)
+    excluded_reason_counts = _pack_reason_counts_by_inclusion(candidate_trace, included=False)
+
+    query_clean = str(query_text or "").strip()
+    query_hash = hashlib.sha256(query_clean.encode("utf-8")).hexdigest()[:24] if query_clean else None
+
+    selected_total = len(pack_selected_refs)
+    citation_total = len(citation_refs)
+    candidate_total = len(candidate_trace)
+
+    return {
+        "kind": _PACK_LIFECYCLE_SHADOW_V1_KIND,
+        "mode": "shadow_receipt_only",
+        "ts": _utcnow_iso(),
+        "query": {
+            "hash": (f"sha256:{query_hash}" if query_hash else None),
+            "chars": len(query_clean),
+        },
+        "selection": {
+            "pack_selected_refs": pack_selected_refs,
+            "citation_record_refs": citation_refs,
+            "trace_refreshed_record_refs": list(pack_selected_refs),
+            "selection_signature": _pack_lifecycle_selection_signature(pack_selected_refs),
+        },
+        "counts": {
+            "selected_total": selected_total,
+            "citation_total": citation_total,
+            "candidate_total": candidate_total,
+            "excluded_total": max(0, candidate_total - selected_total),
+            "selected_by_trust": _pack_lifecycle_counts_by_label(candidate_trace, attr="trust"),
+            "selected_by_importance": _pack_lifecycle_counts_by_label(candidate_trace, attr="importance"),
+        },
+        "reasons": {
+            "pack_included_reason_counts": _pack_lifecycle_reason_counts(included_reason_counts),
+            "pack_excluded_reason_counts": _pack_lifecycle_reason_counts(excluded_reason_counts),
+            "trust_policy_reason_counts": _pack_lifecycle_reason_counts(
+                ((trust_policy or {}).get("decision_reason_counts") if isinstance(trust_policy, dict) else {})
+            ),
+            "graph_provenance_reason_counts": _pack_lifecycle_reason_counts(
+                ((graph_provenance_policy or {}).get("decision_reason_counts") if isinstance(graph_provenance_policy, dict) else {})
+            ),
+        },
+        "policies": {
+            "trust_policy_mode": str((trust_policy or {}).get("mode") or "off") if isinstance(trust_policy, dict) else "off",
+            "graph_provenance_policy_mode": (
+                str((graph_provenance_policy or {}).get("mode") or "off") if isinstance(graph_provenance_policy, dict) else "off"
+            ),
+        },
+        "mutation": {
+            "memory_mutation": "none",
+            "auto_archive_applied": 0,
+            "auto_mutation_applied": 0,
+            "writes_observations": 0,
+            "writes_embeddings": 0,
+            "writes_lifecycle_state": 0,
+            "writes_shadow_log": 1,
+        },
+        "storage": {
+            "table": _PACK_LIFECYCLE_SHADOW_TABLE,
+            "append_only": True,
+        },
+    }
+
+
+def _pack_lifecycle_append_shadow_log(
+    conn: sqlite3.Connection,
+    *,
+    receipt: Dict[str, Any],
+    max_rows: int,
+) -> None:
+    keep = max(1, int(max_rows))
+    ts = str(receipt.get("ts") or _utcnow_iso())
+    query_hash = str((receipt.get("query") or {}).get("hash") or "").strip() or None
+    selection_signature = str((receipt.get("selection") or {}).get("selection_signature") or "").strip() or "sha256:missing"
+
+    counts = receipt.get("counts") if isinstance(receipt.get("counts"), dict) else {}
+    selected_count = max(0, _pack_graph_int(counts.get("selected_total"), 0))
+    citation_count = max(0, _pack_graph_int(counts.get("citation_total"), 0))
+    candidate_count = max(0, _pack_graph_int(counts.get("candidate_total"), 0))
+
+    receipt_json = json.dumps(receipt, ensure_ascii=False, sort_keys=True)
+
+    conn.execute(
+        f"""
+        INSERT INTO {_PACK_LIFECYCLE_SHADOW_TABLE} (
+            ts,
+            query_hash,
+            selection_signature,
+            selected_count,
+            citation_count,
+            candidate_count,
+            receipt_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            ts,
+            query_hash,
+            selection_signature,
+            selected_count,
+            citation_count,
+            candidate_count,
+            receipt_json,
+        ),
+    )
+    conn.execute(
+        f"""
+        DELETE FROM {_PACK_LIFECYCLE_SHADOW_TABLE}
+        WHERE id IN (
+            SELECT id
+            FROM {_PACK_LIFECYCLE_SHADOW_TABLE}
+            ORDER BY id DESC
+            LIMIT -1 OFFSET ?
+        )
+        """,
+        (keep,),
+    )
+    conn.commit()
+
 
 
 def _pack_graph_apply_provenance_policy(
@@ -4288,6 +4514,35 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if policy_surface is not None:
         payload["policy_surface"] = policy_surface
 
+    lifecycle_shadow_receipt: Optional[Dict[str, Any]] = None
+    lifecycle_shadow_mode = _pack_lifecycle_shadow_mode(args)
+    if lifecycle_shadow_mode == "on":
+        lifecycle_shadow_receipt = _pack_compose_lifecycle_shadow_receipt(
+            query_text=query,
+            selected_items=selected_items,
+            citations=citations,
+            candidate_trace=candidate_trace,
+            trust_policy=(trust_policy if trust_policy_mode != "off" else None),
+            graph_provenance_policy=graph_provenance_policy,
+        )
+        lifecycle_log_max_rows = max(
+            1,
+            int(getattr(args, "pack_lifecycle_log_max_rows", _PACK_LIFECYCLE_LOG_MAX_ROWS_DEFAULT) or _PACK_LIFECYCLE_LOG_MAX_ROWS_DEFAULT),
+        )
+        lifecycle_shadow_receipt["storage"]["max_rows"] = lifecycle_log_max_rows
+        lifecycle_shadow_receipt["storage"]["error_code"] = None
+
+        try:
+            _pack_lifecycle_append_shadow_log(
+                conn,
+                receipt=lifecycle_shadow_receipt,
+                max_rows=lifecycle_log_max_rows,
+            )
+        except Exception as exc:
+            lifecycle_shadow_receipt["storage"]["error_code"] = (
+                str(exc.__class__.__name__ or "lifecycle_shadow_log_error").strip() or "lifecycle_shadow_log_error"
+            )
+
     if bool(args.trace):
         duration_ms = int((time.perf_counter() - started) * 1000)
         included_refs = [item["recordRef"] for item in selected_items]
@@ -4297,6 +4552,9 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         all_included_have_rationale = rationale_missing_count == 0
         all_included_have_citations = citation_missing_count == 0
 
+        if lifecycle_shadow_receipt is not None:
+            lifecycle_shadow_receipt["selection"]["trace_refreshed_record_refs"] = _pack_lifecycle_clip_refs(included_refs)
+
         trace_extensions: Dict[str, Any] = {}
         if (graph_state or {}).get("use_graph") != "off":
             trace_extensions["graph"] = _pack_graph_trace_extension(graph_state)
@@ -4304,6 +4562,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             trace_extensions["trust_policy"] = trust_policy
         if policy_surface is not None:
             trace_extensions["policy_surface"] = policy_surface
+        if lifecycle_shadow_receipt is not None:
+            trace_extensions["lifecycle_shadow"] = lifecycle_shadow_receipt
 
         trace = pack_trace_v1.PackTraceV1(
             kind=pack_trace_v1.PACK_TRACE_V1_KIND,
@@ -9493,6 +9753,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["off", "exclude_quarantined_fail_open"],
         default="off",
         help="Optional retrieval trust filter (default: off). exclude_quarantined_fail_open drops quarantined rows but keeps unknown trust as fail-open with explicit trace reasons.",
+    )
+    sp.add_argument(
+        "--pack-lifecycle-shadow",
+        choices=["off", "on"],
+        default="on",
+        help="Lifecycle usage logging mode for pack selection evidence (default: on, shadow receipt/log only).",
+    )
+    sp.add_argument(
+        "--pack-lifecycle-log-max-rows",
+        type=int,
+        default=_PACK_LIFECYCLE_LOG_MAX_ROWS_DEFAULT,
+        help="Bounded row-retention cap for pack lifecycle shadow log table (default: 2000).",
     )
 
     # Probe knobs (used in --use-graph=auto)

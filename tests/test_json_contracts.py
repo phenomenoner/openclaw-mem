@@ -383,6 +383,46 @@ class TestJsonContracts(unittest.TestCase):
         self._assert_exact_keys(trace["timing"], {"durationMs"}, "pack.trace.timing")
         self.assertIsInstance(trace["extensions"], dict)
 
+        lifecycle = trace["extensions"].get("lifecycle_shadow")
+        self.assertIsInstance(lifecycle, dict)
+        self._assert_exact_keys(
+            lifecycle,
+            {"kind", "mode", "ts", "query", "selection", "counts", "reasons", "policies", "mutation", "storage"},
+            "pack.trace.extensions.lifecycle_shadow",
+        )
+        self._assert_exact_keys(lifecycle["query"], {"hash", "chars"}, "pack.trace.extensions.lifecycle_shadow.query")
+        self._assert_exact_keys(
+            lifecycle["selection"],
+            {"pack_selected_refs", "citation_record_refs", "trace_refreshed_record_refs", "selection_signature"},
+            "pack.trace.extensions.lifecycle_shadow.selection",
+        )
+        self._assert_exact_keys(
+            lifecycle["counts"],
+            {
+                "selected_total",
+                "citation_total",
+                "candidate_total",
+                "excluded_total",
+                "selected_by_trust",
+                "selected_by_importance",
+            },
+            "pack.trace.extensions.lifecycle_shadow.counts",
+        )
+        self._assert_exact_keys(
+            lifecycle["mutation"],
+            {
+                "memory_mutation",
+                "auto_archive_applied",
+                "auto_mutation_applied",
+                "writes_observations",
+                "writes_embeddings",
+                "writes_lifecycle_state",
+                "writes_shadow_log",
+            },
+            "pack.trace.extensions.lifecycle_shadow.mutation",
+        )
+        self.assertEqual(lifecycle["mutation"]["memory_mutation"], "none")
+
     def test_pack_trust_policy_contract_v1(self):
         rows = [
             {
@@ -536,6 +576,20 @@ class TestJsonContracts(unittest.TestCase):
 
         self.assertEqual(out["trace"]["extensions"].get("trust_policy"), policy)
         self.assertEqual(out["trace"]["extensions"].get("policy_surface"), policy_surface)
+
+        lifecycle = out["trace"]["extensions"].get("lifecycle_shadow")
+        self.assertIsInstance(lifecycle, dict)
+        self.assertEqual(lifecycle["kind"], "openclaw-mem.pack.lifecycle-shadow.v1")
+        self.assertEqual(lifecycle["selection"]["pack_selected_refs"], selected_refs)
+        self.assertEqual(lifecycle["selection"]["citation_record_refs"], citation_refs)
+        self.assertEqual(lifecycle["selection"]["trace_refreshed_record_refs"], selected_refs)
+        self.assertEqual(lifecycle["counts"]["selected_total"], len(selected_refs))
+        self.assertEqual(lifecycle["counts"]["citation_total"], len(citation_refs))
+        self.assertEqual(lifecycle["counts"]["candidate_total"], 3)
+        self.assertEqual(lifecycle["counts"]["excluded_total"], 1)
+        self.assertEqual(lifecycle["mutation"]["memory_mutation"], "none")
+        self.assertEqual(lifecycle["mutation"]["auto_archive_applied"], 0)
+        self.assertEqual(lifecycle["mutation"]["auto_mutation_applied"], 0)
 
 
 if __name__ == "__main__":

@@ -346,9 +346,14 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.graph_query_db, "/tmp/graph.db")
         self.assertFalse(a.graph_require_structured_provenance)
         self.assertEqual(a.pack_trust_policy, "off")
+        self.assertEqual(a.pack_lifecycle_shadow, "on")
 
         a = build_parser().parse_args(["pack", "--query", "trust", "--pack-trust-policy", "exclude_quarantined_fail_open"])
         self.assertEqual(a.pack_trust_policy, "exclude_quarantined_fail_open")
+
+        a = build_parser().parse_args(["pack", "--query", "trust", "--pack-lifecycle-shadow", "off", "--pack-lifecycle-log-max-rows", "9"])
+        self.assertEqual(a.pack_lifecycle_shadow, "off")
+        self.assertEqual(a.pack_lifecycle_log_max_rows, 9)
 
 
     def test_writeback_lancedb_parser_accepts_flags(self):
@@ -4050,6 +4055,133 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(policy_surface["selection"]["pack_selected_refs"], out["trace"]["output"]["refreshedRecordRefs"])
         self.assertEqual(out["trace"]["extensions"]["policy_surface"], policy_surface)
 
+        conn.close()
+
+    def test_pack_lifecycle_shadow_logging_tracks_real_selection_and_stays_non_mutating(self):
+        conn = _connect(":memory:")
+
+        _insert_observation(
+            conn,
+            {
+                "kind": "fact",
+                "tool_name": "memory_store",
+                "summary": "seed observation",
+                "detail": {"importance": {"score": 0.8, "label": "must_remember"}},
+            },
+        )
+
+        obs_before = int(conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0])
+
+        pack_state = {
+            "ordered_ids": [1, 2],
+            "fts_ids": {1, 2},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.9, 2: 0.8},
+            "obs_map": {
+                1: {"summary": "short", "summary_en": "short", "kind": "fact", "lang": "en"},
+                2: {
+                    "summary": "this summary is intentionally long to exceed token budget",
+                    "summary_en": "this summary is intentionally long to exceed token budget",
+                    "kind": "fact",
+                    "lang": "en",
+                },
+            },
+            "candidate_limit": 10,
+        }
+
+        args = build_parser().parse_args(
+            [
+                "pack",
+                "--query",
+                "lifecycle demo",
+                "--json",
+                "--trace",
+                "--limit",
+                "2",
+                "--budget-tokens",
+                "2",
+                "--pack-lifecycle-shadow",
+                "on",
+            ]
+        )
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        lifecycle = out["trace"]["extensions"]["lifecycle_shadow"]
+
+        obs_after = int(conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0])
+        self.assertEqual(obs_before, obs_after)
+
+        log_rows = conn.execute(
+            "SELECT receipt_json, selected_count, citation_count, candidate_count FROM pack_lifecycle_shadow_log ORDER BY id DESC LIMIT 1"
+        ).fetchall()
+        self.assertEqual(len(log_rows), 1)
+
+        receipt = json.loads(log_rows[0]["receipt_json"])
+        self.assertEqual(receipt, lifecycle)
+        self.assertEqual(receipt["selection"]["pack_selected_refs"], ["obs:1"])
+        self.assertEqual(receipt["selection"]["citation_record_refs"], ["obs:1"])
+        self.assertEqual(receipt["selection"]["trace_refreshed_record_refs"], ["obs:1"])
+        self.assertEqual(receipt["counts"]["selected_total"], 1)
+        self.assertEqual(receipt["counts"]["citation_total"], 1)
+        self.assertEqual(receipt["counts"]["candidate_total"], 2)
+        self.assertEqual(receipt["counts"]["excluded_total"], 1)
+        self.assertEqual(receipt["reasons"]["pack_excluded_reason_counts"], {"budget_tokens_exceeded": 1})
+        self.assertEqual(receipt["mutation"]["memory_mutation"], "none")
+        self.assertEqual(receipt["mutation"]["auto_archive_applied"], 0)
+        self.assertEqual(receipt["mutation"]["auto_mutation_applied"], 0)
+
+        self.assertEqual(log_rows[0]["selected_count"], 1)
+        self.assertEqual(log_rows[0]["citation_count"], 1)
+        self.assertEqual(log_rows[0]["candidate_count"], 2)
+        conn.close()
+
+    def test_pack_lifecycle_shadow_off_skips_log_and_trace_extension(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.7},
+            "obs_map": {
+                1: {"summary": "short", "summary_en": "short", "kind": "fact", "lang": "en"},
+            },
+            "candidate_limit": 8,
+        }
+
+        args = build_parser().parse_args(
+            [
+                "pack",
+                "--query",
+                "lifecycle disabled",
+                "--json",
+                "--trace",
+                "--pack-lifecycle-shadow",
+                "off",
+            ]
+        )
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertNotIn("lifecycle_shadow", out["trace"]["extensions"])
+
+        row_count = int(conn.execute("SELECT COUNT(*) FROM pack_lifecycle_shadow_log").fetchone()[0])
+        self.assertEqual(row_count, 0)
         conn.close()
 
     def test_pack_budget_tokens_clamped_to_minimum_one(self):
