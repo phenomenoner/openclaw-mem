@@ -11,6 +11,7 @@ from .query import (
 )
 from .refresh import refresh_topology, refresh_topology_file
 from .schema import GRAPH_SCHEMA_VERSION, ensure_graph_schema
+from .topology_diff import compare_topology_files
 from .topology_extract import extract_topology_seed
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     "query_writers",
     "refresh_topology",
     "refresh_topology_file",
+    "compare_topology_files",
     "extract_topology_seed",
 ]

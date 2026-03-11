@@ -1,6 +1,8 @@
 # Topology auto-extract (repo map → topology seed) v0
 
-Status: **spec stub** (roadmap item; not implemented).
+Status: **partially implemented** (extract + suggest-only diff shipped; broader promotion workflow still roadmap).
+Update 2026-03-11: `openclaw-mem graph topology-diff` is implemented in CLI (suggest-only seed-vs-curated comparison with bounded buckets).
+Update 2026-03-10: openclaw-mem graph topology-extract is implemented in CLI, including default --spec-dir fallback to <workspace>/openclaw-async-coding-playbook/cron/jobs.
 
 Purpose: move L3 topology from “curated/demo-first” to a system that can **discover and refresh** a minimal repo/system map deterministically.
 
@@ -36,7 +38,7 @@ Safety constraints:
 - no raw log bodies
 - no code snippets
 
-## CLI surface (proposed)
+## CLI surface (v0)
 
 - `openclaw-mem graph topology-extract --workspace <path> --cron-jobs <jobs.json> --out <seed.yaml> --json`
   - emits a receipt with counts + provenance groups

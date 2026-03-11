@@ -63,6 +63,7 @@ from openclaw_mem.graph.query import (
     query_upstream,
     query_writers,
 )
+from openclaw_mem.graph.topology_diff import compare_topology_files
 from openclaw_mem.graph.topology_extract import extract_topology_seed
 from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
 
@@ -6204,6 +6205,58 @@ def cmd_graph_topology_extract(conn: sqlite3.Connection, args: argparse.Namespac
     )
 
 
+def cmd_graph_topology_diff(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Compare extracted seed topology against a curated topology file (suggest-only)."""
+
+    _ = conn
+    seed_path = str(getattr(args, "seed", "") or "").strip()
+    curated_path = str(getattr(args, "curated", "") or "").strip()
+    if not seed_path:
+        _emit({"error": "missing --seed"}, True)
+        sys.exit(2)
+    if not curated_path:
+        _emit({"error": "missing --curated"}, True)
+        sys.exit(2)
+
+    limit_raw = int(getattr(args, "limit", 50) or 50)
+    limit = max(0, limit_raw)
+
+    try:
+        result = compare_topology_files(seed_path=seed_path, curated_path=curated_path, limit=limit)
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    payload = {
+        "kind": "openclaw-mem.graph.topology-diff.v0",
+        "ts": _utcnow_iso(),
+        "seed": str(Path(seed_path).resolve()),
+        "curated": str(Path(curated_path).resolve()),
+        "result": result,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    diff = result.get("diff") if isinstance(result.get("diff"), dict) else {}
+    counts = diff.get("counts") if isinstance(diff.get("counts"), dict) else {}
+    print(
+        " ".join(
+            [
+                f"ok={str(bool(result.get('ok'))).lower()}",
+                f"missing_nodes={int(counts.get('missing_nodes') or 0)}",
+                f"stale_nodes={int(counts.get('stale_nodes') or 0)}",
+                f"node_contract_mismatches={int(counts.get('node_contract_mismatches') or 0)}",
+                f"missing_edges={int(counts.get('missing_edges') or 0)}",
+                f"stale_edges={int(counts.get('stale_edges') or 0)}",
+                f"edge_contract_mismatches={int(counts.get('edge_contract_mismatches') or 0)}",
+                f"limit={int(diff.get('limit') or 0)}",
+            ]
+        )
+    )
+
+
 def _graph_capture_md_norm_ext(ext: str) -> str:
     v = str(ext or "").strip().lower()
     if not v:
@@ -8847,6 +8900,12 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--spec-dir", dest="spec_dir", help="Cron spec directory (default: <workspace>/openclaw-async-coding-playbook/cron/jobs)")
     g.add_argument("--out", required=True, help="Output topology seed JSON path")
     g.set_defaults(func=cmd_graph_topology_extract)
+
+    g = gsub.add_parser("topology-diff", help="Compare extracted seed topology with curated topology (suggest-only)")
+    g.add_argument("--seed", required=True, help="Extracted topology seed file (.json/.yaml)")
+    g.add_argument("--curated", required=True, help="Curated topology file (.json/.yaml)")
+    g.add_argument("--limit", type=int, default=50, help="Max rows per diff bucket in output (default: 50)")
+    g.set_defaults(func=cmd_graph_topology_diff)
 
     g = gsub.add_parser("query", help="Deterministic graph topology queries (upstream/downstream/lineage/writers/subgraph/filter/receipts/provenance/drift)")
     qsub = g.add_subparsers(dest="graph_query_cmd", required=True)

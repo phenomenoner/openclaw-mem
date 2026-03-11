@@ -142,6 +142,66 @@ class TestGraphTopologyExtract(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_cmd_graph_topology_extract_defaults_spec_dir_from_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "workspace"
+            workspace.mkdir(parents=True)
+            (workspace / "repo-alpha").mkdir()
+            (workspace / "repo-alpha" / ".git").mkdir()
+
+            cron_jobs_path = root / "jobs.json"
+            cron_jobs_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "jobs": [
+                            {
+                                "id": "job-alpha",
+                                "name": "alpha",
+                                "enabled": True,
+                                "schedule": {"kind": "cron", "expr": "0 * * * *", "tz": "UTC"},
+                                "delivery": {"mode": "none", "channel": "telegram", "to": "telegram:1"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            default_spec_dir = workspace / "openclaw-async-coding-playbook" / "cron" / "jobs"
+            default_spec_dir.mkdir(parents=True)
+            (default_spec_dir / "job-alpha.md").write_text(
+                "- /root/.openclaw/workspace/repo-alpha/docs/receipt.md\n",
+                encoding="utf-8",
+            )
+
+            out_path = root / "seed.json"
+            conn = _connect(str(root / "mem.sqlite"))
+            try:
+                args = type(
+                    "Args",
+                    (),
+                    {
+                        "workspace": str(workspace),
+                        "cron_jobs": str(cron_jobs_path),
+                        "spec_dir": "",
+                        "out": str(out_path),
+                        "json": True,
+                    },
+                )()
+
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    cmd_graph_topology_extract(conn, args)
+
+                receipt = json.loads(buf.getvalue())
+                self.assertEqual(receipt["result"]["ok"], True)
+                self.assertEqual(receipt["result"]["spec_count"], 1)
+                self.assertEqual(receipt["spec_dir"], str(default_spec_dir.resolve()))
+            finally:
+                conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()
