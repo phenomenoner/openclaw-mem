@@ -383,6 +383,93 @@ class TestJsonContracts(unittest.TestCase):
         self._assert_exact_keys(trace["timing"], {"durationMs"}, "pack.trace.timing")
         self.assertIsInstance(trace["extensions"], dict)
 
+    def test_pack_trust_policy_contract_v1(self):
+        rows = [
+            {
+                "kind": "test.observation",
+                "summary": "trusted trust policy row",
+                "tool_name": "test",
+                "detail": {"trust_tier": "trusted"},
+            },
+            {
+                "kind": "test.observation",
+                "summary": "quarantine trust policy row",
+                "tool_name": "test",
+                "detail": {"trust_tier": "quarantine"},
+            },
+            {
+                "kind": "test.observation",
+                "summary": "unknown trust policy row",
+                "tool_name": "test",
+                "detail": {},
+            },
+        ]
+        self.source.write_text(
+            "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+            encoding="utf-8",
+        )
+        harvest_out = self._run_json_ok(
+            "harvest",
+            "--source",
+            str(self.source),
+            "--no-embed",
+            "--no-update-index",
+        )
+        self.assertEqual(harvest_out["ingested"], 3)
+
+        out = self._run_json_ok(
+            "pack",
+            "--query",
+            "trust policy",
+            "--trace",
+            "--limit",
+            "3",
+            "--budget-tokens",
+            "400",
+            "--pack-trust-policy",
+            "exclude_quarantined_fail_open",
+        )
+
+        self._assert_exact_keys(out, {"bundle_text", "items", "citations", "trace", "trust_policy"}, "pack.trust_policy")
+
+        policy = out["trust_policy"]
+        self._assert_exact_keys(
+            policy,
+            {
+                "kind",
+                "mode",
+                "checked_count",
+                "included_count",
+                "excluded_count",
+                "fail_open_count",
+                "decision_reason_counts",
+                "decisions",
+                "selected_refs",
+            },
+            "pack.trust_policy",
+        )
+        self.assertEqual(policy["kind"], "openclaw-mem.pack.trust-policy.v1")
+        self.assertEqual(policy["mode"], "exclude_quarantined_fail_open")
+        self.assertEqual(policy["checked_count"], 3)
+        self.assertEqual(policy["included_count"], 2)
+        self.assertEqual(policy["excluded_count"], 1)
+        self.assertEqual(policy["fail_open_count"], 1)
+        self.assertEqual(
+            policy["decision_reason_counts"],
+            {
+                "trust_allowed": 1,
+                "trust_quarantined_excluded": 1,
+                "trust_unknown_fail_open": 1,
+            },
+        )
+        self.assertEqual(policy["selected_refs"], ["obs:1", "obs:3"])
+
+        self.assertEqual(
+            [item["recordRef"] for item in out["items"]],
+            ["obs:1", "obs:3"],
+        )
+        self.assertEqual(out["trace"]["extensions"].get("trust_policy"), policy)
+
 
 if __name__ == "__main__":
     unittest.main()

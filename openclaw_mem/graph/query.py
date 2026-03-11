@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from openclaw_mem.provenance_trust_schema import parse_provenance_ref
 
 from .schema import connect_graph_db_for_query
 
@@ -12,67 +13,9 @@ from .schema import connect_graph_db_for_query
 _MAX_RECEIPTS_LIMIT = 200
 _MAX_LINEAGE_DEPTH = 8
 
-_PROVENANCE_LINE_RE = re.compile(r"^(?P<path>[^#]+)#L(?P<start>\d+)(?:-(?:L)?(?P<end>\d+))?$")
-_PROVENANCE_ANCHOR_RE = re.compile(r"^(?P<path>[^#]+)#(?P<anchor>[^\s#]+)$")
-_PROVENANCE_URL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
-_PROVENANCE_RECEIPT_RE = re.compile(r"^(?:receipt:|graph_refresh_receipt:)[^\s]+$")
-
 
 def _parse_provenance_ref(raw: Any) -> Dict[str, Any]:
-    token = str(raw or "").strip()
-    out: Dict[str, Any] = {
-        "raw": token,
-        "kind": "none",
-        "is_structured": False,
-        "path": None,
-        "line_start": None,
-        "line_end": None,
-        "anchor": None,
-        "url": None,
-    }
-    if not token:
-        return out
-
-    if _PROVENANCE_URL_RE.match(token):
-        out.update({"kind": "url", "is_structured": True, "url": token})
-        return out
-
-    line_match = _PROVENANCE_LINE_RE.match(token)
-    if line_match:
-        line_start = int(line_match.group("start"))
-        line_end_raw = line_match.group("end")
-        line_end = int(line_end_raw) if line_end_raw is not None else line_start
-        if line_end < line_start:
-            line_end = line_start
-        out.update(
-            {
-                "kind": "file_line",
-                "is_structured": True,
-                "path": line_match.group("path").strip(),
-                "line_start": line_start,
-                "line_end": line_end,
-            }
-        )
-        return out
-
-    anchor_match = _PROVENANCE_ANCHOR_RE.match(token)
-    if anchor_match:
-        out.update(
-            {
-                "kind": "file_anchor",
-                "is_structured": True,
-                "path": anchor_match.group("path").strip(),
-                "anchor": anchor_match.group("anchor").strip(),
-            }
-        )
-        return out
-
-    if _PROVENANCE_RECEIPT_RE.match(token):
-        out.update({"kind": "receipt", "is_structured": True})
-        return out
-
-    out.update({"kind": "opaque", "is_structured": False})
-    return out
+    return parse_provenance_ref(raw)
 
 
 def _edge_provenance_ref(edge: Dict[str, Any]) -> Dict[str, Any]:

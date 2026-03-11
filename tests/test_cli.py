@@ -345,6 +345,10 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.graph_provenance_policy, "structured_only_fail_open")
         self.assertEqual(a.graph_query_db, "/tmp/graph.db")
         self.assertFalse(a.graph_require_structured_provenance)
+        self.assertEqual(a.pack_trust_policy, "off")
+
+        a = build_parser().parse_args(["pack", "--query", "trust", "--pack-trust-policy", "exclude_quarantined_fail_open"])
+        self.assertEqual(a.pack_trust_policy, "exclude_quarantined_fail_open")
 
 
     def test_writeback_lancedb_parser_accepts_flags(self):
@@ -3856,6 +3860,170 @@ class TestCliM0(unittest.TestCase):
 
         trace_policy = out["trace"]["extensions"]["graph"]["provenance_policy"]
         self.assertEqual(trace_policy, policy)
+        conn.close()
+
+    def test_pack_graph_provenance_and_trust_policy_contracts_are_compatible(self):
+        conn = _connect(":memory:")
+
+        _insert_observation(
+            conn,
+            {
+                "kind": "fact",
+                "tool_name": "memory_store",
+                "summary": "trusted row",
+                "detail": {"trust_tier": "trusted"},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "kind": "fact",
+                "tool_name": "memory_store",
+                "summary": "quarantine row",
+                "detail": {"trust_tier": "quarantine"},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "kind": "fact",
+                "tool_name": "memory_store",
+                "summary": "unknown trust row",
+                "detail": {},
+            },
+        )
+
+        pack_state = {
+            "ordered_ids": [1, 2, 3],
+            "fts_ids": {1, 2, 3},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.91, 2: 0.82, 3: 0.73},
+            "obs_map": {
+                1: {"summary": "trusted row", "summary_en": "trusted row", "kind": "fact", "lang": "en"},
+                2: {"summary": "quarantine row", "summary_en": "quarantine row", "kind": "fact", "lang": "en"},
+                3: {"summary": "unknown trust row", "summary_en": "unknown trust row", "kind": "fact", "lang": "en"},
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(
+            [
+                "pack",
+                "--query",
+                "compat",
+                "--json",
+                "--trace",
+                "--use-graph",
+                "on",
+                "--graph-query-db",
+                "/tmp/graph.db",
+                "--pack-trust-policy",
+                "exclude_quarantined_fail_open",
+            ]
+        )
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [
+                {"recordRef": "obs:1", "id": 1, "kind": "fact", "tool_name": "memory_store", "title": "structured"},
+                {"recordRef": "obs:2", "id": 2, "kind": "fact", "tool_name": "memory_store", "title": "opaque"},
+                {"recordRef": "obs:3", "id": 3, "kind": "fact", "tool_name": "memory_store", "title": "query_error"},
+            ],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\\n",
+        }
+
+        captured: dict[str, list[str]] = {}
+
+        def fake_graph_pack_payload(conn_, *, raw_ids, budget_tokens, max_items, allow_empty=False):
+            captured["raw_ids"] = list(raw_ids)
+            return {
+                "kind": "openclaw-mem.graph.pack.v0",
+                "ts": "2026-02-04T13:00:00Z",
+                "budget": {"budgetTokens": budget_tokens, "estimatedTokens": 5},
+                "items": [{"recordRef": ref, "id": int(ref.split(":", 1)[1]), "summary": "g"} for ref in raw_ids],
+                "bundle_text": "\\n".join(raw_ids) + ("\\n" if raw_ids else ""),
+            }
+
+        def fake_query_subgraph(*, db_path, node_id, hops, direction, max_nodes, max_edges, require_structured_provenance):
+            if node_id == "obs:1":
+                return {
+                    "edge_count": 1,
+                    "skipped_unstructured_provenance": 0,
+                    "provenance": {
+                        "coverage": {
+                            "edge_count": 1,
+                            "structured_edge_count": 1,
+                        },
+                        "kind_counts": {"file_line": 1},
+                    },
+                }
+            if node_id == "obs:2":
+                return {
+                    "edge_count": 0,
+                    "skipped_unstructured_provenance": 1,
+                    "provenance": {
+                        "coverage": {
+                            "edge_count": 0,
+                            "structured_edge_count": 0,
+                        },
+                        "kind_counts": {"manual": 1},
+                    },
+                }
+            raise ValueError("unknown node_id: obs:3")
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
+        ), patch("openclaw_mem.cli._graph_pack_payload", side_effect=fake_graph_pack_payload), patch(
+            "openclaw_mem.cli.query_subgraph", side_effect=fake_query_subgraph
+        ):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(captured.get("raw_ids"), ["obs:1", "obs:3"])
+
+        graph_policy = out["graph"]["provenance_policy"]
+        self.assertEqual(graph_policy["selected_refs"], ["obs:1", "obs:3"])
+        self.assertEqual(graph_policy["decision_reason_counts"], {
+            "graph_provenance_fail_open_query_error": 1,
+            "graph_provenance_structured": 1,
+            "graph_provenance_unstructured_only": 1,
+        })
+
+        trust_policy = out["trust_policy"]
+        self.assertEqual(
+            set(trust_policy.keys()),
+            {
+                "kind",
+                "mode",
+                "checked_count",
+                "included_count",
+                "excluded_count",
+                "fail_open_count",
+                "decision_reason_counts",
+                "decisions",
+                "selected_refs",
+            },
+        )
+        self.assertEqual(trust_policy["kind"], "openclaw-mem.pack.trust-policy.v1")
+        self.assertEqual(trust_policy["mode"], "exclude_quarantined_fail_open")
+        self.assertEqual(trust_policy["selected_refs"], ["obs:1", "obs:3"])
+        self.assertEqual(trust_policy["decision_reason_counts"], {
+            "trust_allowed": 1,
+            "trust_quarantined_excluded": 1,
+            "trust_unknown_fail_open": 1,
+        })
+
+        self.assertEqual([item["recordRef"] for item in out["items"]], ["obs:1", "obs:3"])
+        self.assertEqual(out["trace"]["extensions"]["graph"]["provenance_policy"], graph_policy)
+        self.assertEqual(out["trace"]["extensions"]["trust_policy"], trust_policy)
+
         conn.close()
 
     def test_pack_budget_tokens_clamped_to_minimum_one(self):

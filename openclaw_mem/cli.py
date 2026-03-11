@@ -66,6 +66,11 @@ from openclaw_mem.graph.query import (
 from openclaw_mem.graph.topology_diff import compare_topology_files
 from openclaw_mem.graph.topology_extract import extract_topology_seed
 from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
+from openclaw_mem.provenance_trust_schema import (
+    TRUST_TIER_UNKNOWN,
+    normalize_provenance_kind_counts,
+    normalize_trust_tier,
+)
 
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
@@ -3124,23 +3129,12 @@ def _pack_importance_label(detail_obj: Dict[str, Any]) -> str:
 
 
 def _normalize_trust_tier(raw: Any) -> Optional[str]:
-    if not isinstance(raw, str):
-        return None
-
-    key = raw.strip().lower().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "quarantine": "quarantined",
-    }
-    key = aliases.get(key, key)
-
-    if key in {"trusted", "untrusted", "quarantined"}:
-        return key
-    return None
+    return normalize_trust_tier(raw)
 
 
 def _pack_trust_tier(detail_obj: Dict[str, Any]) -> str:
     if not isinstance(detail_obj, dict):
-        return "unknown"
+        return TRUST_TIER_UNKNOWN
 
     candidates: List[Any] = [
         detail_obj.get("trust"),
@@ -3163,7 +3157,7 @@ def _pack_trust_tier(detail_obj: Dict[str, Any]) -> str:
         if normalized:
             return normalized
 
-    return "unknown"
+    return TRUST_TIER_UNKNOWN
 
 
 def _estimate_tokens(text: str) -> int:
@@ -3378,9 +3372,7 @@ def _pack_graph_normalize_provenance_quality(raw: Any) -> Optional[Dict[str, Any
         return None
 
     kind_counts_raw = raw.get("kind_counts") if isinstance(raw.get("kind_counts"), dict) else {}
-    kind_counts: Dict[str, int] = {}
-    for key in sorted(kind_counts_raw.keys(), key=lambda x: str(x)):
-        kind_counts[str(key)] = max(0, _pack_graph_int(kind_counts_raw.get(key), 0))
+    kind_counts = normalize_provenance_kind_counts(kind_counts_raw)
 
     return {
         "edge_count": max(0, _pack_graph_int(raw.get("edge_count"), 0)),
@@ -3486,6 +3478,127 @@ def _pack_graph_finalize_provenance_policy(policy: Any) -> Dict[str, Any]:
         "decisions": decisions,
         "selected_refs": selected_refs,
     }
+
+
+_PACK_TRUST_POLICY_V1_KIND = "openclaw-mem.pack.trust-policy.v1"
+
+
+def _pack_trust_normalize_policy_decision(raw: Any) -> Dict[str, Any]:
+    src = raw if isinstance(raw, dict) else {}
+    record_ref = str(src.get("recordRef") or "").strip()
+    trust = _pack_trust_tier({"trust": src.get("trust")})
+
+    reason = str(src.get("reason") or "").strip()
+    if not reason:
+        reason = "trust_unknown"
+
+    error_code_raw = src.get("error_code")
+    error_code: Optional[str]
+    if error_code_raw is None:
+        error_code = None
+    else:
+        token = str(error_code_raw).strip()
+        error_code = token or None
+
+    return {
+        "recordRef": record_ref,
+        "trust": trust,
+        "included": bool(src.get("included", False)),
+        "reason": reason,
+        "fail_open": bool(src.get("fail_open", False)),
+        "error_code": error_code,
+    }
+
+
+def _pack_trust_finalize_policy(policy: Any) -> Dict[str, Any]:
+    src = policy if isinstance(policy, dict) else {}
+
+    mode_raw = str(src.get("mode") or "off").strip().lower()
+    mode = mode_raw if mode_raw in {"off", "exclude_quarantined_fail_open"} else "off"
+
+    decisions_in = src.get("decisions") if isinstance(src.get("decisions"), list) else []
+    decisions = [_pack_trust_normalize_policy_decision(item) for item in decisions_in]
+
+    selected_refs: List[str] = []
+    seen_refs: set[str] = set()
+    reason_counts: Dict[str, int] = {}
+    fail_open_count = 0
+
+    for decision in decisions:
+        reason = str(decision.get("reason") or "").strip() or "trust_unknown"
+        reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+        if bool(decision.get("fail_open")):
+            fail_open_count += 1
+        if bool(decision.get("included")):
+            ref = str(decision.get("recordRef") or "").strip()
+            if ref and ref not in seen_refs:
+                seen_refs.add(ref)
+                selected_refs.append(ref)
+
+    if not decisions:
+        selected_raw = src.get("selected_refs") if isinstance(src.get("selected_refs"), list) else []
+        for item in selected_raw:
+            ref = str(item or "").strip()
+            if ref and ref not in seen_refs:
+                seen_refs.add(ref)
+                selected_refs.append(ref)
+        fail_open_count = max(0, _pack_graph_int(src.get("fail_open_count"), 0))
+
+    decision_reason_counts = {key: int(reason_counts[key]) for key in sorted(reason_counts.keys())}
+
+    included_count = len(selected_refs)
+    excluded_count = max(0, len(decisions) - included_count)
+
+    return {
+        "kind": _PACK_TRUST_POLICY_V1_KIND,
+        "mode": mode,
+        "checked_count": len(decisions),
+        "included_count": included_count,
+        "excluded_count": excluded_count,
+        "fail_open_count": fail_open_count,
+        "decision_reason_counts": decision_reason_counts,
+        "decisions": decisions,
+        "selected_refs": selected_refs,
+    }
+
+
+def _pack_trust_apply_policy(
+    *,
+    ordered_ids: List[int],
+    detail_map: Dict[int, Dict[str, Any]],
+    args: argparse.Namespace,
+) -> Dict[str, Any]:
+    mode_raw = str(getattr(args, "pack_trust_policy", "off") or "off").strip().lower()
+    mode = mode_raw if mode_raw in {"off", "exclude_quarantined_fail_open"} else "off"
+
+    if mode == "off":
+        return _pack_trust_finalize_policy({"mode": mode, "decisions": []})
+
+    decisions: List[Dict[str, Any]] = []
+    for rid in ordered_ids:
+        record_ref = f"obs:{rid}"
+        trust = _pack_trust_tier(detail_map.get(rid, {}))
+
+        decision: Dict[str, Any] = {
+            "recordRef": record_ref,
+            "trust": trust,
+            "included": True,
+            "reason": "trust_allowed",
+            "fail_open": False,
+            "error_code": None,
+        }
+
+        if trust == "quarantined":
+            decision["included"] = False
+            decision["reason"] = "trust_quarantined_excluded"
+        elif trust == TRUST_TIER_UNKNOWN:
+            decision["included"] = True
+            decision["fail_open"] = True
+            decision["reason"] = "trust_unknown_fail_open"
+
+        decisions.append(decision)
+
+    return _pack_trust_finalize_policy({"mode": mode, "decisions": decisions})
 
 
 def _pack_graph_apply_provenance_policy(
@@ -3884,6 +3997,18 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         detail_rows = conn.execute(q_detail, ordered_ids).fetchall()
         detail_map = {int(r["id"]): _pack_parse_detail_json(r["detail_json"]) for r in detail_rows}
 
+    trust_policy = _pack_trust_apply_policy(
+        ordered_ids=ordered_ids,
+        detail_map=detail_map,
+        args=args,
+    )
+    trust_policy_mode = str(trust_policy.get("mode") or "off")
+    trust_policy_decisions = {
+        str(item.get("recordRef") or ""): item
+        for item in list(trust_policy.get("decisions") or [])
+        if str(item.get("recordRef") or "").strip()
+    }
+
     selected_items: List[Dict[str, Any]] = []
     citations: List[Dict[str, Any]] = []
     candidate_trace: List[pack_trace_v1.PackTraceV1Candidate] = []
@@ -3901,11 +4026,21 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
         include = False
         reasons: List[str] = []
+        trust_decision = trust_policy_decisions.get(record_ref)
+        trust_allowed = True
+
+        if trust_decision is not None:
+            trust_allowed = bool(trust_decision.get("included", False))
+            if trust_policy_mode != "off":
+                reason = str(trust_decision.get("reason") or "").strip() or "trust_unknown"
+                reasons.append(reason)
 
         if row is None:
             reasons.append("missing_row")
         elif not text:
             reasons.append("missing_summary")
+        elif not trust_allowed:
+            pass
         elif len(selected_items) >= limit:
             reasons.append("max_items_reached")
         elif used_tokens + token_estimate > budget_tokens:
@@ -3967,6 +4102,9 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "citations": citations,
     }
 
+    if trust_policy_mode != "off":
+        payload["trust_policy"] = trust_policy
+
     # Optional graph output (kept separate for safety; consumer may choose to inject).
     if (graph_state or {}).get("use_graph") != "off":
         payload["graph"] = {
@@ -4004,6 +4142,13 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         citation_missing_count = sum(1 for c in included_candidates if not str(getattr(c.citations, "recordRef", "") or "").strip())
         all_included_have_rationale = rationale_missing_count == 0
         all_included_have_citations = citation_missing_count == 0
+
+        trace_extensions: Dict[str, Any] = {}
+        if (graph_state or {}).get("use_graph") != "off":
+            trace_extensions["graph"] = _pack_graph_trace_extension(graph_state)
+        if trust_policy_mode != "off":
+            trace_extensions["trust_policy"] = trust_policy
+
         trace = pack_trace_v1.PackTraceV1(
             kind=pack_trace_v1.PACK_TRACE_V1_KIND,
             ts=_utcnow_iso(),
@@ -4058,7 +4203,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 ),
             ),
             timing=pack_trace_v1.PackTraceV1Timing(durationMs=duration_ms),
-            extensions={"graph": _pack_graph_trace_extension(graph_state)} if (graph_state or {}).get("use_graph") != "off" else {},
+            extensions=trace_extensions,
         )
         payload["trace"] = pack_trace_v1.to_dict(trace)
 
@@ -9187,6 +9332,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--graph-provenance-hops", type=int, default=1, help="Hops for per-candidate subgraph provenance checks (default: 1)")
     sp.add_argument("--graph-provenance-max-nodes", type=int, default=40, help="Max nodes for provenance subgraph checks (default: 40)")
     sp.add_argument("--graph-provenance-max-edges", type=int, default=80, help="Max edges for provenance subgraph checks (default: 80)")
+    sp.add_argument(
+        "--pack-trust-policy",
+        choices=["off", "exclude_quarantined_fail_open"],
+        default="off",
+        help="Optional retrieval trust filter (default: off). exclude_quarantined_fail_open drops quarantined rows but keeps unknown trust as fail-open with explicit trace reasons.",
+    )
 
     # Probe knobs (used in --use-graph=auto)
     sp.add_argument("--graph-probe", choices=["on", "off"], default=None, help="Enable index-probe stage in auto mode (default: on)")
