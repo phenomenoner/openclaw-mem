@@ -244,6 +244,18 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem graph query subgraph pro
 
 Use this when you want a quick read-only check that topology refresh + query plumbing is alive before deeper graph/drift debugging.
 
+
+## Step 8.6: Topology extract + diff smoke test (optional, dev)
+
+Generate a deterministic seed from your workspace, then compare it with curated topology (suggest-only):
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph topology-extract --workspace /root/.openclaw/workspace --cron-jobs /root/.openclaw/cron/jobs.json --out /tmp/topology-seed.json --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph topology-diff --seed /tmp/topology-seed.json --curated ./docs/topology.json --limit 20 --json
+```
+
+Use this to spot missing/stale topology entities before promoting updates into curated docs.
+
 ## Next steps
 
 - Full docs: `README.md`
