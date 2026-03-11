@@ -6250,6 +6250,7 @@ def cmd_graph_topology_diff(conn: sqlite3.Connection, args: argparse.Namespace) 
                 f"node_contract_mismatches={int(counts.get('node_contract_mismatches') or 0)}",
                 f"missing_edges={int(counts.get('missing_edges') or 0)}",
                 f"stale_edges={int(counts.get('stale_edges') or 0)}",
+                f"edge_contract_mismatches={int(counts.get('edge_contract_mismatches') or 0)}",
                 f"limit={int(diff.get('limit') or 0)}",
             ]
         )

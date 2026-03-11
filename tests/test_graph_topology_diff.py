@@ -62,6 +62,9 @@ class TestGraphTopologyDiff(unittest.TestCase):
             self.assertEqual(counts["node_contract_mismatches"], 1)
             self.assertEqual(counts["missing_edges"], 1)
             self.assertEqual(counts["stale_edges"], 1)
+            self.assertEqual(counts["edge_contract_mismatches"], 1)
+            self.assertEqual(diff["edge_contract_mismatches"][0]["src"], "cron.job.a")
+            self.assertEqual(diff["edge_contract_mismatches"][0]["dst"], "repo.alpha")
             self.assertEqual(diff["missing_nodes"][0]["id"], "script.path.run")
             self.assertEqual(diff["stale_nodes"][0]["id"], "artifact.legacy")
             self.assertEqual(diff["node_contract_mismatches"][0]["id"], "repo.alpha")
@@ -116,6 +119,7 @@ class TestGraphTopologyDiff(unittest.TestCase):
                 self.assertTrue(receipt["result"]["ok"])
                 self.assertEqual(receipt["result"]["diff"]["counts"]["missing_nodes"], 0)
                 self.assertEqual(receipt["result"]["diff"]["counts"]["stale_edges"], 0)
+                self.assertEqual(receipt["result"]["diff"]["counts"]["edge_contract_mismatches"], 0)
             finally:
                 conn.close()
 

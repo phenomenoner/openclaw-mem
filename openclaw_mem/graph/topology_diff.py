@@ -212,11 +212,35 @@ def compare_topology_files(*, seed_path: str | Path, curated_path: str | Path, l
     missing_edges_full = [seed_edges_by_key[key] for key in sorted(seed_edge_keys - curated_edge_keys)]
     stale_edges_full = [curated_edges_by_key[key] for key in sorted(curated_edge_keys - seed_edge_keys)]
 
+    edge_contract_mismatches_full: List[Dict[str, Any]] = []
+    for key in sorted(seed_edge_keys.intersection(curated_edge_keys)):
+        seed_edge = seed_edges_by_key[key]
+        curated_edge = curated_edges_by_key[key]
+        seed_contract = {
+            'provenance': str(seed_edge.get('provenance') or ''),
+            'metadata': _json_obj(seed_edge.get('metadata')),
+        }
+        curated_contract = {
+            'provenance': str(curated_edge.get('provenance') or ''),
+            'metadata': _json_obj(curated_edge.get('metadata')),
+        }
+        if seed_contract != curated_contract:
+            edge_contract_mismatches_full.append(
+                {
+                    'src': key[0],
+                    'dst': key[1],
+                    'type': key[2],
+                    'seed': seed_contract,
+                    'curated': curated_contract,
+                }
+            )
+
     bounded_missing_nodes, trunc_missing_nodes = _apply_limit(missing_nodes_full, limit)
     bounded_stale_nodes, trunc_stale_nodes = _apply_limit(stale_nodes_full, limit)
     bounded_contract_mismatches, trunc_contract_mismatches = _apply_limit(contract_mismatches_full, limit)
     bounded_missing_edges, trunc_missing_edges = _apply_limit(missing_edges_full, limit)
     bounded_stale_edges, trunc_stale_edges = _apply_limit(stale_edges_full, limit)
+    bounded_edge_contract_mismatches, trunc_edge_contract_mismatches = _apply_limit(edge_contract_mismatches_full, limit)
 
     return {
         "ok": True,
@@ -237,6 +261,7 @@ def compare_topology_files(*, seed_path: str | Path, curated_path: str | Path, l
                 "node_contract_mismatches": len(contract_mismatches_full),
                 "missing_edges": len(missing_edges_full),
                 "stale_edges": len(stale_edges_full),
+                "edge_contract_mismatches": len(edge_contract_mismatches_full),
             },
             "limit": max(0, int(limit)),
             "truncated": {
@@ -245,11 +270,13 @@ def compare_topology_files(*, seed_path: str | Path, curated_path: str | Path, l
                 "node_contract_mismatches": trunc_contract_mismatches,
                 "missing_edges": trunc_missing_edges,
                 "stale_edges": trunc_stale_edges,
+                "edge_contract_mismatches": trunc_edge_contract_mismatches,
             },
             "missing_nodes": bounded_missing_nodes,
             "stale_nodes": bounded_stale_nodes,
             "node_contract_mismatches": bounded_contract_mismatches,
             "missing_edges": bounded_missing_edges,
             "stale_edges": bounded_stale_edges,
+            "edge_contract_mismatches": bounded_edge_contract_mismatches,
         },
     }
