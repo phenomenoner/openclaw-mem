@@ -163,9 +163,9 @@ tests/
 - bounded recommendation budgets stay in place (`--top`, scoped miss groups)
 
 ### v0.3 — bounded low-risk apply (flagged; **not shipped in this phase**)
-- optional `--apply-low-risk`
-- only for non-destructive metadata changes
-- must emit before/after receipts
+- assist-mode contract is now codified as governance-only spec: `docs/specs/self-optimizing-memory-assist-mode-contract-v1.md`
+- auto mode remains explicitly forbidden
+- future implementation must stay within the contract whitelist/caps and emit before/after + rollback receipts
 
 ## Acceptance checks
 ### 1-day check
