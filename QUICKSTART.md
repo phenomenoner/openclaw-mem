@@ -254,6 +254,8 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem graph topology-extract -
 uv run --python 3.13 --frozen -- python -m openclaw_mem graph topology-diff --seed /tmp/topology-seed.json --curated ./docs/topology.json --limit 20 --json
 ```
 
+Tip: If your OpenClaw state dir is default (/root/.openclaw), you can omit --cron-jobs; topology-extract auto-reads /root/.openclaw/cron/jobs.json.
+
 Use this to spot missing/stale topology entities before promoting updates into curated docs.
 
 ## Next steps
