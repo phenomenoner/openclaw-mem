@@ -3361,6 +3361,133 @@ def _pack_graph_provenance_error_code(exc: Exception) -> str:
     return "query_error"
 
 
+_PACK_GRAPH_PROVENANCE_POLICY_V1_KIND = "openclaw-mem.pack.graph.provenance-policy.v1"
+
+
+def _pack_graph_int(raw: Any, default: int = 0) -> int:
+    if isinstance(raw, bool):
+        return int(default)
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+def _pack_graph_normalize_provenance_quality(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+
+    kind_counts_raw = raw.get("kind_counts") if isinstance(raw.get("kind_counts"), dict) else {}
+    kind_counts: Dict[str, int] = {}
+    for key in sorted(kind_counts_raw.keys(), key=lambda x: str(x)):
+        kind_counts[str(key)] = max(0, _pack_graph_int(kind_counts_raw.get(key), 0))
+
+    return {
+        "edge_count": max(0, _pack_graph_int(raw.get("edge_count"), 0)),
+        "structured_edge_count": max(0, _pack_graph_int(raw.get("structured_edge_count"), 0)),
+        "skipped_unstructured_provenance": max(0, _pack_graph_int(raw.get("skipped_unstructured_provenance"), 0)),
+        "kind_counts": kind_counts,
+    }
+
+
+def _pack_graph_normalize_policy_decision(raw: Any) -> Dict[str, Any]:
+    src = raw if isinstance(raw, dict) else {}
+    record_ref = str(src.get("recordRef") or "").strip()
+
+    reason = str(src.get("reason") or "").strip()
+    if not reason:
+        reason = "graph_provenance_unknown"
+
+    error_code_raw = src.get("error_code")
+    error_code: Optional[str]
+    if error_code_raw is None:
+        error_code = None
+    else:
+        token = str(error_code_raw).strip()
+        error_code = token or None
+
+    return {
+        "recordRef": record_ref,
+        "included": bool(src.get("included", False)),
+        "reason": reason,
+        "fail_open": bool(src.get("fail_open", False)),
+        "error_code": error_code,
+        "provenance_quality": _pack_graph_normalize_provenance_quality(src.get("provenance_quality")),
+    }
+
+
+def _pack_graph_finalize_provenance_policy(policy: Any) -> Dict[str, Any]:
+    src = policy if isinstance(policy, dict) else {}
+
+    mode_raw = str(src.get("mode") or "structured_only_fail_open").strip().lower()
+    mode = mode_raw if mode_raw in {"off", "structured_only_fail_open"} else "structured_only_fail_open"
+
+    bounds_raw = src.get("bounds") if isinstance(src.get("bounds"), dict) else {}
+    bounds = {
+        "hops": max(0, min(2, _pack_graph_int(bounds_raw.get("hops"), 1))),
+        "max_nodes": max(1, min(120, _pack_graph_int(bounds_raw.get("max_nodes"), 40))),
+        "max_edges": max(1, min(240, _pack_graph_int(bounds_raw.get("max_edges"), 80))),
+    }
+
+    decisions_in = src.get("decisions") if isinstance(src.get("decisions"), list) else []
+    decisions = [_pack_graph_normalize_policy_decision(item) for item in decisions_in]
+
+    selected_refs: List[str] = []
+    seen_refs: set[str] = set()
+    reason_counts: Dict[str, int] = {}
+    checked_count = 0
+    fail_open_count = 0
+
+    for decision in decisions:
+        reason = str(decision.get("reason") or "").strip() or "graph_provenance_unknown"
+        reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+
+        if decision.get("provenance_quality") is not None:
+            checked_count += 1
+
+        if bool(decision.get("fail_open")):
+            fail_open_count += 1
+
+        if bool(decision.get("included")):
+            ref = str(decision.get("recordRef") or "").strip()
+            if ref and ref not in seen_refs:
+                seen_refs.add(ref)
+                selected_refs.append(ref)
+
+    if not decisions:
+        selected_raw = src.get("selected_refs") if isinstance(src.get("selected_refs"), list) else []
+        for item in selected_raw:
+            ref = str(item or "").strip()
+            if ref and ref not in seen_refs:
+                seen_refs.add(ref)
+                selected_refs.append(ref)
+        checked_count = max(0, _pack_graph_int(src.get("checked_count"), 0))
+        fail_open_count = max(0, _pack_graph_int(src.get("fail_open_count"), 0))
+
+    decision_reason_counts = {
+        key: int(reason_counts[key])
+        for key in sorted(reason_counts.keys())
+    }
+
+    included_count = len(selected_refs)
+    excluded_count = max(0, len(decisions) - included_count)
+
+    return {
+        "kind": _PACK_GRAPH_PROVENANCE_POLICY_V1_KIND,
+        "mode": mode,
+        "require_structured_provenance": bool(src.get("require_structured_provenance", True)),
+        "graph_query_db_configured": bool(src.get("graph_query_db_configured", False)),
+        "bounds": bounds,
+        "checked_count": checked_count,
+        "included_count": included_count,
+        "excluded_count": excluded_count,
+        "fail_open_count": fail_open_count,
+        "decision_reason_counts": decision_reason_counts,
+        "decisions": decisions,
+        "selected_refs": selected_refs,
+    }
+
+
 def _pack_graph_apply_provenance_policy(
     *,
     selected_refs: List[str],
@@ -3397,7 +3524,7 @@ def _pack_graph_apply_provenance_policy(
     }
 
     if not selected_refs:
-        return out
+        return _pack_graph_finalize_provenance_policy(out)
 
     decisions: List[Dict[str, Any]] = []
 
@@ -3415,7 +3542,7 @@ def _pack_graph_apply_provenance_policy(
             )
         out["included_count"] = len(selected_refs)
         out["decisions"] = decisions
-        return out
+        return _pack_graph_finalize_provenance_policy(out)
 
     if not graph_query_db:
         for ref in selected_refs:
@@ -3432,7 +3559,7 @@ def _pack_graph_apply_provenance_policy(
         out["included_count"] = len(selected_refs)
         out["fail_open_count"] = len(selected_refs)
         out["decisions"] = decisions
-        return out
+        return _pack_graph_finalize_provenance_policy(out)
 
     included_refs: List[str] = []
 
@@ -3499,7 +3626,7 @@ def _pack_graph_apply_provenance_policy(
     out["included_count"] = len(included_refs)
     out["excluded_count"] = max(0, len(selected_refs) - len(included_refs))
     out["decisions"] = decisions
-    return out
+    return _pack_graph_finalize_provenance_policy(out)
 
 
 def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args: argparse.Namespace) -> dict:
@@ -3529,22 +3656,24 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
         "stage0": {"fired": False, "reason": None},
         "stage1": {"hit": False, "categories": [], "matched_keywords": []},
         "probe_decision": None,
-        "provenance_policy": {
-            "mode": str(getattr(args, "graph_provenance_policy", "structured_only_fail_open") or "structured_only_fail_open").strip().lower(),
-            "require_structured_provenance": bool(getattr(args, "graph_require_structured_provenance", True)),
-            "graph_query_db_configured": bool(str(getattr(args, "graph_query_db", "") or "").strip()),
-            "bounds": {
-                "hops": int(max(0, min(2, int(getattr(args, "graph_provenance_hops", 1) or 1)))),
-                "max_nodes": int(max(1, min(120, int(getattr(args, "graph_provenance_max_nodes", 40) or 40)))),
-                "max_edges": int(max(1, min(240, int(getattr(args, "graph_provenance_max_edges", 80) or 80)))),
-            },
-            "checked_count": 0,
-            "included_count": 0,
-            "excluded_count": 0,
-            "fail_open_count": 0,
-            "decisions": [],
-            "selected_refs": [],
-        },
+        "provenance_policy": _pack_graph_finalize_provenance_policy(
+            {
+                "mode": str(getattr(args, "graph_provenance_policy", "structured_only_fail_open") or "structured_only_fail_open").strip().lower(),
+                "require_structured_provenance": bool(getattr(args, "graph_require_structured_provenance", True)),
+                "graph_query_db_configured": bool(str(getattr(args, "graph_query_db", "") or "").strip()),
+                "bounds": {
+                    "hops": int(max(0, min(2, int(getattr(args, "graph_provenance_hops", 1) or 1)))),
+                    "max_nodes": int(max(1, min(120, int(getattr(args, "graph_provenance_max_nodes", 40) or 40)))),
+                    "max_edges": int(max(1, min(240, int(getattr(args, "graph_provenance_max_edges", 80) or 80)))),
+                },
+                "checked_count": 0,
+                "included_count": 0,
+                "excluded_count": 0,
+                "fail_open_count": 0,
+                "decisions": [],
+                "selected_refs": [],
+            }
+        ),
         "payload": None,
     }
 
@@ -3698,7 +3827,7 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
         "budget_tokens": int(graph_state.get("budget_tokens") or 0),
         "take": int(graph_state.get("take") or 0),
         "scope": graph_state.get("scope"),
-        "provenance_policy": graph_state.get("provenance_policy"),
+        "provenance_policy": _pack_graph_finalize_provenance_policy(graph_state.get("provenance_policy")),
         "fail_open": bool(graph_state.get("fail_open")),
         "error_first_line": graph_state.get("error_first_line"),
         "preflight_kind": pre.get("kind"),
@@ -3855,7 +3984,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "budget_tokens": int(graph_state.get("budget_tokens") or 0),
             "take": int(graph_state.get("take") or 0),
             "scope": graph_state.get("scope"),
-            "provenance_policy": graph_state.get("provenance_policy"),
+            "provenance_policy": _pack_graph_finalize_provenance_policy(graph_state.get("provenance_policy")),
             "preflight": graph_state.get("payload"),
         }
 
