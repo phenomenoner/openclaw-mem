@@ -1,7 +1,7 @@
 # Spec — Self-Optimizing Memory Loop v0
 
 ## Status
-- Stage: **partial implementation shipped** (v0.1 observer/reporter)
+- Stage: **partial implementation shipped** (v0.1 observer + v0.2 policy-loop gate)
 - Scope: `openclaw-mem` dev branch only
 - Posture: **shadow/recommendation-first**
 
@@ -154,12 +154,15 @@ tests/
 - no auto-apply
 - zero writes to memory rows (observe + propose only)
 
-### v0.2 — operator review lane
-- keep `optimize review` contract stable and add optional markdown report output
-- add proposal acceptance/rejection workflow as explicit operator action only
-- keep recommendation budgets bounded (top-N / per-signal caps)
+### v0.2 — operator review lane (**partially shipped**)
+- keep `optimize review` contract stable and add policy-loop review output
+- shipped read-only command: `openclaw-mem optimize policy-loop --json`
+  - combines repeated recall-miss pressure, writeback linkage readiness, and lifecycle-shadow evidence
+  - emits sunrise Stage B/C gate status (`ready|hold`) with explicit threshold/reason receipts
+  - remains strict zero-write (`policy.writes_performed=0`, `memory_mutation=none`)
+- bounded recommendation budgets stay in place (`--top`, scoped miss groups)
 
-### v0.3 — bounded low-risk apply (flagged)
+### v0.3 — bounded low-risk apply (flagged; **not shipped in this phase**)
 - optional `--apply-low-risk`
 - only for non-destructive metadata changes
 - must emit before/after receipts

@@ -29,7 +29,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Dict, Any, List, Optional, Tuple
+from typing import Iterable, Dict, Any, List, Optional, Set, Tuple
 
 from openclaw_mem import __version__
 from openclaw_mem import defaults
@@ -1465,6 +1465,399 @@ def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         return
 
     print(render_memory_health_review(report))
+
+
+def _optimize_policy_int(raw: Any, default: int, *, min_value: int = 0) -> int:
+    try:
+        value = int(raw)
+    except Exception:
+        value = default
+    return max(min_value, value)
+
+
+def _optimize_policy_float(raw: Any, default: float, *, min_value: float = 0.0, max_value: float = 1.0) -> float:
+    try:
+        value = float(raw)
+    except Exception:
+        value = default
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
+
+def _optimize_policy_load_state(path: Optional[str]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    p = str(path or "").strip()
+    if not p:
+        return (None, None)
+
+    target = Path(os.path.expanduser(p))
+    if not target.exists():
+        return (None, "sunrise_state_missing")
+
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        return (None, "sunrise_state_invalid_json")
+
+    if not isinstance(raw, dict):
+        return (None, "sunrise_state_not_object")
+
+    out: Dict[str, Any] = {
+        "path": str(target),
+        "stage": str(raw.get("stage") or "").strip() or None,
+        "lastHealthy": bool(raw.get("lastHealthy")) if "lastHealthy" in raw else None,
+        "readyForStageB": bool(raw.get("readyForStageB")) if "readyForStageB" in raw else False,
+        "liveGreenStreak": _optimize_policy_int(raw.get("liveGreenStreak"), 0, min_value=0),
+        "dryGreenStreak": _optimize_policy_int(raw.get("dryGreenStreak"), 0, min_value=0),
+        "lastRunAt": str(raw.get("lastRunAt") or "").strip() or None,
+    }
+    return (out, None)
+
+
+def cmd_optimize_policy_loop(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    review_limit = _optimize_policy_int(getattr(args, "review_limit", 1000), 1000, min_value=1)
+    writeback_limit = _optimize_policy_int(getattr(args, "writeback_limit", 500), 500, min_value=1)
+    lifecycle_limit = _optimize_policy_int(getattr(args, "lifecycle_limit", 200), 200, min_value=1)
+    miss_min_count = _optimize_policy_int(getattr(args, "miss_min_count", 2), 2, min_value=2)
+    top = _optimize_policy_int(getattr(args, "top", 10), 10, min_value=1)
+    scope = getattr(args, "scope", None)
+
+    min_live_green_streak = _optimize_policy_int(getattr(args, "min_live_green_streak", 18), 18, min_value=1)
+    min_lifecycle_runs_stage_b = _optimize_policy_int(
+        getattr(args, "min_lifecycle_runs_stage_b", 12),
+        12,
+        min_value=1,
+    )
+    min_lifecycle_runs_stage_c = _optimize_policy_int(
+        getattr(args, "min_lifecycle_runs_stage_c", 24),
+        24,
+        min_value=1,
+    )
+    min_writeback_eligible_ratio = _optimize_policy_float(
+        getattr(args, "min_writeback_eligible_ratio", 0.60),
+        0.60,
+        min_value=0.0,
+        max_value=1.0,
+    )
+    max_repeated_miss_groups_stage_c = _optimize_policy_int(
+        getattr(args, "max_repeated_miss_groups_stage_c", 1),
+        1,
+        min_value=0,
+    )
+
+    review = build_memory_health_review(
+        conn,
+        limit=review_limit,
+        stale_days=60,
+        duplicate_min_count=2,
+        bloat_summary_chars=240,
+        bloat_detail_bytes=4096,
+        orphan_min_tokens=2,
+        miss_min_count=miss_min_count,
+        top=top,
+        scope=scope,
+    )
+    repeated_misses = ((review.get("signals") or {}).get("repeated_misses") or {})
+
+    writeback_rows = conn.execute(
+        """
+        SELECT id, kind, summary, summary_en, detail_json
+        FROM observations
+        WHERE tool_name = 'memory_store'
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (writeback_limit,),
+    ).fetchall()
+
+    writeback_scanned = len(writeback_rows)
+    writeback_eligible = 0
+    writeback_missing = 0
+    writeback_unique_ids: Set[str] = set()
+    missing_obs_ids: List[int] = []
+    update_field_counts: Dict[str, int] = {
+        "importance": 0,
+        "importance_label": 0,
+        "scope": 0,
+        "category": 0,
+        "trust_tier": 0,
+    }
+
+    for row in writeback_rows:
+        payload = _extract_writeback_updates(row)
+        if not payload:
+            writeback_missing += 1
+            if len(missing_obs_ids) < top:
+                missing_obs_ids.append(int(row["id"]))
+            continue
+
+        writeback_eligible += 1
+        writeback_unique_ids.add(str(payload.get("id") or ""))
+        updates = payload.get("updates") if isinstance(payload, dict) else {}
+        if not isinstance(updates, dict):
+            updates = {}
+        for key in update_field_counts.keys():
+            if key in updates:
+                update_field_counts[key] += 1
+
+    writeback_eligible_ratio = round(
+        (writeback_eligible / writeback_scanned) if writeback_scanned else 0.0,
+        4,
+    )
+
+    lifecycle_rows = conn.execute(
+        f"""
+        SELECT id, ts, selected_count, citation_count, candidate_count, selection_signature, receipt_json
+        FROM {_PACK_LIFECYCLE_SHADOW_TABLE}
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (lifecycle_limit,),
+    ).fetchall()
+
+    lifecycle_runs = len(lifecycle_rows)
+    selected_total = 0
+    citation_total = 0
+    candidate_total = 0
+    zero_selection_runs = 0
+    unique_signatures: Set[str] = set()
+    trust_modes: Dict[str, int] = {}
+    graph_modes: Dict[str, int] = {}
+    parse_errors = 0
+    non_shadow_mutation_rows = 0
+
+    for row in lifecycle_rows:
+        selected = _optimize_policy_int(row["selected_count"], 0, min_value=0)
+        citation = _optimize_policy_int(row["citation_count"], 0, min_value=0)
+        candidate = _optimize_policy_int(row["candidate_count"], 0, min_value=0)
+
+        selected_total += selected
+        citation_total += citation
+        candidate_total += candidate
+
+        if selected == 0:
+            zero_selection_runs += 1
+
+        sig = str(row["selection_signature"] or "").strip()
+        if sig:
+            unique_signatures.add(sig)
+
+        try:
+            receipt_obj = json.loads(str(row["receipt_json"] or "{}"))
+        except Exception:
+            parse_errors += 1
+            continue
+
+        if not isinstance(receipt_obj, dict):
+            parse_errors += 1
+            continue
+
+        policies = receipt_obj.get("policies") if isinstance(receipt_obj.get("policies"), dict) else {}
+        trust_mode = str(policies.get("trust_policy_mode") or "off").strip() or "off"
+        graph_mode = str(policies.get("graph_provenance_policy_mode") or "off").strip() or "off"
+        trust_modes[trust_mode] = trust_modes.get(trust_mode, 0) + 1
+        graph_modes[graph_mode] = graph_modes.get(graph_mode, 0) + 1
+
+        mutation = receipt_obj.get("mutation") if isinstance(receipt_obj.get("mutation"), dict) else {}
+        memory_mutation = str(mutation.get("memory_mutation") or "none").strip() or "none"
+        if memory_mutation != "none":
+            non_shadow_mutation_rows += 1
+
+    stage_state, stage_state_error = _optimize_policy_load_state(getattr(args, "sunrise_state", None))
+
+    stage_b_reasons: List[str] = []
+    stage_b_ready = True
+
+    if stage_state_error:
+        stage_b_ready = False
+        stage_b_reasons.append(stage_state_error)
+    elif stage_state is None:
+        stage_b_ready = False
+        stage_b_reasons.append("sunrise_state_missing")
+    else:
+        if stage_state.get("stage") != "A-live":
+            stage_b_ready = False
+            stage_b_reasons.append("stage_not_a_live")
+        if not stage_state.get("readyForStageB", False) and int(stage_state.get("liveGreenStreak") or 0) < min_live_green_streak:
+            stage_b_ready = False
+            stage_b_reasons.append("live_green_streak_below_threshold")
+
+    if lifecycle_runs < min_lifecycle_runs_stage_b:
+        stage_b_ready = False
+        stage_b_reasons.append("insufficient_lifecycle_runs")
+
+    if writeback_eligible_ratio < min_writeback_eligible_ratio:
+        stage_b_ready = False
+        stage_b_reasons.append("writeback_eligible_ratio_below_threshold")
+
+    if non_shadow_mutation_rows > 0:
+        stage_b_ready = False
+        stage_b_reasons.append("lifecycle_mutation_not_shadow")
+
+    stage_c_reasons: List[str] = []
+    stage_c_ready = True
+    if not stage_b_ready:
+        stage_c_ready = False
+        stage_c_reasons.append("stage_b_not_ready")
+    if lifecycle_runs < min_lifecycle_runs_stage_c:
+        stage_c_ready = False
+        stage_c_reasons.append("insufficient_lifecycle_runs")
+    if _optimize_policy_int(repeated_misses.get("groups"), 0, min_value=0) > max_repeated_miss_groups_stage_c:
+        stage_c_ready = False
+        stage_c_reasons.append("repeated_miss_pressure_high")
+
+    recommendations: List[Dict[str, Any]] = []
+
+    if writeback_eligible_ratio < min_writeback_eligible_ratio:
+        recommendations.append(
+            {
+                "type": "improve_writeback_linkage",
+                "priority": "high",
+                "why": "writeback coverage is below policy threshold",
+                "evidence": {
+                    "eligible_ratio": writeback_eligible_ratio,
+                    "threshold": min_writeback_eligible_ratio,
+                    "sample_missing_observation_ids": missing_obs_ids,
+                },
+                "safe_for_auto_apply": False,
+            }
+        )
+
+    if _optimize_policy_int(repeated_misses.get("groups"), 0, min_value=0) > 0:
+        recommendations.append(
+            {
+                "type": "target_recall_gap_review",
+                "priority": "medium",
+                "why": "repeated no-result recall patterns are present",
+                "evidence": {
+                    "groups": repeated_misses.get("groups", 0),
+                    "events": repeated_misses.get("miss_events", 0),
+                    "sample_queries": [item.get("query") for item in list(repeated_misses.get("items") or [])[:3]],
+                },
+                "safe_for_auto_apply": False,
+            }
+        )
+
+    if stage_b_ready:
+        recommendations.append(
+            {
+                "type": "stage_b_canary_review_packet",
+                "priority": "low",
+                "why": "stage B gate conditions are satisfied in read-only policy review",
+                "evidence": {
+                    "lifecycle_runs": lifecycle_runs,
+                    "eligible_ratio": writeback_eligible_ratio,
+                    "ready_for_stage_b": bool((stage_state or {}).get("readyForStageB")),
+                },
+                "safe_for_auto_apply": False,
+            }
+        )
+
+    report: Dict[str, Any] = {
+        "kind": "openclaw-mem.optimize.policy-loop.v0",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "version": {
+            "openclaw_mem": __version__,
+            "schema": "v0",
+        },
+        "source": {
+            "scope": _normalize_scope_token(scope),
+            "review_limit": review_limit,
+            "writeback_limit": writeback_limit,
+            "lifecycle_limit": lifecycle_limit,
+            "sunrise_state": (stage_state or {}).get("path"),
+        },
+        "signals": {
+            "recall": {
+                "repeated_misses": {
+                    "groups": _optimize_policy_int(repeated_misses.get("groups"), 0, min_value=0),
+                    "miss_events": _optimize_policy_int(repeated_misses.get("miss_events"), 0, min_value=0),
+                    "min_count": _optimize_policy_int(repeated_misses.get("min_count"), miss_min_count, min_value=2),
+                    "items": list(repeated_misses.get("items") or [])[:top],
+                },
+            },
+            "writeback": {
+                "scanned": writeback_scanned,
+                "eligible": writeback_eligible,
+                "missing_lancedb_id": writeback_missing,
+                "eligible_ratio": writeback_eligible_ratio,
+                "unique_lancedb_ids": len([x for x in writeback_unique_ids if x]),
+                "update_field_counts": update_field_counts,
+                "sample_missing_observation_ids": missing_obs_ids,
+            },
+            "lifecycle_shadow": {
+                "runs": lifecycle_runs,
+                "selected_total": selected_total,
+                "citation_total": citation_total,
+                "candidate_total": candidate_total,
+                "avg_selected_per_run": round((selected_total / lifecycle_runs), 3) if lifecycle_runs else 0.0,
+                "avg_candidate_per_run": round((candidate_total / lifecycle_runs), 3) if lifecycle_runs else 0.0,
+                "zero_selection_runs": zero_selection_runs,
+                "selection_signature_unique": len(unique_signatures),
+                "trust_policy_modes": trust_modes,
+                "graph_provenance_policy_modes": graph_modes,
+                "receipt_parse_errors": parse_errors,
+                "non_shadow_mutation_rows": non_shadow_mutation_rows,
+            },
+        },
+        "sunrise": {
+            "stage_a_state": stage_state,
+            "stage_a_state_error": stage_state_error,
+            "stage_b": {
+                "status": "ready" if stage_b_ready else "hold",
+                "reasons": sorted(set(stage_b_reasons)),
+                "thresholds": {
+                    "min_live_green_streak": min_live_green_streak,
+                    "min_lifecycle_runs": min_lifecycle_runs_stage_b,
+                    "min_writeback_eligible_ratio": min_writeback_eligible_ratio,
+                },
+            },
+            "stage_c": {
+                "status": "ready" if stage_c_ready else "hold",
+                "reasons": sorted(set(stage_c_reasons)),
+                "thresholds": {
+                    "min_lifecycle_runs": min_lifecycle_runs_stage_c,
+                    "max_repeated_miss_groups": max_repeated_miss_groups_stage_c,
+                },
+            },
+        },
+        "policy": {
+            "mode": "review_only",
+            "writes_performed": 0,
+            "memory_mutation": "none",
+            "sunrise_freeze_respected": True,
+        },
+        "recommendations": recommendations,
+    }
+
+    if args.json:
+        _emit(report, True)
+        return
+
+    lines = [
+        "openclaw-mem optimize policy-loop (read-only)",
+        (
+            "writeback eligibility: "
+            f"{writeback_eligible}/{writeback_scanned} "
+            f"(ratio={writeback_eligible_ratio}, threshold={min_writeback_eligible_ratio})"
+        ),
+        (
+            "repeated misses: "
+            f"{report['signals']['recall']['repeated_misses']['groups']} groups "
+            f"({report['signals']['recall']['repeated_misses']['miss_events']} events)"
+        ),
+        (
+            "lifecycle shadow: "
+            f"runs={lifecycle_runs} "
+            f"avg_selected={report['signals']['lifecycle_shadow']['avg_selected_per_run']}"
+        ),
+        f"sunrise stage B: {report['sunrise']['stage_b']['status']} ({', '.join(report['sunrise']['stage_b']['reasons']) or 'no blockers'})",
+        f"sunrise stage C: {report['sunrise']['stage_c']['status']} ({', '.join(report['sunrise']['stage_c']['reasons']) or 'no blockers'})",
+    ]
+
+    print("\n".join(lines))
 
 
 def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -9466,6 +9859,7 @@ def build_parser() -> argparse.ArgumentParser:
         "\n"
         "  # Recall/writeback (Phase 5)\n"
         "  openclaw-mem writeback-lancedb --db mem.sqlite --lancedb ~/.openclaw/memory/lancedb --table memories --limit 50 --dry-run\n"
+        "  openclaw-mem optimize policy-loop --json --review-limit 800 --writeback-limit 400 --lifecycle-limit 120\n"
         "\n"
         "  # Hybrid Search & Store (Phase 4)\n"
         "  openclaw-mem hybrid \"python error\" --limit 5 --json\n"
@@ -9528,6 +9922,22 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
     o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per signal in output (default: 10)")
     o.set_defaults(func=cmd_optimize_review)
+
+    o = osub.add_parser("policy-loop", help="Read-only writeback+recall policy review with sunrise Stage B/C gates")
+    add_common(o)
+    o.add_argument("--review-limit", type=int, default=1000, help="Max rows scanned for recall pressure signals (default: 1000)")
+    o.add_argument("--writeback-limit", type=int, default=500, help="Max memory_store rows scanned for writeback linkage readiness (default: 500)")
+    o.add_argument("--lifecycle-limit", type=int, default=200, help="Max lifecycle-shadow rows scanned for rollout evidence (default: 200)")
+    o.add_argument("--miss-min-count", dest="miss_min_count", type=int, default=2, help="Min repeated no-result memory_recall events per query/scope group (default: 2)")
+    o.add_argument("--scope", default=None, help="Filter recall pressure review to a normalized detail.scope token")
+    o.add_argument("--top", type=int, default=10, help="Max repeated-miss groups and sample IDs per section (default: 10)")
+    o.add_argument("--sunrise-state", dest="sunrise_state", default=None, help="Optional sunrise Stage A state JSON path (from mem_engine_writeback_cron.py)")
+    o.add_argument("--min-live-green-streak", dest="min_live_green_streak", type=int, default=18, help="Stage-B gate threshold for Stage-A live green streak when readyForStageB is absent (default: 18)")
+    o.add_argument("--min-lifecycle-runs-stage-b", dest="min_lifecycle_runs_stage_b", type=int, default=12, help="Minimum lifecycle-shadow runs required before Stage B canary is considered (default: 12)")
+    o.add_argument("--min-lifecycle-runs-stage-c", dest="min_lifecycle_runs_stage_c", type=int, default=24, help="Minimum lifecycle-shadow runs required before Stage C promotion is considered (default: 24)")
+    o.add_argument("--min-writeback-eligible-ratio", dest="min_writeback_eligible_ratio", type=float, default=0.60, help="Minimum writeback eligible ratio for Stage B gate (default: 0.60)")
+    o.add_argument("--max-repeated-miss-groups-stage-c", dest="max_repeated_miss_groups_stage_c", type=int, default=1, help="Maximum repeated miss groups tolerated for Stage C gate (default: 1)")
+    o.set_defaults(func=cmd_optimize_policy_loop)
 
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)
