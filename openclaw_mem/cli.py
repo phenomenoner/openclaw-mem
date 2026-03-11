@@ -3346,6 +3346,162 @@ def _pack_graph_probe_observations(
     }
 
 
+def _pack_graph_provenance_error_code(exc: Exception) -> str:
+    text = str(exc or "").strip().lower()
+    if "unknown node_id" in text:
+        return "unknown_node_id"
+    if "graph db not found" in text:
+        return "graph_db_not_found"
+    if "graph schema missing required tables" in text:
+        return "graph_schema_missing_tables"
+    if "graph schema missing required meta key" in text:
+        return "graph_schema_missing_meta_key"
+    if "graph schema version mismatch" in text:
+        return "graph_schema_version_mismatch"
+    return "query_error"
+
+
+def _pack_graph_apply_provenance_policy(
+    *,
+    selected_refs: List[str],
+    args: argparse.Namespace,
+) -> Dict[str, Any]:
+    mode_raw = str(getattr(args, "graph_provenance_policy", "structured_only_fail_open") or "structured_only_fail_open").strip().lower()
+    mode = mode_raw if mode_raw in {"off", "structured_only_fail_open"} else "structured_only_fail_open"
+
+    graph_query_db = str(getattr(args, "graph_query_db", "") or "").strip()
+    require_structured = bool(getattr(args, "graph_require_structured_provenance", True))
+
+    hops = int(getattr(args, "graph_provenance_hops", 1) or 1)
+    hops = max(0, min(2, hops))
+    max_nodes = int(getattr(args, "graph_provenance_max_nodes", 40) or 40)
+    max_nodes = max(1, min(120, max_nodes))
+    max_edges = int(getattr(args, "graph_provenance_max_edges", 80) or 80)
+    max_edges = max(1, min(240, max_edges))
+
+    out: Dict[str, Any] = {
+        "mode": mode,
+        "require_structured_provenance": require_structured,
+        "graph_query_db_configured": bool(graph_query_db),
+        "bounds": {
+            "hops": hops,
+            "max_nodes": max_nodes,
+            "max_edges": max_edges,
+        },
+        "checked_count": 0,
+        "included_count": 0,
+        "excluded_count": 0,
+        "fail_open_count": 0,
+        "decisions": [],
+        "selected_refs": list(selected_refs),
+    }
+
+    if not selected_refs:
+        return out
+
+    decisions: List[Dict[str, Any]] = []
+
+    if mode == "off":
+        for ref in selected_refs:
+            decisions.append(
+                {
+                    "recordRef": ref,
+                    "included": True,
+                    "reason": "graph_provenance_policy_off",
+                    "fail_open": False,
+                    "error_code": None,
+                    "provenance_quality": None,
+                }
+            )
+        out["included_count"] = len(selected_refs)
+        out["decisions"] = decisions
+        return out
+
+    if not graph_query_db:
+        for ref in selected_refs:
+            decisions.append(
+                {
+                    "recordRef": ref,
+                    "included": True,
+                    "reason": "graph_provenance_fail_open_no_graph_db",
+                    "fail_open": True,
+                    "error_code": "no_graph_db",
+                    "provenance_quality": None,
+                }
+            )
+        out["included_count"] = len(selected_refs)
+        out["fail_open_count"] = len(selected_refs)
+        out["decisions"] = decisions
+        return out
+
+    included_refs: List[str] = []
+
+    for ref in selected_refs:
+        decision: Dict[str, Any] = {
+            "recordRef": ref,
+            "included": False,
+            "reason": None,
+            "fail_open": False,
+            "error_code": None,
+            "provenance_quality": None,
+        }
+
+        try:
+            subgraph = query_subgraph(
+                db_path=graph_query_db,
+                node_id=ref,
+                hops=hops,
+                direction="both",
+                max_nodes=max_nodes,
+                max_edges=max_edges,
+                require_structured_provenance=require_structured,
+            )
+
+            provenance = subgraph.get("provenance") if isinstance(subgraph, dict) else {}
+            provenance = provenance if isinstance(provenance, dict) else {}
+            coverage = provenance.get("coverage") if isinstance(provenance.get("coverage"), dict) else {}
+
+            edge_count = int(coverage.get("edge_count") or subgraph.get("edge_count") or 0)
+            structured_edge_count = int(coverage.get("structured_edge_count") or 0)
+            skipped_unstructured = int(subgraph.get("skipped_unstructured_provenance") or 0)
+            kind_counts_raw = provenance.get("kind_counts") if isinstance(provenance.get("kind_counts"), dict) else {}
+            kind_counts = {str(k): int(v) for k, v in kind_counts_raw.items()}
+
+            decision["provenance_quality"] = {
+                "edge_count": edge_count,
+                "structured_edge_count": structured_edge_count,
+                "skipped_unstructured_provenance": skipped_unstructured,
+                "kind_counts": kind_counts,
+            }
+            out["checked_count"] = int(out["checked_count"]) + 1
+
+            if structured_edge_count > 0:
+                decision["included"] = True
+                decision["reason"] = "graph_provenance_structured"
+                included_refs.append(ref)
+            elif edge_count > 0 or skipped_unstructured > 0:
+                decision["included"] = False
+                decision["reason"] = "graph_provenance_unstructured_only"
+            else:
+                decision["included"] = False
+                decision["reason"] = "graph_provenance_empty_subgraph"
+        except Exception as exc:
+            decision["included"] = True
+            decision["reason"] = "graph_provenance_fail_open_query_error"
+            decision["fail_open"] = True
+            decision["error_code"] = _pack_graph_provenance_error_code(exc)
+            out["fail_open_count"] = int(out["fail_open_count"]) + 1
+            included_refs.append(ref)
+
+        decisions.append(decision)
+
+    out["selected_refs"] = included_refs
+    out["included_count"] = len(included_refs)
+    out["excluded_count"] = max(0, len(selected_refs) - len(included_refs))
+    out["decisions"] = decisions
+    return out
+
+
 def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args: argparse.Namespace) -> dict:
     """Optional Graphic Memory preflight for `pack` (default OFF; fail-open).
 
@@ -3365,6 +3521,7 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
         "fail_open": True,
         "error_first_line": None,
         "selection_count": 0,
+        "selection_count_pre_policy": 0,
         "budget_tokens": int(max(1, int(getattr(args, "graph_budget_tokens", 1200) or 1200))),
         "take": int(max(1, int(getattr(args, "graph_take", 12) or 12))),
         "scope": (str(getattr(args, "graph_scope", "") or "").strip() or None),
@@ -3372,6 +3529,22 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
         "stage0": {"fired": False, "reason": None},
         "stage1": {"hit": False, "categories": [], "matched_keywords": []},
         "probe_decision": None,
+        "provenance_policy": {
+            "mode": str(getattr(args, "graph_provenance_policy", "structured_only_fail_open") or "structured_only_fail_open").strip().lower(),
+            "require_structured_provenance": bool(getattr(args, "graph_require_structured_provenance", True)),
+            "graph_query_db_configured": bool(str(getattr(args, "graph_query_db", "") or "").strip()),
+            "bounds": {
+                "hops": int(max(0, min(2, int(getattr(args, "graph_provenance_hops", 1) or 1)))),
+                "max_nodes": int(max(1, min(120, int(getattr(args, "graph_provenance_max_nodes", 40) or 40)))),
+                "max_edges": int(max(1, min(240, int(getattr(args, "graph_provenance_max_edges", 80) or 80)))),
+            },
+            "checked_count": 0,
+            "included_count": 0,
+            "excluded_count": 0,
+            "fail_open_count": 0,
+            "decisions": [],
+            "selected_refs": [],
+        },
         "payload": None,
     }
 
@@ -3463,7 +3636,13 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             suggest_limit=6,
             budget_tokens=int(out["budget_tokens"]),
         )
-        selected_refs = _graph_preflight_selection(index_payload, take=int(out["take"]))
+        selected_refs_pre_policy = _graph_preflight_selection(index_payload, take=int(out["take"]))
+        provenance_policy = _pack_graph_apply_provenance_policy(
+            selected_refs=selected_refs_pre_policy,
+            args=args,
+        )
+        selected_refs = list(provenance_policy.get("selected_refs") or [])
+
         pack_payload = _graph_pack_payload(
             conn,
             raw_ids=selected_refs,
@@ -3473,11 +3652,20 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
         )
 
         out["selection_count"] = len(selected_refs)
+        out["selection_count_pre_policy"] = len(selected_refs_pre_policy)
+        out["provenance_policy"] = provenance_policy
         out["payload"] = {
             "kind": "openclaw-mem.graph.preflight.v0",
             "query": {"text": query, "scope": out["scope"]},
-            "selection": {"take": int(out["take"]), "selectedCount": len(selected_refs), "recordRefs": selected_refs},
+            "selection": {
+                "take": int(out["take"]),
+                "prePolicyCount": len(selected_refs_pre_policy),
+                "selectedCount": len(selected_refs),
+                "prePolicyRecordRefs": selected_refs_pre_policy,
+                "recordRefs": selected_refs,
+            },
             "budget": {"budgetTokens": int(out["budget_tokens"]), "estimatedTokens": _estimate_tokens(pack_payload.get("bundle_text", "") or "")},
+            "provenance_policy": provenance_policy,
             "pack": pack_payload,
             "items": pack_payload.get("items", []),
             "bundle_text": pack_payload.get("bundle_text", "") or "",
@@ -3505,10 +3693,12 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
         "stage1": graph_state.get("stage1"),
         "probe": graph_state.get("probe"),
         "probe_decision": graph_state.get("probe_decision"),
+        "selection_count_pre_policy": int(graph_state.get("selection_count_pre_policy") or 0),
         "selected_refs_count": int(graph_state.get("selection_count") or 0),
         "budget_tokens": int(graph_state.get("budget_tokens") or 0),
         "take": int(graph_state.get("take") or 0),
         "scope": graph_state.get("scope"),
+        "provenance_policy": graph_state.get("provenance_policy"),
         "fail_open": bool(graph_state.get("fail_open")),
         "error_first_line": graph_state.get("error_first_line"),
         "preflight_kind": pre.get("kind"),
@@ -3660,10 +3850,12 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "stage1": graph_state.get("stage1"),
             "probe": graph_state.get("probe"),
             "probe_decision": graph_state.get("probe_decision"),
+            "selection_count_pre_policy": int(graph_state.get("selection_count_pre_policy") or 0),
             "selection_count": int(graph_state.get("selection_count") or 0),
             "budget_tokens": int(graph_state.get("budget_tokens") or 0),
             "take": int(graph_state.get("take") or 0),
             "scope": graph_state.get("scope"),
+            "provenance_policy": graph_state.get("provenance_policy"),
             "preflight": graph_state.get("payload"),
         }
 
@@ -8847,6 +9039,25 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--graph-scope", default=None, help="Optional scope hint for graph preflight (default: unset)")
     sp.add_argument("--graph-budget-tokens", type=int, default=1200, help="Token budget for graph preflight bundle_text (default: 1200)")
     sp.add_argument("--graph-take", type=int, default=12, help="Max selected refs to pack for graph preflight (default: 12)")
+
+    # Graph query-plane provenance gate for graph-derived preflight selection.
+    sp.add_argument("--graph-query-db", default=None, help="Optional graph query-plane SQLite DB path for provenance checks")
+    sp.add_argument(
+        "--graph-provenance-policy",
+        choices=["off", "structured_only_fail_open"],
+        default="structured_only_fail_open",
+        help="Policy for graph-derived candidate inclusion (default: structured_only_fail_open)",
+    )
+    sp.add_argument(
+        "--graph-require-structured-provenance",
+        dest="graph_require_structured_provenance",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="When checking graph provenance, require structured provenance refs (default: true)",
+    )
+    sp.add_argument("--graph-provenance-hops", type=int, default=1, help="Hops for per-candidate subgraph provenance checks (default: 1)")
+    sp.add_argument("--graph-provenance-max-nodes", type=int, default=40, help="Max nodes for provenance subgraph checks (default: 40)")
+    sp.add_argument("--graph-provenance-max-edges", type=int, default=80, help="Max edges for provenance subgraph checks (default: 80)")
 
     # Probe knobs (used in --use-graph=auto)
     sp.add_argument("--graph-probe", choices=["on", "off"], default=None, help="Enable index-probe stage in auto mode (default: on)")

@@ -69,6 +69,7 @@ Acceptance criteria:
 - `pack` behavior unchanged when graph is OFF.
 - In `--use-graph=auto`, trigger is deterministic + traceable (`--trace` shows trigger reason).
 - Graph failures are fail-open and never break pack.
+- Graph-derived candidate injection can consume query-plane provenance quality with deterministic include/exclude reasons (structured provenance gate + fail-open receipts).
 
 ### 1.7a) Graphic Memory query plane (operator-facing graph interface)
 

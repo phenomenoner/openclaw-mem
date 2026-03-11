@@ -328,6 +328,24 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.graph_query_cmd, "subgraph")
         self.assertTrue(a.require_structured_provenance)
 
+        a = build_parser().parse_args(
+            [
+                "pack",
+                "--query",
+                "provenance gated pack",
+                "--use-graph",
+                "on",
+                "--graph-query-db",
+                "/tmp/graph.db",
+                "--graph-provenance-policy",
+                "structured_only_fail_open",
+                "--no-graph-require-structured-provenance",
+            ]
+        )
+        self.assertEqual(a.graph_provenance_policy, "structured_only_fail_open")
+        self.assertEqual(a.graph_query_db, "/tmp/graph.db")
+        self.assertFalse(a.graph_require_structured_provenance)
+
 
     def test_writeback_lancedb_parser_accepts_flags(self):
         a = build_parser().parse_args([
@@ -3503,6 +3521,200 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("extensions", out["trace"])
         self.assertIn("graph", out["trace"]["extensions"])
         self.assertTrue(out["trace"]["extensions"]["graph"]["triggered"])
+
+        conn.close()
+
+    def test_pack_use_graph_on_provenance_policy_filters_unstructured_graph_candidates(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "plain summary",
+                    "summary_en": "plain summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(
+            [
+                "pack",
+                "--query",
+                "something",
+                "--json",
+                "--trace",
+                "--use-graph",
+                "on",
+                "--graph-query-db",
+                "/tmp/graph.db",
+            ]
+        )
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [
+                {"recordRef": "obs:1", "id": 1, "kind": "fact", "tool_name": "memory_store", "title": "structured"},
+                {"recordRef": "obs:2", "id": 2, "kind": "fact", "tool_name": "memory_store", "title": "opaque"},
+            ],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\\n",
+        }
+
+        captured: dict[str, list[str]] = {}
+
+        def fake_graph_pack_payload(conn_, *, raw_ids, budget_tokens, max_items, allow_empty=False):
+            captured["raw_ids"] = list(raw_ids)
+            return {
+                "kind": "openclaw-mem.graph.pack.v0",
+                "ts": "2026-02-04T13:00:00Z",
+                "budget": {"budgetTokens": budget_tokens, "estimatedTokens": 5},
+                "items": [{"recordRef": ref, "id": int(ref.split(":", 1)[1]), "summary": "g"} for ref in raw_ids],
+                "bundle_text": "\\n".join(raw_ids) + ("\\n" if raw_ids else ""),
+            }
+
+        def fake_query_subgraph(*, db_path, node_id, hops, direction, max_nodes, max_edges, require_structured_provenance):
+            if node_id == "obs:1":
+                return {
+                    "edge_count": 1,
+                    "skipped_unstructured_provenance": 0,
+                    "provenance": {
+                        "coverage": {
+                            "edge_count": 1,
+                            "structured_edge_count": 1,
+                        },
+                        "kind_counts": {"file_line": 1},
+                    },
+                }
+            return {
+                "edge_count": 0,
+                "skipped_unstructured_provenance": 1,
+                "provenance": {
+                    "coverage": {
+                        "edge_count": 0,
+                        "structured_edge_count": 0,
+                    },
+                    "kind_counts": {"opaque": 1},
+                },
+            }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
+        ), patch("openclaw_mem.cli._graph_pack_payload", side_effect=fake_graph_pack_payload), patch(
+            "openclaw_mem.cli.query_subgraph", side_effect=fake_query_subgraph
+        ):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(captured.get("raw_ids"), ["obs:1"])
+        self.assertEqual(out["graph"]["selection_count_pre_policy"], 2)
+        self.assertEqual(out["graph"]["selection_count"], 1)
+
+        decisions = out["graph"]["provenance_policy"]["decisions"]
+        self.assertEqual(len(decisions), 2)
+        self.assertEqual(decisions[0]["recordRef"], "obs:1")
+        self.assertTrue(decisions[0]["included"])
+        self.assertEqual(decisions[0]["reason"], "graph_provenance_structured")
+        self.assertEqual(decisions[1]["recordRef"], "obs:2")
+        self.assertFalse(decisions[1]["included"])
+        self.assertEqual(decisions[1]["reason"], "graph_provenance_unstructured_only")
+
+        ext = out["trace"]["extensions"]["graph"]
+        self.assertEqual(ext["selection_count_pre_policy"], 2)
+        self.assertEqual(ext["selected_refs_count"], 1)
+        self.assertEqual(ext["provenance_policy"]["included_count"], 1)
+        self.assertEqual(ext["provenance_policy"]["excluded_count"], 1)
+        conn.close()
+
+    def test_pack_use_graph_on_provenance_policy_fail_open_on_query_error(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "plain summary",
+                    "summary_en": "plain summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(
+            [
+                "pack",
+                "--query",
+                "something",
+                "--json",
+                "--trace",
+                "--use-graph",
+                "on",
+                "--graph-query-db",
+                "/tmp/graph.db",
+            ]
+        )
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [
+                {"recordRef": "obs:1", "id": 1, "kind": "fact", "tool_name": "memory_store", "title": "one"},
+                {"recordRef": "obs:2", "id": 2, "kind": "fact", "tool_name": "memory_store", "title": "two"},
+            ],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\\n",
+        }
+
+        captured: dict[str, list[str]] = {}
+
+        def fake_graph_pack_payload(conn_, *, raw_ids, budget_tokens, max_items, allow_empty=False):
+            captured["raw_ids"] = list(raw_ids)
+            return {
+                "kind": "openclaw-mem.graph.pack.v0",
+                "ts": "2026-02-04T13:00:00Z",
+                "budget": {"budgetTokens": budget_tokens, "estimatedTokens": 5},
+                "items": [{"recordRef": ref, "id": int(ref.split(":", 1)[1]), "summary": "g"} for ref in raw_ids],
+                "bundle_text": "\\n".join(raw_ids) + ("\\n" if raw_ids else ""),
+            }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
+        ), patch("openclaw_mem.cli._graph_pack_payload", side_effect=fake_graph_pack_payload), patch(
+            "openclaw_mem.cli.query_subgraph", side_effect=ValueError("graph db not found: /tmp/private/graph.db")
+        ):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(captured.get("raw_ids"), ["obs:1", "obs:2"])
+        policy = out["graph"]["provenance_policy"]
+        self.assertEqual(policy["fail_open_count"], 2)
+        reasons = [d["reason"] for d in policy["decisions"]]
+        self.assertEqual(reasons, ["graph_provenance_fail_open_query_error", "graph_provenance_fail_open_query_error"])
+        for d in policy["decisions"]:
+            self.assertTrue(d["included"])
+            self.assertEqual(d["error_code"], "graph_db_not_found")
 
         conn.close()
 
