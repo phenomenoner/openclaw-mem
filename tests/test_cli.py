@@ -4020,9 +4020,35 @@ class TestCliM0(unittest.TestCase):
             "trust_unknown_fail_open": 1,
         })
 
-        self.assertEqual([item["recordRef"] for item in out["items"]], ["obs:1", "obs:3"])
+        selected_refs = [item["recordRef"] for item in out["items"]]
+        citation_refs = [item["recordRef"] for item in out["citations"]]
+        self.assertEqual(selected_refs, ["obs:1", "obs:3"])
+        self.assertEqual(citation_refs, ["obs:1", "obs:3"])
         self.assertEqual(out["trace"]["extensions"]["graph"]["provenance_policy"], graph_policy)
         self.assertEqual(out["trace"]["extensions"]["trust_policy"], trust_policy)
+
+        policy_surface = out["policy_surface"]
+        self.assertEqual(policy_surface["kind"], "openclaw-mem.pack.policy-surface.v1")
+        self.assertEqual(policy_surface["selection"]["pack_selected_refs"], selected_refs)
+        self.assertEqual(policy_surface["selection"]["citation_record_refs"], citation_refs)
+        self.assertEqual(policy_surface["selection"]["trust_selected_refs"], trust_policy["selected_refs"])
+        self.assertEqual(policy_surface["selection"]["graph_selected_refs"], graph_policy["selected_refs"])
+        self.assertEqual(policy_surface["selection"]["shared_pack_and_graph_refs"], selected_refs)
+        self.assertEqual(policy_surface["reasons"]["trust_policy_reason_counts"], trust_policy["decision_reason_counts"])
+        self.assertEqual(
+            policy_surface["reasons"]["graph_provenance_reason_counts"],
+            graph_policy["decision_reason_counts"],
+        )
+        self.assertEqual(policy_surface["policies"]["trust_policy"]["selected_refs"], trust_policy["selected_refs"])
+        self.assertEqual(
+            policy_surface["policies"]["graph_provenance_policy"]["selected_refs"],
+            graph_policy["selected_refs"],
+        )
+        self.assertEqual(policy_surface["consistency"]["pack_items_match_citations"], True)
+        self.assertEqual(policy_surface["consistency"]["pack_items_subset_of_trust_selected_refs"], True)
+        self.assertEqual(policy_surface["consistency"]["pack_items_missing_from_trust_selected_refs"], [])
+        self.assertEqual(policy_surface["selection"]["pack_selected_refs"], out["trace"]["output"]["refreshedRecordRefs"])
+        self.assertEqual(out["trace"]["extensions"]["policy_surface"], policy_surface)
 
         conn.close()
 

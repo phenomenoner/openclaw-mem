@@ -3601,6 +3601,146 @@ def _pack_trust_apply_policy(
     return _pack_trust_finalize_policy({"mode": mode, "decisions": decisions})
 
 
+_PACK_POLICY_SURFACE_V1_KIND = "openclaw-mem.pack.policy-surface.v1"
+
+
+def _pack_reason_counts_by_inclusion(
+    candidates: List[pack_trace_v1.PackTraceV1Candidate],
+    *,
+    included: bool,
+) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for candidate in candidates:
+        decision = getattr(candidate, "decision", None)
+        if bool(getattr(decision, "included", False)) != included:
+            continue
+
+        reasons_raw = list(getattr(decision, "reason", []) or [])
+        if not reasons_raw:
+            counts["pack_reason_missing"] = int(counts.get("pack_reason_missing", 0)) + 1
+            continue
+
+        for token in reasons_raw:
+            reason = str(token or "").strip() or "pack_reason_missing"
+            counts[reason] = int(counts.get(reason, 0)) + 1
+
+    return {key: int(counts[key]) for key in sorted(counts.keys())}
+
+
+def _pack_policy_surface_summary(policy: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(policy, dict):
+        return None
+
+    selected_refs: List[str] = []
+    seen_refs: set[str] = set()
+    for item in list(policy.get("selected_refs") or []):
+        ref = str(item or "").strip()
+        if ref and ref not in seen_refs:
+            seen_refs.add(ref)
+            selected_refs.append(ref)
+
+    reason_counts_raw = policy.get("decision_reason_counts") if isinstance(policy.get("decision_reason_counts"), dict) else {}
+    reason_counts: Dict[str, int] = {}
+    for key in sorted(reason_counts_raw.keys(), key=lambda token: str(token)):
+        try:
+            value = int(reason_counts_raw.get(key, 0))
+        except Exception:
+            value = 0
+        if value <= 0:
+            continue
+        reason = str(key or "").strip() or "unknown"
+        reason_counts[reason] = int(value)
+
+    return {
+        "kind": str(policy.get("kind") or "").strip() or None,
+        "mode": str(policy.get("mode") or "").strip() or None,
+        "checked_count": max(0, _pack_graph_int(policy.get("checked_count"), 0)),
+        "included_count": max(0, _pack_graph_int(policy.get("included_count"), 0)),
+        "excluded_count": max(0, _pack_graph_int(policy.get("excluded_count"), 0)),
+        "fail_open_count": max(0, _pack_graph_int(policy.get("fail_open_count"), 0)),
+        "decision_reason_counts": reason_counts,
+        "selected_refs": selected_refs,
+    }
+
+
+def _pack_compose_policy_surface(
+    *,
+    selected_items: List[Dict[str, Any]],
+    citations: List[Dict[str, Any]],
+    candidate_trace: List[pack_trace_v1.PackTraceV1Candidate],
+    graph_provenance_policy: Optional[Dict[str, Any]],
+    trust_policy: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    trust_summary = _pack_policy_surface_summary(trust_policy)
+    graph_summary = _pack_policy_surface_summary(graph_provenance_policy)
+
+    if trust_summary is None and graph_summary is None:
+        return None
+
+    pack_selected_refs = [
+        str(item.get("recordRef") or "").strip()
+        for item in selected_items
+        if str(item.get("recordRef") or "").strip()
+    ]
+    citation_refs = [
+        str(item.get("recordRef") or "").strip()
+        for item in citations
+        if str(item.get("recordRef") or "").strip()
+    ]
+
+    trust_selected_refs = list((trust_summary or {}).get("selected_refs") or [])
+    graph_selected_refs = list((graph_summary or {}).get("selected_refs") or [])
+
+    trust_selected_set = set(trust_selected_refs)
+    graph_selected_set = set(graph_selected_refs)
+
+    pack_missing_from_trust = (
+        [ref for ref in pack_selected_refs if ref not in trust_selected_set]
+        if trust_summary is not None
+        else None
+    )
+
+    shared_pack_and_graph_refs = (
+        [ref for ref in pack_selected_refs if ref in graph_selected_set]
+        if graph_summary is not None
+        else None
+    )
+
+    return {
+        "kind": _PACK_POLICY_SURFACE_V1_KIND,
+        "selection": {
+            "pack_selected_refs": pack_selected_refs,
+            "citation_record_refs": citation_refs,
+            "trust_selected_refs": trust_selected_refs if trust_summary is not None else None,
+            "graph_selected_refs": graph_selected_refs if graph_summary is not None else None,
+            "shared_pack_and_graph_refs": shared_pack_and_graph_refs,
+        },
+        "counts": {
+            "pack_selected_count": len(pack_selected_refs),
+            "citation_count": len(citation_refs),
+            "candidate_count": len(candidate_trace),
+            "pack_excluded_count": max(0, len(candidate_trace) - len(pack_selected_refs)),
+        },
+        "reasons": {
+            "pack_included_reason_counts": _pack_reason_counts_by_inclusion(candidate_trace, included=True),
+            "pack_excluded_reason_counts": _pack_reason_counts_by_inclusion(candidate_trace, included=False),
+            "trust_policy_reason_counts": dict((trust_summary or {}).get("decision_reason_counts") or {}),
+            "graph_provenance_reason_counts": dict((graph_summary or {}).get("decision_reason_counts") or {}),
+        },
+        "policies": {
+            "trust_policy": trust_summary,
+            "graph_provenance_policy": graph_summary,
+        },
+        "consistency": {
+            "pack_items_match_citations": pack_selected_refs == citation_refs,
+            "pack_items_subset_of_trust_selected_refs": (
+                len(pack_missing_from_trust or []) == 0 if trust_summary is not None else None
+            ),
+            "pack_items_missing_from_trust_selected_refs": pack_missing_from_trust,
+        },
+    }
+
+
 def _pack_graph_apply_provenance_policy(
     *,
     selected_refs: List[str],
@@ -4102,6 +4242,10 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "citations": citations,
     }
 
+    graph_provenance_policy: Optional[Dict[str, Any]] = None
+    if (graph_state or {}).get("use_graph") != "off":
+        graph_provenance_policy = _pack_graph_finalize_provenance_policy(graph_state.get("provenance_policy"))
+
     if trust_policy_mode != "off":
         payload["trust_policy"] = trust_policy
 
@@ -4122,7 +4266,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "budget_tokens": int(graph_state.get("budget_tokens") or 0),
             "take": int(graph_state.get("take") or 0),
             "scope": graph_state.get("scope"),
-            "provenance_policy": _pack_graph_finalize_provenance_policy(graph_state.get("provenance_policy")),
+            "provenance_policy": graph_provenance_policy,
             "preflight": graph_state.get("payload"),
         }
 
@@ -4133,6 +4277,16 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             if max_chars and len(combined) > max_chars:
                 combined = combined[:max_chars].rstrip() + "\n"
             payload["bundle_text_with_graph"] = combined
+
+    policy_surface = _pack_compose_policy_surface(
+        selected_items=selected_items,
+        citations=citations,
+        candidate_trace=candidate_trace,
+        graph_provenance_policy=graph_provenance_policy,
+        trust_policy=(trust_policy if trust_policy_mode != "off" else None),
+    )
+    if policy_surface is not None:
+        payload["policy_surface"] = policy_surface
 
     if bool(args.trace):
         duration_ms = int((time.perf_counter() - started) * 1000)
@@ -4148,6 +4302,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             trace_extensions["graph"] = _pack_graph_trace_extension(graph_state)
         if trust_policy_mode != "off":
             trace_extensions["trust_policy"] = trust_policy
+        if policy_surface is not None:
+            trace_extensions["policy_surface"] = policy_surface
 
         trace = pack_trace_v1.PackTraceV1(
             kind=pack_trace_v1.PACK_TRACE_V1_KIND,

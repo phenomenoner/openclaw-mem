@@ -430,7 +430,11 @@ class TestJsonContracts(unittest.TestCase):
             "exclude_quarantined_fail_open",
         )
 
-        self._assert_exact_keys(out, {"bundle_text", "items", "citations", "trace", "trust_policy"}, "pack.trust_policy")
+        self._assert_exact_keys(
+            out,
+            {"bundle_text", "items", "citations", "trace", "trust_policy", "policy_surface"},
+            "pack.trust_policy",
+        )
 
         policy = out["trust_policy"]
         self._assert_exact_keys(
@@ -464,11 +468,74 @@ class TestJsonContracts(unittest.TestCase):
         )
         self.assertEqual(policy["selected_refs"], ["obs:1", "obs:3"])
 
-        self.assertEqual(
-            [item["recordRef"] for item in out["items"]],
-            ["obs:1", "obs:3"],
+        selected_refs = [item["recordRef"] for item in out["items"]]
+        citation_refs = [item["recordRef"] for item in out["citations"]]
+        self.assertEqual(selected_refs, ["obs:1", "obs:3"])
+        self.assertEqual(citation_refs, ["obs:1", "obs:3"])
+
+        policy_surface = out["policy_surface"]
+        self._assert_exact_keys(
+            policy_surface,
+            {"kind", "selection", "counts", "reasons", "policies", "consistency"},
+            "pack.policy_surface",
         )
+        self._assert_exact_keys(
+            policy_surface["selection"],
+            {
+                "pack_selected_refs",
+                "citation_record_refs",
+                "trust_selected_refs",
+                "graph_selected_refs",
+                "shared_pack_and_graph_refs",
+            },
+            "pack.policy_surface.selection",
+        )
+        self._assert_exact_keys(
+            policy_surface["counts"],
+            {"pack_selected_count", "citation_count", "candidate_count", "pack_excluded_count"},
+            "pack.policy_surface.counts",
+        )
+        self._assert_exact_keys(
+            policy_surface["reasons"],
+            {
+                "pack_included_reason_counts",
+                "pack_excluded_reason_counts",
+                "trust_policy_reason_counts",
+                "graph_provenance_reason_counts",
+            },
+            "pack.policy_surface.reasons",
+        )
+        self._assert_exact_keys(
+            policy_surface["policies"],
+            {"trust_policy", "graph_provenance_policy"},
+            "pack.policy_surface.policies",
+        )
+        self._assert_exact_keys(
+            policy_surface["consistency"],
+            {
+                "pack_items_match_citations",
+                "pack_items_subset_of_trust_selected_refs",
+                "pack_items_missing_from_trust_selected_refs",
+            },
+            "pack.policy_surface.consistency",
+        )
+
+        self.assertEqual(policy_surface["kind"], "openclaw-mem.pack.policy-surface.v1")
+        self.assertEqual(policy_surface["selection"]["pack_selected_refs"], selected_refs)
+        self.assertEqual(policy_surface["selection"]["citation_record_refs"], citation_refs)
+        self.assertEqual(policy_surface["selection"]["trust_selected_refs"], policy["selected_refs"])
+        self.assertIsNone(policy_surface["selection"]["graph_selected_refs"])
+        self.assertIsNone(policy_surface["selection"]["shared_pack_and_graph_refs"])
+        self.assertEqual(policy_surface["reasons"]["trust_policy_reason_counts"], policy["decision_reason_counts"])
+        self.assertEqual(policy_surface["reasons"]["graph_provenance_reason_counts"], {})
+        self.assertEqual(policy_surface["policies"]["trust_policy"]["selected_refs"], policy["selected_refs"])
+        self.assertIsNone(policy_surface["policies"]["graph_provenance_policy"])
+        self.assertTrue(policy_surface["consistency"]["pack_items_match_citations"])
+        self.assertTrue(policy_surface["consistency"]["pack_items_subset_of_trust_selected_refs"])
+        self.assertEqual(policy_surface["consistency"]["pack_items_missing_from_trust_selected_refs"], [])
+
         self.assertEqual(out["trace"]["extensions"].get("trust_policy"), policy)
+        self.assertEqual(out["trace"]["extensions"].get("policy_surface"), policy_surface)
 
 
 if __name__ == "__main__":

@@ -130,6 +130,9 @@ Rules:
   - provenance-policy contract (`openclaw-mem.pack.graph.provenance-policy.v1`):
     - top-level: `kind`, `mode`, `require_structured_provenance`, `graph_query_db_configured`, `bounds`, `checked_count`, `included_count`, `excluded_count`, `fail_open_count`, `decision_reason_counts`, `decisions`, `selected_refs`
     - each decision: `recordRef`, `included`, `reason`, `fail_open`, `error_code`, `provenance_quality`
+  - composed policy surface (`openclaw-mem.pack.policy-surface.v1`):
+    - mirrored between top-level `pack.policy_surface` and `trace.extensions.policy_surface`
+    - composes pack-selected refs/citations, trust-policy summary, graph-provenance summary, deterministic include/exclude reason counters, and consistency booleans (`pack_items_match_citations`, trust subset checks)
 
 Acceptance (MVP):
 - OFF = no behavior change.
