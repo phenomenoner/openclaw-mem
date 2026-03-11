@@ -318,6 +318,16 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.graph_query_cmd, "upstream")
         self.assertEqual(a.node_id, "artifact.daily-mission")
 
+        a = build_parser().parse_args([
+            "graph",
+            "query",
+            "subgraph",
+            "artifact.daily-mission",
+            "--require-structured-provenance",
+        ])
+        self.assertEqual(a.graph_query_cmd, "subgraph")
+        self.assertTrue(a.require_structured_provenance)
+
 
     def test_writeback_lancedb_parser_accepts_flags(self):
         a = build_parser().parse_args([

@@ -7086,6 +7086,7 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 max_edges=getattr(args, "max_edges", 80),
                 edge_types=getattr(args, "edge_type", None),
                 include_node_types=getattr(args, "include_node_type", None),
+                require_structured_provenance=getattr(args, "require_structured_provenance", False),
             )
         elif query_cmd == "drift":
             result = query_drift(
@@ -7156,6 +7157,10 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             else:
                 edge_types_summary = ""
             line = f"{item.get('provenance')} edges={item.get('edge_count')}"
+            prov_ref = item.get("provenance_ref") or {}
+            prov_kind = str(prov_ref.get("kind") or "")
+            if prov_kind:
+                line += f" kind={prov_kind}"
             if edge_types_summary:
                 line += f" edge_types={edge_types_summary}"
             print(line)
@@ -8955,6 +8960,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=None,
         help="Only include nodes with these node types (repeatable; comma-separated ok). Center node is always included.",
+    )
+    q.add_argument(
+        "--require-structured-provenance",
+        dest="require_structured_provenance",
+        action="store_true",
+        help="Drop edges whose provenance cannot be normalized into structured refs (file/line, file/anchor, URL, receipt).",
     )
     q.set_defaults(func=cmd_graph_query)
 

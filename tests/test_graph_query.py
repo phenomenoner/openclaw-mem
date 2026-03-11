@@ -59,6 +59,8 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(upstream["edges"][0]["src"], "cron.job.alpha")
             self.assertEqual(upstream["edges"][1]["src"], "cron.job.beta")
             self.assertEqual(upstream["edges"][0]["provenance"], "docs/topology.yaml#L20")
+            self.assertEqual(upstream["edges"][0]["provenance_ref"]["kind"], "file_line")
+            self.assertEqual(upstream["edges"][0]["provenance_ref"]["line_start"], 20)
 
             downstream = query_downstream(db_path=db_path, node_id="project.finlife")
             self.assertTrue(downstream["ok"])
@@ -301,6 +303,51 @@ class TestGraphQuery(unittest.TestCase):
                 )
             self.assertIn("max_nodes must be <= 500", str(ctx.exception))
 
+    def test_query_subgraph_require_structured_provenance_filters_edges(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "artifact.center", "type": "artifact"},
+                {"id": "artifact.structured", "type": "artifact"},
+                {"id": "artifact.opaque", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "artifact.center",
+                    "dst": "artifact.structured",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L10",
+                },
+                {
+                    "src": "artifact.center",
+                    "dst": "artifact.opaque",
+                    "type": "alerts_to",
+                    "provenance": "manual-entry",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path)
+
+            out = query_subgraph(
+                db_path=db_path,
+                node_id="artifact.center",
+                hops=1,
+                direction="both",
+                max_nodes=10,
+                max_edges=10,
+                require_structured_provenance=True,
+            )
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["edge_count"], 1)
+            self.assertEqual(out["skipped_unstructured_provenance"], 1)
+            self.assertTrue(out["filters"]["require_structured_provenance"])
+            self.assertEqual(out["provenance"]["coverage"]["structured_edge_count"], 1)
+            self.assertEqual(out["provenance"]["kind_counts"], {"file_line": 1})
+            node_ids = {node["id"] for node in out["nodes"]}
+            self.assertEqual(node_ids, {"artifact.center", "artifact.structured"})
+
     def test_query_provenance_groups_and_filters_edges(self) -> None:
         topology = {
             "nodes": [
@@ -347,11 +394,15 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(out["total_distinct"], 2)
             self.assertEqual(out["count"], 2)
             self.assertEqual(out["items"][0]["provenance"], "docs/topology.yaml#L10")
+            self.assertEqual(out["items"][0]["provenance_ref"]["kind"], "file_line")
+            self.assertEqual(out["items"][0]["provenance_ref"]["line_start"], 10)
             self.assertEqual(out["items"][0]["edge_count"], 2)
             self.assertEqual(
                 out["items"][0]["edge_types"],
                 [{"edge_type": "writes", "edge_count": 2}],
             )
+            self.assertEqual(out["provenance_quality"]["kind_counts"], {"file_line": 3})
+            self.assertEqual(out["provenance_quality"]["structured_edge_count"], 3)
 
             filtered = query_provenance(
                 db_path=db_path,
@@ -413,6 +464,7 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(out["count"], 1)
             self.assertEqual(out["filters"]["min_edge_count"], 2)
             self.assertEqual(out["items"][0]["provenance"], "docs/topology.yaml#L20")
+            self.assertEqual(out["items"][0]["provenance_ref"]["kind"], "file_line")
             self.assertEqual(out["items"][0]["edge_count"], 2)
             self.assertEqual(
                 out["items"][0]["edge_types"],

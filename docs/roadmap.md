@@ -84,6 +84,7 @@ Status: **PARTIAL** (query-plane foundation + deterministic query CLI shipped; d
   - deterministic query-plane foundation module + SQLite refresh contract
   - `graph query` commands for `upstream` / `downstream` / `lineage` / `writers` / `filter`
   - `graph query drift --live-json <path> --db <path>` for stable-topology vs runtime-state checks
+  - provenance integration deepened: query edges/groups now carry normalized `provenance_ref` objects, plus bounded `graph query subgraph --require-structured-provenance` filtering for pack-safe consumption
 - Initial operator questions:
   - what depends on this node?
   - what does this node feed/write?
