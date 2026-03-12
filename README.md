@@ -132,6 +132,7 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 - **5-minute showcase:** [`docs/showcase/inside-out-demo.md`](docs/showcase/inside-out-demo.md)
 - **About the wedge:** [`docs/about.md`](docs/about.md)
 - **Copy pack:** [`docs/launch/trust-aware-context-pack-copy-pack.md`](docs/launch/trust-aware-context-pack-copy-pack.md)
+- **GitHub surface spec:** [`docs/launch/github-repo-surface-consistency.md`](docs/launch/github-repo-surface-consistency.md)
 
 **Operate and extend**
 - **Release checklist:** [`docs/release-checklist.md`](docs/release-checklist.md)

@@ -50,6 +50,7 @@ That split is the core design choice: start with something inspectable and rollb
 ## Launch / external copy
 
 - [Trust-aware context pack copy pack](launch/trust-aware-context-pack-copy-pack.md)
+- [GitHub repo surface consistency](launch/github-repo-surface-consistency.md)
 
 ## Releases
 

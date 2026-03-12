@@ -37,6 +37,24 @@ Proof:
 
 Trust-aware context packing for OpenClaw: smaller prompt packs, explicit trust tiers, and receipts for why memory entered the pack.
 
+## GitHub-facing surfaces
+
+### Repo description / pin-safe line
+
+Trust-aware memory for OpenClaw — pack only what the agent should trust, with provenance, receipts, and local-first recall.
+
+### Ultra-short line
+
+Trust-aware context packing for OpenClaw.
+
+### Social preview headline
+
+Trust-aware context packing for OpenClaw
+
+### Social preview subhead
+
+Pack only what the agent should trust
+
 ## X / thread-ready copy
 
 ### Single-post version
