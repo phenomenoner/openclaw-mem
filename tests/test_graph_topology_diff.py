@@ -65,6 +65,14 @@ class TestGraphTopologyDiff(unittest.TestCase):
             self.assertEqual(counts["edge_contract_mismatches"], 1)
             self.assertEqual(diff["edge_contract_mismatches"][0]["src"], "cron.job.a")
             self.assertEqual(diff["edge_contract_mismatches"][0]["dst"], "repo.alpha")
+            self.assertEqual(
+                [entry["provenance"] for entry in diff["edge_contract_mismatches"][0]["seed_variants"]],
+                ["jobs.json#job=a"],
+            )
+            self.assertEqual(
+                [entry["provenance"] for entry in diff["edge_contract_mismatches"][0]["curated_variants"]],
+                ["manual"],
+            )
             self.assertEqual(diff["missing_nodes"][0]["id"], "script.path.run")
             self.assertEqual(diff["stale_nodes"][0]["id"], "artifact.legacy")
             self.assertEqual(diff["node_contract_mismatches"][0]["id"], "repo.alpha")

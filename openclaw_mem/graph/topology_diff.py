@@ -245,17 +245,17 @@ def compare_topology_files(*, seed_path: str | Path, curated_path: str | Path, l
         seed_contracts = _sorted_edge_contracts(seed_edges_by_key[key])
         curated_contracts = _sorted_edge_contracts(curated_edges_by_key[key])
         if seed_contracts != curated_contracts:
-            mismatch: Dict[str, Any] = {
-                "src": key[0],
-                "dst": key[1],
-                "type": key[2],
-                "seed": seed_contracts[0] if seed_contracts else {},
-                "curated": curated_contracts[0] if curated_contracts else {},
-            }
-            if len(seed_contracts) > 1 or len(curated_contracts) > 1:
-                mismatch["seed_variants"] = seed_contracts
-                mismatch["curated_variants"] = curated_contracts
-            edge_contract_mismatches_full.append(mismatch)
+            edge_contract_mismatches_full.append(
+                {
+                    "src": key[0],
+                    "dst": key[1],
+                    "type": key[2],
+                    "seed": seed_contracts[0] if seed_contracts else {},
+                    "curated": curated_contracts[0] if curated_contracts else {},
+                    "seed_variants": seed_contracts,
+                    "curated_variants": curated_contracts,
+                }
+            )
 
     bounded_missing_nodes, trunc_missing_nodes = _apply_limit(missing_nodes_full, limit)
     bounded_stale_nodes, trunc_stale_nodes = _apply_limit(stale_nodes_full, limit)
