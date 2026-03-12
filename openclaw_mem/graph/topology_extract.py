@@ -8,7 +8,20 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
-ABS_WORKSPACE_PATH_RE = re.compile(r"(/root/\.openclaw/workspace/[^\s'\"`<>]+)")
+WORKSPACE_PATH_TOKEN_RE = re.compile(
+    r"(/root/\.openclaw/workspace/[^\s'\"`<>]+|\$\{OPENCLAW_WORKSPACE\}/[^\s'\"`<>]+|\$OPENCLAW_WORKSPACE/[^\s'\"`<>]+)"
+)
+
+
+def _normalize_workspace_path_token(path_token: str, *, workspace_path: Path) -> str:
+    token = str(path_token or "").strip()
+    if token.startswith("${OPENCLAW_WORKSPACE}/"):
+        rel = token[len("${OPENCLAW_WORKSPACE}/") :]
+        return (workspace_path / rel).as_posix()
+    if token.startswith("$OPENCLAW_WORKSPACE/"):
+        rel = token[len("$OPENCLAW_WORKSPACE/") :]
+        return (workspace_path / rel).as_posix()
+    return token
 
 
 def _utc_now_iso() -> str:
@@ -124,11 +137,11 @@ def _iter_spec_files(spec_dir: Path) -> List[Path]:
     return sorted([p for p in spec_dir.glob("*.md") if p.is_file()], key=lambda p: p.name.lower())
 
 
-def _extract_workspace_paths_from_spec(spec_path: Path) -> List[Tuple[int, str]]:
+def _extract_workspace_paths_from_spec(spec_path: Path, *, workspace_path: Path) -> List[Tuple[int, str]]:
     hits: List[Tuple[int, str]] = []
     for idx, raw_line in enumerate(spec_path.read_text(encoding="utf-8").splitlines(), start=1):
-        for match in ABS_WORKSPACE_PATH_RE.findall(raw_line):
-            token = match.rstrip(".,;:)]}")
+        for match in WORKSPACE_PATH_TOKEN_RE.findall(raw_line):
+            token = _normalize_workspace_path_token(match.rstrip(".,;:)]}"), workspace_path=workspace_path)
             if token:
                 hits.append((idx, token))
     return hits
@@ -154,6 +167,33 @@ def _path_node(path_token: str) -> Dict[str, Any]:
         },
         "edge_role": edge_role,
     }
+
+
+def _provenance_group(
+    provenance: str,
+    *,
+    workspace_path: Path,
+    cron_jobs_file: Path,
+    spec_dir_path: Path,
+) -> str:
+    token = str(provenance or "").strip()
+    if not token:
+        return "unknown"
+
+    source = token.split("#", 1)[0].strip()
+    if not source:
+        return "unknown"
+
+    source_path = Path(source)
+    if not source_path.is_absolute():
+        source_path = workspace_path / source_path
+    source_path = source_path.resolve()
+
+    if source_path == cron_jobs_file:
+        return "cron_jobs"
+    if source_path.parent == spec_dir_path:
+        return "cron_spec"
+    return "other"
 
 
 def extract_topology_seed(
@@ -271,7 +311,7 @@ def extract_topology_seed(
         )
         add_edge(job_node_id, spec_node_id, "reads", f"{spec_rel}")
 
-        for line_no, path_token in _extract_workspace_paths_from_spec(spec_path):
+        for line_no, path_token in _extract_workspace_paths_from_spec(spec_path, workspace_path=workspace_path):
             parsed = _path_node(path_token)
             path_node = parsed["node"]
             edge_role = parsed["edge_role"]
@@ -312,6 +352,16 @@ def extract_topology_seed(
         t = str(edge.get("type") or "unknown")
         edge_type_counts[t] = edge_type_counts.get(t, 0) + 1
 
+    provenance_group_counts: Dict[str, int] = {}
+    for edge in edges:
+        group = _provenance_group(
+            str(edge.get("provenance") or ""),
+            workspace_path=workspace_path,
+            cron_jobs_file=cron_jobs_file,
+            spec_dir_path=spec_dir_path,
+        )
+        provenance_group_counts[group] = provenance_group_counts.get(group, 0) + 1
+
     return {
         "kind": "openclaw-mem.graph.topology-seed.v0",
         "generated_at": _utc_now_iso(),
@@ -328,6 +378,10 @@ def extract_topology_seed(
             "edges": len(edges),
             "node_types": node_type_counts,
             "edge_types": edge_type_counts,
+            "provenance_groups": {
+                group: provenance_group_counts[group]
+                for group in sorted(provenance_group_counts)
+            },
         },
         "nodes": nodes,
         "edges": edges,

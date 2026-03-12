@@ -7478,6 +7478,9 @@ def cmd_graph_topology_extract(conn: sqlite3.Connection, args: argparse.Namespac
             "spec_count": int(counts.get("spec_files") or 0),
             "node_types": counts.get("node_types") if isinstance(counts.get("node_types"), dict) else {},
             "edge_types": counts.get("edge_types") if isinstance(counts.get("edge_types"), dict) else {},
+            "provenance_groups": counts.get("provenance_groups")
+            if isinstance(counts.get("provenance_groups"), dict)
+            else {},
         },
     }
 
