@@ -353,6 +353,61 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         self.assertIn("importance", detail)
         self.assertEqual(detail["importance"].get("method"), "heuristic-v1")
 
+    def test_graph_capture_md_cli_override_matches_ingest_harvest_behavior(self):
+        md_path = Path(self.tmpdir.name) / "notes.md"
+        state_path = Path(self.tmpdir.name) / "graph-capture-md-state.json"
+        md_path.write_text("# Title\n\n## Heading\nline\n", encoding="utf-8")
+
+        out_on = self._run_cli(
+            "graph",
+            "capture-md",
+            "--path",
+            str(md_path),
+            "--state",
+            str(state_path),
+            "--importance-scorer",
+            "heuristic-v1",
+            env={"OPENCLAW_MEM_IMPORTANCE_SCORER": "off"},
+        )
+        self.assertEqual(out_on.get("inserted"), 1)
+
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        row_on = conn.execute(
+            "SELECT detail_json FROM observations WHERE tool_name='graph.capture-md' ORDER BY id ASC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        self.assertIsNotNone(row_on)
+        detail_on = json.loads(row_on["detail_json"])
+        self.assertIn("importance", detail_on)
+        self.assertEqual(detail_on["importance"].get("method"), "heuristic-v1")
+
+        md_path_2 = Path(self.tmpdir.name) / "notes-2.md"
+        md_path_2.write_text("# Title\n\n## Heading 2\nline\n", encoding="utf-8")
+
+        out_off = self._run_cli(
+            "graph",
+            "capture-md",
+            "--path",
+            str(md_path_2),
+            "--state",
+            str(state_path),
+            "--importance-scorer",
+            "off",
+            env={"OPENCLAW_MEM_IMPORTANCE_SCORER": "heuristic-v1"},
+        )
+        self.assertEqual(out_off.get("inserted"), 1)
+
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        row_off = conn.execute(
+            "SELECT detail_json FROM observations WHERE tool_name='graph.capture-md' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        self.assertIsNotNone(row_off)
+        detail_off = json.loads(row_off["detail_json"])
+        self.assertNotIn("importance", detail_off)
+
 
 if __name__ == "__main__":
     unittest.main()

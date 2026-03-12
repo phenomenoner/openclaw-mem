@@ -29,7 +29,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Dict, Any, List, Optional, Tuple
+from typing import Iterable, Dict, Any, List, Optional, Set, Tuple
 
 from openclaw_mem import __version__
 from openclaw_mem import defaults
@@ -66,6 +66,11 @@ from openclaw_mem.graph.query import (
 from openclaw_mem.graph.topology_diff import compare_topology_files
 from openclaw_mem.graph.topology_extract import extract_topology_seed
 from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
+from openclaw_mem.provenance_trust_schema import (
+    TRUST_TIER_UNKNOWN,
+    normalize_provenance_kind_counts,
+    normalize_trust_tier,
+)
 
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
@@ -1019,6 +1024,27 @@ def _init_db(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_session_ts ON episodic_events(session_id, ts_ms);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_scope_type_ts ON episodic_events(scope, type, ts_ms);")
 
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {_PACK_LIFECYCLE_SHADOW_TABLE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            query_hash TEXT,
+            selection_signature TEXT NOT NULL,
+            selected_count INTEGER NOT NULL,
+            citation_count INTEGER NOT NULL,
+            candidate_count INTEGER NOT NULL,
+            receipt_json TEXT NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{_PACK_LIFECYCLE_SHADOW_TABLE}_ts ON {_PACK_LIFECYCLE_SHADOW_TABLE}(ts DESC);"
+    )
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{_PACK_LIFECYCLE_SHADOW_TABLE}_signature ON {_PACK_LIFECYCLE_SHADOW_TABLE}(selection_signature);"
+    )
+
     conn.commit()
 
 
@@ -1439,6 +1465,415 @@ def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         return
 
     print(render_memory_health_review(report))
+
+
+def _optimize_policy_int(raw: Any, default: int, *, min_value: int = 0) -> int:
+    try:
+        value = int(raw)
+    except Exception:
+        value = default
+    return max(min_value, value)
+
+
+def _optimize_policy_float(raw: Any, default: float, *, min_value: float = 0.0, max_value: float = 1.0) -> float:
+    try:
+        value = float(raw)
+    except Exception:
+        value = default
+    if value < min_value:
+        return min_value
+    if value > max_value:
+        return max_value
+    return value
+
+
+def _optimize_policy_load_state(path: Optional[str]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    p = str(path or "").strip()
+    if not p:
+        return (None, None)
+
+    target = Path(os.path.expanduser(p))
+    if not target.exists():
+        return (None, "sunrise_state_missing")
+
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        return (None, "sunrise_state_invalid_json")
+
+    if not isinstance(raw, dict):
+        return (None, "sunrise_state_not_object")
+
+    out: Dict[str, Any] = {
+        "path": str(target),
+        "stage": str(raw.get("stage") or "").strip() or None,
+        "lastHealthy": bool(raw.get("lastHealthy")) if "lastHealthy" in raw else None,
+        "readyForStageB": bool(raw.get("readyForStageB")) if "readyForStageB" in raw else False,
+        "liveGreenStreak": _optimize_policy_int(raw.get("liveGreenStreak"), 0, min_value=0),
+        "dryGreenStreak": _optimize_policy_int(raw.get("dryGreenStreak"), 0, min_value=0),
+        "lastRunAt": str(raw.get("lastRunAt") or "").strip() or None,
+    }
+    return (out, None)
+
+
+def cmd_optimize_policy_loop(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    review_limit = _optimize_policy_int(getattr(args, "review_limit", 1000), 1000, min_value=1)
+    writeback_limit = _optimize_policy_int(getattr(args, "writeback_limit", 500), 500, min_value=1)
+    lifecycle_limit = _optimize_policy_int(getattr(args, "lifecycle_limit", 200), 200, min_value=1)
+    miss_min_count = _optimize_policy_int(getattr(args, "miss_min_count", 2), 2, min_value=2)
+    top = _optimize_policy_int(getattr(args, "top", 10), 10, min_value=1)
+    scope = getattr(args, "scope", None)
+
+    min_live_green_streak = _optimize_policy_int(getattr(args, "min_live_green_streak", 18), 18, min_value=1)
+    min_lifecycle_runs_stage_b = _optimize_policy_int(
+        getattr(args, "min_lifecycle_runs_stage_b", 12),
+        12,
+        min_value=1,
+    )
+    min_lifecycle_runs_stage_c = _optimize_policy_int(
+        getattr(args, "min_lifecycle_runs_stage_c", 24),
+        24,
+        min_value=1,
+    )
+    min_writeback_eligible_ratio = _optimize_policy_float(
+        getattr(args, "min_writeback_eligible_ratio", 0.60),
+        0.60,
+        min_value=0.0,
+        max_value=1.0,
+    )
+    max_repeated_miss_groups_stage_c = _optimize_policy_int(
+        getattr(args, "max_repeated_miss_groups_stage_c", 1),
+        1,
+        min_value=0,
+    )
+
+    review = build_memory_health_review(
+        conn,
+        limit=review_limit,
+        stale_days=60,
+        duplicate_min_count=2,
+        bloat_summary_chars=240,
+        bloat_detail_bytes=4096,
+        orphan_min_tokens=2,
+        miss_min_count=miss_min_count,
+        top=top,
+        scope=scope,
+    )
+    repeated_misses = ((review.get("signals") or {}).get("repeated_misses") or {})
+
+    writeback_rows = conn.execute(
+        """
+        SELECT id, kind, summary, summary_en, detail_json
+        FROM observations
+        WHERE tool_name = 'memory_store'
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (writeback_limit,),
+    ).fetchall()
+
+    writeback_total_rows = len(writeback_rows)
+    writeback_filtered_non_target = 0
+    writeback_scanned = 0
+    writeback_eligible = 0
+    writeback_missing = 0
+    writeback_unique_ids: Set[str] = set()
+    missing_obs_ids: List[int] = []
+    update_field_counts: Dict[str, int] = {
+        "importance": 0,
+        "importance_label": 0,
+        "scope": 0,
+        "category": 0,
+        "trust_tier": 0,
+    }
+
+    for row in writeback_rows:
+        detail_obj = _pack_parse_detail_json(row["detail_json"])
+        memory_backend = str(detail_obj.get("memory_backend") or "").strip().lower()
+        memory_operation = str(detail_obj.get("memory_operation") or "").strip().lower()
+
+        if memory_backend and memory_backend != "openclaw-mem-engine":
+            writeback_filtered_non_target += 1
+            continue
+        if memory_operation and memory_operation != "store":
+            writeback_filtered_non_target += 1
+            continue
+
+        writeback_scanned += 1
+        payload = _extract_writeback_updates(row, detail_obj=detail_obj)
+        if not payload:
+            writeback_missing += 1
+            if len(missing_obs_ids) < top:
+                missing_obs_ids.append(int(row["id"]))
+            continue
+
+        writeback_eligible += 1
+        writeback_unique_ids.add(str(payload.get("id") or ""))
+        updates = payload.get("updates") if isinstance(payload, dict) else {}
+        if not isinstance(updates, dict):
+            updates = {}
+        for key in update_field_counts.keys():
+            if key in updates:
+                update_field_counts[key] += 1
+
+    writeback_eligible_ratio = round(
+        (writeback_eligible / writeback_scanned) if writeback_scanned else 0.0,
+        4,
+    )
+
+    lifecycle_rows = conn.execute(
+        f"""
+        SELECT id, ts, selected_count, citation_count, candidate_count, selection_signature, receipt_json
+        FROM {_PACK_LIFECYCLE_SHADOW_TABLE}
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (lifecycle_limit,),
+    ).fetchall()
+
+    lifecycle_runs = len(lifecycle_rows)
+    selected_total = 0
+    citation_total = 0
+    candidate_total = 0
+    zero_selection_runs = 0
+    unique_signatures: Set[str] = set()
+    trust_modes: Dict[str, int] = {}
+    graph_modes: Dict[str, int] = {}
+    parse_errors = 0
+    non_shadow_mutation_rows = 0
+
+    for row in lifecycle_rows:
+        selected = _optimize_policy_int(row["selected_count"], 0, min_value=0)
+        citation = _optimize_policy_int(row["citation_count"], 0, min_value=0)
+        candidate = _optimize_policy_int(row["candidate_count"], 0, min_value=0)
+
+        selected_total += selected
+        citation_total += citation
+        candidate_total += candidate
+
+        if selected == 0:
+            zero_selection_runs += 1
+
+        sig = str(row["selection_signature"] or "").strip()
+        if sig:
+            unique_signatures.add(sig)
+
+        try:
+            receipt_obj = json.loads(str(row["receipt_json"] or "{}"))
+        except Exception:
+            parse_errors += 1
+            continue
+
+        if not isinstance(receipt_obj, dict):
+            parse_errors += 1
+            continue
+
+        policies = receipt_obj.get("policies") if isinstance(receipt_obj.get("policies"), dict) else {}
+        trust_mode = str(policies.get("trust_policy_mode") or "off").strip() or "off"
+        graph_mode = str(policies.get("graph_provenance_policy_mode") or "off").strip() or "off"
+        trust_modes[trust_mode] = trust_modes.get(trust_mode, 0) + 1
+        graph_modes[graph_mode] = graph_modes.get(graph_mode, 0) + 1
+
+        mutation = receipt_obj.get("mutation") if isinstance(receipt_obj.get("mutation"), dict) else {}
+        memory_mutation = str(mutation.get("memory_mutation") or "none").strip() or "none"
+        if memory_mutation != "none":
+            non_shadow_mutation_rows += 1
+
+    stage_state, stage_state_error = _optimize_policy_load_state(getattr(args, "sunrise_state", None))
+
+    stage_b_reasons: List[str] = []
+    stage_b_ready = True
+
+    if stage_state_error:
+        stage_b_ready = False
+        stage_b_reasons.append(stage_state_error)
+    elif stage_state is None:
+        stage_b_ready = False
+        stage_b_reasons.append("sunrise_state_missing")
+    else:
+        if stage_state.get("stage") != "A-live":
+            stage_b_ready = False
+            stage_b_reasons.append("stage_not_a_live")
+        if not stage_state.get("readyForStageB", False) and int(stage_state.get("liveGreenStreak") or 0) < min_live_green_streak:
+            stage_b_ready = False
+            stage_b_reasons.append("live_green_streak_below_threshold")
+
+    if lifecycle_runs < min_lifecycle_runs_stage_b:
+        stage_b_ready = False
+        stage_b_reasons.append("insufficient_lifecycle_runs")
+
+    if writeback_eligible_ratio < min_writeback_eligible_ratio:
+        stage_b_ready = False
+        stage_b_reasons.append("writeback_eligible_ratio_below_threshold")
+
+    if non_shadow_mutation_rows > 0:
+        stage_b_ready = False
+        stage_b_reasons.append("lifecycle_mutation_not_shadow")
+
+    stage_c_reasons: List[str] = []
+    stage_c_ready = True
+    if not stage_b_ready:
+        stage_c_ready = False
+        stage_c_reasons.append("stage_b_not_ready")
+    if lifecycle_runs < min_lifecycle_runs_stage_c:
+        stage_c_ready = False
+        stage_c_reasons.append("insufficient_lifecycle_runs")
+    if _optimize_policy_int(repeated_misses.get("groups"), 0, min_value=0) > max_repeated_miss_groups_stage_c:
+        stage_c_ready = False
+        stage_c_reasons.append("repeated_miss_pressure_high")
+
+    recommendations: List[Dict[str, Any]] = []
+
+    if writeback_eligible_ratio < min_writeback_eligible_ratio:
+        recommendations.append(
+            {
+                "type": "improve_writeback_linkage",
+                "priority": "high",
+                "why": "writeback coverage is below policy threshold",
+                "evidence": {
+                    "eligible_ratio": writeback_eligible_ratio,
+                    "threshold": min_writeback_eligible_ratio,
+                    "sample_missing_observation_ids": missing_obs_ids,
+                },
+                "safe_for_auto_apply": False,
+            }
+        )
+
+    if _optimize_policy_int(repeated_misses.get("groups"), 0, min_value=0) > 0:
+        recommendations.append(
+            {
+                "type": "target_recall_gap_review",
+                "priority": "medium",
+                "why": "repeated no-result recall patterns are present",
+                "evidence": {
+                    "groups": repeated_misses.get("groups", 0),
+                    "events": repeated_misses.get("miss_events", 0),
+                    "sample_queries": [item.get("query") for item in list(repeated_misses.get("items") or [])[:3]],
+                },
+                "safe_for_auto_apply": False,
+            }
+        )
+
+    if stage_b_ready:
+        recommendations.append(
+            {
+                "type": "stage_b_canary_review_packet",
+                "priority": "low",
+                "why": "stage B gate conditions are satisfied in read-only policy review",
+                "evidence": {
+                    "lifecycle_runs": lifecycle_runs,
+                    "eligible_ratio": writeback_eligible_ratio,
+                    "ready_for_stage_b": bool((stage_state or {}).get("readyForStageB")),
+                },
+                "safe_for_auto_apply": False,
+            }
+        )
+
+    report: Dict[str, Any] = {
+        "kind": "openclaw-mem.optimize.policy-loop.v0",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "version": {
+            "openclaw_mem": __version__,
+            "schema": "v0",
+        },
+        "source": {
+            "scope": _normalize_scope_token(scope),
+            "review_limit": review_limit,
+            "writeback_limit": writeback_limit,
+            "lifecycle_limit": lifecycle_limit,
+            "sunrise_state": (stage_state or {}).get("path"),
+        },
+        "signals": {
+            "recall": {
+                "repeated_misses": {
+                    "groups": _optimize_policy_int(repeated_misses.get("groups"), 0, min_value=0),
+                    "miss_events": _optimize_policy_int(repeated_misses.get("miss_events"), 0, min_value=0),
+                    "min_count": _optimize_policy_int(repeated_misses.get("min_count"), miss_min_count, min_value=2),
+                    "items": list(repeated_misses.get("items") or [])[:top],
+                },
+            },
+            "writeback": {
+                "total_rows": writeback_total_rows,
+                "filtered_non_target_rows": writeback_filtered_non_target,
+                "scanned": writeback_scanned,
+                "eligible": writeback_eligible,
+                "missing_lancedb_id": writeback_missing,
+                "eligible_ratio": writeback_eligible_ratio,
+                "unique_lancedb_ids": len([x for x in writeback_unique_ids if x]),
+                "update_field_counts": update_field_counts,
+                "sample_missing_observation_ids": missing_obs_ids,
+            },
+            "lifecycle_shadow": {
+                "runs": lifecycle_runs,
+                "selected_total": selected_total,
+                "citation_total": citation_total,
+                "candidate_total": candidate_total,
+                "avg_selected_per_run": round((selected_total / lifecycle_runs), 3) if lifecycle_runs else 0.0,
+                "avg_candidate_per_run": round((candidate_total / lifecycle_runs), 3) if lifecycle_runs else 0.0,
+                "zero_selection_runs": zero_selection_runs,
+                "selection_signature_unique": len(unique_signatures),
+                "trust_policy_modes": trust_modes,
+                "graph_provenance_policy_modes": graph_modes,
+                "receipt_parse_errors": parse_errors,
+                "non_shadow_mutation_rows": non_shadow_mutation_rows,
+            },
+        },
+        "sunrise": {
+            "stage_a_state": stage_state,
+            "stage_a_state_error": stage_state_error,
+            "stage_b": {
+                "status": "ready" if stage_b_ready else "hold",
+                "reasons": sorted(set(stage_b_reasons)),
+                "thresholds": {
+                    "min_live_green_streak": min_live_green_streak,
+                    "min_lifecycle_runs": min_lifecycle_runs_stage_b,
+                    "min_writeback_eligible_ratio": min_writeback_eligible_ratio,
+                },
+            },
+            "stage_c": {
+                "status": "ready" if stage_c_ready else "hold",
+                "reasons": sorted(set(stage_c_reasons)),
+                "thresholds": {
+                    "min_lifecycle_runs": min_lifecycle_runs_stage_c,
+                    "max_repeated_miss_groups": max_repeated_miss_groups_stage_c,
+                },
+            },
+        },
+        "policy": {
+            "mode": "review_only",
+            "writes_performed": 0,
+            "memory_mutation": "none",
+            "sunrise_freeze_respected": True,
+        },
+        "recommendations": recommendations,
+    }
+
+    if args.json:
+        _emit(report, True)
+        return
+
+    lines = [
+        "openclaw-mem optimize policy-loop (read-only)",
+        (
+            "writeback eligibility: "
+            f"{writeback_eligible}/{writeback_scanned} "
+            f"(ratio={writeback_eligible_ratio}, threshold={min_writeback_eligible_ratio})"
+        ),
+        (
+            "repeated misses: "
+            f"{report['signals']['recall']['repeated_misses']['groups']} groups "
+            f"({report['signals']['recall']['repeated_misses']['miss_events']} events)"
+        ),
+        (
+            "lifecycle shadow: "
+            f"runs={lifecycle_runs} "
+            f"avg_selected={report['signals']['lifecycle_shadow']['avg_selected_per_run']}"
+        ),
+        f"sunrise stage B: {report['sunrise']['stage_b']['status']} ({', '.join(report['sunrise']['stage_b']['reasons']) or 'no blockers'})",
+        f"sunrise stage C: {report['sunrise']['stage_c']['status']} ({', '.join(report['sunrise']['stage_c']['reasons']) or 'no blockers'})",
+    ]
+
+    print("\n".join(lines))
 
 
 def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -3124,23 +3559,12 @@ def _pack_importance_label(detail_obj: Dict[str, Any]) -> str:
 
 
 def _normalize_trust_tier(raw: Any) -> Optional[str]:
-    if not isinstance(raw, str):
-        return None
-
-    key = raw.strip().lower().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "quarantine": "quarantined",
-    }
-    key = aliases.get(key, key)
-
-    if key in {"trusted", "untrusted", "quarantined"}:
-        return key
-    return None
+    return normalize_trust_tier(raw)
 
 
 def _pack_trust_tier(detail_obj: Dict[str, Any]) -> str:
     if not isinstance(detail_obj, dict):
-        return "unknown"
+        return TRUST_TIER_UNKNOWN
 
     candidates: List[Any] = [
         detail_obj.get("trust"),
@@ -3163,7 +3587,7 @@ def _pack_trust_tier(detail_obj: Dict[str, Any]) -> str:
         if normalized:
             return normalized
 
-    return "unknown"
+    return TRUST_TIER_UNKNOWN
 
 
 def _estimate_tokens(text: str) -> int:
@@ -3346,6 +3770,753 @@ def _pack_graph_probe_observations(
     }
 
 
+def _pack_graph_provenance_error_code(exc: Exception) -> str:
+    text = str(exc or "").strip().lower()
+    if "unknown node_id" in text:
+        return "unknown_node_id"
+    if "graph db not found" in text:
+        return "graph_db_not_found"
+    if "graph schema missing required tables" in text:
+        return "graph_schema_missing_tables"
+    if "graph schema missing required meta key" in text:
+        return "graph_schema_missing_meta_key"
+    if "graph schema version mismatch" in text:
+        return "graph_schema_version_mismatch"
+    return "query_error"
+
+
+_PACK_GRAPH_PROVENANCE_POLICY_V1_KIND = "openclaw-mem.pack.graph.provenance-policy.v1"
+
+
+def _pack_graph_int(raw: Any, default: int = 0) -> int:
+    if isinstance(raw, bool):
+        return int(default)
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+def _pack_graph_normalize_provenance_quality(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+
+    kind_counts_raw = raw.get("kind_counts") if isinstance(raw.get("kind_counts"), dict) else {}
+    kind_counts = normalize_provenance_kind_counts(kind_counts_raw)
+
+    return {
+        "edge_count": max(0, _pack_graph_int(raw.get("edge_count"), 0)),
+        "structured_edge_count": max(0, _pack_graph_int(raw.get("structured_edge_count"), 0)),
+        "skipped_unstructured_provenance": max(0, _pack_graph_int(raw.get("skipped_unstructured_provenance"), 0)),
+        "kind_counts": kind_counts,
+    }
+
+
+def _pack_graph_normalize_policy_decision(raw: Any) -> Dict[str, Any]:
+    src = raw if isinstance(raw, dict) else {}
+    record_ref = str(src.get("recordRef") or "").strip()
+
+    reason = str(src.get("reason") or "").strip()
+    if not reason:
+        reason = "graph_provenance_unknown"
+
+    error_code_raw = src.get("error_code")
+    error_code: Optional[str]
+    if error_code_raw is None:
+        error_code = None
+    else:
+        token = str(error_code_raw).strip()
+        error_code = token or None
+
+    return {
+        "recordRef": record_ref,
+        "included": bool(src.get("included", False)),
+        "reason": reason,
+        "fail_open": bool(src.get("fail_open", False)),
+        "error_code": error_code,
+        "provenance_quality": _pack_graph_normalize_provenance_quality(src.get("provenance_quality")),
+    }
+
+
+def _pack_graph_finalize_provenance_policy(policy: Any) -> Dict[str, Any]:
+    src = policy if isinstance(policy, dict) else {}
+
+    mode_raw = str(src.get("mode") or "structured_only_fail_open").strip().lower()
+    mode = mode_raw if mode_raw in {"off", "structured_only_fail_open"} else "structured_only_fail_open"
+
+    bounds_raw = src.get("bounds") if isinstance(src.get("bounds"), dict) else {}
+    bounds = {
+        "hops": max(0, min(2, _pack_graph_int(bounds_raw.get("hops"), 1))),
+        "max_nodes": max(1, min(120, _pack_graph_int(bounds_raw.get("max_nodes"), 40))),
+        "max_edges": max(1, min(240, _pack_graph_int(bounds_raw.get("max_edges"), 80))),
+    }
+
+    decisions_in = src.get("decisions") if isinstance(src.get("decisions"), list) else []
+    decisions = [_pack_graph_normalize_policy_decision(item) for item in decisions_in]
+
+    selected_refs: List[str] = []
+    seen_refs: set[str] = set()
+    reason_counts: Dict[str, int] = {}
+    checked_count = 0
+    fail_open_count = 0
+
+    for decision in decisions:
+        reason = str(decision.get("reason") or "").strip() or "graph_provenance_unknown"
+        reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+
+        if decision.get("provenance_quality") is not None:
+            checked_count += 1
+
+        if bool(decision.get("fail_open")):
+            fail_open_count += 1
+
+        if bool(decision.get("included")):
+            ref = str(decision.get("recordRef") or "").strip()
+            if ref and ref not in seen_refs:
+                seen_refs.add(ref)
+                selected_refs.append(ref)
+
+    if not decisions:
+        selected_raw = src.get("selected_refs") if isinstance(src.get("selected_refs"), list) else []
+        for item in selected_raw:
+            ref = str(item or "").strip()
+            if ref and ref not in seen_refs:
+                seen_refs.add(ref)
+                selected_refs.append(ref)
+        checked_count = max(0, _pack_graph_int(src.get("checked_count"), 0))
+        fail_open_count = max(0, _pack_graph_int(src.get("fail_open_count"), 0))
+
+    decision_reason_counts = {
+        key: int(reason_counts[key])
+        for key in sorted(reason_counts.keys())
+    }
+
+    included_count = len(selected_refs)
+    excluded_count = max(0, len(decisions) - included_count)
+
+    return {
+        "kind": _PACK_GRAPH_PROVENANCE_POLICY_V1_KIND,
+        "mode": mode,
+        "require_structured_provenance": bool(src.get("require_structured_provenance", True)),
+        "graph_query_db_configured": bool(src.get("graph_query_db_configured", False)),
+        "bounds": bounds,
+        "checked_count": checked_count,
+        "included_count": included_count,
+        "excluded_count": excluded_count,
+        "fail_open_count": fail_open_count,
+        "decision_reason_counts": decision_reason_counts,
+        "decisions": decisions,
+        "selected_refs": selected_refs,
+    }
+
+
+_PACK_TRUST_POLICY_V1_KIND = "openclaw-mem.pack.trust-policy.v1"
+
+
+def _pack_trust_normalize_policy_decision(raw: Any) -> Dict[str, Any]:
+    src = raw if isinstance(raw, dict) else {}
+    record_ref = str(src.get("recordRef") or "").strip()
+    trust = _pack_trust_tier({"trust": src.get("trust")})
+
+    reason = str(src.get("reason") or "").strip()
+    if not reason:
+        reason = "trust_unknown"
+
+    error_code_raw = src.get("error_code")
+    error_code: Optional[str]
+    if error_code_raw is None:
+        error_code = None
+    else:
+        token = str(error_code_raw).strip()
+        error_code = token or None
+
+    return {
+        "recordRef": record_ref,
+        "trust": trust,
+        "included": bool(src.get("included", False)),
+        "reason": reason,
+        "fail_open": bool(src.get("fail_open", False)),
+        "error_code": error_code,
+    }
+
+
+def _pack_trust_finalize_policy(policy: Any) -> Dict[str, Any]:
+    src = policy if isinstance(policy, dict) else {}
+
+    mode_raw = str(src.get("mode") or "off").strip().lower()
+    mode = mode_raw if mode_raw in {"off", "exclude_quarantined_fail_open"} else "off"
+
+    decisions_in = src.get("decisions") if isinstance(src.get("decisions"), list) else []
+    decisions = [_pack_trust_normalize_policy_decision(item) for item in decisions_in]
+
+    selected_refs: List[str] = []
+    seen_refs: set[str] = set()
+    reason_counts: Dict[str, int] = {}
+    fail_open_count = 0
+
+    for decision in decisions:
+        reason = str(decision.get("reason") or "").strip() or "trust_unknown"
+        reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+        if bool(decision.get("fail_open")):
+            fail_open_count += 1
+        if bool(decision.get("included")):
+            ref = str(decision.get("recordRef") or "").strip()
+            if ref and ref not in seen_refs:
+                seen_refs.add(ref)
+                selected_refs.append(ref)
+
+    if not decisions:
+        selected_raw = src.get("selected_refs") if isinstance(src.get("selected_refs"), list) else []
+        for item in selected_raw:
+            ref = str(item or "").strip()
+            if ref and ref not in seen_refs:
+                seen_refs.add(ref)
+                selected_refs.append(ref)
+        fail_open_count = max(0, _pack_graph_int(src.get("fail_open_count"), 0))
+
+    decision_reason_counts = {key: int(reason_counts[key]) for key in sorted(reason_counts.keys())}
+
+    included_count = len(selected_refs)
+    excluded_count = max(0, len(decisions) - included_count)
+
+    return {
+        "kind": _PACK_TRUST_POLICY_V1_KIND,
+        "mode": mode,
+        "checked_count": len(decisions),
+        "included_count": included_count,
+        "excluded_count": excluded_count,
+        "fail_open_count": fail_open_count,
+        "decision_reason_counts": decision_reason_counts,
+        "decisions": decisions,
+        "selected_refs": selected_refs,
+    }
+
+
+def _pack_trust_apply_policy(
+    *,
+    ordered_ids: List[int],
+    detail_map: Dict[int, Dict[str, Any]],
+    args: argparse.Namespace,
+) -> Dict[str, Any]:
+    mode_raw = str(getattr(args, "pack_trust_policy", "off") or "off").strip().lower()
+    mode = mode_raw if mode_raw in {"off", "exclude_quarantined_fail_open"} else "off"
+
+    if mode == "off":
+        return _pack_trust_finalize_policy({"mode": mode, "decisions": []})
+
+    decisions: List[Dict[str, Any]] = []
+    for rid in ordered_ids:
+        record_ref = f"obs:{rid}"
+        trust = _pack_trust_tier(detail_map.get(rid, {}))
+
+        decision: Dict[str, Any] = {
+            "recordRef": record_ref,
+            "trust": trust,
+            "included": True,
+            "reason": "trust_allowed",
+            "fail_open": False,
+            "error_code": None,
+        }
+
+        if trust == "quarantined":
+            decision["included"] = False
+            decision["reason"] = "trust_quarantined_excluded"
+        elif trust == TRUST_TIER_UNKNOWN:
+            decision["included"] = True
+            decision["fail_open"] = True
+            decision["reason"] = "trust_unknown_fail_open"
+
+        decisions.append(decision)
+
+    return _pack_trust_finalize_policy({"mode": mode, "decisions": decisions})
+
+
+_PACK_POLICY_SURFACE_V1_KIND = "openclaw-mem.pack.policy-surface.v1"
+_PACK_LIFECYCLE_SHADOW_V1_KIND = "openclaw-mem.pack.lifecycle-shadow.v1"
+_PACK_LIFECYCLE_SHADOW_TABLE = "pack_lifecycle_shadow_log"
+_PACK_LIFECYCLE_MAX_REFS = 64
+_PACK_LIFECYCLE_MAX_REASON_BUCKETS = 32
+_PACK_LIFECYCLE_LOG_MAX_ROWS_DEFAULT = 2000
+
+
+def _pack_reason_counts_by_inclusion(
+    candidates: List[pack_trace_v1.PackTraceV1Candidate],
+    *,
+    included: bool,
+) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for candidate in candidates:
+        decision = getattr(candidate, "decision", None)
+        if bool(getattr(decision, "included", False)) != included:
+            continue
+
+        reasons_raw = list(getattr(decision, "reason", []) or [])
+        if not reasons_raw:
+            counts["pack_reason_missing"] = int(counts.get("pack_reason_missing", 0)) + 1
+            continue
+
+        for token in reasons_raw:
+            reason = str(token or "").strip() or "pack_reason_missing"
+            counts[reason] = int(counts.get(reason, 0)) + 1
+
+    return {key: int(counts[key]) for key in sorted(counts.keys())}
+
+
+def _pack_policy_surface_summary(policy: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(policy, dict):
+        return None
+
+    selected_refs: List[str] = []
+    seen_refs: set[str] = set()
+    for item in list(policy.get("selected_refs") or []):
+        ref = str(item or "").strip()
+        if ref and ref not in seen_refs:
+            seen_refs.add(ref)
+            selected_refs.append(ref)
+
+    reason_counts_raw = policy.get("decision_reason_counts") if isinstance(policy.get("decision_reason_counts"), dict) else {}
+    reason_counts: Dict[str, int] = {}
+    for key in sorted(reason_counts_raw.keys(), key=lambda token: str(token)):
+        try:
+            value = int(reason_counts_raw.get(key, 0))
+        except Exception:
+            value = 0
+        if value <= 0:
+            continue
+        reason = str(key or "").strip() or "unknown"
+        reason_counts[reason] = int(value)
+
+    return {
+        "kind": str(policy.get("kind") or "").strip() or None,
+        "mode": str(policy.get("mode") or "").strip() or None,
+        "checked_count": max(0, _pack_graph_int(policy.get("checked_count"), 0)),
+        "included_count": max(0, _pack_graph_int(policy.get("included_count"), 0)),
+        "excluded_count": max(0, _pack_graph_int(policy.get("excluded_count"), 0)),
+        "fail_open_count": max(0, _pack_graph_int(policy.get("fail_open_count"), 0)),
+        "decision_reason_counts": reason_counts,
+        "selected_refs": selected_refs,
+    }
+
+
+def _pack_compose_policy_surface(
+    *,
+    selected_items: List[Dict[str, Any]],
+    citations: List[Dict[str, Any]],
+    candidate_trace: List[pack_trace_v1.PackTraceV1Candidate],
+    graph_provenance_policy: Optional[Dict[str, Any]],
+    trust_policy: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    trust_summary = _pack_policy_surface_summary(trust_policy)
+    graph_summary = _pack_policy_surface_summary(graph_provenance_policy)
+
+    if trust_summary is None and graph_summary is None:
+        return None
+
+    pack_selected_refs = [
+        str(item.get("recordRef") or "").strip()
+        for item in selected_items
+        if str(item.get("recordRef") or "").strip()
+    ]
+    citation_refs = [
+        str(item.get("recordRef") or "").strip()
+        for item in citations
+        if str(item.get("recordRef") or "").strip()
+    ]
+
+    trust_selected_refs = list((trust_summary or {}).get("selected_refs") or [])
+    graph_selected_refs = list((graph_summary or {}).get("selected_refs") or [])
+
+    trust_selected_set = set(trust_selected_refs)
+    graph_selected_set = set(graph_selected_refs)
+
+    pack_missing_from_trust = (
+        [ref for ref in pack_selected_refs if ref not in trust_selected_set]
+        if trust_summary is not None
+        else None
+    )
+
+    shared_pack_and_graph_refs = (
+        [ref for ref in pack_selected_refs if ref in graph_selected_set]
+        if graph_summary is not None
+        else None
+    )
+
+    return {
+        "kind": _PACK_POLICY_SURFACE_V1_KIND,
+        "selection": {
+            "pack_selected_refs": pack_selected_refs,
+            "citation_record_refs": citation_refs,
+            "trust_selected_refs": trust_selected_refs if trust_summary is not None else None,
+            "graph_selected_refs": graph_selected_refs if graph_summary is not None else None,
+            "shared_pack_and_graph_refs": shared_pack_and_graph_refs,
+        },
+        "counts": {
+            "pack_selected_count": len(pack_selected_refs),
+            "citation_count": len(citation_refs),
+            "candidate_count": len(candidate_trace),
+            "pack_excluded_count": max(0, len(candidate_trace) - len(pack_selected_refs)),
+        },
+        "reasons": {
+            "pack_included_reason_counts": _pack_reason_counts_by_inclusion(candidate_trace, included=True),
+            "pack_excluded_reason_counts": _pack_reason_counts_by_inclusion(candidate_trace, included=False),
+            "trust_policy_reason_counts": dict((trust_summary or {}).get("decision_reason_counts") or {}),
+            "graph_provenance_reason_counts": dict((graph_summary or {}).get("decision_reason_counts") or {}),
+        },
+        "policies": {
+            "trust_policy": trust_summary,
+            "graph_provenance_policy": graph_summary,
+        },
+        "consistency": {
+            "pack_items_match_citations": pack_selected_refs == citation_refs,
+            "pack_items_subset_of_trust_selected_refs": (
+                len(pack_missing_from_trust or []) == 0 if trust_summary is not None else None
+            ),
+            "pack_items_missing_from_trust_selected_refs": pack_missing_from_trust,
+        },
+    }
+
+
+def _pack_lifecycle_shadow_mode(args: argparse.Namespace) -> str:
+    mode_raw = str(getattr(args, "pack_lifecycle_shadow", "on") or "on").strip().lower()
+    return mode_raw if mode_raw in {"off", "on"} else "on"
+
+
+def _pack_lifecycle_clip_refs(raw: Any, *, max_refs: int = _PACK_LIFECYCLE_MAX_REFS) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    cap = max(1, int(max_refs))
+
+    for item in list(raw or []):
+        ref = str(item or "").strip()
+        if not ref or ref in seen:
+            continue
+        seen.add(ref)
+        out.append(ref)
+        if len(out) >= cap:
+            break
+
+    return out
+
+
+def _pack_lifecycle_reason_counts(raw: Any, *, max_buckets: int = _PACK_LIFECYCLE_MAX_REASON_BUCKETS) -> Dict[str, int]:
+    if not isinstance(raw, dict):
+        return {}
+
+    rows: List[Tuple[str, int]] = []
+    for key in sorted(raw.keys(), key=lambda token: str(token)):
+        iv = _pack_graph_int(raw.get(key), 0)
+        if iv <= 0:
+            continue
+        reason = str(key or "").strip() or "unknown"
+        rows.append((reason, int(iv)))
+
+    cap = max(1, int(max_buckets))
+    if len(rows) > cap:
+        rows = rows[:cap]
+
+    return {reason: count for reason, count in rows}
+
+
+def _pack_lifecycle_counts_by_label(
+    candidates: List[pack_trace_v1.PackTraceV1Candidate],
+    *,
+    attr: str,
+) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for candidate in candidates:
+        decision = getattr(candidate, "decision", None)
+        if not bool(getattr(decision, "included", False)):
+            continue
+
+        token = str(getattr(candidate, attr, "") or "").strip() or "unknown"
+        counts[token] = int(counts.get(token, 0)) + 1
+
+    return {key: int(counts[key]) for key in sorted(counts.keys())}
+
+
+def _pack_lifecycle_selection_signature(selected_refs: List[str]) -> str:
+    joined = "\n".join(selected_refs)
+    digest = hashlib.sha256(joined.encode("utf-8")).hexdigest()[:24]
+    return f"sha256:{digest}"
+
+
+def _pack_compose_lifecycle_shadow_receipt(
+    *,
+    query_text: str,
+    selected_items: List[Dict[str, Any]],
+    citations: List[Dict[str, Any]],
+    candidate_trace: List[pack_trace_v1.PackTraceV1Candidate],
+    trust_policy: Optional[Dict[str, Any]],
+    graph_provenance_policy: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    pack_selected_refs = _pack_lifecycle_clip_refs(
+        [item.get("recordRef") for item in selected_items]
+    )
+    citation_refs = _pack_lifecycle_clip_refs(
+        [item.get("recordRef") for item in citations]
+    )
+
+    included_reason_counts = _pack_reason_counts_by_inclusion(candidate_trace, included=True)
+    excluded_reason_counts = _pack_reason_counts_by_inclusion(candidate_trace, included=False)
+
+    query_clean = str(query_text or "").strip()
+    query_hash = hashlib.sha256(query_clean.encode("utf-8")).hexdigest()[:24] if query_clean else None
+
+    selected_total = len(pack_selected_refs)
+    citation_total = len(citation_refs)
+    candidate_total = len(candidate_trace)
+
+    return {
+        "kind": _PACK_LIFECYCLE_SHADOW_V1_KIND,
+        "mode": "shadow_receipt_only",
+        "ts": _utcnow_iso(),
+        "query": {
+            "hash": (f"sha256:{query_hash}" if query_hash else None),
+            "chars": len(query_clean),
+        },
+        "selection": {
+            "pack_selected_refs": pack_selected_refs,
+            "citation_record_refs": citation_refs,
+            "trace_refreshed_record_refs": list(pack_selected_refs),
+            "selection_signature": _pack_lifecycle_selection_signature(pack_selected_refs),
+        },
+        "counts": {
+            "selected_total": selected_total,
+            "citation_total": citation_total,
+            "candidate_total": candidate_total,
+            "excluded_total": max(0, candidate_total - selected_total),
+            "selected_by_trust": _pack_lifecycle_counts_by_label(candidate_trace, attr="trust"),
+            "selected_by_importance": _pack_lifecycle_counts_by_label(candidate_trace, attr="importance"),
+        },
+        "reasons": {
+            "pack_included_reason_counts": _pack_lifecycle_reason_counts(included_reason_counts),
+            "pack_excluded_reason_counts": _pack_lifecycle_reason_counts(excluded_reason_counts),
+            "trust_policy_reason_counts": _pack_lifecycle_reason_counts(
+                ((trust_policy or {}).get("decision_reason_counts") if isinstance(trust_policy, dict) else {})
+            ),
+            "graph_provenance_reason_counts": _pack_lifecycle_reason_counts(
+                ((graph_provenance_policy or {}).get("decision_reason_counts") if isinstance(graph_provenance_policy, dict) else {})
+            ),
+        },
+        "policies": {
+            "trust_policy_mode": str((trust_policy or {}).get("mode") or "off") if isinstance(trust_policy, dict) else "off",
+            "graph_provenance_policy_mode": (
+                str((graph_provenance_policy or {}).get("mode") or "off") if isinstance(graph_provenance_policy, dict) else "off"
+            ),
+        },
+        "mutation": {
+            "memory_mutation": "none",
+            "auto_archive_applied": 0,
+            "auto_mutation_applied": 0,
+            "writes_observations": 0,
+            "writes_embeddings": 0,
+            "writes_lifecycle_state": 0,
+            "writes_shadow_log": 1,
+        },
+        "storage": {
+            "table": _PACK_LIFECYCLE_SHADOW_TABLE,
+            "append_only": True,
+        },
+    }
+
+
+def _pack_lifecycle_append_shadow_log(
+    conn: sqlite3.Connection,
+    *,
+    receipt: Dict[str, Any],
+    max_rows: int,
+) -> None:
+    keep = max(1, int(max_rows))
+    ts = str(receipt.get("ts") or _utcnow_iso())
+    query_hash = str((receipt.get("query") or {}).get("hash") or "").strip() or None
+    selection_signature = str((receipt.get("selection") or {}).get("selection_signature") or "").strip() or "sha256:missing"
+
+    counts = receipt.get("counts") if isinstance(receipt.get("counts"), dict) else {}
+    selected_count = max(0, _pack_graph_int(counts.get("selected_total"), 0))
+    citation_count = max(0, _pack_graph_int(counts.get("citation_total"), 0))
+    candidate_count = max(0, _pack_graph_int(counts.get("candidate_total"), 0))
+
+    receipt_json = json.dumps(receipt, ensure_ascii=False, sort_keys=True)
+
+    conn.execute(
+        f"""
+        INSERT INTO {_PACK_LIFECYCLE_SHADOW_TABLE} (
+            ts,
+            query_hash,
+            selection_signature,
+            selected_count,
+            citation_count,
+            candidate_count,
+            receipt_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            ts,
+            query_hash,
+            selection_signature,
+            selected_count,
+            citation_count,
+            candidate_count,
+            receipt_json,
+        ),
+    )
+    conn.execute(
+        f"""
+        DELETE FROM {_PACK_LIFECYCLE_SHADOW_TABLE}
+        WHERE id IN (
+            SELECT id
+            FROM {_PACK_LIFECYCLE_SHADOW_TABLE}
+            ORDER BY id DESC
+            LIMIT -1 OFFSET ?
+        )
+        """,
+        (keep,),
+    )
+    conn.commit()
+
+
+
+def _pack_graph_apply_provenance_policy(
+    *,
+    selected_refs: List[str],
+    args: argparse.Namespace,
+) -> Dict[str, Any]:
+    mode_raw = str(getattr(args, "graph_provenance_policy", "structured_only_fail_open") or "structured_only_fail_open").strip().lower()
+    mode = mode_raw if mode_raw in {"off", "structured_only_fail_open"} else "structured_only_fail_open"
+
+    graph_query_db = str(getattr(args, "graph_query_db", "") or "").strip()
+    require_structured = bool(getattr(args, "graph_require_structured_provenance", True))
+
+    hops = int(getattr(args, "graph_provenance_hops", 1) or 1)
+    hops = max(0, min(2, hops))
+    max_nodes = int(getattr(args, "graph_provenance_max_nodes", 40) or 40)
+    max_nodes = max(1, min(120, max_nodes))
+    max_edges = int(getattr(args, "graph_provenance_max_edges", 80) or 80)
+    max_edges = max(1, min(240, max_edges))
+
+    out: Dict[str, Any] = {
+        "mode": mode,
+        "require_structured_provenance": require_structured,
+        "graph_query_db_configured": bool(graph_query_db),
+        "bounds": {
+            "hops": hops,
+            "max_nodes": max_nodes,
+            "max_edges": max_edges,
+        },
+        "checked_count": 0,
+        "included_count": 0,
+        "excluded_count": 0,
+        "fail_open_count": 0,
+        "decisions": [],
+        "selected_refs": list(selected_refs),
+    }
+
+    if not selected_refs:
+        return _pack_graph_finalize_provenance_policy(out)
+
+    decisions: List[Dict[str, Any]] = []
+
+    if mode == "off":
+        for ref in selected_refs:
+            decisions.append(
+                {
+                    "recordRef": ref,
+                    "included": True,
+                    "reason": "graph_provenance_policy_off",
+                    "fail_open": False,
+                    "error_code": None,
+                    "provenance_quality": None,
+                }
+            )
+        out["included_count"] = len(selected_refs)
+        out["decisions"] = decisions
+        return _pack_graph_finalize_provenance_policy(out)
+
+    if not graph_query_db:
+        for ref in selected_refs:
+            decisions.append(
+                {
+                    "recordRef": ref,
+                    "included": True,
+                    "reason": "graph_provenance_fail_open_no_graph_db",
+                    "fail_open": True,
+                    "error_code": "no_graph_db",
+                    "provenance_quality": None,
+                }
+            )
+        out["included_count"] = len(selected_refs)
+        out["fail_open_count"] = len(selected_refs)
+        out["decisions"] = decisions
+        return _pack_graph_finalize_provenance_policy(out)
+
+    included_refs: List[str] = []
+
+    for ref in selected_refs:
+        decision: Dict[str, Any] = {
+            "recordRef": ref,
+            "included": False,
+            "reason": None,
+            "fail_open": False,
+            "error_code": None,
+            "provenance_quality": None,
+        }
+
+        try:
+            subgraph = query_subgraph(
+                db_path=graph_query_db,
+                node_id=ref,
+                hops=hops,
+                direction="both",
+                max_nodes=max_nodes,
+                max_edges=max_edges,
+                require_structured_provenance=require_structured,
+            )
+
+            provenance = subgraph.get("provenance") if isinstance(subgraph, dict) else {}
+            provenance = provenance if isinstance(provenance, dict) else {}
+            coverage = provenance.get("coverage") if isinstance(provenance.get("coverage"), dict) else {}
+
+            edge_count = int(coverage.get("edge_count") or subgraph.get("edge_count") or 0)
+            structured_edge_count = int(coverage.get("structured_edge_count") or 0)
+            skipped_unstructured = int(subgraph.get("skipped_unstructured_provenance") or 0)
+            kind_counts_raw = provenance.get("kind_counts") if isinstance(provenance.get("kind_counts"), dict) else {}
+            kind_counts = {str(k): int(v) for k, v in kind_counts_raw.items()}
+
+            decision["provenance_quality"] = {
+                "edge_count": edge_count,
+                "structured_edge_count": structured_edge_count,
+                "skipped_unstructured_provenance": skipped_unstructured,
+                "kind_counts": kind_counts,
+            }
+            out["checked_count"] = int(out["checked_count"]) + 1
+
+            if structured_edge_count > 0:
+                decision["included"] = True
+                decision["reason"] = "graph_provenance_structured"
+                included_refs.append(ref)
+            elif edge_count > 0 or skipped_unstructured > 0:
+                decision["included"] = False
+                decision["reason"] = "graph_provenance_unstructured_only"
+            else:
+                decision["included"] = False
+                decision["reason"] = "graph_provenance_empty_subgraph"
+        except Exception as exc:
+            decision["included"] = True
+            decision["reason"] = "graph_provenance_fail_open_query_error"
+            decision["fail_open"] = True
+            decision["error_code"] = _pack_graph_provenance_error_code(exc)
+            out["fail_open_count"] = int(out["fail_open_count"]) + 1
+            included_refs.append(ref)
+
+        decisions.append(decision)
+
+    out["selected_refs"] = included_refs
+    out["included_count"] = len(included_refs)
+    out["excluded_count"] = max(0, len(selected_refs) - len(included_refs))
+    out["decisions"] = decisions
+    return _pack_graph_finalize_provenance_policy(out)
+
+
 def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args: argparse.Namespace) -> dict:
     """Optional Graphic Memory preflight for `pack` (default OFF; fail-open).
 
@@ -3365,6 +4536,7 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
         "fail_open": True,
         "error_first_line": None,
         "selection_count": 0,
+        "selection_count_pre_policy": 0,
         "budget_tokens": int(max(1, int(getattr(args, "graph_budget_tokens", 1200) or 1200))),
         "take": int(max(1, int(getattr(args, "graph_take", 12) or 12))),
         "scope": (str(getattr(args, "graph_scope", "") or "").strip() or None),
@@ -3372,6 +4544,24 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
         "stage0": {"fired": False, "reason": None},
         "stage1": {"hit": False, "categories": [], "matched_keywords": []},
         "probe_decision": None,
+        "provenance_policy": _pack_graph_finalize_provenance_policy(
+            {
+                "mode": str(getattr(args, "graph_provenance_policy", "structured_only_fail_open") or "structured_only_fail_open").strip().lower(),
+                "require_structured_provenance": bool(getattr(args, "graph_require_structured_provenance", True)),
+                "graph_query_db_configured": bool(str(getattr(args, "graph_query_db", "") or "").strip()),
+                "bounds": {
+                    "hops": int(max(0, min(2, int(getattr(args, "graph_provenance_hops", 1) or 1)))),
+                    "max_nodes": int(max(1, min(120, int(getattr(args, "graph_provenance_max_nodes", 40) or 40)))),
+                    "max_edges": int(max(1, min(240, int(getattr(args, "graph_provenance_max_edges", 80) or 80)))),
+                },
+                "checked_count": 0,
+                "included_count": 0,
+                "excluded_count": 0,
+                "fail_open_count": 0,
+                "decisions": [],
+                "selected_refs": [],
+            }
+        ),
         "payload": None,
     }
 
@@ -3463,7 +4653,13 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             suggest_limit=6,
             budget_tokens=int(out["budget_tokens"]),
         )
-        selected_refs = _graph_preflight_selection(index_payload, take=int(out["take"]))
+        selected_refs_pre_policy = _graph_preflight_selection(index_payload, take=int(out["take"]))
+        provenance_policy = _pack_graph_apply_provenance_policy(
+            selected_refs=selected_refs_pre_policy,
+            args=args,
+        )
+        selected_refs = list(provenance_policy.get("selected_refs") or [])
+
         pack_payload = _graph_pack_payload(
             conn,
             raw_ids=selected_refs,
@@ -3473,11 +4669,20 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
         )
 
         out["selection_count"] = len(selected_refs)
+        out["selection_count_pre_policy"] = len(selected_refs_pre_policy)
+        out["provenance_policy"] = provenance_policy
         out["payload"] = {
             "kind": "openclaw-mem.graph.preflight.v0",
             "query": {"text": query, "scope": out["scope"]},
-            "selection": {"take": int(out["take"]), "selectedCount": len(selected_refs), "recordRefs": selected_refs},
+            "selection": {
+                "take": int(out["take"]),
+                "prePolicyCount": len(selected_refs_pre_policy),
+                "selectedCount": len(selected_refs),
+                "prePolicyRecordRefs": selected_refs_pre_policy,
+                "recordRefs": selected_refs,
+            },
             "budget": {"budgetTokens": int(out["budget_tokens"]), "estimatedTokens": _estimate_tokens(pack_payload.get("bundle_text", "") or "")},
+            "provenance_policy": provenance_policy,
             "pack": pack_payload,
             "items": pack_payload.get("items", []),
             "bundle_text": pack_payload.get("bundle_text", "") or "",
@@ -3505,10 +4710,12 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
         "stage1": graph_state.get("stage1"),
         "probe": graph_state.get("probe"),
         "probe_decision": graph_state.get("probe_decision"),
+        "selection_count_pre_policy": int(graph_state.get("selection_count_pre_policy") or 0),
         "selected_refs_count": int(graph_state.get("selection_count") or 0),
         "budget_tokens": int(graph_state.get("budget_tokens") or 0),
         "take": int(graph_state.get("take") or 0),
         "scope": graph_state.get("scope"),
+        "provenance_policy": _pack_graph_finalize_provenance_policy(graph_state.get("provenance_policy")),
         "fail_open": bool(graph_state.get("fail_open")),
         "error_first_line": graph_state.get("error_first_line"),
         "preflight_kind": pre.get("kind"),
@@ -3565,6 +4772,18 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         detail_rows = conn.execute(q_detail, ordered_ids).fetchall()
         detail_map = {int(r["id"]): _pack_parse_detail_json(r["detail_json"]) for r in detail_rows}
 
+    trust_policy = _pack_trust_apply_policy(
+        ordered_ids=ordered_ids,
+        detail_map=detail_map,
+        args=args,
+    )
+    trust_policy_mode = str(trust_policy.get("mode") or "off")
+    trust_policy_decisions = {
+        str(item.get("recordRef") or ""): item
+        for item in list(trust_policy.get("decisions") or [])
+        if str(item.get("recordRef") or "").strip()
+    }
+
     selected_items: List[Dict[str, Any]] = []
     citations: List[Dict[str, Any]] = []
     candidate_trace: List[pack_trace_v1.PackTraceV1Candidate] = []
@@ -3582,11 +4801,21 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
         include = False
         reasons: List[str] = []
+        trust_decision = trust_policy_decisions.get(record_ref)
+        trust_allowed = True
+
+        if trust_decision is not None:
+            trust_allowed = bool(trust_decision.get("included", False))
+            if trust_policy_mode != "off":
+                reason = str(trust_decision.get("reason") or "").strip() or "trust_unknown"
+                reasons.append(reason)
 
         if row is None:
             reasons.append("missing_row")
         elif not text:
             reasons.append("missing_summary")
+        elif not trust_allowed:
+            pass
         elif len(selected_items) >= limit:
             reasons.append("max_items_reached")
         elif used_tokens + token_estimate > budget_tokens:
@@ -3648,6 +4877,13 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "citations": citations,
     }
 
+    graph_provenance_policy: Optional[Dict[str, Any]] = None
+    if (graph_state or {}).get("use_graph") != "off":
+        graph_provenance_policy = _pack_graph_finalize_provenance_policy(graph_state.get("provenance_policy"))
+
+    if trust_policy_mode != "off":
+        payload["trust_policy"] = trust_policy
+
     # Optional graph output (kept separate for safety; consumer may choose to inject).
     if (graph_state or {}).get("use_graph") != "off":
         payload["graph"] = {
@@ -3660,10 +4896,12 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "stage1": graph_state.get("stage1"),
             "probe": graph_state.get("probe"),
             "probe_decision": graph_state.get("probe_decision"),
+            "selection_count_pre_policy": int(graph_state.get("selection_count_pre_policy") or 0),
             "selection_count": int(graph_state.get("selection_count") or 0),
             "budget_tokens": int(graph_state.get("budget_tokens") or 0),
             "take": int(graph_state.get("take") or 0),
             "scope": graph_state.get("scope"),
+            "provenance_policy": graph_provenance_policy,
             "preflight": graph_state.get("payload"),
         }
 
@@ -3675,6 +4913,45 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 combined = combined[:max_chars].rstrip() + "\n"
             payload["bundle_text_with_graph"] = combined
 
+    policy_surface = _pack_compose_policy_surface(
+        selected_items=selected_items,
+        citations=citations,
+        candidate_trace=candidate_trace,
+        graph_provenance_policy=graph_provenance_policy,
+        trust_policy=(trust_policy if trust_policy_mode != "off" else None),
+    )
+    if policy_surface is not None:
+        payload["policy_surface"] = policy_surface
+
+    lifecycle_shadow_receipt: Optional[Dict[str, Any]] = None
+    lifecycle_shadow_mode = _pack_lifecycle_shadow_mode(args)
+    if lifecycle_shadow_mode == "on":
+        lifecycle_shadow_receipt = _pack_compose_lifecycle_shadow_receipt(
+            query_text=query,
+            selected_items=selected_items,
+            citations=citations,
+            candidate_trace=candidate_trace,
+            trust_policy=(trust_policy if trust_policy_mode != "off" else None),
+            graph_provenance_policy=graph_provenance_policy,
+        )
+        lifecycle_log_max_rows = max(
+            1,
+            int(getattr(args, "pack_lifecycle_log_max_rows", _PACK_LIFECYCLE_LOG_MAX_ROWS_DEFAULT) or _PACK_LIFECYCLE_LOG_MAX_ROWS_DEFAULT),
+        )
+        lifecycle_shadow_receipt["storage"]["max_rows"] = lifecycle_log_max_rows
+        lifecycle_shadow_receipt["storage"]["error_code"] = None
+
+        try:
+            _pack_lifecycle_append_shadow_log(
+                conn,
+                receipt=lifecycle_shadow_receipt,
+                max_rows=lifecycle_log_max_rows,
+            )
+        except Exception as exc:
+            lifecycle_shadow_receipt["storage"]["error_code"] = (
+                str(exc.__class__.__name__ or "lifecycle_shadow_log_error").strip() or "lifecycle_shadow_log_error"
+            )
+
     if bool(args.trace):
         duration_ms = int((time.perf_counter() - started) * 1000)
         included_refs = [item["recordRef"] for item in selected_items]
@@ -3683,6 +4960,20 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         citation_missing_count = sum(1 for c in included_candidates if not str(getattr(c.citations, "recordRef", "") or "").strip())
         all_included_have_rationale = rationale_missing_count == 0
         all_included_have_citations = citation_missing_count == 0
+
+        if lifecycle_shadow_receipt is not None:
+            lifecycle_shadow_receipt["selection"]["trace_refreshed_record_refs"] = _pack_lifecycle_clip_refs(included_refs)
+
+        trace_extensions: Dict[str, Any] = {}
+        if (graph_state or {}).get("use_graph") != "off":
+            trace_extensions["graph"] = _pack_graph_trace_extension(graph_state)
+        if trust_policy_mode != "off":
+            trace_extensions["trust_policy"] = trust_policy
+        if policy_surface is not None:
+            trace_extensions["policy_surface"] = policy_surface
+        if lifecycle_shadow_receipt is not None:
+            trace_extensions["lifecycle_shadow"] = lifecycle_shadow_receipt
+
         trace = pack_trace_v1.PackTraceV1(
             kind=pack_trace_v1.PACK_TRACE_V1_KIND,
             ts=_utcnow_iso(),
@@ -3737,7 +5028,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 ),
             ),
             timing=pack_trace_v1.PackTraceV1Timing(durationMs=duration_ms),
-            extensions={"graph": _pack_graph_trace_extension(graph_state)} if (graph_state or {}).get("use_graph") != "off" else {},
+            extensions=trace_extensions,
         )
         payload["trace"] = pack_trace_v1.to_dict(trace)
 
@@ -5128,8 +6419,13 @@ def _extract_importance_from_detail(detail_obj: Dict[str, Any]) -> Tuple[Optiona
     return (score, label)
 
 
-def _extract_writeback_updates(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
-    detail_obj = _pack_parse_detail_json(row["detail_json"])
+def _extract_writeback_updates(
+    row: sqlite3.Row,
+    *,
+    detail_obj: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    if detail_obj is None:
+        detail_obj = _pack_parse_detail_json(row["detail_json"])
 
     lancedb_id = _extract_lancedb_id(row, detail_obj)
     if not lancedb_id:
@@ -6482,6 +7778,8 @@ def _graph_capture_md_mark_seen(
 
 
 def cmd_graph_capture_md(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _apply_importance_scorer_override(args)
+
     raw_paths = list(getattr(args, "path", []) or [])
     if not raw_paths:
         _emit({"error": "missing --path"}, True)
@@ -6804,6 +8102,8 @@ def _graph_capture_git_observation_exists(conn: sqlite3.Connection, repo: str, s
 
 
 def cmd_graph_capture_git(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _apply_importance_scorer_override(args)
+
     repos = list(getattr(args, "repo", []) or [])
     if not repos:
         _emit({"error": "missing --repo"}, True)
@@ -7082,6 +8382,7 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 max_edges=getattr(args, "max_edges", 80),
                 edge_types=getattr(args, "edge_type", None),
                 include_node_types=getattr(args, "include_node_type", None),
+                require_structured_provenance=getattr(args, "require_structured_provenance", False),
             )
         elif query_cmd == "drift":
             result = query_drift(
@@ -7152,6 +8453,10 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             else:
                 edge_types_summary = ""
             line = f"{item.get('provenance')} edges={item.get('edge_count')}"
+            prov_ref = item.get("provenance_ref") or {}
+            prov_kind = str(prov_ref.get("kind") or "")
+            if prov_kind:
+                line += f" kind={prov_kind}"
             if edge_types_summary:
                 line += f" edge_types={edge_types_summary}"
             print(line)
@@ -8575,6 +9880,7 @@ def build_parser() -> argparse.ArgumentParser:
         "\n"
         "  # Recall/writeback (Phase 5)\n"
         "  openclaw-mem writeback-lancedb --db mem.sqlite --lancedb ~/.openclaw/memory/lancedb --table memories --limit 50 --dry-run\n"
+        "  openclaw-mem optimize policy-loop --json --review-limit 800 --writeback-limit 400 --lifecycle-limit 120\n"
         "\n"
         "  # Hybrid Search & Store (Phase 4)\n"
         "  openclaw-mem hybrid \"python error\" --limit 5 --json\n"
@@ -8637,6 +9943,22 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
     o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per signal in output (default: 10)")
     o.set_defaults(func=cmd_optimize_review)
+
+    o = osub.add_parser("policy-loop", help="Read-only writeback+recall policy review with sunrise Stage B/C gates")
+    add_common(o)
+    o.add_argument("--review-limit", type=int, default=1000, help="Max rows scanned for recall pressure signals (default: 1000)")
+    o.add_argument("--writeback-limit", type=int, default=500, help="Max memory_store rows scanned for writeback linkage readiness (default: 500)")
+    o.add_argument("--lifecycle-limit", type=int, default=200, help="Max lifecycle-shadow rows scanned for rollout evidence (default: 200)")
+    o.add_argument("--miss-min-count", dest="miss_min_count", type=int, default=2, help="Min repeated no-result memory_recall events per query/scope group (default: 2)")
+    o.add_argument("--scope", default=None, help="Filter recall pressure review to a normalized detail.scope token")
+    o.add_argument("--top", type=int, default=10, help="Max repeated-miss groups and sample IDs per section (default: 10)")
+    o.add_argument("--sunrise-state", dest="sunrise_state", default=None, help="Optional sunrise Stage A state JSON path (from mem_engine_writeback_cron.py)")
+    o.add_argument("--min-live-green-streak", dest="min_live_green_streak", type=int, default=18, help="Stage-B gate threshold for Stage-A live green streak when readyForStageB is absent (default: 18)")
+    o.add_argument("--min-lifecycle-runs-stage-b", dest="min_lifecycle_runs_stage_b", type=int, default=12, help="Minimum lifecycle-shadow runs required before Stage B canary is considered (default: 12)")
+    o.add_argument("--min-lifecycle-runs-stage-c", dest="min_lifecycle_runs_stage_c", type=int, default=24, help="Minimum lifecycle-shadow runs required before Stage C promotion is considered (default: 24)")
+    o.add_argument("--min-writeback-eligible-ratio", dest="min_writeback_eligible_ratio", type=float, default=0.60, help="Minimum writeback eligible ratio for Stage B gate (default: 0.60)")
+    o.add_argument("--max-repeated-miss-groups-stage-c", dest="max_repeated_miss_groups_stage_c", type=int, default=1, help="Maximum repeated miss groups tolerated for Stage C gate (default: 1)")
+    o.set_defaults(func=cmd_optimize_policy_loop)
 
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)
@@ -8839,6 +10161,43 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--graph-budget-tokens", type=int, default=1200, help="Token budget for graph preflight bundle_text (default: 1200)")
     sp.add_argument("--graph-take", type=int, default=12, help="Max selected refs to pack for graph preflight (default: 12)")
 
+    # Graph query-plane provenance gate for graph-derived preflight selection.
+    sp.add_argument("--graph-query-db", default=None, help="Optional graph query-plane SQLite DB path for provenance checks")
+    sp.add_argument(
+        "--graph-provenance-policy",
+        choices=["off", "structured_only_fail_open"],
+        default="structured_only_fail_open",
+        help="Policy for graph-derived candidate inclusion (default: structured_only_fail_open)",
+    )
+    sp.add_argument(
+        "--graph-require-structured-provenance",
+        dest="graph_require_structured_provenance",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="When checking graph provenance, require structured provenance refs (default: true)",
+    )
+    sp.add_argument("--graph-provenance-hops", type=int, default=1, help="Hops for per-candidate subgraph provenance checks (default: 1)")
+    sp.add_argument("--graph-provenance-max-nodes", type=int, default=40, help="Max nodes for provenance subgraph checks (default: 40)")
+    sp.add_argument("--graph-provenance-max-edges", type=int, default=80, help="Max edges for provenance subgraph checks (default: 80)")
+    sp.add_argument(
+        "--pack-trust-policy",
+        choices=["off", "exclude_quarantined_fail_open"],
+        default="off",
+        help="Optional retrieval trust filter (default: off). exclude_quarantined_fail_open drops quarantined rows but keeps unknown trust as fail-open with explicit trace reasons.",
+    )
+    sp.add_argument(
+        "--pack-lifecycle-shadow",
+        choices=["off", "on"],
+        default="on",
+        help="Lifecycle usage logging mode for pack selection evidence (default: on, shadow receipt/log only).",
+    )
+    sp.add_argument(
+        "--pack-lifecycle-log-max-rows",
+        type=int,
+        default=_PACK_LIFECYCLE_LOG_MAX_ROWS_DEFAULT,
+        help="Bounded row-retention cap for pack lifecycle shadow log table (default: 2000).",
+    )
+
     # Probe knobs (used in --use-graph=auto)
     sp.add_argument("--graph-probe", choices=["on", "off"], default=None, help="Enable index-probe stage in auto mode (default: on)")
     sp.add_argument("--graph-probe-limit", type=int, default=5, help="Max FTS rows to fetch in probe (default: 5)")
@@ -8952,6 +10311,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Only include nodes with these node types (repeatable; comma-separated ok). Center node is always included.",
     )
+    q.add_argument(
+        "--require-structured-provenance",
+        dest="require_structured_provenance",
+        action="store_true",
+        help="Drop edges whose provenance cannot be normalized into structured refs (file/line, file/anchor, URL, receipt).",
+    )
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("filter", help="Filter nodes by tags/type")
@@ -8983,6 +10348,15 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--since", type=float, default=24, help="Fallback lookback window in hours (default: 24)")
     g.add_argument("--state", default=DEFAULT_GRAPH_CAPTURE_STATE_PATH, help=f"Capture state file (default: {DEFAULT_GRAPH_CAPTURE_STATE_PATH})")
     g.add_argument("--max-commits", dest="max_commits", type=int, default=50, help="Max commits per repo per run (default: 50)")
+    g.add_argument(
+        "--importance-scorer",
+        dest="importance_scorer",
+        default=None,
+        help=(
+            "Override importance autograde scorer for this run (env fallback: OPENCLAW_MEM_IMPORTANCE_SCORER). "
+            "Use 'heuristic-v1' to enable, or 'off' to disable."
+        ),
+    )
     g.set_defaults(func=cmd_graph_capture_git)
 
     g = gsub.add_parser("capture-md", help="Capture Markdown heading sections as index-only observations (idempotent)")
@@ -8994,6 +10368,15 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--min-heading-level", dest="min_heading_level", type=int, default=2, help="Capture headings at this level or deeper (default: 2)")
     g.add_argument("--state", default=DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH, help=f"Capture state file (default: {DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH})")
     g.add_argument("--since-hours", dest="since_hours", type=float, default=24, help="Fallback lookback window in hours for first scan (default: 24)")
+    g.add_argument(
+        "--importance-scorer",
+        dest="importance_scorer",
+        default=None,
+        help=(
+            "Override importance autograde scorer for this run (env fallback: OPENCLAW_MEM_IMPORTANCE_SCORER). "
+            "Use 'heuristic-v1' to enable, or 'off' to disable."
+        ),
+    )
     g.set_defaults(func=cmd_graph_capture_md)
 
     g = gsub.add_parser("export", help="Export a small graph.json artifact around query hits (portable artifact)")

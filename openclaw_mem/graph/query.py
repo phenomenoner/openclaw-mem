@@ -5,11 +5,24 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from openclaw_mem.provenance_trust_schema import parse_provenance_ref
+
 from .schema import connect_graph_db_for_query
 
 
 _MAX_RECEIPTS_LIMIT = 200
 _MAX_LINEAGE_DEPTH = 8
+
+
+def _parse_provenance_ref(raw: Any) -> Dict[str, Any]:
+    return parse_provenance_ref(raw)
+
+
+def _edge_provenance_ref(edge: Dict[str, Any]) -> Dict[str, Any]:
+    raw = edge.get("provenance_ref")
+    if isinstance(raw, dict):
+        return _parse_provenance_ref(raw.get("raw"))
+    return _parse_provenance_ref(edge.get("provenance"))
 
 
 def _json_load_object(raw: Any) -> Dict[str, Any]:
@@ -107,12 +120,14 @@ def _edge_rows(
     ).fetchall()
     out: List[Dict[str, Any]] = []
     for row in rows:
+        provenance = str(row[3])
         out.append(
             {
                 "src": str(row[0]),
                 "dst": str(row[1]),
                 "type": str(row[2]),
-                "provenance": str(row[3]),
+                "provenance": provenance,
+                "provenance_ref": _parse_provenance_ref(provenance),
                 "metadata": _json_load_object(row[4]),
             }
         )
@@ -418,12 +433,25 @@ def query_provenance(
         )
 
     items: List[Dict[str, Any]] = []
+    kind_counts: Dict[str, int] = {}
+    structured_edge_count = 0
+    covered_edge_count = 0
+
     for row in rows:
         provenance = str(row[0])
+        edge_count = int(row[1])
+        provenance_ref = _parse_provenance_ref(provenance)
+        kind = str(provenance_ref.get("kind") or "none")
+        kind_counts[kind] = int(kind_counts.get(kind, 0)) + edge_count
+        if bool(provenance_ref.get("is_structured")):
+            structured_edge_count += edge_count
+        covered_edge_count += edge_count
+
         items.append(
             {
                 "provenance": provenance,
-                "edge_count": int(row[1]),
+                "provenance_ref": provenance_ref,
+                "edge_count": edge_count,
                 "edge_types": edge_types_by_provenance.get(provenance, []),
             }
         )
@@ -440,6 +468,11 @@ def query_provenance(
         },
         "count": len(items),
         "total_distinct": total_distinct,
+        "provenance_quality": {
+            "edge_count": covered_edge_count,
+            "structured_edge_count": structured_edge_count,
+            "kind_counts": {k: int(kind_counts[k]) for k in sorted(kind_counts.keys())},
+        },
         "items": items,
     }
 
@@ -536,13 +569,30 @@ def _latest_refresh_receipt(conn: sqlite3.Connection) -> Optional[Dict[str, Any]
 
 def _summarize_provenance_for_edges(edges: List[Dict[str, Any]]) -> Dict[str, Any]:
     by_prov: Dict[str, Dict[str, Any]] = {}
+    kind_counts: Dict[str, int] = {}
+    with_provenance = 0
+    structured_edge_count = 0
+
     for edge in edges:
         prov = str(edge.get("provenance") or "").strip()
         if not prov:
             continue
+
+        with_provenance += 1
+        provenance_ref = _edge_provenance_ref(edge)
+        kind = str(provenance_ref.get("kind") or "none")
+        kind_counts[kind] = int(kind_counts.get(kind, 0)) + 1
+        if bool(provenance_ref.get("is_structured")):
+            structured_edge_count += 1
+
         entry = by_prov.setdefault(
             prov,
-            {"provenance": prov, "edge_count": 0, "edge_types": {}},
+            {
+                "provenance": prov,
+                "provenance_ref": provenance_ref,
+                "edge_count": 0,
+                "edge_types": {},
+            },
         )
         entry["edge_count"] += 1
         edge_type = str(edge.get("type") or "").strip() or "unknown"
@@ -560,15 +610,25 @@ def _summarize_provenance_for_edges(edges: List[Dict[str, Any]]) -> Dict[str, An
         items.append(
             {
                 "provenance": prov,
+                "provenance_ref": dict(entry.get("provenance_ref") or {}),
                 "edge_count": int(entry.get("edge_count", 0)),
                 "edge_types": edge_types_list,
             }
         )
 
     items.sort(key=lambda item: (-int(item.get("edge_count", 0)), str(item.get("provenance"))))
+    missing_provenance = max(0, len(edges) - with_provenance)
+
     return {
         "count": len(items),
         "items": items,
+        "coverage": {
+            "edge_count": len(edges),
+            "with_provenance": with_provenance,
+            "missing_provenance": missing_provenance,
+            "structured_edge_count": structured_edge_count,
+        },
+        "kind_counts": {k: int(kind_counts[k]) for k in sorted(kind_counts.keys())},
     }
 
 
@@ -609,6 +669,7 @@ def _render_subgraph_bundle_text(
     edges: List[Dict[str, Any]],
     edge_types: Optional[List[str]] = None,
     include_node_types: Optional[List[str]] = None,
+    require_structured_provenance: bool = False,
 ) -> str:
     lines: List[str] = []
     edge_types_norm = sorted(set(edge_types or []))
@@ -618,6 +679,8 @@ def _render_subgraph_bundle_text(
         filters.append("edge_types=" + ",".join(edge_types_norm))
     if node_types_norm:
         filters.append("include_node_types=" + ",".join(node_types_norm))
+    if require_structured_provenance:
+        filters.append("require_structured_provenance=true")
     filters_suffix = (" " + " ".join(filters)) if filters else ""
 
     lines.append(
@@ -653,6 +716,7 @@ def query_subgraph(
     max_edges: int = 80,
     edge_types: Optional[List[str]] = None,
     include_node_types: Optional[List[str]] = None,
+    require_structured_provenance: bool = False,
 ) -> Dict[str, Any]:
     center = str(node_id or "").strip()
     if not center:
@@ -679,6 +743,7 @@ def query_subgraph(
 
     edge_type_allow = set(_normalize_token_list(edge_types))
     include_type_allow = set(_normalize_token_list(include_node_types))
+    require_structured_provenance_bool = bool(require_structured_provenance)
 
     conn = connect_graph_db_for_query(db_path)
     try:
@@ -692,6 +757,7 @@ def query_subgraph(
         frontier: set[str] = {center}
         seen_edges: set[Tuple[str, str, str, str]] = set()
         selected_edges: List[Dict[str, Any]] = []
+        skipped_unstructured_provenance = 0
         stopped_reason: Optional[str] = None
 
         for _depth in range(hops_int):
@@ -718,6 +784,11 @@ def query_subgraph(
                         continue
                     if dst_id != center and dst_type not in include_type_allow:
                         continue
+
+                provenance_ref = _edge_provenance_ref(edge)
+                if require_structured_provenance_bool and not bool(provenance_ref.get("is_structured")):
+                    skipped_unstructured_provenance += 1
+                    continue
 
                 key = (edge["src"], edge["dst"], edge["type"], edge["provenance"])
                 if key in seen_edges:
@@ -760,6 +831,7 @@ def query_subgraph(
             edges=selected_edges,
             edge_types=sorted(edge_type_allow),
             include_node_types=sorted(include_type_allow),
+            require_structured_provenance=require_structured_provenance_bool,
         )
 
         return {
@@ -775,9 +847,11 @@ def query_subgraph(
             "filters": {
                 "edge_types": sorted(edge_type_allow) or None,
                 "include_node_types": sorted(include_type_allow) or None,
+                "require_structured_provenance": require_structured_provenance_bool,
             },
             "node_count": len(nodes),
             "edge_count": len(edges_with_nodes),
+            "skipped_unstructured_provenance": skipped_unstructured_provenance,
             "stopped_reason": stopped_reason,
             "refresh_receipt": refresh_receipt,
             "provenance": provenance_summary,

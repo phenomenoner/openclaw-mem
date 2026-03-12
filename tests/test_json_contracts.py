@@ -383,6 +383,214 @@ class TestJsonContracts(unittest.TestCase):
         self._assert_exact_keys(trace["timing"], {"durationMs"}, "pack.trace.timing")
         self.assertIsInstance(trace["extensions"], dict)
 
+        lifecycle = trace["extensions"].get("lifecycle_shadow")
+        self.assertIsInstance(lifecycle, dict)
+        self._assert_exact_keys(
+            lifecycle,
+            {"kind", "mode", "ts", "query", "selection", "counts", "reasons", "policies", "mutation", "storage"},
+            "pack.trace.extensions.lifecycle_shadow",
+        )
+        self._assert_exact_keys(lifecycle["query"], {"hash", "chars"}, "pack.trace.extensions.lifecycle_shadow.query")
+        self._assert_exact_keys(
+            lifecycle["selection"],
+            {"pack_selected_refs", "citation_record_refs", "trace_refreshed_record_refs", "selection_signature"},
+            "pack.trace.extensions.lifecycle_shadow.selection",
+        )
+        self._assert_exact_keys(
+            lifecycle["counts"],
+            {
+                "selected_total",
+                "citation_total",
+                "candidate_total",
+                "excluded_total",
+                "selected_by_trust",
+                "selected_by_importance",
+            },
+            "pack.trace.extensions.lifecycle_shadow.counts",
+        )
+        self._assert_exact_keys(
+            lifecycle["mutation"],
+            {
+                "memory_mutation",
+                "auto_archive_applied",
+                "auto_mutation_applied",
+                "writes_observations",
+                "writes_embeddings",
+                "writes_lifecycle_state",
+                "writes_shadow_log",
+            },
+            "pack.trace.extensions.lifecycle_shadow.mutation",
+        )
+        self.assertEqual(lifecycle["mutation"]["memory_mutation"], "none")
+
+    def test_pack_trust_policy_contract_v1(self):
+        rows = [
+            {
+                "kind": "test.observation",
+                "summary": "trusted trust policy row",
+                "tool_name": "test",
+                "detail": {"trust_tier": "trusted"},
+            },
+            {
+                "kind": "test.observation",
+                "summary": "quarantine trust policy row",
+                "tool_name": "test",
+                "detail": {"trust_tier": "quarantine"},
+            },
+            {
+                "kind": "test.observation",
+                "summary": "unknown trust policy row",
+                "tool_name": "test",
+                "detail": {},
+            },
+        ]
+        self.source.write_text(
+            "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+            encoding="utf-8",
+        )
+        harvest_out = self._run_json_ok(
+            "harvest",
+            "--source",
+            str(self.source),
+            "--no-embed",
+            "--no-update-index",
+        )
+        self.assertEqual(harvest_out["ingested"], 3)
+
+        out = self._run_json_ok(
+            "pack",
+            "--query",
+            "trust policy",
+            "--trace",
+            "--limit",
+            "3",
+            "--budget-tokens",
+            "400",
+            "--pack-trust-policy",
+            "exclude_quarantined_fail_open",
+        )
+
+        self._assert_exact_keys(
+            out,
+            {"bundle_text", "items", "citations", "trace", "trust_policy", "policy_surface"},
+            "pack.trust_policy",
+        )
+
+        policy = out["trust_policy"]
+        self._assert_exact_keys(
+            policy,
+            {
+                "kind",
+                "mode",
+                "checked_count",
+                "included_count",
+                "excluded_count",
+                "fail_open_count",
+                "decision_reason_counts",
+                "decisions",
+                "selected_refs",
+            },
+            "pack.trust_policy",
+        )
+        self.assertEqual(policy["kind"], "openclaw-mem.pack.trust-policy.v1")
+        self.assertEqual(policy["mode"], "exclude_quarantined_fail_open")
+        self.assertEqual(policy["checked_count"], 3)
+        self.assertEqual(policy["included_count"], 2)
+        self.assertEqual(policy["excluded_count"], 1)
+        self.assertEqual(policy["fail_open_count"], 1)
+        self.assertEqual(
+            policy["decision_reason_counts"],
+            {
+                "trust_allowed": 1,
+                "trust_quarantined_excluded": 1,
+                "trust_unknown_fail_open": 1,
+            },
+        )
+        self.assertEqual(policy["selected_refs"], ["obs:1", "obs:3"])
+
+        selected_refs = [item["recordRef"] for item in out["items"]]
+        citation_refs = [item["recordRef"] for item in out["citations"]]
+        self.assertEqual(selected_refs, ["obs:1", "obs:3"])
+        self.assertEqual(citation_refs, ["obs:1", "obs:3"])
+
+        policy_surface = out["policy_surface"]
+        self._assert_exact_keys(
+            policy_surface,
+            {"kind", "selection", "counts", "reasons", "policies", "consistency"},
+            "pack.policy_surface",
+        )
+        self._assert_exact_keys(
+            policy_surface["selection"],
+            {
+                "pack_selected_refs",
+                "citation_record_refs",
+                "trust_selected_refs",
+                "graph_selected_refs",
+                "shared_pack_and_graph_refs",
+            },
+            "pack.policy_surface.selection",
+        )
+        self._assert_exact_keys(
+            policy_surface["counts"],
+            {"pack_selected_count", "citation_count", "candidate_count", "pack_excluded_count"},
+            "pack.policy_surface.counts",
+        )
+        self._assert_exact_keys(
+            policy_surface["reasons"],
+            {
+                "pack_included_reason_counts",
+                "pack_excluded_reason_counts",
+                "trust_policy_reason_counts",
+                "graph_provenance_reason_counts",
+            },
+            "pack.policy_surface.reasons",
+        )
+        self._assert_exact_keys(
+            policy_surface["policies"],
+            {"trust_policy", "graph_provenance_policy"},
+            "pack.policy_surface.policies",
+        )
+        self._assert_exact_keys(
+            policy_surface["consistency"],
+            {
+                "pack_items_match_citations",
+                "pack_items_subset_of_trust_selected_refs",
+                "pack_items_missing_from_trust_selected_refs",
+            },
+            "pack.policy_surface.consistency",
+        )
+
+        self.assertEqual(policy_surface["kind"], "openclaw-mem.pack.policy-surface.v1")
+        self.assertEqual(policy_surface["selection"]["pack_selected_refs"], selected_refs)
+        self.assertEqual(policy_surface["selection"]["citation_record_refs"], citation_refs)
+        self.assertEqual(policy_surface["selection"]["trust_selected_refs"], policy["selected_refs"])
+        self.assertIsNone(policy_surface["selection"]["graph_selected_refs"])
+        self.assertIsNone(policy_surface["selection"]["shared_pack_and_graph_refs"])
+        self.assertEqual(policy_surface["reasons"]["trust_policy_reason_counts"], policy["decision_reason_counts"])
+        self.assertEqual(policy_surface["reasons"]["graph_provenance_reason_counts"], {})
+        self.assertEqual(policy_surface["policies"]["trust_policy"]["selected_refs"], policy["selected_refs"])
+        self.assertIsNone(policy_surface["policies"]["graph_provenance_policy"])
+        self.assertTrue(policy_surface["consistency"]["pack_items_match_citations"])
+        self.assertTrue(policy_surface["consistency"]["pack_items_subset_of_trust_selected_refs"])
+        self.assertEqual(policy_surface["consistency"]["pack_items_missing_from_trust_selected_refs"], [])
+
+        self.assertEqual(out["trace"]["extensions"].get("trust_policy"), policy)
+        self.assertEqual(out["trace"]["extensions"].get("policy_surface"), policy_surface)
+
+        lifecycle = out["trace"]["extensions"].get("lifecycle_shadow")
+        self.assertIsInstance(lifecycle, dict)
+        self.assertEqual(lifecycle["kind"], "openclaw-mem.pack.lifecycle-shadow.v1")
+        self.assertEqual(lifecycle["selection"]["pack_selected_refs"], selected_refs)
+        self.assertEqual(lifecycle["selection"]["citation_record_refs"], citation_refs)
+        self.assertEqual(lifecycle["selection"]["trace_refreshed_record_refs"], selected_refs)
+        self.assertEqual(lifecycle["counts"]["selected_total"], len(selected_refs))
+        self.assertEqual(lifecycle["counts"]["citation_total"], len(citation_refs))
+        self.assertEqual(lifecycle["counts"]["candidate_total"], 3)
+        self.assertEqual(lifecycle["counts"]["excluded_total"], 1)
+        self.assertEqual(lifecycle["mutation"]["memory_mutation"], "none")
+        self.assertEqual(lifecycle["mutation"]["auto_archive_applied"], 0)
+        self.assertEqual(lifecycle["mutation"]["auto_mutation_applied"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

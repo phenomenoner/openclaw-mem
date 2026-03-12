@@ -103,8 +103,10 @@ tests/
 - `openclaw-mem graph health --db <path> --stale-hours 24`
 
 ### Stage-3 provenance / receipts
-- `openclaw-mem graph provenance --artifact <id> --db <path>`
-- `openclaw-mem graph lineage --node <id> --db <path>`
+- `openclaw-mem graph query provenance --node-id <id> --db <path>`
+- `openclaw-mem graph query lineage <node_id> --db <path>`
+- Query outputs should expose a normalized `provenance_ref` object (`kind`, `path/url`, optional line span/anchor) so provenance is machine-consumable instead of string-only.
+- `openclaw-mem graph query subgraph <node_id> --require-structured-provenance` provides a bounded fail-open guard for pack-facing consumption.
 
 ## A-fast / A-deep split
 

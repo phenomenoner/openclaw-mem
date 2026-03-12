@@ -124,9 +124,20 @@ Rules:
 
 ### Trace additions (only when `--trace`)
 - `trace.extensions.graph.*` (redaction-safe):
-  - `triggered`, `trigger_reason`, `stage1_hit`, `stage1_categories`
-  - `probe_ran`, `probe_best_score`, `probe_hit_count`, `probe_decision`, `probe_latency_ms`
-  - `selected_refs_count`, `budget_tokens`, `fail_open`, `error_first_line` (if any)
+  - trigger/probe envelope: `triggered`, `trigger_reason`, `stage0`, `stage1`, `probe`, `probe_decision`
+  - bounded selection stats: `selection_count_pre_policy`, `selected_refs_count`, `budget_tokens`, `take`, `scope`
+  - fail-open envelope: `fail_open`, `error_first_line`, `preflight_kind`
+  - provenance-policy contract (`openclaw-mem.pack.graph.provenance-policy.v1`):
+    - top-level: `kind`, `mode`, `require_structured_provenance`, `graph_query_db_configured`, `bounds`, `checked_count`, `included_count`, `excluded_count`, `fail_open_count`, `decision_reason_counts`, `decisions`, `selected_refs`
+    - each decision: `recordRef`, `included`, `reason`, `fail_open`, `error_code`, `provenance_quality`
+  - composed policy surface (`openclaw-mem.pack.policy-surface.v1`):
+    - mirrored between top-level `pack.policy_surface` and `trace.extensions.policy_surface`
+    - composes pack-selected refs/citations, trust-policy summary, graph-provenance summary, deterministic include/exclude reason counters, and consistency booleans (`pack_items_match_citations`, trust subset checks)
+  - lifecycle usage shadow receipt (`openclaw-mem.pack.lifecycle-shadow.v1`):
+    - emitted under `trace.extensions.lifecycle_shadow`
+    - derived from real pack selection/citation/candidate decisions (not synthetic counters)
+    - append-only write to bounded SQLite shadow table `pack_lifecycle_shadow_log` (retention capped by `--pack-lifecycle-log-max-rows`)
+    - mutation contract is explicit `memory_mutation=none` / `auto_archive_applied=0` / `auto_mutation_applied=0` (usage evidence + receipts only)
 
 Acceptance (MVP):
 - OFF = no behavior change.

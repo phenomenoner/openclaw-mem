@@ -97,6 +97,8 @@ class TestGraphQueryCli(unittest.TestCase):
             self.assertEqual(out["query_cmd"], "subgraph")
             self.assertEqual(out["result"]["center_node_id"], "artifact.daily-mission")
             self.assertEqual(out["result"]["edge_count"], 3)
+            self.assertFalse(out["result"]["filters"]["require_structured_provenance"])
+            self.assertEqual(out["result"]["edges"][0]["provenance_ref"]["kind"], "file_line")
             self.assertIn("Edges (with provenance)", out["result"]["bundle_text"])
             self.assertIn("docs/topology.yaml#L20", out["result"]["bundle_text"])
             conn.close()
@@ -148,6 +150,65 @@ class TestGraphQueryCli(unittest.TestCase):
             edge = out["result"]["edges"][0]
             self.assertIn(edge["src"], node_ids)
             self.assertIn(edge["dst"], node_ids)
+            conn.close()
+
+    def test_cmd_graph_query_subgraph_supports_require_structured_provenance(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "artifact.center", "type": "artifact"},
+                {"id": "artifact.structured", "type": "artifact"},
+                {"id": "artifact.opaque", "type": "artifact"},
+            ],
+            "edges": [
+                {"src": "artifact.center", "dst": "artifact.structured", "type": "writes", "provenance": "docs/topology.yaml#L10"},
+                {"src": "artifact.center", "dst": "artifact.opaque", "type": "alerts_to", "provenance": "manual-entry"},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "mem.sqlite"
+            conn = _connect(str(db_path))
+            refresh_topology(topology, db_path=db_path, source_path="docs/topology.yaml")
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "graph_query_cmd": "subgraph",
+                    "db": str(db_path),
+                    "node_id": "artifact.center",
+                    "hops": 1,
+                    "direction": "both",
+                    "max_nodes": 10,
+                    "max_edges": 10,
+                    "edge_type": None,
+                    "include_node_type": None,
+                    "require_structured_provenance": True,
+                    "json": True,
+                },
+            )()
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_query(conn, args)
+
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["query_cmd"], "subgraph")
+            self.assertTrue(out["result"]["filters"]["require_structured_provenance"])
+            self.assertEqual(out["result"]["edge_count"], 1)
+            self.assertEqual(out["result"]["skipped_unstructured_provenance"], 1)
+            self.assertIn("require_structured_provenance=true", out["result"]["bundle_text"])
+
+            coverage = out["result"]["provenance"]["coverage"]
+            self.assertEqual(
+                set(coverage.keys()),
+                {"edge_count", "with_provenance", "missing_provenance", "structured_edge_count"},
+            )
+            edge_ref = out["result"]["edges"][0]["provenance_ref"]
+            self.assertEqual(
+                set(edge_ref.keys()),
+                {"raw", "kind", "is_structured", "path", "line_start", "line_end", "anchor", "url"},
+            )
             conn.close()
 
     def test_cmd_graph_query_filter_json_payload(self) -> None:
@@ -341,11 +402,26 @@ class TestGraphQueryCli(unittest.TestCase):
             self.assertEqual(out["result"]["total_distinct"], 1)
             self.assertEqual(out["result"]["count"], 1)
             self.assertEqual(out["result"]["filters"]["min_edge_count"], 2)
-            self.assertEqual(out["result"]["items"][0]["edge_count"], 2)
             self.assertEqual(
-                out["result"]["items"][0]["edge_types"],
+                set(out["result"]["provenance_quality"].keys()),
+                {"edge_count", "structured_edge_count", "kind_counts"},
+            )
+            self.assertEqual(out["result"]["provenance_quality"]["kind_counts"], {"file_line": 2})
+
+            item = out["result"]["items"][0]
+            self.assertEqual(set(item.keys()), {"provenance", "provenance_ref", "edge_count", "edge_types"})
+            self.assertEqual(item["edge_count"], 2)
+            self.assertEqual(
+                item["edge_types"],
                 [{"edge_type": "writes", "edge_count": 2}],
             )
+
+            prov_ref = item["provenance_ref"]
+            self.assertEqual(
+                set(prov_ref.keys()),
+                {"raw", "kind", "is_structured", "path", "line_start", "line_end", "anchor", "url"},
+            )
+            self.assertEqual(prov_ref["kind"], "file_line")
             conn.close()
 
     def test_cmd_graph_query_provenance_plaintext_includes_edge_types(self) -> None:
@@ -397,6 +473,7 @@ class TestGraphQueryCli(unittest.TestCase):
             text = buf.getvalue()
             self.assertIn("count=1 total_distinct=1", text)
             self.assertIn("docs/topology.yaml#L42 edges=2", text)
+            self.assertIn("kind=file_line", text)
             self.assertIn("edge_types=alerts_to:1,writes:1", text)
             conn.close()
 
