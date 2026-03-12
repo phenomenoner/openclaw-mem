@@ -108,7 +108,14 @@ class TestOptimizePolicyLoop(unittest.TestCase):
                 "kind": "fact",
                 "tool_name": "memory_store",
                 "summary": "Remember Alpha memory",
-                "detail": {"memory_id": _UUID_A, "importance": {"score": 0.91}, "scope": "team/alpha", "category": "fact"},
+                "detail": {
+                    "memory_backend": "openclaw-mem-engine",
+                    "memory_operation": "store",
+                    "memory_id": _UUID_A,
+                    "importance": {"score": 0.91},
+                    "scope": "team/alpha",
+                    "category": "fact",
+                },
             },
         )
         _insert_observation(
@@ -118,7 +125,14 @@ class TestOptimizePolicyLoop(unittest.TestCase):
                 "kind": "note",
                 "tool_name": "memory_store",
                 "summary": "Remember Beta memory",
-                "detail": {"memory": {"lancedb_id": _UUID_B}, "importance": {"score": 0.62}, "scope": "team/alpha", "category": "note"},
+                "detail": {
+                    "memory_backend": "openclaw-mem-engine",
+                    "memory_operation": "store",
+                    "memory": {"lancedb_id": _UUID_B},
+                    "importance": {"score": 0.62},
+                    "scope": "team/alpha",
+                    "category": "note",
+                },
             },
         )
         _insert_observation(
@@ -128,7 +142,25 @@ class TestOptimizePolicyLoop(unittest.TestCase):
                 "kind": "note",
                 "tool_name": "memory_store",
                 "summary": "No lancedb id yet",
-                "detail": {"scope": "team/alpha"},
+                "detail": {
+                    "memory_backend": "openclaw-mem-engine",
+                    "memory_operation": "store",
+                    "scope": "team/alpha",
+                },
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _now_iso(),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Legacy backend stored summary",
+                "detail": {
+                    "memory_backend": "memory-lancedb",
+                    "memory_operation": "store",
+                    "scope": "team/alpha",
+                },
             },
         )
 
@@ -181,6 +213,8 @@ class TestOptimizePolicyLoop(unittest.TestCase):
         self.assertEqual(out["policy"]["writes_performed"], 0)
         self.assertEqual(out["sunrise"]["stage_b"]["status"], "ready")
         self.assertEqual(out["sunrise"]["stage_c"]["status"], "ready")
+        self.assertEqual(out["signals"]["writeback"]["total_rows"], 4)
+        self.assertEqual(out["signals"]["writeback"]["filtered_non_target_rows"], 1)
         self.assertEqual(out["signals"]["writeback"]["eligible"], 2)
         self.assertEqual(out["signals"]["writeback"]["scanned"], 3)
         self.assertEqual(out["signals"]["writeback"]["eligible_ratio"], 0.6667)
@@ -200,7 +234,11 @@ class TestOptimizePolicyLoop(unittest.TestCase):
                 "kind": "note",
                 "tool_name": "memory_store",
                 "summary": "No lancedb id",
-                "detail": {"scope": "team/beta"},
+                "detail": {
+                    "memory_backend": "openclaw-mem-engine",
+                    "memory_operation": "store",
+                    "scope": "team/beta",
+                },
             },
         )
 

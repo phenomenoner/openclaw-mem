@@ -158,6 +158,7 @@ tests/
 - keep `optimize review` contract stable and add policy-loop review output
 - shipped read-only command: `openclaw-mem optimize policy-loop --json`
   - combines repeated recall-miss pressure, writeback linkage readiness, and lifecycle-shadow evidence
+  - writeback linkage readiness is scoped to `memory_store` rows from `memory_backend=openclaw-mem-engine` (legacy/non-target backends are excluded from the denominator)
   - emits sunrise Stage B/C gate status (`ready|hold`) with explicit threshold/reason receipts
   - remains strict zero-write (`policy.writes_performed=0`, `memory_mutation=none`)
 - bounded recommendation budgets stay in place (`--top`, scoped miss groups)

@@ -1572,7 +1572,9 @@ def cmd_optimize_policy_loop(conn: sqlite3.Connection, args: argparse.Namespace)
         (writeback_limit,),
     ).fetchall()
 
-    writeback_scanned = len(writeback_rows)
+    writeback_total_rows = len(writeback_rows)
+    writeback_filtered_non_target = 0
+    writeback_scanned = 0
     writeback_eligible = 0
     writeback_missing = 0
     writeback_unique_ids: Set[str] = set()
@@ -1586,7 +1588,19 @@ def cmd_optimize_policy_loop(conn: sqlite3.Connection, args: argparse.Namespace)
     }
 
     for row in writeback_rows:
-        payload = _extract_writeback_updates(row)
+        detail_obj = _pack_parse_detail_json(row["detail_json"])
+        memory_backend = str(detail_obj.get("memory_backend") or "").strip().lower()
+        memory_operation = str(detail_obj.get("memory_operation") or "").strip().lower()
+
+        if memory_backend and memory_backend != "openclaw-mem-engine":
+            writeback_filtered_non_target += 1
+            continue
+        if memory_operation and memory_operation != "store":
+            writeback_filtered_non_target += 1
+            continue
+
+        writeback_scanned += 1
+        payload = _extract_writeback_updates(row, detail_obj=detail_obj)
         if not payload:
             writeback_missing += 1
             if len(missing_obs_ids) < top:
@@ -1779,6 +1793,8 @@ def cmd_optimize_policy_loop(conn: sqlite3.Connection, args: argparse.Namespace)
                 },
             },
             "writeback": {
+                "total_rows": writeback_total_rows,
+                "filtered_non_target_rows": writeback_filtered_non_target,
                 "scanned": writeback_scanned,
                 "eligible": writeback_eligible,
                 "missing_lancedb_id": writeback_missing,
@@ -6403,8 +6419,13 @@ def _extract_importance_from_detail(detail_obj: Dict[str, Any]) -> Tuple[Optiona
     return (score, label)
 
 
-def _extract_writeback_updates(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
-    detail_obj = _pack_parse_detail_json(row["detail_json"])
+def _extract_writeback_updates(
+    row: sqlite3.Row,
+    *,
+    detail_obj: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    if detail_obj is None:
+        detail_obj = _pack_parse_detail_json(row["detail_json"])
 
     lancedb_id = _extract_lancedb_id(row, detail_obj)
     if not lancedb_id:
