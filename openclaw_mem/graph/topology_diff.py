@@ -151,6 +151,26 @@ def _edge_key(edge: Dict[str, Any]) -> Tuple[str, str, str]:
     )
 
 
+def _edge_contract(edge: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "provenance": str(edge.get("provenance") or ""),
+        "metadata": _json_obj(edge.get("metadata")),
+    }
+
+
+def _group_edges_by_key(edges: List[Dict[str, Any]]) -> Dict[Tuple[str, str, str], List[Dict[str, Any]]]:
+    grouped: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = {}
+    for edge in edges:
+        grouped.setdefault(_edge_key(edge), []).append(edge)
+    return grouped
+
+
+def _sorted_edge_contracts(edges: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    contracts = [_edge_contract(edge) for edge in edges]
+    contracts.sort(key=_stable_json)
+    return contracts
+
+
 def _apply_limit(items: List[Dict[str, Any]], limit: int) -> Tuple[List[Dict[str, Any]], bool]:
     if limit < 0:
         limit = 0
@@ -203,37 +223,39 @@ def compare_topology_files(*, seed_path: str | Path, curated_path: str | Path, l
     seed_edges = _normalize_edges(seed_obj.get("edges"), node_ids=seed_ids)
     curated_edges = _normalize_edges(curated_obj.get("edges"), node_ids=curated_ids)
 
-    seed_edges_by_key = {_edge_key(edge): edge for edge in seed_edges}
-    curated_edges_by_key = {_edge_key(edge): edge for edge in curated_edges}
+    seed_edges_by_key = _group_edges_by_key(seed_edges)
+    curated_edges_by_key = _group_edges_by_key(curated_edges)
 
     seed_edge_keys = set(seed_edges_by_key.keys())
     curated_edge_keys = set(curated_edges_by_key.keys())
 
-    missing_edges_full = [seed_edges_by_key[key] for key in sorted(seed_edge_keys - curated_edge_keys)]
-    stale_edges_full = [curated_edges_by_key[key] for key in sorted(curated_edge_keys - seed_edge_keys)]
+    missing_edges_full = [
+        edge
+        for key in sorted(seed_edge_keys - curated_edge_keys)
+        for edge in seed_edges_by_key[key]
+    ]
+    stale_edges_full = [
+        edge
+        for key in sorted(curated_edge_keys - seed_edge_keys)
+        for edge in curated_edges_by_key[key]
+    ]
 
     edge_contract_mismatches_full: List[Dict[str, Any]] = []
     for key in sorted(seed_edge_keys.intersection(curated_edge_keys)):
-        seed_edge = seed_edges_by_key[key]
-        curated_edge = curated_edges_by_key[key]
-        seed_contract = {
-            'provenance': str(seed_edge.get('provenance') or ''),
-            'metadata': _json_obj(seed_edge.get('metadata')),
-        }
-        curated_contract = {
-            'provenance': str(curated_edge.get('provenance') or ''),
-            'metadata': _json_obj(curated_edge.get('metadata')),
-        }
-        if seed_contract != curated_contract:
-            edge_contract_mismatches_full.append(
-                {
-                    'src': key[0],
-                    'dst': key[1],
-                    'type': key[2],
-                    'seed': seed_contract,
-                    'curated': curated_contract,
-                }
-            )
+        seed_contracts = _sorted_edge_contracts(seed_edges_by_key[key])
+        curated_contracts = _sorted_edge_contracts(curated_edges_by_key[key])
+        if seed_contracts != curated_contracts:
+            mismatch: Dict[str, Any] = {
+                "src": key[0],
+                "dst": key[1],
+                "type": key[2],
+                "seed": seed_contracts[0] if seed_contracts else {},
+                "curated": curated_contracts[0] if curated_contracts else {},
+            }
+            if len(seed_contracts) > 1 or len(curated_contracts) > 1:
+                mismatch["seed_variants"] = seed_contracts
+                mismatch["curated_variants"] = curated_contracts
+            edge_contract_mismatches_full.append(mismatch)
 
     bounded_missing_nodes, trunc_missing_nodes = _apply_limit(missing_nodes_full, limit)
     bounded_stale_nodes, trunc_stale_nodes = _apply_limit(stale_nodes_full, limit)

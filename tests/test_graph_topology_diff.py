@@ -69,6 +69,63 @@ class TestGraphTopologyDiff(unittest.TestCase):
             self.assertEqual(diff["stale_nodes"][0]["id"], "artifact.legacy")
             self.assertEqual(diff["node_contract_mismatches"][0]["id"], "repo.alpha")
 
+    def test_compare_topology_files_keeps_all_edge_contract_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed_path = root / "seed.json"
+            curated_path = root / "curated.json"
+
+            seed_path.write_text(
+                json.dumps(
+                    {
+                        "nodes": [
+                            {"id": "cron.job.a", "type": "cron_job", "tags": ["enabled"]},
+                            {"id": "repo.alpha", "type": "repo", "tags": ["derived"]},
+                        ],
+                        "edges": [
+                            {"src": "cron.job.a", "dst": "repo.alpha", "type": "targets_repo", "provenance": "jobs.json#job=a"},
+                            {"src": "cron.job.a", "dst": "repo.alpha", "type": "targets_repo", "provenance": "spec-alpha.md#L1"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            curated_path.write_text(
+                json.dumps(
+                    {
+                        "nodes": [
+                            {"id": "cron.job.a", "type": "cron_job", "tags": ["enabled"]},
+                            {"id": "repo.alpha", "type": "repo", "tags": ["derived"]},
+                        ],
+                        "edges": [
+                            {"src": "cron.job.a", "dst": "repo.alpha", "type": "targets_repo", "provenance": "spec-alpha.md#L1"},
+                            {"src": "cron.job.a", "dst": "repo.alpha", "type": "targets_repo", "provenance": "manual-map.yaml#L4"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            out = compare_topology_files(seed_path=seed_path, curated_path=curated_path, limit=10)
+            diff = out["diff"]
+
+            self.assertEqual(diff["counts"]["missing_edges"], 0)
+            self.assertEqual(diff["counts"]["stale_edges"], 0)
+            self.assertEqual(diff["counts"]["edge_contract_mismatches"], 1)
+
+            mismatch = diff["edge_contract_mismatches"][0]
+            self.assertEqual(mismatch["src"], "cron.job.a")
+            self.assertEqual(mismatch["dst"], "repo.alpha")
+            self.assertEqual(mismatch["type"], "targets_repo")
+            self.assertEqual(
+                [entry["provenance"] for entry in mismatch["seed_variants"]],
+                ["jobs.json#job=a", "spec-alpha.md#L1"],
+            )
+            self.assertEqual(
+                [entry["provenance"] for entry in mismatch["curated_variants"]],
+                ["manual-map.yaml#L4", "spec-alpha.md#L1"],
+            )
+
     def test_cmd_graph_topology_diff_emits_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
