@@ -21,7 +21,9 @@ Start with a local SQLite sidecar. Keep your current OpenClaw memory backend if 
 ## Core capabilities in v1.1.0
 
 - **Graph/query plane (deterministic):** `graph topology-refresh`, `graph query ...`, `graph query drift`, `graph query provenance`.
-- **Optimization observer (zero-write):** `optimize review` proposes cleanups (staleness, duplication, repeated misses) without mutating data.
+- **Graph capture scorer parity:** both `graph capture-git` and `graph capture-md` support `--importance-scorer` (same override model as ingest/harvest).
+- **Optimization observer (zero-write):** `optimize review` plus `optimize policy-loop` for read-only rollout readiness (recall pressure, writeback linkage, lifecycle-shadow + sunrise gate reporting).
+- **Pack policy surfaces (bounded + auditable):** trust policy (`--pack-trust-policy`), graph provenance policy (`--graph-provenance-policy`, `--graph-query-db`), lifecycle shadow logging (`--pack-lifecycle-shadow`), and composed `policy_surface` / trace extensions.
 - **Episodic event lane:** append/extract/ingest/query/replay with redaction-first defaults.
 - **Optional Mem Engine upgrades:** hybrid recall controls, TODO guardrails, docs cold-lane ingest/search.
 
