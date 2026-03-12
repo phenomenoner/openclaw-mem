@@ -165,6 +165,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("‣[x]TODO clean pipeline"))
         self.assertTrue(_summary_has_task_marker("▪[x]TODO clean pipeline"))
         self.assertTrue(_summary_has_task_marker("∙[x]TODO clean pipeline"))
+        self.assertTrue(_summary_has_task_marker("∙TODO compact pipeline"))
         self.assertTrue(_summary_has_task_marker("·[ ]TASK sync branch"))
         self.assertTrue(_summary_has_task_marker("◦[x]TODO compact pipeline"))
         self.assertTrue(_summary_has_task_marker("●[x]TODO compact pipeline"))
