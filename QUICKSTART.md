@@ -2,6 +2,12 @@
 
 Get `openclaw-mem` up and running in ~5 minutes.
 
+This guide is the **fastest local proof** for the core product story:
+
+- memory stays local
+- recall stays inspectable
+- you can review stale / noisy memory before it quietly shapes future answers
+
 ## Prerequisites
 
 - Python 3.10+ (recommended: Python 3.13)
@@ -18,7 +24,7 @@ cd openclaw-mem
 uv sync --locked
 ```
 
-**Invocation note (truthful):** from a source checkout, run the CLI as:
+**Run from source:** when using a source checkout, invoke the CLI as:
 
 ```bash
 uv run --python 3.13 --frozen -- python -m openclaw_mem ...
@@ -42,11 +48,18 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --json status
 uv run --python 3.13 --frozen -- python -m openclaw_mem --json backend
 ```
 
+What this proves:
+- the local ledger is alive
+- the CLI surface is working
+- you can inspect memory posture before wiring anything deeper
+
 ---
 
 ## Step 2.1: 5-minute synthetic demo (Inside-Out Memory)
 
-This is a synthetic transparency demo for the local recall loop: no private/user data, no hidden state, and it is designed to run even without `OPENAI_API_KEY` (FTS-only fail-open).
+This is the cleanest showcase path when you want a demo instead of a docs read.
+
+It is **synthetic** (no private/user data). It demonstrates the contract for a memory layer that can recover stable constraints without bloating the chat context.
 
 ```bash
 ./scripts/inside_out_demo.sh
@@ -65,6 +78,10 @@ python3 ./scripts/make_sample_jsonl.py --out ./sample.jsonl
 uv run --python 3.13 --frozen -- python -m openclaw_mem ingest --file ./sample.jsonl --json
 ```
 
+What to expect:
+- inserted row counts
+- stable IDs / receipts you can inspect later
+
 ---
 
 ## Step 4: Progressive recall (search → timeline → get)
@@ -74,6 +91,13 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem search "OpenClaw" --limi
 uv run --python 3.13 --frozen -- python -m openclaw_mem timeline 2 --window 2 --json
 uv run --python 3.13 --frozen -- python -m openclaw_mem get 1 --json
 ```
+
+This is the product in miniature:
+- **search** finds candidate memory
+- **timeline** scopes it to the right slice of history
+- **get** lets you inspect the concrete memory instead of trusting a vague summary
+
+If your real question is “what changed?” or “why are we still doing this?”, this is the loop you want to prove first.
 
 ---
 
@@ -160,10 +184,10 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --ta
 ```
 
 Task matching rules in `--mode tasks` are deterministic:
-- `kind == "task"`, or
-- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`, `〈TODO〉 ...`, `〖TODO〗 ...`, `〘TODO〙 ...`, `‹TODO› ...`, `<TODO> ...`, `＜TODO＞ ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `▪` / `‣` / `∙` / `·` / `◦` / `・` / `–` / `—` / `−`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` / `[☒]` / `[✅]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`, `〔TODO〕buy milk`, `{TODO}buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`, `«TODO»buy milk`, `〈TODO〉buy milk`, `〖TODO〗buy milk`, `〘TODO〙buy milk`, `‹TODO›buy milk`, `<TODO>buy milk`, `＜TODO＞buy milk`), followed by `:`, `：`, `;`, `；`, whitespace, `-`, `.`, `。`, `－`, `–`, `—`, `−`, or end-of-string.
-- Example formats: `TODO: rotate runbook`, `{TODO}: rotate runbook`, `【TODO】 rotate runbook`, `「TODO」 rotate runbook`, `『TODO』 rotate runbook`, `《TODO》 rotate runbook`, `«TODO» rotate runbook`, `〈TODO〉 rotate runbook`, `〖TODO〗 rotate runbook`, `〘TODO〙 rotate runbook`, `‹TODO› rotate runbook`, `<TODO> rotate runbook`, `＜TODO＞rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`, `TODO; rotate runbook`, `TASK；follow up on release checklist`.
-- More accepted compact examples: `> - (1) [ ] TASK: clean desk`, `>> (iv) [ ] TODO: clean desk`.
+- matches `kind == "task"`, or summaries starting with `TODO`, `TASK`, or `REMINDER`
+- supports plain forms, bracketed forms, markdown list/checklist wrappers, blockquotes, ordered-list prefixes, and common international punctuation
+- example formats: `TODO: rotate runbook`, `- [ ] TASK: review PR`, `> TODO follow up with vendor`, `【TODO】 rotate runbook`
+- see `docs/upgrade-checklist.md` for the full matcher contract and exhaustive accepted forms
 - Example run:
 
 ```bash
@@ -179,6 +203,8 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem optimize review --json -
 ```
 
 This command is zero-write by design in the current release: it only reports candidates (staleness, duplication, bloat, weakly-connected memories, repeated no-result `memory_recall` misses) and suggestions.
+
+If you are using importance grading, this is one of the easiest operator checks for “is bad memory starting to crowd out the good stuff?”
 
 ## Step 7: Autograde toggle (optional)
 

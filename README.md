@@ -1,41 +1,50 @@
 # openclaw-mem
 
-**Local-first memory sidecar for OpenClaw, with an optional hybrid memory engine when you want it to become the active memory backend.**
+**Stop long-running OpenClaw projects from rotting.**
 
-`openclaw-mem` turns your agent’s work into a durable, searchable, auditable memory trail.
-Start with a local SQLite sidecar. Keep your current OpenClaw memory backend if you want. Promote to the optional mem engine later if you need hybrid recall, policy controls, and safer automation.
+`openclaw-mem` is a **local-first memory layer for OpenClaw**.
+It gives your agent a durable, searchable memory ledger so you can answer three questions fast:
+
+- **what changed**
+- **why it changed**
+- **what the agent should still trust**
+
+Start with a local sidecar. Keep your current OpenClaw memory backend if you want. Promote to the optional mem engine later if you need hybrid recall, policy controls, and safer automation.
 
 ## Why people adopt it
 
-- **Local-first by default** — JSONL + SQLite, no external database required.
-- **Inspectable recall loop** — `search → timeline → get` keeps routine lookups fast and auditable.
-- **Deterministic operator tools** — topology query/drift checks, recommendation-only optimization, and explicit JSON receipts.
-- **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
+- **Context drift shows up first in long-running work** — old notes, stale assumptions, and weak signals quietly shape new answers.
+- **Search alone is not enough** — you need a recall path you can inspect, test, and audit.
+- **Receipts beat vibes** — JSON outputs, timeline views, and topology checks make memory behavior easier to verify.
+- **Sidecar-first keeps the risk low** — prove the product locally before changing your main OpenClaw memory slot.
 
-## Who it’s for
+## Best first fit
 
-- **OpenClaw operators** who want memory freshness, auditability, and safer rollbacks.
-- **Agent builders** who need a practical local recall surface before adding more complexity.
-- **Teams with docs / repos / decisions to remember** who want memory to stay explainable.
+`openclaw-mem` is a strong fit when you want OpenClaw to keep working memory sharp across days or weeks of real work.
+
+Typical fits:
+- **OpenClaw operators** who want better recall freshness, auditability, and rollback posture
+- **Agent builders** who need a practical memory surface before adding more complexity
+- **Teams with docs / repos / decisions to remember** who want memory to stay explainable instead of opaque
 
 ## Core capabilities in v1.1.0
 
-- **Graph/query plane (deterministic):** `graph topology-refresh`, `graph query ...`, `graph query drift`, `graph query provenance`.
-- **Graph capture scorer parity:** both `graph capture-git` and `graph capture-md` support `--importance-scorer` (same override model as ingest/harvest).
-- **Optimization observer (zero-write):** `optimize review` plus `optimize policy-loop` for read-only rollout readiness (recall pressure, writeback linkage, lifecycle-shadow + sunrise gate reporting).
-- **Pack policy surfaces (bounded + auditable):** trust policy (`--pack-trust-policy`), graph provenance policy (`--graph-provenance-policy`, `--graph-query-db`), lifecycle shadow logging (`--pack-lifecycle-shadow`), and composed `policy_surface` / trace extensions.
+- **Local recall loop:** `search → timeline → get` keeps routine lookups fast and inspectable.
+- **Graph/query plane:** `graph topology-refresh`, `graph query ...`, `graph query drift`, `graph query provenance`.
+- **Recommendation-only memory hygiene:** `optimize review` plus `optimize policy-loop` for read-only rollout readiness.
+- **Policy-driven safety:** trust policies, graph provenance, and lifecycle logging (`--pack-trust-policy`, `--graph-provenance-policy`, `--graph-query-db`, `--pack-lifecycle-shadow`) keep memory grounded, auditable, and safer for automation.
 - **Episodic event lane:** append/extract/ingest/query/replay with redaction-first defaults.
 - **Optional Mem Engine upgrades:** hybrid recall controls, TODO guardrails, docs cold-lane ingest/search.
 
 ## Three adoption paths
 
 ### 1) Local proof in one repo
-Use this when you just want to see the product work.
+Use this when you want to prove the core story first.
 
 - clone the repo
 - ingest a sample JSONL file
 - run local recall against SQLite
-- no OpenClaw config changes
+- verify that memory is inspectable before touching OpenClaw config
 
 ### 2) Sidecar on an existing OpenClaw install
 Use this when you already run OpenClaw and want better capture, freshness, and observability.
@@ -52,7 +61,12 @@ Use this when you want `openclaw-mem` to own the memory slot.
 - get hybrid recall, bounded automation, and operator-tunable policies
 - keep rollback to native backends as a one-line slot change
 
-## Quick proof (local, no OpenClaw required)
+## 5-minute local proof (no OpenClaw required)
+
+Goal: prove three things in one pass:
+1. memory stays local
+2. recall is inspectable
+3. stale / noisy memory can be reviewed before it pollutes future context
 
 ```bash
 git clone https://github.com/phenomenoner/openclaw-mem.git
@@ -70,7 +84,12 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json timeli
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize review --limit 200
 ```
 
-If that works, your local memory ledger is active and verifiable: you already have an inspectable recall path and a safe recommendation-only optimization pass.
+If that works, you have already shown the core value:
+- memory is local and inspectable
+- you can recover what happened without a black-box backend
+- you can review memory health before trusting it blindly
+
+Want a tighter demo talk track? See [`docs/showcase/inside-out-demo.md`](docs/showcase/inside-out-demo.md).
 
 ## Start here
 
@@ -86,6 +105,10 @@ If that works, your local memory ledger is active and verifiable: you already ha
 - **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
 - **Optional Mem Engine:** [`docs/mem-engine.md`](docs/mem-engine.md)
 
+**Demo / positioning path**
+- **5-minute showcase:** [`docs/showcase/inside-out-demo.md`](docs/showcase/inside-out-demo.md)
+- **About the wedge:** [`docs/about.md`](docs/about.md)
+
 **Operate and extend**
 - **Release checklist:** [`docs/release-checklist.md`](docs/release-checklist.md)
 - **Triage task-marker acceptance (TASK/TODO/REMINDER forms):** [`docs/upgrade-checklist.md`](docs/upgrade-checklist.md)
@@ -99,7 +122,7 @@ If that works, your local memory ledger is active and verifiable: you already ha
 - **Sidecar (default):** capture, ingest, local recall, triage, receipts.
 - **Mem Engine (optional):** an OpenClaw memory-slot backend for hybrid recall and controlled automation.
 
-Deep implementation detail stays in the reference docs; the README is meant to help you decide whether this project matches your setup.
+The README stays focused on the product story: local proof first, sidecar next, engine only when it earns the right to exist.
 
 ## License
 

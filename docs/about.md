@@ -2,7 +2,14 @@
 
 `openclaw-mem` is a **local-first memory layer for OpenClaw**.
 
+Its job is simple: make long-running OpenClaw work easier to trust.
+
 It gives operators a durable record of what the agent actually did, plus a practical recall surface they can inspect, test, and roll back.
+
+In product terms, it helps answer three questions:
+- **what changed**
+- **why it changed**
+- **what should still be trusted**
 
 ## The problem it solves
 
@@ -12,6 +19,7 @@ Most agent memory stories sound good until you need one of these in production:
 - **auditability** for tool outcomes, decisions, and ops breadcrumbs
 - **cheap local lookup** before asking a remote semantic system again
 - **safe rollback** when a memory backend or embedding path gets weird
+- **memory hygiene** so stale or low-signal context does not quietly poison the next decision
 
 `openclaw-mem` exists to make agent memory more transparent, verifiable, and easy to audit.
 
