@@ -81,6 +81,55 @@ class TestGraphTopologyExtract(unittest.TestCase):
             self.assertEqual(provenance_groups.get("cron_jobs"), 1)
             self.assertEqual(provenance_groups.get("cron_spec"), 3)
 
+    def test_extract_topology_seed_normalizes_openclaw_workspace_env_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "workspace"
+            workspace.mkdir(parents=True)
+            (workspace / "repo-alpha").mkdir()
+            (workspace / "repo-alpha" / ".git").mkdir()
+
+            cron_jobs_path = root / "jobs.json"
+            cron_jobs_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "jobs": [
+                            {
+                                "id": "job-alpha",
+                                "name": "alpha",
+                                "enabled": True,
+                                "schedule": {"kind": "cron", "expr": "0 * * * *", "tz": "UTC"},
+                                "delivery": {"mode": "none", "channel": "telegram", "to": "telegram:1"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            spec_dir = workspace / "openclaw-async-coding-playbook" / "cron" / "jobs"
+            spec_dir.mkdir(parents=True)
+            (spec_dir / "job-alpha.md").write_text(
+                "- exec: python3 $OPENCLAW_WORKSPACE/repo-alpha/tools/run.py\n"
+                "- ref: ${OPENCLAW_WORKSPACE}/repo-alpha/docs/receipt.json\n",
+                encoding="utf-8",
+            )
+
+            out = extract_topology_seed(
+                workspace=workspace,
+                cron_jobs_path=cron_jobs_path,
+                spec_dir=spec_dir,
+            )
+
+            derived_paths = {
+                node.get("metadata", {}).get("path")
+                for node in out["nodes"]
+                if str(node.get("id", "")).startswith(("script.path.", "artifact.path."))
+            }
+            self.assertIn((workspace / "repo-alpha" / "tools" / "run.py").as_posix(), derived_paths)
+            self.assertIn((workspace / "repo-alpha" / "docs" / "receipt.json").as_posix(), derived_paths)
+
     def test_cmd_graph_topology_extract_writes_seed_and_emits_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
