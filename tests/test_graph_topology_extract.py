@@ -77,6 +77,10 @@ class TestGraphTopologyExtract(unittest.TestCase):
             self.assertGreaterEqual(edge_types.get("reads", 0), 1)
             self.assertGreaterEqual(edge_types.get("runs", 0), 1)
 
+            provenance_groups = out_a["counts"]["provenance_groups"]
+            self.assertEqual(provenance_groups.get("cron_jobs"), 1)
+            self.assertEqual(provenance_groups.get("cron_spec"), 3)
+
     def test_cmd_graph_topology_extract_writes_seed_and_emits_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -135,6 +139,7 @@ class TestGraphTopologyExtract(unittest.TestCase):
                 self.assertTrue(receipt["result"]["ok"])
                 self.assertEqual(receipt["result"]["cron_job_count"], 1)
                 self.assertEqual(receipt["result"]["spec_count"], 1)
+                self.assertEqual(receipt["result"]["provenance_groups"], {"cron_spec": 2})
 
                 seed = json.loads(out_path.read_text(encoding="utf-8"))
                 self.assertEqual(seed["kind"], "openclaw-mem.graph.topology-seed.v0")
@@ -198,6 +203,7 @@ class TestGraphTopologyExtract(unittest.TestCase):
                 receipt = json.loads(buf.getvalue())
                 self.assertEqual(receipt["result"]["ok"], True)
                 self.assertEqual(receipt["result"]["spec_count"], 1)
+                self.assertEqual(receipt["result"]["provenance_groups"], {"cron_spec": 2})
                 self.assertEqual(receipt["spec_dir"], str(default_spec_dir.resolve()))
             finally:
                 conn.close()

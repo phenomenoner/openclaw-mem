@@ -156,6 +156,33 @@ def _path_node(path_token: str) -> Dict[str, Any]:
     }
 
 
+def _provenance_group(
+    provenance: str,
+    *,
+    workspace_path: Path,
+    cron_jobs_file: Path,
+    spec_dir_path: Path,
+) -> str:
+    token = str(provenance or "").strip()
+    if not token:
+        return "unknown"
+
+    source = token.split("#", 1)[0].strip()
+    if not source:
+        return "unknown"
+
+    source_path = Path(source)
+    if not source_path.is_absolute():
+        source_path = workspace_path / source_path
+    source_path = source_path.resolve()
+
+    if source_path == cron_jobs_file:
+        return "cron_jobs"
+    if source_path.parent == spec_dir_path:
+        return "cron_spec"
+    return "other"
+
+
 def extract_topology_seed(
     *,
     workspace: str | Path,
@@ -312,6 +339,16 @@ def extract_topology_seed(
         t = str(edge.get("type") or "unknown")
         edge_type_counts[t] = edge_type_counts.get(t, 0) + 1
 
+    provenance_group_counts: Dict[str, int] = {}
+    for edge in edges:
+        group = _provenance_group(
+            str(edge.get("provenance") or ""),
+            workspace_path=workspace_path,
+            cron_jobs_file=cron_jobs_file,
+            spec_dir_path=spec_dir_path,
+        )
+        provenance_group_counts[group] = provenance_group_counts.get(group, 0) + 1
+
     return {
         "kind": "openclaw-mem.graph.topology-seed.v0",
         "generated_at": _utc_now_iso(),
@@ -328,6 +365,10 @@ def extract_topology_seed(
             "edges": len(edges),
             "node_types": node_type_counts,
             "edge_types": edge_type_counts,
+            "provenance_groups": {
+                group: provenance_group_counts[group]
+                for group in sorted(provenance_group_counts)
+            },
         },
         "nodes": nodes,
         "edges": edges,
