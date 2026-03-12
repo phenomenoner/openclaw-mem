@@ -1,0 +1,394 @@
+{
+  "kind": "openclaw-mem.showcase.trust-aware-context-pack.metrics.v1",
+  "fixture_path": "docs/showcase/artifacts/trust-aware-context-pack.synthetic.jsonl",
+  "query": "trust-aware context packing prompt pack receipts hostile durable memory provenance",
+  "ingest": {
+    "inserted": 6,
+    "label_counts": {
+      "must_remember": 4,
+      "nice_to_have": 2,
+      "ignore": 0,
+      "unknown": 0
+    }
+  },
+  "before": {
+    "path": "docs/showcase/artifacts/trust-aware-context-pack.before.json",
+    "selected_refs": [
+      "obs:1",
+      "obs:2",
+      "obs:5",
+      "obs:3",
+      "obs:4"
+    ],
+    "selected_count": 5,
+    "selected_by_trust": {
+      "quarantined": 1,
+      "trusted": 3,
+      "unknown": 1
+    },
+    "bundle_chars": 773,
+    "citation_count": 5,
+    "coverage": {
+      "rationaleMissingCount": 0,
+      "citationMissingCount": 0,
+      "allIncludedHaveRationale": true,
+      "allIncludedHaveCitations": true
+    },
+    "lifecycle_counts": {
+      "selected_total": 5,
+      "citation_total": 5,
+      "candidate_total": 6,
+      "excluded_total": 1,
+      "selected_by_trust": {
+        "quarantined": 1,
+        "trusted": 3,
+        "unknown": 1
+      },
+      "selected_by_importance": {
+        "must_remember": 3,
+        "nice_to_have": 2
+      }
+    },
+    "lifecycle_mutation": {
+      "memory_mutation": "none",
+      "auto_archive_applied": 0,
+      "auto_mutation_applied": 0,
+      "writes_observations": 0,
+      "writes_embeddings": 0,
+      "writes_lifecycle_state": 0,
+      "writes_shadow_log": 1
+    },
+    "candidate_reasons": {
+      "obs:1": {
+        "trust": "trusted",
+        "included": true,
+        "reason": [
+          "within_item_limit",
+          "within_budget",
+          "matched_fts"
+        ]
+      },
+      "obs:2": {
+        "trust": "trusted",
+        "included": true,
+        "reason": [
+          "within_item_limit",
+          "within_budget",
+          "matched_fts"
+        ]
+      },
+      "obs:5": {
+        "trust": "unknown",
+        "included": true,
+        "reason": [
+          "within_item_limit",
+          "within_budget",
+          "matched_fts"
+        ]
+      },
+      "obs:3": {
+        "trust": "trusted",
+        "included": true,
+        "reason": [
+          "within_item_limit",
+          "within_budget",
+          "matched_fts"
+        ]
+      },
+      "obs:4": {
+        "trust": "quarantined",
+        "included": true,
+        "reason": [
+          "within_item_limit",
+          "within_budget",
+          "matched_fts"
+        ]
+      },
+      "obs:6": {
+        "trust": "trusted",
+        "included": false,
+        "reason": [
+          "max_items_reached"
+        ]
+      }
+    }
+  },
+  "after": {
+    "path": "docs/showcase/artifacts/trust-aware-context-pack.after.json",
+    "selected_refs": [
+      "obs:1",
+      "obs:2",
+      "obs:5",
+      "obs:3",
+      "obs:6"
+    ],
+    "selected_count": 5,
+    "selected_by_trust": {
+      "trusted": 4,
+      "unknown": 1
+    },
+    "bundle_chars": 680,
+    "citation_count": 5,
+    "coverage": {
+      "rationaleMissingCount": 0,
+      "citationMissingCount": 0,
+      "allIncludedHaveRationale": true,
+      "allIncludedHaveCitations": true
+    },
+    "lifecycle_counts": {
+      "selected_total": 5,
+      "citation_total": 5,
+      "candidate_total": 6,
+      "excluded_total": 1,
+      "selected_by_trust": {
+        "trusted": 4,
+        "unknown": 1
+      },
+      "selected_by_importance": {
+        "must_remember": 4,
+        "nice_to_have": 1
+      }
+    },
+    "lifecycle_mutation": {
+      "memory_mutation": "none",
+      "auto_archive_applied": 0,
+      "auto_mutation_applied": 0,
+      "writes_observations": 0,
+      "writes_embeddings": 0,
+      "writes_lifecycle_state": 0,
+      "writes_shadow_log": 1
+    },
+    "trust_policy": {
+      "kind": "openclaw-mem.pack.trust-policy.v1",
+      "mode": "exclude_quarantined_fail_open",
+      "checked_count": 6,
+      "included_count": 5,
+      "excluded_count": 1,
+      "fail_open_count": 1,
+      "decision_reason_counts": {
+        "trust_allowed": 4,
+        "trust_quarantined_excluded": 1,
+        "trust_unknown_fail_open": 1
+      },
+      "decisions": [
+        {
+          "recordRef": "obs:1",
+          "trust": "trusted",
+          "included": true,
+          "reason": "trust_allowed",
+          "fail_open": false,
+          "error_code": null
+        },
+        {
+          "recordRef": "obs:2",
+          "trust": "trusted",
+          "included": true,
+          "reason": "trust_allowed",
+          "fail_open": false,
+          "error_code": null
+        },
+        {
+          "recordRef": "obs:5",
+          "trust": "unknown",
+          "included": true,
+          "reason": "trust_unknown_fail_open",
+          "fail_open": true,
+          "error_code": null
+        },
+        {
+          "recordRef": "obs:3",
+          "trust": "trusted",
+          "included": true,
+          "reason": "trust_allowed",
+          "fail_open": false,
+          "error_code": null
+        },
+        {
+          "recordRef": "obs:4",
+          "trust": "quarantined",
+          "included": false,
+          "reason": "trust_quarantined_excluded",
+          "fail_open": false,
+          "error_code": null
+        },
+        {
+          "recordRef": "obs:6",
+          "trust": "trusted",
+          "included": true,
+          "reason": "trust_allowed",
+          "fail_open": false,
+          "error_code": null
+        }
+      ],
+      "selected_refs": [
+        "obs:1",
+        "obs:2",
+        "obs:5",
+        "obs:3",
+        "obs:6"
+      ]
+    },
+    "policy_surface": {
+      "kind": "openclaw-mem.pack.policy-surface.v1",
+      "selection": {
+        "pack_selected_refs": [
+          "obs:1",
+          "obs:2",
+          "obs:5",
+          "obs:3",
+          "obs:6"
+        ],
+        "citation_record_refs": [
+          "obs:1",
+          "obs:2",
+          "obs:5",
+          "obs:3",
+          "obs:6"
+        ],
+        "trust_selected_refs": [
+          "obs:1",
+          "obs:2",
+          "obs:5",
+          "obs:3",
+          "obs:6"
+        ],
+        "graph_selected_refs": null,
+        "shared_pack_and_graph_refs": null
+      },
+      "counts": {
+        "pack_selected_count": 5,
+        "citation_count": 5,
+        "candidate_count": 6,
+        "pack_excluded_count": 1
+      },
+      "reasons": {
+        "pack_included_reason_counts": {
+          "matched_fts": 5,
+          "trust_allowed": 4,
+          "trust_unknown_fail_open": 1,
+          "within_budget": 5,
+          "within_item_limit": 5
+        },
+        "pack_excluded_reason_counts": {
+          "trust_quarantined_excluded": 1
+        },
+        "trust_policy_reason_counts": {
+          "trust_allowed": 4,
+          "trust_quarantined_excluded": 1,
+          "trust_unknown_fail_open": 1
+        },
+        "graph_provenance_reason_counts": {}
+      },
+      "policies": {
+        "trust_policy": {
+          "kind": "openclaw-mem.pack.trust-policy.v1",
+          "mode": "exclude_quarantined_fail_open",
+          "checked_count": 6,
+          "included_count": 5,
+          "excluded_count": 1,
+          "fail_open_count": 1,
+          "decision_reason_counts": {
+            "trust_allowed": 4,
+            "trust_quarantined_excluded": 1,
+            "trust_unknown_fail_open": 1
+          },
+          "selected_refs": [
+            "obs:1",
+            "obs:2",
+            "obs:5",
+            "obs:3",
+            "obs:6"
+          ]
+        },
+        "graph_provenance_policy": null
+      },
+      "consistency": {
+        "pack_items_match_citations": true,
+        "pack_items_subset_of_trust_selected_refs": true,
+        "pack_items_missing_from_trust_selected_refs": []
+      }
+    },
+    "candidate_reasons": {
+      "obs:1": {
+        "trust": "trusted",
+        "included": true,
+        "reason": [
+          "trust_allowed",
+          "within_item_limit",
+          "within_budget",
+          "matched_fts"
+        ]
+      },
+      "obs:2": {
+        "trust": "trusted",
+        "included": true,
+        "reason": [
+          "trust_allowed",
+          "within_item_limit",
+          "within_budget",
+          "matched_fts"
+        ]
+      },
+      "obs:5": {
+        "trust": "unknown",
+        "included": true,
+        "reason": [
+          "trust_unknown_fail_open",
+          "within_item_limit",
+          "within_budget",
+          "matched_fts"
+        ]
+      },
+      "obs:3": {
+        "trust": "trusted",
+        "included": true,
+        "reason": [
+          "trust_allowed",
+          "within_item_limit",
+          "within_budget",
+          "matched_fts"
+        ]
+      },
+      "obs:4": {
+        "trust": "quarantined",
+        "included": false,
+        "reason": [
+          "trust_quarantined_excluded"
+        ]
+      },
+      "obs:6": {
+        "trust": "trusted",
+        "included": true,
+        "reason": [
+          "trust_allowed",
+          "within_item_limit",
+          "within_budget",
+          "matched_fts"
+        ]
+      }
+    }
+  },
+  "delta": {
+    "bundle_chars_actual": -93,
+    "bundle_chars_reduction": 93,
+    "bundle_chars_reduction_pct": 12.0,
+    "quarantined_selected": {
+      "before": 1,
+      "after": 0
+    },
+    "trusted_selected": {
+      "before": 3,
+      "after": 4
+    },
+    "unknown_selected": {
+      "before": 1,
+      "after": 1
+    },
+    "swapped_out_refs": [
+      "obs:4"
+    ],
+    "swapped_in_refs": [
+      "obs:6"
+    ]
+  }
+}

@@ -1,22 +1,42 @@
 # openclaw-mem
 
-**Stop long-running OpenClaw projects from rotting.**
+**Trust-aware context packing for OpenClaw.**
 
-`openclaw-mem` is a **local-first memory layer for OpenClaw**.
-It gives your agent a durable, searchable memory ledger so you can answer three questions fast:
+`openclaw-mem` is a **local-first memory layer for OpenClaw** that helps you pack the right durable facts into context **without** dragging stale, untrusted, or hostile content into every prompt.
 
-- **what changed**
-- **why it changed**
-- **what the agent should still trust**
+It is built around four operator outcomes:
 
-Start with a local sidecar. Keep your current OpenClaw memory backend if you want. Promote to the optional mem engine later if you need hybrid recall, policy controls, and safer automation.
+- **smaller prompt packs** instead of dumping whole memory logs into chat
+- **explicit trust tiers** so quarantined material can stay visible without being silently injected
+- **recordRef citations + trace receipts** so you can inspect why something was included, excluded, or left fail-open
+- **safer memory admission / recall** before low-signal content becomes durable memory
+
+## See the proof first
+
+- **Canonical proof artifact:** [`docs/showcase/trust-aware-context-pack-proof.md`](docs/showcase/trust-aware-context-pack-proof.md)
+- **Before/after metrics artifact:** [`docs/showcase/artifacts/trust-aware-context-pack.metrics.json`](docs/showcase/artifacts/trust-aware-context-pack.metrics.json)
+- **Synthetic fixture + receipts:** [`docs/showcase/artifacts/index.md`](docs/showcase/artifacts/index.md)
+- **Companion 5-minute demo:** [`docs/showcase/inside-out-demo.md`](docs/showcase/inside-out-demo.md)
+
+Start with a local sidecar. Keep your current OpenClaw memory backend if you want. Promote to the optional mem engine later if you need hybrid recall, policy controls, and bounded automation.
 
 ## Why people adopt it
 
-- **Context drift shows up first in long-running work** — old notes, stale assumptions, and weak signals quietly shape new answers.
-- **Search alone is not enough** — you need a recall path you can inspect, test, and audit.
-- **Receipts beat vibes** — JSON outputs, timeline views, and topology checks make memory behavior easier to verify.
-- **Sidecar-first keeps the risk low** — prove the product locally before changing your main OpenClaw memory slot.
+- **Long-running agent failures are often admission failures, not storage failures.** Old notes, stale assumptions, scraped suggestions, and hostile instructions can quietly shape future answers.
+- **Search alone is not enough.** You need a pack you can inspect, test, and audit before trusting it.
+- **Smaller, cited packs beat giant context dumps.** They are cheaper to inject, easier to reason about, and safer to debug.
+- **Receipts beat vibes.** JSON outputs, pack traces, policy surfaces, and lifecycle shadow logs make memory behavior visible.
+- **Sidecar-first keeps the risk low.** Prove the product locally before touching your OpenClaw memory slot.
+
+## What ships today in v1.1.0
+
+- **Local recall loop:** `search → timeline → get` keeps routine lookups fast and inspectable.
+- **Trust-aware pack surfaces:** `pack`, `--trace`, `--pack-trust-policy`, `policy_surface`, and `pack_lifecycle_shadow` provide inclusion/exclusion receipts.
+- **Graph/provenance surfaces:** `graph topology-refresh`, `graph query ...`, drift checks, and graph provenance gating for graph-derived pack candidates.
+- **Recommendation-only memory hygiene:** `optimize review` plus `optimize policy-loop` for read-only rollout readiness.
+- **Policy-driven safety:** trust policies, graph provenance, and lifecycle logging (`--pack-trust-policy`, `--graph-provenance-policy`, `--graph-query-db`, `--pack-lifecycle-shadow`) keep memory grounded, auditable, and safer for automation.
+- **Episodic event lane:** append/extract/ingest/query/replay with redaction-first defaults.
+- **Optional Mem Engine upgrades:** hybrid recall controls, TODO guardrails, docs cold-lane ingest/search.
 
 ## Best first fit
 
@@ -27,24 +47,15 @@ Typical fits:
 - **Agent builders** who need a practical memory surface before adding more complexity
 - **Teams with docs / repos / decisions to remember** who want memory to stay explainable instead of opaque
 
-## Core capabilities in v1.1.0
-
-- **Local recall loop:** `search → timeline → get` keeps routine lookups fast and inspectable.
-- **Graph/query plane:** `graph topology-refresh`, `graph query ...`, `graph query drift`, `graph query provenance`.
-- **Recommendation-only memory hygiene:** `optimize review` plus `optimize policy-loop` for read-only rollout readiness.
-- **Policy-driven safety:** trust policies, graph provenance, and lifecycle logging (`--pack-trust-policy`, `--graph-provenance-policy`, `--graph-query-db`, `--pack-lifecycle-shadow`) keep memory grounded, auditable, and safer for automation.
-- **Episodic event lane:** append/extract/ingest/query/replay with redaction-first defaults.
-- **Optional Mem Engine upgrades:** hybrid recall controls, TODO guardrails, docs cold-lane ingest/search.
-
 ## Three adoption paths
 
 ### 1) Local proof in one repo
-Use this when you want to prove the core story first.
+Use this when you want to prove the wedge first.
 
 - clone the repo
-- ingest a sample JSONL file
-- run local recall against SQLite
-- verify that memory is inspectable before touching OpenClaw config
+- ingest a synthetic trust-aware fixture
+- run `pack` before/after a trust policy
+- inspect the receipts before touching OpenClaw config
 
 ### 2) Sidecar on an existing OpenClaw install
 Use this when you already run OpenClaw and want better capture, freshness, and observability.
@@ -52,7 +63,7 @@ Use this when you already run OpenClaw and want better capture, freshness, and o
 - keep your current memory slot (`memory-core` or `memory-lancedb`)
 - enable the capture plugin
 - schedule `harvest`
-- use `openclaw-mem` for local recall, triage, and receipts
+- use `openclaw-mem` for local recall, triage, and pack receipts
 
 ### 3) Promote the optional Mem Engine
 Use this when you want `openclaw-mem` to own the memory slot.
@@ -64,32 +75,43 @@ Use this when you want `openclaw-mem` to own the memory slot.
 ## 5-minute local proof (no OpenClaw required)
 
 Goal: prove three things in one pass:
-1. memory stays local
-2. recall is inspectable
-3. stale / noisy memory can be reviewed before it pollutes future context
+1. the same query can change selection when trust policy is enabled
+2. quarantined / hostile memory does not have to pollute the pack
+3. citations and receipts stay intact
 
 ```bash
 git clone https://github.com/phenomenoner/openclaw-mem.git
 cd openclaw-mem
 uv sync --locked
 
-DB=/tmp/openclaw-mem.sqlite
-python3 ./scripts/make_sample_jsonl.py --out /tmp/openclaw-mem-sample.jsonl
+DB=/tmp/openclaw-mem-proof.sqlite
+uv run --python 3.13 --frozen -- python -m openclaw_mem ingest \
+  --db "$DB" \
+  --json \
+  --file ./docs/showcase/artifacts/trust-aware-context-pack.synthetic.jsonl
 
-uv run --python 3.13 --frozen -- python -m openclaw_mem --help
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json status
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json ingest --file /tmp/openclaw-mem-sample.jsonl
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json search "OpenClaw" --limit 5
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json timeline 2 --window 2
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize review --limit 200
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
+  --db "$DB" \
+  --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
+  --limit 5 \
+  --budget-tokens 500 \
+  --trace
+
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
+  --db "$DB" \
+  --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
+  --limit 5 \
+  --budget-tokens 500 \
+  --trace \
+  --pack-trust-policy exclude_quarantined_fail_open
 ```
 
-If that works, you have already shown the core value:
-- memory is local and inspectable
-- you can recover what happened without a black-box backend
-- you can review memory health before trusting it blindly
+If that works, you have already shown the wedge:
+- the same query can exclude quarantined memory with an explicit reason
+- the pack stays compact and cited
+- the selection remains inspectable through `trace`, `policy_surface`, and `lifecycle_shadow`
 
-Want a tighter demo talk track? See [`docs/showcase/inside-out-demo.md`](docs/showcase/inside-out-demo.md).
+Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proof.md`](docs/showcase/trust-aware-context-pack-proof.md).
 
 ## Start here
 
@@ -105,9 +127,11 @@ Want a tighter demo talk track? See [`docs/showcase/inside-out-demo.md`](docs/sh
 - **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
 - **Optional Mem Engine:** [`docs/mem-engine.md`](docs/mem-engine.md)
 
-**Demo / positioning path**
+**Proof / showcase path**
+- **Canonical proof:** [`docs/showcase/trust-aware-context-pack-proof.md`](docs/showcase/trust-aware-context-pack-proof.md)
 - **5-minute showcase:** [`docs/showcase/inside-out-demo.md`](docs/showcase/inside-out-demo.md)
 - **About the wedge:** [`docs/about.md`](docs/about.md)
+- **Copy pack:** [`docs/launch/trust-aware-context-pack-copy-pack.md`](docs/launch/trust-aware-context-pack-copy-pack.md)
 
 **Operate and extend**
 - **Release checklist:** [`docs/release-checklist.md`](docs/release-checklist.md)
@@ -119,10 +143,10 @@ Want a tighter demo talk track? See [`docs/showcase/inside-out-demo.md`](docs/sh
 
 `openclaw-mem` has two parts:
 
-- **Sidecar (default):** capture, ingest, local recall, triage, receipts.
+- **Sidecar (default):** capture, ingest, local recall, triage, pack receipts.
 - **Mem Engine (optional):** an OpenClaw memory-slot backend for hybrid recall and controlled automation.
 
-The README stays focused on the product story: local proof first, sidecar next, engine only when it earns the right to exist.
+The README stays focused on the product story: prove trust-aware context packing locally first, sidecar next, engine only when it earns the right to exist.
 
 ## License
 

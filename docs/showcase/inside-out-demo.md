@@ -1,5 +1,7 @@
 # Inside-Out Memory — 5-minute reproducible demo (synthetic)
 
+> If you want the stricter trust-gating proof first, start with [trust-aware context pack proof](trust-aware-context-pack-proof.md).
+
 This demo is **synthetic** (no private/user data). It is the shortest clean showcase for the `openclaw-mem` wedge:
 
 - a small set of stable preferences / constraints is stored once

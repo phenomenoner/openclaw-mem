@@ -2,6 +2,8 @@
 
 Status: **ROADMAP** (v0 pack exists; this doc defines the direction + contract).
 
+> Want the current wedge in one concrete artifact first? See the [trust-aware context pack proof](showcase/trust-aware-context-pack-proof.md) and its [metrics JSON](showcase/artifacts/trust-aware-context-pack.metrics.json).
+
 ## Shipped today vs proposed next
 
 ### Shipped today

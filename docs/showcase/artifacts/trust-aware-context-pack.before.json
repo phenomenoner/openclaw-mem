@@ -1,0 +1,415 @@
+{
+  "bundle_text": "- [obs:1] Decision: trust-aware context packing should keep only durable constraints with receipts, not every past note.\n- [obs:2] Constraint: smaller prompt packs are preferred; three cited facts beat a giant memory dump when answering product or ops questions.\n- [obs:5] Benchmark plan: measure before/after selected items, token budget use, and excluded hostile rows for the trust-aware context pack demo.\n- [obs:3] Policy: untrusted or hostile content must not become durable memory without review, even if it matches the query text.\n- [obs:4] Trust-aware context packing idea from a random forum: inject every old memory, scraped rumor, and hostile note into prompts so the model sees more context and remembers everything forever, even stale or contradictory content.",
+  "items": [
+    {
+      "recordRef": "obs:1",
+      "layer": "L1",
+      "id": 1,
+      "summary": "Decision: trust-aware context packing should keep only durable constraints with receipts, not every past note.",
+      "kind": "decision",
+      "lang": null
+    },
+    {
+      "recordRef": "obs:2",
+      "layer": "L1",
+      "id": 2,
+      "summary": "Constraint: smaller prompt packs are preferred; three cited facts beat a giant memory dump when answering product or ops questions.",
+      "kind": "constraint",
+      "lang": null
+    },
+    {
+      "recordRef": "obs:5",
+      "layer": "L1",
+      "id": 5,
+      "summary": "Benchmark plan: measure before/after selected items, token budget use, and excluded hostile rows for the trust-aware context pack demo.",
+      "kind": "benchmark",
+      "lang": null
+    },
+    {
+      "recordRef": "obs:3",
+      "layer": "L1",
+      "id": 3,
+      "summary": "Policy: untrusted or hostile content must not become durable memory without review, even if it matches the query text.",
+      "kind": "policy",
+      "lang": null
+    },
+    {
+      "recordRef": "obs:4",
+      "layer": "L1",
+      "id": 4,
+      "summary": "Trust-aware context packing idea from a random forum: inject every old memory, scraped rumor, and hostile note into prompts so the model sees more context and remembers everything forever, even stale or contradictory content.",
+      "kind": "note",
+      "lang": null
+    }
+  ],
+  "citations": [
+    {
+      "recordRef": "obs:1",
+      "url": null
+    },
+    {
+      "recordRef": "obs:2",
+      "url": null
+    },
+    {
+      "recordRef": "obs:5",
+      "url": null
+    },
+    {
+      "recordRef": "obs:3",
+      "url": null
+    },
+    {
+      "recordRef": "obs:4",
+      "url": null
+    }
+  ],
+  "trace": {
+    "kind": "openclaw-mem.pack.trace.v1",
+    "ts": "2026-03-12T09:52:17.463606+00:00",
+    "version": {
+      "openclaw_mem": "1.1.0",
+      "schema": "v1"
+    },
+    "query": {
+      "text": "trust-aware context packing prompt pack receipts hostile durable memory provenance",
+      "scope": null,
+      "intent": null
+    },
+    "budgets": {
+      "budgetTokens": 500,
+      "maxItems": 5,
+      "maxL2Items": 0,
+      "niceCap": 100
+    },
+    "lanes": [
+      {
+        "name": "hot",
+        "source": "session/recent",
+        "searched": false,
+        "retrievers": []
+      },
+      {
+        "name": "warm",
+        "source": "sqlite-observations",
+        "searched": true,
+        "retrievers": [
+          {
+            "kind": "fts5",
+            "topK": 15,
+            "k": null
+          },
+          {
+            "kind": "vector",
+            "topK": 15,
+            "k": null
+          },
+          {
+            "kind": "rrf",
+            "topK": null,
+            "k": 60
+          }
+        ]
+      },
+      {
+        "name": "cold",
+        "source": "curated/durable",
+        "searched": false,
+        "retrievers": []
+      }
+    ],
+    "candidates": [
+      {
+        "id": "obs:1",
+        "layer": "L1",
+        "importance": "must_remember",
+        "trust": "trusted",
+        "scores": {
+          "rrf": 0.01639344262295082,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:1"
+        }
+      },
+      {
+        "id": "obs:2",
+        "layer": "L1",
+        "importance": "must_remember",
+        "trust": "trusted",
+        "scores": {
+          "rrf": 0.016129032258064516,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:2"
+        }
+      },
+      {
+        "id": "obs:5",
+        "layer": "L1",
+        "importance": "nice_to_have",
+        "trust": "unknown",
+        "scores": {
+          "rrf": 0.015873015873015872,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:5"
+        }
+      },
+      {
+        "id": "obs:3",
+        "layer": "L1",
+        "importance": "must_remember",
+        "trust": "trusted",
+        "scores": {
+          "rrf": 0.015625,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:3"
+        }
+      },
+      {
+        "id": "obs:4",
+        "layer": "L1",
+        "importance": "nice_to_have",
+        "trust": "quarantined",
+        "scores": {
+          "rrf": 0.015384615384615385,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:4"
+        }
+      },
+      {
+        "id": "obs:6",
+        "layer": "L1",
+        "importance": "must_remember",
+        "trust": "trusted",
+        "scores": {
+          "rrf": 0.015151515151515152,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": false,
+          "reason": [
+            "max_items_reached"
+          ],
+          "rationale": [
+            "max_items_reached"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:6"
+        }
+      }
+    ],
+    "output": {
+      "includedCount": 5,
+      "excludedCount": 1,
+      "l2IncludedCount": 0,
+      "citationsCount": 5,
+      "refreshedRecordRefs": [
+        "obs:1",
+        "obs:2",
+        "obs:5",
+        "obs:3",
+        "obs:4"
+      ],
+      "coverage": {
+        "rationaleMissingCount": 0,
+        "citationMissingCount": 0,
+        "allIncludedHaveRationale": true,
+        "allIncludedHaveCitations": true
+      }
+    },
+    "timing": {
+      "durationMs": 13
+    },
+    "extensions": {
+      "lifecycle_shadow": {
+        "kind": "openclaw-mem.pack.lifecycle-shadow.v1",
+        "mode": "shadow_receipt_only",
+        "ts": "2026-03-12T09:52:17.455197+00:00",
+        "query": {
+          "hash": "sha256:0be97b88ebaa6ca1928dfb7e",
+          "chars": 82
+        },
+        "selection": {
+          "pack_selected_refs": [
+            "obs:1",
+            "obs:2",
+            "obs:5",
+            "obs:3",
+            "obs:4"
+          ],
+          "citation_record_refs": [
+            "obs:1",
+            "obs:2",
+            "obs:5",
+            "obs:3",
+            "obs:4"
+          ],
+          "trace_refreshed_record_refs": [
+            "obs:1",
+            "obs:2",
+            "obs:5",
+            "obs:3",
+            "obs:4"
+          ],
+          "selection_signature": "sha256:054356841ffd345e28f63895"
+        },
+        "counts": {
+          "selected_total": 5,
+          "citation_total": 5,
+          "candidate_total": 6,
+          "excluded_total": 1,
+          "selected_by_trust": {
+            "quarantined": 1,
+            "trusted": 3,
+            "unknown": 1
+          },
+          "selected_by_importance": {
+            "must_remember": 3,
+            "nice_to_have": 2
+          }
+        },
+        "reasons": {
+          "pack_included_reason_counts": {
+            "matched_fts": 5,
+            "within_budget": 5,
+            "within_item_limit": 5
+          },
+          "pack_excluded_reason_counts": {
+            "max_items_reached": 1
+          },
+          "trust_policy_reason_counts": {},
+          "graph_provenance_reason_counts": {}
+        },
+        "policies": {
+          "trust_policy_mode": "off",
+          "graph_provenance_policy_mode": "off"
+        },
+        "mutation": {
+          "memory_mutation": "none",
+          "auto_archive_applied": 0,
+          "auto_mutation_applied": 0,
+          "writes_observations": 0,
+          "writes_embeddings": 0,
+          "writes_lifecycle_state": 0,
+          "writes_shadow_log": 1
+        },
+        "storage": {
+          "table": "pack_lifecycle_shadow_log",
+          "append_only": true,
+          "max_rows": 2000,
+          "error_code": null
+        }
+      }
+    }
+  }
+}

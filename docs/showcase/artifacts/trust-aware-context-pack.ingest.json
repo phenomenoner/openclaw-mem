@@ -1,0 +1,22 @@
+{
+  "inserted": 6,
+  "ids": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "total_seen": 6,
+  "graded_filled": 0,
+  "skipped_existing": 6,
+  "skipped_disabled": 0,
+  "scorer_errors": 0,
+  "label_counts": {
+    "must_remember": 4,
+    "nice_to_have": 2,
+    "ignore": 0,
+    "unknown": 0
+  }
+}

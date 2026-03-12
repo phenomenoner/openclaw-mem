@@ -1,45 +1,55 @@
 # openclaw-mem
 
-**Local-first memory sidecar for OpenClaw, with an optional hybrid memory engine when you want more control.**
+**Trust-aware context packing for OpenClaw.**
 
-This docs site is organized to answer three questions in order:
+This docs site is organized around one wedge first:
 
-1. **What is this product, really?**
-2. **Which install path fits my setup?**
-3. **Where do I go for proof, deployment, and deep reference?**
+- keep prompt packs **small**
+- keep selection **inspectable**
+- keep trust tiers and provenance **visible**
+- keep stale / untrusted / hostile content from quietly polluting future answers
 
 ## Start here
 
-- [About openclaw-mem](about.md) — product story, problem, audience, and boundaries
-- [Choose an install path](install-modes.md) — the three adoption modes and when each one makes sense
-- [Quickstart](quickstart.md) — fastest local proof
+- [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md) — canonical before/after artifact
+- [About openclaw-mem](about.md) — product story, wedge, audience, and boundaries
+- [Quickstart](quickstart.md) — fastest local proof from a fresh clone
 - [Reality check & status](reality-check.md) — what is done, partial, and roadmap
+
+## Proof artifacts
+
+- [Metrics JSON](showcase/artifacts/trust-aware-context-pack.metrics.json)
+- [Synthetic fixture + receipts](showcase/artifacts/index.md)
+- [Inside-Out demo](showcase/inside-out-demo.md)
 
 ## Product shape
 
 `openclaw-mem` is intentionally split into two layers:
 
-- **Sidecar (default)** — capture, ingest, local recall, triage, graph query/drift checks, receipts
+- **Sidecar (default)** — capture, ingest, local recall, pack receipts, graph query/drift checks, hygiene review
 - **Mem Engine (optional)** — memory-slot backend for hybrid recall and bounded automation
 
 That split is the core design choice: start with something inspectable and rollbackable, then add power only when it earns its keep.
 
 ## Most common next stops
 
+- [Choose an install path](install-modes.md)
 - [Deployment guide](deployment.md)
 - [Auto-capture plugin](auto-capture.md)
-- [Ecosystem fit](ecosystem-fit.md)
 - [Mem Engine reference](mem-engine.md)
 
 ## Deeper reference
 
-- [Architecture](architecture.md)
 - [Context pack](context-pack.md)
-- [Agent memory skill (SOP)](agent-memory-skill.md)
+- [Architecture](architecture.md)
 - [Importance grading](importance-grading.md)
+- [Agent memory skill (SOP)](agent-memory-skill.md)
 - [Automation status](automation-status.md)
 - [Roadmap](roadmap.md)
-- [Release checklist](release-checklist.md)
+
+## Launch / external copy
+
+- [Trust-aware context pack copy pack](launch/trust-aware-context-pack-copy-pack.md)
 
 ## Releases
 

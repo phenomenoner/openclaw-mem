@@ -1,0 +1,730 @@
+{
+  "bundle_text": "- [obs:1] Decision: trust-aware context packing should keep only durable constraints with receipts, not every past note.\n- [obs:2] Constraint: smaller prompt packs are preferred; three cited facts beat a giant memory dump when answering product or ops questions.\n- [obs:5] Benchmark plan: measure before/after selected items, token budget use, and excluded hostile rows for the trust-aware context pack demo.\n- [obs:3] Policy: untrusted or hostile content must not become durable memory without review, even if it matches the query text.\n- [obs:6] Reminder: every packed item should keep a stable recordRef citation so operators can inspect the original row and its receipt later.",
+  "items": [
+    {
+      "recordRef": "obs:1",
+      "layer": "L1",
+      "id": 1,
+      "summary": "Decision: trust-aware context packing should keep only durable constraints with receipts, not every past note.",
+      "kind": "decision",
+      "lang": null
+    },
+    {
+      "recordRef": "obs:2",
+      "layer": "L1",
+      "id": 2,
+      "summary": "Constraint: smaller prompt packs are preferred; three cited facts beat a giant memory dump when answering product or ops questions.",
+      "kind": "constraint",
+      "lang": null
+    },
+    {
+      "recordRef": "obs:5",
+      "layer": "L1",
+      "id": 5,
+      "summary": "Benchmark plan: measure before/after selected items, token budget use, and excluded hostile rows for the trust-aware context pack demo.",
+      "kind": "benchmark",
+      "lang": null
+    },
+    {
+      "recordRef": "obs:3",
+      "layer": "L1",
+      "id": 3,
+      "summary": "Policy: untrusted or hostile content must not become durable memory without review, even if it matches the query text.",
+      "kind": "policy",
+      "lang": null
+    },
+    {
+      "recordRef": "obs:6",
+      "layer": "L1",
+      "id": 6,
+      "summary": "Reminder: every packed item should keep a stable recordRef citation so operators can inspect the original row and its receipt later.",
+      "kind": "note",
+      "lang": null
+    }
+  ],
+  "citations": [
+    {
+      "recordRef": "obs:1",
+      "url": null
+    },
+    {
+      "recordRef": "obs:2",
+      "url": null
+    },
+    {
+      "recordRef": "obs:5",
+      "url": null
+    },
+    {
+      "recordRef": "obs:3",
+      "url": null
+    },
+    {
+      "recordRef": "obs:6",
+      "url": null
+    }
+  ],
+  "trust_policy": {
+    "kind": "openclaw-mem.pack.trust-policy.v1",
+    "mode": "exclude_quarantined_fail_open",
+    "checked_count": 6,
+    "included_count": 5,
+    "excluded_count": 1,
+    "fail_open_count": 1,
+    "decision_reason_counts": {
+      "trust_allowed": 4,
+      "trust_quarantined_excluded": 1,
+      "trust_unknown_fail_open": 1
+    },
+    "decisions": [
+      {
+        "recordRef": "obs:1",
+        "trust": "trusted",
+        "included": true,
+        "reason": "trust_allowed",
+        "fail_open": false,
+        "error_code": null
+      },
+      {
+        "recordRef": "obs:2",
+        "trust": "trusted",
+        "included": true,
+        "reason": "trust_allowed",
+        "fail_open": false,
+        "error_code": null
+      },
+      {
+        "recordRef": "obs:5",
+        "trust": "unknown",
+        "included": true,
+        "reason": "trust_unknown_fail_open",
+        "fail_open": true,
+        "error_code": null
+      },
+      {
+        "recordRef": "obs:3",
+        "trust": "trusted",
+        "included": true,
+        "reason": "trust_allowed",
+        "fail_open": false,
+        "error_code": null
+      },
+      {
+        "recordRef": "obs:4",
+        "trust": "quarantined",
+        "included": false,
+        "reason": "trust_quarantined_excluded",
+        "fail_open": false,
+        "error_code": null
+      },
+      {
+        "recordRef": "obs:6",
+        "trust": "trusted",
+        "included": true,
+        "reason": "trust_allowed",
+        "fail_open": false,
+        "error_code": null
+      }
+    ],
+    "selected_refs": [
+      "obs:1",
+      "obs:2",
+      "obs:5",
+      "obs:3",
+      "obs:6"
+    ]
+  },
+  "policy_surface": {
+    "kind": "openclaw-mem.pack.policy-surface.v1",
+    "selection": {
+      "pack_selected_refs": [
+        "obs:1",
+        "obs:2",
+        "obs:5",
+        "obs:3",
+        "obs:6"
+      ],
+      "citation_record_refs": [
+        "obs:1",
+        "obs:2",
+        "obs:5",
+        "obs:3",
+        "obs:6"
+      ],
+      "trust_selected_refs": [
+        "obs:1",
+        "obs:2",
+        "obs:5",
+        "obs:3",
+        "obs:6"
+      ],
+      "graph_selected_refs": null,
+      "shared_pack_and_graph_refs": null
+    },
+    "counts": {
+      "pack_selected_count": 5,
+      "citation_count": 5,
+      "candidate_count": 6,
+      "pack_excluded_count": 1
+    },
+    "reasons": {
+      "pack_included_reason_counts": {
+        "matched_fts": 5,
+        "trust_allowed": 4,
+        "trust_unknown_fail_open": 1,
+        "within_budget": 5,
+        "within_item_limit": 5
+      },
+      "pack_excluded_reason_counts": {
+        "trust_quarantined_excluded": 1
+      },
+      "trust_policy_reason_counts": {
+        "trust_allowed": 4,
+        "trust_quarantined_excluded": 1,
+        "trust_unknown_fail_open": 1
+      },
+      "graph_provenance_reason_counts": {}
+    },
+    "policies": {
+      "trust_policy": {
+        "kind": "openclaw-mem.pack.trust-policy.v1",
+        "mode": "exclude_quarantined_fail_open",
+        "checked_count": 6,
+        "included_count": 5,
+        "excluded_count": 1,
+        "fail_open_count": 1,
+        "decision_reason_counts": {
+          "trust_allowed": 4,
+          "trust_quarantined_excluded": 1,
+          "trust_unknown_fail_open": 1
+        },
+        "selected_refs": [
+          "obs:1",
+          "obs:2",
+          "obs:5",
+          "obs:3",
+          "obs:6"
+        ]
+      },
+      "graph_provenance_policy": null
+    },
+    "consistency": {
+      "pack_items_match_citations": true,
+      "pack_items_subset_of_trust_selected_refs": true,
+      "pack_items_missing_from_trust_selected_refs": []
+    }
+  },
+  "trace": {
+    "kind": "openclaw-mem.pack.trace.v1",
+    "ts": "2026-03-12T09:52:17.582503+00:00",
+    "version": {
+      "openclaw_mem": "1.1.0",
+      "schema": "v1"
+    },
+    "query": {
+      "text": "trust-aware context packing prompt pack receipts hostile durable memory provenance",
+      "scope": null,
+      "intent": null
+    },
+    "budgets": {
+      "budgetTokens": 500,
+      "maxItems": 5,
+      "maxL2Items": 0,
+      "niceCap": 100
+    },
+    "lanes": [
+      {
+        "name": "hot",
+        "source": "session/recent",
+        "searched": false,
+        "retrievers": []
+      },
+      {
+        "name": "warm",
+        "source": "sqlite-observations",
+        "searched": true,
+        "retrievers": [
+          {
+            "kind": "fts5",
+            "topK": 15,
+            "k": null
+          },
+          {
+            "kind": "vector",
+            "topK": 15,
+            "k": null
+          },
+          {
+            "kind": "rrf",
+            "topK": null,
+            "k": 60
+          }
+        ]
+      },
+      {
+        "name": "cold",
+        "source": "curated/durable",
+        "searched": false,
+        "retrievers": []
+      }
+    ],
+    "candidates": [
+      {
+        "id": "obs:1",
+        "layer": "L1",
+        "importance": "must_remember",
+        "trust": "trusted",
+        "scores": {
+          "rrf": 0.01639344262295082,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "trust_allowed",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "trust_allowed",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:1"
+        }
+      },
+      {
+        "id": "obs:2",
+        "layer": "L1",
+        "importance": "must_remember",
+        "trust": "trusted",
+        "scores": {
+          "rrf": 0.016129032258064516,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "trust_allowed",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "trust_allowed",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:2"
+        }
+      },
+      {
+        "id": "obs:5",
+        "layer": "L1",
+        "importance": "nice_to_have",
+        "trust": "unknown",
+        "scores": {
+          "rrf": 0.015873015873015872,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "trust_unknown_fail_open",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "trust_unknown_fail_open",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:5"
+        }
+      },
+      {
+        "id": "obs:3",
+        "layer": "L1",
+        "importance": "must_remember",
+        "trust": "trusted",
+        "scores": {
+          "rrf": 0.015625,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "trust_allowed",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "trust_allowed",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:3"
+        }
+      },
+      {
+        "id": "obs:4",
+        "layer": "L1",
+        "importance": "nice_to_have",
+        "trust": "quarantined",
+        "scores": {
+          "rrf": 0.015384615384615385,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": false,
+          "reason": [
+            "trust_quarantined_excluded"
+          ],
+          "rationale": [
+            "trust_quarantined_excluded"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:4"
+        }
+      },
+      {
+        "id": "obs:6",
+        "layer": "L1",
+        "importance": "must_remember",
+        "trust": "trusted",
+        "scores": {
+          "rrf": 0.015151515151515152,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "trust_allowed",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "trust_allowed",
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:6"
+        }
+      }
+    ],
+    "output": {
+      "includedCount": 5,
+      "excludedCount": 1,
+      "l2IncludedCount": 0,
+      "citationsCount": 5,
+      "refreshedRecordRefs": [
+        "obs:1",
+        "obs:2",
+        "obs:5",
+        "obs:3",
+        "obs:6"
+      ],
+      "coverage": {
+        "rationaleMissingCount": 0,
+        "citationMissingCount": 0,
+        "allIncludedHaveRationale": true,
+        "allIncludedHaveCitations": true
+      }
+    },
+    "timing": {
+      "durationMs": 9
+    },
+    "extensions": {
+      "trust_policy": {
+        "kind": "openclaw-mem.pack.trust-policy.v1",
+        "mode": "exclude_quarantined_fail_open",
+        "checked_count": 6,
+        "included_count": 5,
+        "excluded_count": 1,
+        "fail_open_count": 1,
+        "decision_reason_counts": {
+          "trust_allowed": 4,
+          "trust_quarantined_excluded": 1,
+          "trust_unknown_fail_open": 1
+        },
+        "decisions": [
+          {
+            "recordRef": "obs:1",
+            "trust": "trusted",
+            "included": true,
+            "reason": "trust_allowed",
+            "fail_open": false,
+            "error_code": null
+          },
+          {
+            "recordRef": "obs:2",
+            "trust": "trusted",
+            "included": true,
+            "reason": "trust_allowed",
+            "fail_open": false,
+            "error_code": null
+          },
+          {
+            "recordRef": "obs:5",
+            "trust": "unknown",
+            "included": true,
+            "reason": "trust_unknown_fail_open",
+            "fail_open": true,
+            "error_code": null
+          },
+          {
+            "recordRef": "obs:3",
+            "trust": "trusted",
+            "included": true,
+            "reason": "trust_allowed",
+            "fail_open": false,
+            "error_code": null
+          },
+          {
+            "recordRef": "obs:4",
+            "trust": "quarantined",
+            "included": false,
+            "reason": "trust_quarantined_excluded",
+            "fail_open": false,
+            "error_code": null
+          },
+          {
+            "recordRef": "obs:6",
+            "trust": "trusted",
+            "included": true,
+            "reason": "trust_allowed",
+            "fail_open": false,
+            "error_code": null
+          }
+        ],
+        "selected_refs": [
+          "obs:1",
+          "obs:2",
+          "obs:5",
+          "obs:3",
+          "obs:6"
+        ]
+      },
+      "policy_surface": {
+        "kind": "openclaw-mem.pack.policy-surface.v1",
+        "selection": {
+          "pack_selected_refs": [
+            "obs:1",
+            "obs:2",
+            "obs:5",
+            "obs:3",
+            "obs:6"
+          ],
+          "citation_record_refs": [
+            "obs:1",
+            "obs:2",
+            "obs:5",
+            "obs:3",
+            "obs:6"
+          ],
+          "trust_selected_refs": [
+            "obs:1",
+            "obs:2",
+            "obs:5",
+            "obs:3",
+            "obs:6"
+          ],
+          "graph_selected_refs": null,
+          "shared_pack_and_graph_refs": null
+        },
+        "counts": {
+          "pack_selected_count": 5,
+          "citation_count": 5,
+          "candidate_count": 6,
+          "pack_excluded_count": 1
+        },
+        "reasons": {
+          "pack_included_reason_counts": {
+            "matched_fts": 5,
+            "trust_allowed": 4,
+            "trust_unknown_fail_open": 1,
+            "within_budget": 5,
+            "within_item_limit": 5
+          },
+          "pack_excluded_reason_counts": {
+            "trust_quarantined_excluded": 1
+          },
+          "trust_policy_reason_counts": {
+            "trust_allowed": 4,
+            "trust_quarantined_excluded": 1,
+            "trust_unknown_fail_open": 1
+          },
+          "graph_provenance_reason_counts": {}
+        },
+        "policies": {
+          "trust_policy": {
+            "kind": "openclaw-mem.pack.trust-policy.v1",
+            "mode": "exclude_quarantined_fail_open",
+            "checked_count": 6,
+            "included_count": 5,
+            "excluded_count": 1,
+            "fail_open_count": 1,
+            "decision_reason_counts": {
+              "trust_allowed": 4,
+              "trust_quarantined_excluded": 1,
+              "trust_unknown_fail_open": 1
+            },
+            "selected_refs": [
+              "obs:1",
+              "obs:2",
+              "obs:5",
+              "obs:3",
+              "obs:6"
+            ]
+          },
+          "graph_provenance_policy": null
+        },
+        "consistency": {
+          "pack_items_match_citations": true,
+          "pack_items_subset_of_trust_selected_refs": true,
+          "pack_items_missing_from_trust_selected_refs": []
+        }
+      },
+      "lifecycle_shadow": {
+        "kind": "openclaw-mem.pack.lifecycle-shadow.v1",
+        "mode": "shadow_receipt_only",
+        "ts": "2026-03-12T09:52:17.573696+00:00",
+        "query": {
+          "hash": "sha256:0be97b88ebaa6ca1928dfb7e",
+          "chars": 82
+        },
+        "selection": {
+          "pack_selected_refs": [
+            "obs:1",
+            "obs:2",
+            "obs:5",
+            "obs:3",
+            "obs:6"
+          ],
+          "citation_record_refs": [
+            "obs:1",
+            "obs:2",
+            "obs:5",
+            "obs:3",
+            "obs:6"
+          ],
+          "trace_refreshed_record_refs": [
+            "obs:1",
+            "obs:2",
+            "obs:5",
+            "obs:3",
+            "obs:6"
+          ],
+          "selection_signature": "sha256:9444641a015a4fe7ecf09d8c"
+        },
+        "counts": {
+          "selected_total": 5,
+          "citation_total": 5,
+          "candidate_total": 6,
+          "excluded_total": 1,
+          "selected_by_trust": {
+            "trusted": 4,
+            "unknown": 1
+          },
+          "selected_by_importance": {
+            "must_remember": 4,
+            "nice_to_have": 1
+          }
+        },
+        "reasons": {
+          "pack_included_reason_counts": {
+            "matched_fts": 5,
+            "trust_allowed": 4,
+            "trust_unknown_fail_open": 1,
+            "within_budget": 5,
+            "within_item_limit": 5
+          },
+          "pack_excluded_reason_counts": {
+            "trust_quarantined_excluded": 1
+          },
+          "trust_policy_reason_counts": {
+            "trust_allowed": 4,
+            "trust_quarantined_excluded": 1,
+            "trust_unknown_fail_open": 1
+          },
+          "graph_provenance_reason_counts": {}
+        },
+        "policies": {
+          "trust_policy_mode": "exclude_quarantined_fail_open",
+          "graph_provenance_policy_mode": "off"
+        },
+        "mutation": {
+          "memory_mutation": "none",
+          "auto_archive_applied": 0,
+          "auto_mutation_applied": 0,
+          "writes_observations": 0,
+          "writes_embeddings": 0,
+          "writes_lifecycle_state": 0,
+          "writes_shadow_log": 1
+        },
+        "storage": {
+          "table": "pack_lifecycle_shadow_log",
+          "append_only": true,
+          "max_rows": 2000,
+          "error_code": null
+        }
+      }
+    }
+  }
+}

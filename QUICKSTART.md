@@ -2,11 +2,11 @@
 
 Get `openclaw-mem` up and running in ~5 minutes.
 
-This guide is the **fastest local proof** for the core product story:
+This guide is the **fastest local proof** for the sharper product wedge:
 
-- memory stays local
-- recall stays inspectable
-- you can review stale / noisy memory before it quietly shapes future answers
+- prompt packs stay smaller than a giant memory dump
+- trust tiers stay visible and actionable
+- stale / untrusted / hostile content can be kept out of the pack with receipts
 
 ## Prerequisites
 
@@ -55,17 +55,40 @@ What this proves:
 
 ---
 
-## Step 2.1: 5-minute synthetic demo (Inside-Out Memory)
+## Step 2.1: Canonical trust-aware pack proof (synthetic)
 
-This is the cleanest showcase path when you want a demo instead of a docs read.
+This is the cleanest showcase path when you want the wedge directly instead of a generic smoke test.
 
-It is **synthetic** (no private/user data). It demonstrates the contract for a memory layer that can recover stable constraints without bloating the chat context.
+It is **synthetic** (no private/user data). It demonstrates that the **same query** can produce a safer pack once trust policy is enabled.
 
 ```bash
-./scripts/inside_out_demo.sh
+DB=/tmp/openclaw-mem-proof.sqlite
+
+uv run --python 3.13 --frozen -- python -m openclaw_mem ingest \
+  --db "$DB" \
+  --json \
+  --file ./docs/showcase/artifacts/trust-aware-context-pack.synthetic.jsonl
+
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
+  --db "$DB" \
+  --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
+  --limit 5 \
+  --budget-tokens 500 \
+  --trace
+
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
+  --db "$DB" \
+  --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
+  --limit 5 \
+  --budget-tokens 500 \
+  --trace \
+  --pack-trust-policy exclude_quarantined_fail_open
 ```
 
-See: `docs/showcase/inside-out-demo.md`.
+See:
+- `docs/showcase/trust-aware-context-pack-proof.md`
+- `docs/showcase/artifacts/trust-aware-context-pack.metrics.json`
+- `docs/showcase/inside-out-demo.md` for the companion narrative demo
 
 ---
 

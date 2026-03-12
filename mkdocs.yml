@@ -34,8 +34,12 @@ nav:
   - Quickstart: quickstart.md
   - Reality check & status: reality-check.md
   - Showcase:
+      - Trust-aware pack proof: showcase/trust-aware-context-pack-proof.md
+      - Trust-aware proof artifacts: showcase/artifacts/index.md
       - Inside-Out demo: showcase/inside-out-demo.md
       - Topology demo: showcase/topology-demo.md
+  - Launch:
+      - Copy pack: launch/trust-aware-context-pack-copy-pack.md
   - Releases: https://github.com/phenomenoner/openclaw-mem/releases
   - Reference:
       - Ecosystem fit: ecosystem-fit.md

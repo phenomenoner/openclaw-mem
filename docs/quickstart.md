@@ -1,13 +1,8 @@
 # Quickstart
 
-This page is the **fastest local proof** for `openclaw-mem`.
+This is the **fastest local proof** for the `openclaw-mem` wedge.
 
-It assumes you want to verify the core story first:
-
-- local-first
-- searchable
-- auditable
-- no OpenClaw config changes yet
+Goal: show that the same query can produce a **smaller, safer, cited** pack once trust policy is enabled.
 
 If you are still deciding how to adopt it, read [Choose an install path](install-modes.md) first.
 
@@ -24,65 +19,77 @@ cd openclaw-mem
 uv sync --locked
 ```
 
-## 2) Create a tiny sample and ingest it
+## 2) Ingest the synthetic proof fixture
 
 ```bash
 DB=/tmp/openclaw-mem-quickstart.sqlite
-python3 ./scripts/make_sample_jsonl.py --out /tmp/openclaw-mem-sample.jsonl
 
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json status
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json ingest --file /tmp/openclaw-mem-sample.jsonl
+uv run --python 3.13 --frozen -- python -m openclaw_mem ingest \
+  --db "$DB" \
+  --json \
+  --file ./docs/showcase/artifacts/trust-aware-context-pack.synthetic.jsonl
 ```
 
-What to expect:
+What this gives you:
+- six synthetic rows with trust tiers, importance labels, and provenance refs
+- no private/user data
+- a reproducible basis for pack before/after comparison
 
-- `status` returns a JSON object with DB counters
-- `ingest` returns inserted row counts and IDs
-
-## 3) Run the local recall loop
+## 3) Build the pack without trust gating
 
 ```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json search "OpenClaw" --limit 5
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json timeline 1 --window 2
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json get 1
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
+  --db "$DB" \
+  --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
+  --limit 5 \
+  --budget-tokens 500 \
+  --trace
 ```
 
-That is the product in miniature:
+Expected shape:
+- a compact `bundle_text`
+- `items[]` + `citations[]`
+- `trace.kind = openclaw-mem.pack.trace.v1`
 
-- data goes in locally
-- recall stays inspectable
-- you can verify what happened without involving a remote backend
+In the synthetic proof, this ungated pack still admits one **quarantined** row because it matches the query text.
 
-## 4) Optional: inspect ops posture
+## 4) Build the pack with trust gating on
 
 ```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json profile --recent-limit 10
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize review --limit 200
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
+  --db "$DB" \
+  --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
+  --limit 5 \
+  --budget-tokens 500 \
+  --trace \
+  --pack-trust-policy exclude_quarantined_fail_open
 ```
+
+What changes:
+- the quarantined row is excluded
+- a trusted row takes its place
+- the pack gets smaller
+- `trust_policy`, `policy_surface`, and `lifecycle_shadow` explain exactly what happened
+
+## 5) Inspect the proof artifact
+
+- [Canonical walkthrough](showcase/trust-aware-context-pack-proof.md)
+- [Metrics JSON](showcase/artifacts/trust-aware-context-pack.metrics.json)
+- [Raw receipts](showcase/artifacts/index.md)
 
 ## What to do next
-
-### If you are integrating with OpenClaw agents
-
-- Read the [Agent memory skill (SOP)](agent-memory-skill.md) — trust-aware routing for when to recall, store, search docs, consult topology, or do nothing.
-- Install the drop-in skill card(s):
-  - global default: `skills/agent-memory-skill.global.md`
-  - watchdog/healthcheck/lint/smoke read-only carve-out: `skills/agent-memory-skill.readonly.md`
-- Use the copy/paste prompt wiring templates:
-  - `docs/snippets/openclaw-agentturn-message.global-default.md`
-  - `docs/snippets/openclaw-agentturn-message.watchdog-readonly.md`
-  - helper: `scripts/json_escape.py` (embed multi-line messages into JSON cron config)
 
 ### If the local proof was enough
 
 - move to [Deployment guide](deployment.md)
 - enable the sidecar on your existing OpenClaw install
 
+### If you are integrating with OpenClaw agents
+
+- read the [Agent memory skill (SOP)](agent-memory-skill.md)
+- review [Context pack](context-pack.md)
+- review [Mem Engine reference](mem-engine.md)
+
 ### If you want the detailed source-checkout walkthrough
 
 - GitHub quickstart: <https://github.com/phenomenoner/openclaw-mem/blob/main/QUICKSTART.md>
-
-### If you want the engine path
-
-- read [Mem Engine reference](mem-engine.md)
-- read [Ecosystem fit](ecosystem-fit.md)
