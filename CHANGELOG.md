@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Added parser regression coverage for NFKC-normalized full-width bracket wrappers in task markers (｛TODO｝ / ［TODO］).
+
+- Expanded task-marker parser regression coverage to include NFKC-normalized full-width parenthesized marker form （TASK）.
 - Centralized TODO/TASK/REMINDER marker parsing into `openclaw_mem.task_markers` and wired both triage and heuristic scoring to the shared contract, reducing parser drift across CLI surfaces.
 - Heuristic task detection now evaluates both raw summaries and `tool: summary` payloads, so plain `TODO: ...` summaries no longer lose task classification due to colon splitting.
 - Added self-optimizing memory v0.1 observer/reporter command: `openclaw-mem optimize review` (recommendation-first, zero-write).
