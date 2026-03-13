@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Centralized TODO/TASK/REMINDER marker parsing into `openclaw_mem.task_markers` and wired both triage and heuristic scoring to the shared contract, reducing parser drift across CLI surfaces.
+- Heuristic task detection now evaluates both raw summaries and `tool: summary` payloads, so plain `TODO: ...` summaries no longer lose task classification due to colon splitting.
 - Added self-optimizing memory v0.1 observer/reporter command: `openclaw-mem optimize review` (recommendation-first, zero-write).
   - bounded source scan over `observations` (default limit: 1000)
   - computes low-risk signals: staleness, duplication, bloat, weakly-connected candidates, and repeated no-result `memory_recall` miss patterns
@@ -72,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 
+- Added heuristic regression coverage for shared task-marker contract parity (`TODO: ...`, compact wrapper chains like `●[x]TODO ...`, and tool-prefixed marker summaries).
 - Added heuristic fixture coverage for French guillemet task marker form (angle quote wrapper TODO marker) in tests/data/HEURISTIC_TESTCASES.jsonl (tc33) to keep task-marker parity with parser and docs wrapper support.
 - Added `tests/test_optimize_review.py` coverage for parser wiring, structured report shape, signal generation, repeated miss detection (`memory_recall` no-result patterns), and read-only behavior of `optimize review`.
 - Added guardrail regression coverage for invalid/non-finite TODO dedupe and stale-TTL inputs in `extensions/openclaw-mem-engine/todoGuardrails.test.mjs`.
