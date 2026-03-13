@@ -64,6 +64,16 @@ def _iter_repo_roots(workspace: Path) -> List[Path]:
 
 
 _REMOTE_HEAD_PREFIX = "refs/remotes/origin/"
+_DETACHED_HEAD_TOKEN = "HEAD"
+
+
+def _normalize_branch_name(raw: Optional[str]) -> Optional[str]:
+    token = str(raw or "").strip()
+    if not token:
+        return None
+    if token.upper() == _DETACHED_HEAD_TOKEN:
+        return None
+    return token
 
 
 def _extract_origin_default_branch(symbolic_ref: Optional[str]) -> Optional[str]:
@@ -71,7 +81,16 @@ def _extract_origin_default_branch(symbolic_ref: Optional[str]) -> Optional[str]
     if not token.startswith(_REMOTE_HEAD_PREFIX):
         return None
     branch = token[len(_REMOTE_HEAD_PREFIX) :].strip()
-    return branch or None
+    return _normalize_branch_name(branch)
+
+
+def _resolve_current_branch(repo_path: Path) -> Optional[str]:
+    symbolic_branch = _normalize_branch_name(
+        _run_git(repo_path, ["symbolic-ref", "--quiet", "--short", "HEAD"])
+    )
+    if symbolic_branch:
+        return symbolic_branch
+    return _normalize_branch_name(_run_git(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"]))
 
 
 def _resolve_default_branch(repo_path: Path, *, current_branch: Optional[str]) -> Optional[str]:
@@ -80,14 +99,13 @@ def _resolve_default_branch(repo_path: Path, *, current_branch: Optional[str]) -
     if origin_default:
         return origin_default
 
-    fallback = str(current_branch or "").strip()
-    return fallback or None
+    return _normalize_branch_name(current_branch)
 
 
 def _repo_node(repo_path: Path, workspace: Path) -> Dict[str, Any]:
     rel = repo_path.relative_to(workspace).as_posix()
     node_id = f"repo.{_safe_slug(rel.replace('/', '.'))}"
-    current_branch = _run_git(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"])
+    current_branch = _resolve_current_branch(repo_path)
     return {
         "id": node_id,
         "type": "repo",

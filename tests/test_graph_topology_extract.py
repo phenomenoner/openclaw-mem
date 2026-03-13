@@ -183,6 +183,34 @@ class TestGraphTopologyExtract(unittest.TestCase):
             self.assertEqual(meta["default_branch"], "dev")
             self.assertEqual(meta["current_branch"], "dev")
 
+    def test_repo_node_omits_detached_head_branch_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td) / "workspace"
+            workspace.mkdir(parents=True)
+            repo = workspace / "repo-alpha"
+            repo.mkdir(parents=True)
+
+            def fake_run_git(repo_path: Path, args: list[str]) -> str | None:
+                command = tuple(args)
+                if command == ("remote", "get-url", "origin"):
+                    return "git@github.com:example/repo-alpha.git"
+                if command == ("symbolic-ref", "--quiet", "--short", "HEAD"):
+                    return None
+                if command == ("rev-parse", "--abbrev-ref", "HEAD"):
+                    return "HEAD"
+                if command == ("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):
+                    return None
+                if command == ("log", "-1", "--format=%cI"):
+                    return "2026-03-13T00:00:00+00:00"
+                return None
+
+            with patch("openclaw_mem.graph.topology_extract._run_git", side_effect=fake_run_git):
+                node = extract_topology_seed.__globals__["_repo_node"](repo, workspace)
+
+            meta = node["metadata"]
+            self.assertIsNone(meta["default_branch"])
+            self.assertIsNone(meta["current_branch"])
+
     def test_cmd_graph_topology_extract_writes_seed_and_emits_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
