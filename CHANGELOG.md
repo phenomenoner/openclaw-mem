@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `graph query provenance` now supports source-level grouping (`--group-by-source`) that collapses line-anchored provenance keys into path-level concentration views while preserving edge-type breakdowns.
+
 - Added parser regression coverage for NFKC-normalized full-width bracket wrappers in task markers (｛TODO｝ / ［TODO］).
 
 - Expanded task-marker parser regression coverage to include NFKC-normalized full-width parenthesized marker form （TASK）.

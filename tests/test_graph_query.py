@@ -430,6 +430,63 @@ class TestGraphQuery(unittest.TestCase):
                 ["docs/topology.yaml#L20", "docs/topology.yaml#L10"],
             )
 
+
+    def test_query_provenance_can_group_by_source_path(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "cron.job.beta", "type": "cron_job"},
+                {"id": "cron.job.gamma", "type": "cron_job"},
+                {"id": "artifact.daily-mission", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.daily-mission",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L10",
+                },
+                {
+                    "src": "cron.job.beta",
+                    "dst": "artifact.daily-mission",
+                    "type": "alerts_to",
+                    "provenance": "docs/topology.yaml#L20",
+                },
+                {
+                    "src": "cron.job.gamma",
+                    "dst": "artifact.daily-mission",
+                    "type": "writes",
+                    "provenance": "ops/runtime.md#L7",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path)
+
+            out = query_provenance(
+                db_path=db_path,
+                group_by_source=True,
+                min_edge_count=2,
+                limit=10,
+            )
+
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["filters"]["group_by_source"], True)
+            self.assertEqual(out["total_distinct"], 1)
+            self.assertEqual(out["count"], 1)
+            self.assertEqual(out["items"][0]["provenance"], "docs/topology.yaml")
+            self.assertEqual(out["items"][0]["source_path"], "docs/topology.yaml")
+            self.assertEqual(out["items"][0]["edge_count"], 2)
+            self.assertEqual(
+                out["items"][0]["edge_types"],
+                [
+                    {"edge_type": "alerts_to", "edge_count": 1},
+                    {"edge_type": "writes", "edge_count": 1},
+                ],
+            )
+
     def test_query_provenance_rejects_invalid_min_edge_count(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db_path = Path(td) / "graph.db"

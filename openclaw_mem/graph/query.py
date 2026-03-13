@@ -356,6 +356,7 @@ def query_provenance(
     edge_type: Optional[str] = None,
     limit: int = 20,
     min_edge_count: int = 1,
+    group_by_source: bool = False,
 ) -> Dict[str, Any]:
     limit_int = _parse_limit(limit, max_limit=_MAX_RECEIPTS_LIMIT)
     min_edges = int(min_edge_count)
@@ -365,7 +366,17 @@ def query_provenance(
     node = (node_id or "").strip()
     edge_kind = (edge_type or "").strip()
 
-    where_parts = ["TRIM(provenance) != ''"]
+    group_expr = "TRIM(provenance)"
+    if group_by_source:
+        group_expr = (
+            "TRIM(CASE "
+            "WHEN INSTR(TRIM(provenance), '#') > 0 "
+            "THEN SUBSTR(TRIM(provenance), 1, INSTR(TRIM(provenance), '#') - 1) "
+            "ELSE TRIM(provenance) "
+            "END)"
+        )
+
+    where_parts = [f"{group_expr} != ''"]
     where_args: List[Any] = []
     if node:
         where_parts.append("(src_id = ? OR dst_id = ?)")
@@ -381,37 +392,38 @@ def query_provenance(
     try:
         total_row = conn.execute(
             "SELECT COUNT(*) FROM ("
-            f"SELECT provenance FROM graph_edges WHERE {where_sql} "
-            "GROUP BY provenance HAVING COUNT(*) >= ?"
+            f"SELECT {group_expr} AS provenance_group FROM graph_edges WHERE {where_sql} "
+            "GROUP BY provenance_group HAVING COUNT(*) >= ?"
             ")",
             where_args_tuple + (min_edges,),
         ).fetchone()
 
         rows = conn.execute(
-            f"SELECT provenance, COUNT(*) AS edge_count FROM graph_edges WHERE {where_sql} "
-            "GROUP BY provenance HAVING COUNT(*) >= ? "
-            "ORDER BY edge_count DESC, provenance ASC LIMIT ?",
+            f"SELECT {group_expr} AS provenance_group, COUNT(*) AS edge_count FROM graph_edges WHERE {where_sql} "
+            "GROUP BY provenance_group HAVING COUNT(*) >= ? "
+            "ORDER BY edge_count DESC, provenance_group ASC LIMIT ?",
             where_args_tuple + (min_edges, limit_int),
         ).fetchall()
 
-        selected_provenances = [str(row[0]) for row in rows]
+        selected_groups = [str(row[0]) for row in rows]
         detail_rows: List[Tuple[Any, Any, Any]] = []
-        if selected_provenances:
-            placeholders = ", ".join(["?"] * len(selected_provenances))
+        if selected_groups:
+            placeholders = ", ".join(["?"] * len(selected_groups))
             detail_rows = conn.execute(
-                f"SELECT provenance, edge_type, COUNT(*) AS edge_count FROM graph_edges WHERE {where_sql} "
-                f"AND provenance IN ({placeholders}) "
-                "GROUP BY provenance, edge_type "
-                "ORDER BY provenance ASC, edge_count DESC, edge_type ASC",
-                where_args_tuple + tuple(selected_provenances),
+                f"SELECT {group_expr} AS provenance_group, edge_type, COUNT(*) AS edge_count "
+                f"FROM graph_edges WHERE {where_sql} "
+                f"AND {group_expr} IN ({placeholders}) "
+                "GROUP BY provenance_group, edge_type "
+                "ORDER BY provenance_group ASC, edge_count DESC, edge_type ASC",
+                where_args_tuple + tuple(selected_groups),
             ).fetchall()
     finally:
         conn.close()
 
-    edge_types_by_provenance: Dict[str, List[Dict[str, Any]]] = {}
+    edge_types_by_group: Dict[str, List[Dict[str, Any]]] = {}
     for row in detail_rows:
-        provenance = str(row[0])
-        edge_types_by_provenance.setdefault(provenance, []).append(
+        group_key = str(row[0])
+        edge_types_by_group.setdefault(group_key, []).append(
             {
                 "edge_type": str(row[1]),
                 "edge_count": int(row[2]),
@@ -420,14 +432,15 @@ def query_provenance(
 
     items: List[Dict[str, Any]] = []
     for row in rows:
-        provenance = str(row[0])
-        items.append(
-            {
-                "provenance": provenance,
-                "edge_count": int(row[1]),
-                "edge_types": edge_types_by_provenance.get(provenance, []),
-            }
-        )
+        group_key = str(row[0])
+        item = {
+            "provenance": group_key,
+            "edge_count": int(row[1]),
+            "edge_types": edge_types_by_group.get(group_key, []),
+        }
+        if group_by_source:
+            item["source_path"] = group_key
+        items.append(item)
 
     total_distinct = int(total_row[0]) if total_row and total_row[0] is not None else 0
 
@@ -438,6 +451,7 @@ def query_provenance(
             "node_id": node or None,
             "edge_type": edge_kind or None,
             "min_edge_count": min_edges,
+            "group_by_source": bool(group_by_source),
         },
         "count": len(items),
         "total_distinct": total_distinct,
