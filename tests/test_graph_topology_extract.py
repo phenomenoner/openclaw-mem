@@ -4,6 +4,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -129,6 +130,58 @@ class TestGraphTopologyExtract(unittest.TestCase):
             }
             self.assertIn((workspace / "repo-alpha" / "tools" / "run.py").as_posix(), derived_paths)
             self.assertIn((workspace / "repo-alpha" / "docs" / "receipt.json").as_posix(), derived_paths)
+
+    def test_repo_node_prefers_origin_head_for_default_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td) / "workspace"
+            workspace.mkdir(parents=True)
+            repo = workspace / "repo-alpha"
+            repo.mkdir(parents=True)
+
+            def fake_run_git(repo_path: Path, args: list[str]) -> str | None:
+                command = tuple(args)
+                if command == ("remote", "get-url", "origin"):
+                    return "git@github.com:example/repo-alpha.git"
+                if command == ("rev-parse", "--abbrev-ref", "HEAD"):
+                    return "feature/hotfix"
+                if command == ("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):
+                    return "refs/remotes/origin/main"
+                if command == ("log", "-1", "--format=%cI"):
+                    return "2026-03-13T00:00:00+00:00"
+                return None
+
+            with patch("openclaw_mem.graph.topology_extract._run_git", side_effect=fake_run_git):
+                node = extract_topology_seed.__globals__["_repo_node"](repo, workspace)
+
+            meta = node["metadata"]
+            self.assertEqual(meta["default_branch"], "main")
+            self.assertEqual(meta["current_branch"], "feature/hotfix")
+
+    def test_repo_node_falls_back_to_current_branch_when_origin_head_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            workspace = Path(td) / "workspace"
+            workspace.mkdir(parents=True)
+            repo = workspace / "repo-alpha"
+            repo.mkdir(parents=True)
+
+            def fake_run_git(repo_path: Path, args: list[str]) -> str | None:
+                command = tuple(args)
+                if command == ("remote", "get-url", "origin"):
+                    return "git@github.com:example/repo-alpha.git"
+                if command == ("rev-parse", "--abbrev-ref", "HEAD"):
+                    return "dev"
+                if command == ("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):
+                    return None
+                if command == ("log", "-1", "--format=%cI"):
+                    return "2026-03-13T00:00:00+00:00"
+                return None
+
+            with patch("openclaw_mem.graph.topology_extract._run_git", side_effect=fake_run_git):
+                node = extract_topology_seed.__globals__["_repo_node"](repo, workspace)
+
+            meta = node["metadata"]
+            self.assertEqual(meta["default_branch"], "dev")
+            self.assertEqual(meta["current_branch"], "dev")
 
     def test_cmd_graph_topology_extract_writes_seed_and_emits_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as td:
