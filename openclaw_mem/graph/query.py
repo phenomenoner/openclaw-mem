@@ -354,6 +354,7 @@ def query_provenance(
     db_path: str | Path,
     node_id: Optional[str] = None,
     edge_type: Optional[str] = None,
+    source_path: Optional[str] = None,
     limit: int = 20,
     min_edge_count: int = 1,
     group_by_source: bool = False,
@@ -365,16 +366,19 @@ def query_provenance(
 
     node = (node_id or "").strip()
     edge_kind = (edge_type or "").strip()
+    source = (source_path or "").strip()
+
+    source_expr = (
+        "TRIM(CASE "
+        "WHEN INSTR(TRIM(provenance), '#') > 0 "
+        "THEN SUBSTR(TRIM(provenance), 1, INSTR(TRIM(provenance), '#') - 1) "
+        "ELSE TRIM(provenance) "
+        "END)"
+    )
 
     group_expr = "TRIM(provenance)"
     if group_by_source:
-        group_expr = (
-            "TRIM(CASE "
-            "WHEN INSTR(TRIM(provenance), '#') > 0 "
-            "THEN SUBSTR(TRIM(provenance), 1, INSTR(TRIM(provenance), '#') - 1) "
-            "ELSE TRIM(provenance) "
-            "END)"
-        )
+        group_expr = source_expr
 
     where_parts = [f"{group_expr} != ''"]
     where_args: List[Any] = []
@@ -384,6 +388,9 @@ def query_provenance(
     if edge_kind:
         where_parts.append("edge_type = ?")
         where_args.append(edge_kind)
+    if source:
+        where_parts.append(f"{source_expr} = ?")
+        where_args.append(source)
 
     where_sql = " AND ".join(where_parts)
     where_args_tuple = tuple(where_args)
@@ -450,6 +457,7 @@ def query_provenance(
         "filters": {
             "node_id": node or None,
             "edge_type": edge_kind or None,
+            "source_path": source or None,
             "min_edge_count": min_edges,
             "group_by_source": bool(group_by_source),
         },
