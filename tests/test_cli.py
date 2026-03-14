@@ -102,6 +102,7 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(_summary_has_task_marker("[TODO] buy milk"))
         self.assertTrue(_summary_has_task_marker("(task): clean desk"))
         self.assertTrue(_summary_has_task_marker("（ＲＥＭＩＮＤＥＲ） 續約網域"))
+        self.assertTrue(_summary_has_task_marker("（TASK）rotate runbook"))
         self.assertTrue(_summary_has_task_marker("【ＴＡＳＫ】 續約網域"))
         self.assertTrue(_summary_has_task_marker("【task】 rotate runbook"))
         self.assertTrue(_summary_has_task_marker("【TODO】"))
