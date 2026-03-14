@@ -65,6 +65,26 @@ class TestHeuristicV1(unittest.TestCase):
         if failures:
             self.fail("\n\n".join(failures) + f"\n\nRESULT: {failed}/{total} failed")
 
+    def test_heuristic_handles_task_marker_contract_parity(self):
+        task_like_summaries = [
+            "TODO: rotate runbook",
+            "●[x]TODO compact pipeline",
+            "○ TODO buy milk",
+            "＜TODO＞rotate creds this week",
+        ]
+
+        for summary in task_like_summaries:
+            with self.subTest(summary=summary):
+                r = grade_observation({"kind": "note", "summary": summary})
+                self.assertGreaterEqual(r.score, 0.50)
+                self.assertEqual(r.label, "nice_to_have")
+
+        r_tool_prefixed = grade_observation(
+            {"kind": "note", "tool_name": "memory_store", "summary": "TODO: ship release notes"}
+        )
+        self.assertGreaterEqual(r_tool_prefixed.score, 0.50)
+        self.assertEqual(r_tool_prefixed.label, "nice_to_have")
+
 
 if __name__ == "__main__":
     unittest.main()

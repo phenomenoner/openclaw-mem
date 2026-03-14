@@ -63,9 +63,49 @@ def _iter_repo_roots(workspace: Path) -> List[Path]:
     return repos
 
 
+_REMOTE_HEAD_PREFIX = "refs/remotes/origin/"
+_DETACHED_HEAD_TOKEN = "HEAD"
+
+
+def _normalize_branch_name(raw: Optional[str]) -> Optional[str]:
+    token = str(raw or "").strip()
+    if not token:
+        return None
+    if token.upper() == _DETACHED_HEAD_TOKEN:
+        return None
+    return token
+
+
+def _extract_origin_default_branch(symbolic_ref: Optional[str]) -> Optional[str]:
+    token = str(symbolic_ref or "").strip()
+    if not token.startswith(_REMOTE_HEAD_PREFIX):
+        return None
+    branch = token[len(_REMOTE_HEAD_PREFIX) :].strip()
+    return _normalize_branch_name(branch)
+
+
+def _resolve_current_branch(repo_path: Path) -> Optional[str]:
+    symbolic_branch = _normalize_branch_name(
+        _run_git(repo_path, ["symbolic-ref", "--quiet", "--short", "HEAD"])
+    )
+    if symbolic_branch:
+        return symbolic_branch
+    return _normalize_branch_name(_run_git(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"]))
+
+
+def _resolve_default_branch(repo_path: Path, *, current_branch: Optional[str]) -> Optional[str]:
+    origin_head_ref = _run_git(repo_path, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
+    origin_default = _extract_origin_default_branch(origin_head_ref)
+    if origin_default:
+        return origin_default
+
+    return _normalize_branch_name(current_branch)
+
+
 def _repo_node(repo_path: Path, workspace: Path) -> Dict[str, Any]:
     rel = repo_path.relative_to(workspace).as_posix()
     node_id = f"repo.{_safe_slug(rel.replace('/', '.'))}"
+    current_branch = _resolve_current_branch(repo_path)
     return {
         "id": node_id,
         "type": "repo",
@@ -74,7 +114,8 @@ def _repo_node(repo_path: Path, workspace: Path) -> Dict[str, Any]:
             "path": str(repo_path),
             "workspace_rel": rel,
             "git_remote": _run_git(repo_path, ["remote", "get-url", "origin"]),
-            "default_branch": _run_git(repo_path, ["rev-parse", "--abbrev-ref", "HEAD"]),
+            "default_branch": _resolve_default_branch(repo_path, current_branch=current_branch),
+            "current_branch": current_branch,
             "last_commit_ts": _run_git(repo_path, ["log", "-1", "--format=%cI"]),
         },
     }
