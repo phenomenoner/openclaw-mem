@@ -258,6 +258,15 @@ Tip: If your OpenClaw state dir is default (/root/.openclaw), you can omit --cro
 
 Use this to spot missing/stale topology entities before promoting updates into curated docs.
 
+## Step 8.7: Provenance concentration quick slice (optional, dev)
+
+Use provenance concentration views when you need to inspect where edges come from without drilling into one anchor at a time.
+
+    uv run --python 3.13 --frozen -- python -m openclaw_mem graph query provenance --group-by-source --limit 10 --json
+    uv run --python 3.13 --frozen -- python -m openclaw_mem graph query provenance --group-by-source --source-path docs/topology.json --limit 10 --json
+
+The first command gives path-level concentration. The second narrows to one source path while still returning edge-type breakdowns.
+
 ## Next steps
 
 - Full docs: `README.md`
