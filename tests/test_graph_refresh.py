@@ -49,6 +49,10 @@ class TestGraphRefresh(unittest.TestCase):
                 latest_receipt = conn.execute(
                     "SELECT topology_digest, node_count, edge_count FROM graph_refresh_receipts ORDER BY id DESC LIMIT 1"
                 ).fetchone()
+                receipt_indexes = {
+                    str(row[1])
+                    for row in conn.execute("PRAGMA index_list('graph_refresh_receipts')").fetchall()
+                }
             finally:
                 conn.close()
 
@@ -61,6 +65,8 @@ class TestGraphRefresh(unittest.TestCase):
             self.assertEqual(latest_receipt[0], out["topology_digest"])
             self.assertEqual(int(latest_receipt[1]), 2)
             self.assertEqual(int(latest_receipt[2]), 1)
+            self.assertIn('idx_graph_refresh_receipts_source_path_id', receipt_indexes)
+            self.assertIn('idx_graph_refresh_receipts_topology_digest_id', receipt_indexes)
 
     def test_refresh_topology_is_deterministic_for_reordered_input(self) -> None:
         topology_a = {
