@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - bounded receipt/log markers: `openclaw-mem-engine:docsColdLane.ingest`, `openclaw-mem-engine:docsColdLane.search`, plus optional `coldLane` block in recall lifecycle receipts.
 
 ### Docs
+- Added QUICKSTART task-marker examples for solid-circle and hollow-circle markdown bullet wrappers (● TODO ..., ○[x] TODO ...) to mirror parser acceptance and existing upgrade-checklist coverage.
 
 
 - Added QUICKSTART provenance concentration examples for `graph query provenance --group-by-source`, `--source-path`, and `--source-path-prefix` to make path-level, per-source, and source-family checks explicit in the optional topology smoke lane.
