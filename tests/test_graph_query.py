@@ -362,6 +362,69 @@ class TestGraphQuery(unittest.TestCase):
                 ],
             )
 
+    def test_query_provenance_supports_source_path_prefix_filter(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "cron.job.beta", "type": "cron_job"},
+                {"id": "cron.job.gamma", "type": "cron_job"},
+                {"id": "artifact.daily-mission", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.daily-mission",
+                    "type": "writes",
+                    "provenance": "docs/topology/base.yaml#L10",
+                },
+                {
+                    "src": "cron.job.beta",
+                    "dst": "artifact.daily-mission",
+                    "type": "alerts_to",
+                    "provenance": "docs/topology/extra.yaml#L20",
+                },
+                {
+                    "src": "cron.job.gamma",
+                    "dst": "artifact.daily-mission",
+                    "type": "writes",
+                    "provenance": "ops/runtime.md#L7",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path)
+
+            out = query_provenance(
+                db_path=db_path,
+                source_path_prefix="docs/topology/",
+                min_edge_count=1,
+                limit=10,
+            )
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["filters"]["source_path_prefix"], "docs/topology/")
+            self.assertEqual(out["total_distinct"], 2)
+            self.assertEqual(out["count"], 2)
+            self.assertEqual(
+                [item["provenance"] for item in out["items"]],
+                ["docs/topology/base.yaml#L10", "docs/topology/extra.yaml#L20"],
+            )
+
+            grouped = query_provenance(
+                db_path=db_path,
+                source_path_prefix="docs/topology/",
+                group_by_source=True,
+                min_edge_count=1,
+                limit=10,
+            )
+            self.assertEqual(grouped["total_distinct"], 2)
+            self.assertEqual(grouped["count"], 2)
+            self.assertEqual(
+                [item["source_path"] for item in grouped["items"]],
+                ["docs/topology/base.yaml", "docs/topology/extra.yaml"],
+            )
+
     def test_query_provenance_rejects_invalid_min_edge_count(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             db_path = Path(td) / "graph.db"

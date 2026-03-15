@@ -123,6 +123,10 @@ CREATE TABLE IF NOT EXISTS graph_refresh_receipts (
 
 CREATE INDEX IF NOT EXISTS idx_graph_refresh_receipts_refreshed_at
 ON graph_refresh_receipts(refreshed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_graph_refresh_receipts_source_path_id
+ON graph_refresh_receipts(source_path, id DESC);
+CREATE INDEX IF NOT EXISTS idx_graph_refresh_receipts_topology_digest_id
+ON graph_refresh_receipts(topology_digest, id DESC);
 """
 
 

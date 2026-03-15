@@ -595,6 +595,62 @@ class TestGraphQueryCli(unittest.TestCase):
             self.assertEqual(out["result"]["items"][0]["provenance"], "docs/topology.yaml#L42")
             conn.close()
 
+    def test_cmd_graph_query_provenance_supports_source_path_prefix_json(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job"},
+                {"id": "cron.job.beta", "type": "cron_job"},
+                {"id": "artifact.receipt", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "cron.job.alpha",
+                    "dst": "artifact.receipt",
+                    "type": "writes",
+                    "provenance": "docs/topology/base.yaml#L42",
+                },
+                {
+                    "src": "cron.job.beta",
+                    "dst": "artifact.receipt",
+                    "type": "alerts_to",
+                    "provenance": "ops/runtime.md#L48",
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "mem.sqlite"
+            conn = _connect(str(db_path))
+            refresh_topology(topology, db_path=db_path)
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "graph_query_cmd": "provenance",
+                    "db": str(db_path),
+                    "node_id": None,
+                    "edge_type": None,
+                    "source_path": None,
+                    "source_path_prefix": "docs/topology/",
+                    "group_by_source": False,
+                    "min_edge_count": 1,
+                    "limit": 10,
+                    "json": True,
+                },
+            )()
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_query(conn, args)
+
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["query_cmd"], "provenance")
+            self.assertEqual(out["result"]["filters"]["source_path_prefix"], "docs/topology/")
+            self.assertEqual(out["result"]["total_distinct"], 1)
+            self.assertEqual(out["result"]["items"][0]["provenance"], "docs/topology/base.yaml#L42")
+            conn.close()
+
     def test_cmd_graph_query_lineage_supports_max_depth(self) -> None:
         topology = {
             "nodes": [

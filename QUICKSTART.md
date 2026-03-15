@@ -209,7 +209,8 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --ta
 Task matching rules in `--mode tasks` are deterministic:
 - matches `kind == "task"`, or summaries starting with `TODO`, `TASK`, or `REMINDER`
 - supports plain forms, bracketed forms, markdown list/checklist wrappers, blockquotes, ordered-list prefixes, and common international punctuation
-- example formats: `TODO: rotate runbook`, `- [ ] TASK: review PR`, `> TODO follow up with vendor`, `【TODO】 rotate runbook`
+- full-width / bracketed forms are accepted too, including `【TODO】`, `〔TODO〕`, `{TODO}`, `｛TODO｝`, `［TODO］`, `「TODO」`, `『TODO』`, `《TODO》`, `«TODO»`, `〈TODO〉`, `〖TODO〗`, `〘TODO〙`, `‹TODO›`, `<TODO>`, `＜TODO＞`
+- example formats: `TODO: rotate runbook`, `{TODO}: rotate runbook`, `｛TODO｝: rotate runbook`, `［TODO］ rotate runbook`, `- [ ] TASK: review PR`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`
 - see `docs/upgrade-checklist.md` for the full matcher contract and exhaustive accepted forms
 - Example run:
 
@@ -305,6 +306,16 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem graph topology-diff --se
 Tip: If your OpenClaw state dir is default (/root/.openclaw), you can omit --cron-jobs; topology-extract auto-reads /root/.openclaw/cron/jobs.json.
 
 Use this to spot missing/stale topology entities before promoting updates into curated docs.
+
+## Step 8.7: Provenance concentration quick slice (optional, dev)
+
+Use provenance concentration views when you need to inspect where edges come from without drilling into one anchor at a time.
+
+    uv run --python 3.13 --frozen -- python -m openclaw_mem graph query provenance --group-by-source --limit 10 --json
+    uv run --python 3.13 --frozen -- python -m openclaw_mem graph query provenance --group-by-source --source-path docs/topology.json --limit 10 --json
+    uv run --python 3.13 --frozen -- python -m openclaw_mem graph query provenance --source-path-prefix docs/topology/ --limit 10 --json
+
+The first command gives path-level concentration. The second narrows to one exact source path while still returning edge-type breakdowns. The third scopes to a path family prefix before `#anchor` suffixes are considered.
 
 ## Next steps
 
