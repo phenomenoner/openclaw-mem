@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added parser regression coverage for NFKC-normalized full-width bracket wrappers in task markers (｛TODO｝ / ［TODO］).
 
+- Expanded triage task-marker docs/examples to include NFKC-normalized full-width bracket wrappers (`｛TODO｝ ...`, `［TODO］ ...`) in QUICKSTART and upgrade-checklist guidance.
+
 - Expanded task-marker parser regression coverage to include NFKC-normalized full-width parenthesized marker form （TASK）.
 - Added CLI regression coverage for compact no-space full-width parenthesized task markers (`（TASK）rotate runbook`) to keep marker-only and compact suffix behavior aligned under NFKC normalization.
 - Centralized TODO/TASK/REMINDER marker parsing into `openclaw_mem.task_markers` and wired both triage and heuristic scoring to the shared contract, reducing parser drift across CLI surfaces.
