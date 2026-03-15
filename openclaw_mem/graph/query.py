@@ -77,6 +77,16 @@ def _parse_limit(raw: int, *, max_limit: int) -> int:
     return limit_int
 
 
+def _sql_like_prefix(token: str) -> str:
+    """Escape a literal token for SQL LIKE prefix matching (ESCAPE '\\')."""
+    return (
+        token.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+        + "%"
+    )
+
+
 def _load_node_map(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]]:
     rows = conn.execute(
         "SELECT node_id, node_type, tags_json, metadata_json FROM graph_nodes ORDER BY node_id"
@@ -355,6 +365,7 @@ def query_provenance(
     node_id: Optional[str] = None,
     edge_type: Optional[str] = None,
     source_path: Optional[str] = None,
+    source_path_prefix: Optional[str] = None,
     limit: int = 20,
     min_edge_count: int = 1,
     group_by_source: bool = False,
@@ -367,6 +378,7 @@ def query_provenance(
     node = (node_id or "").strip()
     edge_kind = (edge_type or "").strip()
     source = (source_path or "").strip()
+    source_prefix = (source_path_prefix or "").strip()
 
     source_expr = (
         "TRIM(CASE "
@@ -391,6 +403,9 @@ def query_provenance(
     if source:
         where_parts.append(f"{source_expr} = ?")
         where_args.append(source)
+    if source_prefix:
+        where_parts.append(f"{source_expr} LIKE ? ESCAPE '\\'")
+        where_args.append(_sql_like_prefix(source_prefix))
 
     where_sql = " AND ".join(where_parts)
     where_args_tuple = tuple(where_args)
@@ -458,6 +473,7 @@ def query_provenance(
             "node_id": node or None,
             "edge_type": edge_kind or None,
             "source_path": source or None,
+            "source_path_prefix": source_prefix or None,
             "min_edge_count": min_edges,
             "group_by_source": bool(group_by_source),
         },

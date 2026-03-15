@@ -6829,6 +6829,7 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 node_id=getattr(args, "node_id", None),
                 edge_type=getattr(args, "edge_type", None),
                 source_path=getattr(args, "source_path", None),
+                source_path_prefix=getattr(args, "source_path_prefix", None),
                 limit=getattr(args, "limit", 20),
                 min_edge_count=getattr(args, "min_edge_count", 1),
                 group_by_source=bool(getattr(args, "group_by_source", False)),
@@ -8731,6 +8732,7 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--node-id", dest="node_id", help="Optional node id filter (matches src or dst)")
     q.add_argument("--edge-type", dest="edge_type", help="Optional edge type filter")
     q.add_argument("--source-path", dest="source_path", help="Optional exact source path filter (before #anchor)")
+    q.add_argument("--source-path-prefix", dest="source_path_prefix", help="Optional source path prefix filter (before #anchor)")
     q.add_argument("--group-by-source", dest="group_by_source", action="store_true", help="Group by provenance source path (drop #anchor suffixes)")
     q.add_argument("--min-edge-count", dest="min_edge_count", type=int, default=1, help="Only include provenance groups with at least this many edges (default: 1)")
     q.add_argument("--limit", type=int, default=20, help="Max provenance rows to return (default: 20)")

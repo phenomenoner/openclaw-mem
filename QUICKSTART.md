@@ -264,8 +264,9 @@ Use provenance concentration views when you need to inspect where edges come fro
 
     uv run --python 3.13 --frozen -- python -m openclaw_mem graph query provenance --group-by-source --limit 10 --json
     uv run --python 3.13 --frozen -- python -m openclaw_mem graph query provenance --group-by-source --source-path docs/topology.json --limit 10 --json
+    uv run --python 3.13 --frozen -- python -m openclaw_mem graph query provenance --source-path-prefix docs/topology/ --limit 10 --json
 
-The first command gives path-level concentration. The second narrows to one source path while still returning edge-type breakdowns.
+The first command gives path-level concentration. The second narrows to one exact source path while still returning edge-type breakdowns. The third scopes to a path family prefix before `#anchor` suffixes are considered.
 
 ## Next steps
 

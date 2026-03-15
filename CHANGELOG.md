@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `graph query provenance` now supports `--source-path` filtering (path before `#anchor`) so provenance concentration checks can scope deterministically to one topology source while preserving optional anchor-level breakdowns.
 
+- `graph query provenance` now supports `--source-path-prefix` filtering (path before `#anchor`) for deterministic provenance-family slicing without requiring exact file-path matches.
+
 - `graph query provenance` now supports source-level grouping (`--group-by-source`) that collapses line-anchored provenance keys into path-level concentration views while preserving edge-type breakdowns.
 
 - Added parser regression coverage for NFKC-normalized full-width bracket wrappers in task markers (｛TODO｝ / ［TODO］).
@@ -68,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Docs
 
 
-- Added QUICKSTART provenance concentration examples for `graph query provenance --group-by-source` and `--source-path` to make path-level and per-source checks explicit in the optional topology smoke lane.
+- Added QUICKSTART provenance concentration examples for `graph query provenance --group-by-source`, `--source-path`, and `--source-path-prefix` to make path-level, per-source, and source-family checks explicit in the optional topology smoke lane.
 - Added README quick-proof timeline example (`timeline 2 --window 2`) so the local proof demonstrates the full search → timeline → get recall loop.
 - Updated `docs/specs/graphic-memory-query-plane-v0.md` Stage-2 CLI examples to reflect shipped `graph query drift --live-json <path> --db <path>` command shape.
 - Updated `docs/roadmap.md` section 1.7a to PARTIAL status with shipped query-plane slice (`graph query ...`, `graph query drift --live-json <path> --db <path>`) while keeping deeper provenance integration as roadmap work.
@@ -102,6 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added docs-cold-lane contract tests (`test_mem_engine_docs_cold_lane.py`) for config schema defaults, trust/provenance markers, and runtime marker wiring.
 - Added `tests/test_graph_refresh.py` coverage for deterministic topology refresh, schema/meta initialization, JSON topology loading, and unknown-node edge rejection.
 - Added regression coverage for `graph query provenance` in both query-layer and CLI JSON contract tests (`tests/test_graph_query.py`, `tests/test_graph_query_cli.py`).
+- Added provenance source-family filter regression coverage for the new `--source-path-prefix` query/CLI contract.
 - Added provenance guardrail tests for whitespace provenance exclusion and `min_edge_count` filtering in query-layer and CLI paths.
 - Added CLI plain-text coverage for provenance output `edge_types` summaries (`tests/test_graph_query_cli.py`).
 
