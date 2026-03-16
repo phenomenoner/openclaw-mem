@@ -207,11 +207,12 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --ta
 ```
 
 Task matching rules in `--mode tasks` are deterministic:
-- matches `kind == "task"`, or summaries starting with `TODO`, `TASK`, or `REMINDER`
-- supports plain forms, bracketed forms, markdown list/checklist wrappers, blockquotes, ordered-list prefixes, and common international punctuation
-- full-width / bracketed forms are accepted too, including `【TODO】`, `〔TODO〕`, `{TODO}`, `｛TODO｝`, `［TODO］`, `「TODO」`, `『TODO』`, `《TODO》`, `«TODO»`, `〈TODO〉`, `〖TODO〗`, `〘TODO〙`, `‹TODO›`, `<TODO>`, `＜TODO＞`
-- example formats: `TODO: rotate runbook`, `{TODO}: rotate runbook`, `｛TODO｝: rotate runbook`, `［TODO］ rotate runbook`, `- [ ] TASK: review PR`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`
-- see `docs/upgrade-checklist.md` for the full matcher contract and exhaustive accepted forms
+- `kind == "task"`, or
+- `summary` starts with `TODO` / `TASK` / `REMINDER` (case-insensitive; NFKC width-normalized so full-width forms are accepted), in plain form (`TODO ...`) or bracketed form (`[TODO] ...`, `(TASK) ...`, `【TODO】 ...`, `〔TODO〕 ...`, `{TODO} ...`, `｛TODO｝ ...`, `［TODO］ ...`, `「TODO」 ...`, `『TODO』 ...`, `《TODO》 ...`, `«TODO» ...`, `〈TODO〉 ...`, `〖TODO〗 ...`, `〘TODO〙 ...`, `‹TODO› ...`, `<TODO> ...`, `＜TODO＞ ...`), with optional leading markdown wrappers: blockquotes (`>`; spaced `> > ...` and compact `>> ...`/`>>...` forms), list/checklist wrappers (`-` / `*` / `+` / `•` / `▪` / `‣` / `∙` / `·` / `◦` / `・` / `–` / `—` / `−`, then optional `[ ]` / `[x]` / `[✓]` / `[✔]` / `[☐]` / `[☑]` / `[☒]` / `[✅]`), and ordered-list prefixes (`1.` / `1)` / `(1)` / `a.` / `a)` / `(a)` / `iv.` / `iv)` / `(iv)`; Roman forms are canonical). Compact no-space wrapper chaining is also accepted (for example `-TODO ...`, `[x]TODO ...`, `1)TODO ...`, `[TODO]buy milk`, `【TODO】buy milk`, `〔TODO〕buy milk`, `{TODO}buy milk`, `｛TODO｝buy milk`, `［TODO］buy milk`, `「TODO」buy milk`, `『TODO』buy milk`, `《TODO》buy milk`, `«TODO»buy milk`, `〈TODO〉buy milk`, `〖TODO〗buy milk`, `〘TODO〙buy milk`, `‹TODO›buy milk`, `<TODO>buy milk`, `＜TODO＞buy milk`), followed by `:`, `：`, `;`, `；`, whitespace, `-`, `.`, `。`, `－`, `–`, `—`, `−`, or end-of-string.
+- Example formats: `TODO: rotate runbook`, `{TODO}: rotate runbook`, `｛TODO｝: rotate runbook`, `［TODO］ rotate runbook`, `【TODO】 rotate runbook`, `「TODO」 rotate runbook`, `『TODO』 rotate runbook`, `《TODO》 rotate runbook`, `«TODO» rotate runbook`, `〈TODO〉 rotate runbook`, `〖TODO〗 rotate runbook`, `〘TODO〙 rotate runbook`, `‹TODO› rotate runbook`, `<TODO> rotate runbook`, `＜TODO＞rotate runbook`, `task- check alerts`, `(TASK): review PR`, `- [ ] TODO file patch`, `> TODO follow up with vendor`, `>>[x]TODO: compact wrappers`, `TODO; rotate runbook`, `TASK；follow up on release checklist`.
+- More accepted compact examples: `> - (1) [ ] TASK: clean desk`, `>> (iv) [ ] TODO: clean desk`.
+- Additional bullet-wrapper examples: `● TODO rotate runbook`, `○[x] TODO clean desk`.
+- See `docs/upgrade-checklist.md` for the full matcher contract and exhaustive accepted forms.
 - Example run:
 
 ```bash
