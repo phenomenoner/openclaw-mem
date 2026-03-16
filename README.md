@@ -151,4 +151,7 @@ The README stays focused on the product story: prove trust-aware context packing
 
 ## License
 
-Dual-licensed: **MIT OR Apache-2.0**. See `LICENSE`, `LICENSE-MIT`, and `LICENSE-APACHE`.
+Dual-licensed: **MIT OR Apache-2.0**, at your option.
+
+- MIT terms: `LICENSE` (root canonical text for GitHub/license-scanner detection) and `LICENSE-MIT`
+- Apache 2.0 terms: `LICENSE-APACHE`
