@@ -245,6 +245,7 @@ Add-on (debuggability + governance):
 Deliverables:
 - A short spec of promotion rules (what moves up tiers, and why)
 - A default operator workflow: `search → timeline → get → store/promote`
+- A future record-kind hardening note for durable `event | fact | plan` semantics so forward-looking intent is not collapsed into ordinary fact storage
 
 Acceptance criteria:
 - Operators can explain where a fact lives and how it got there.
@@ -321,6 +322,7 @@ Deliverables:
   - Include a minimal JSON schema (v1) so we can diff behavior over time and compare arms in benchmarks.
 - A cheap retrieval baseline **without embeddings** (FTS + heuristics)
 - Optional: embedding-based rerank as an opt-in layer
+- A bounded **counterexample / dissent quota** policy hook so packs can preserve at least one meaningful contradiction when conflict exists, rather than returning only reinforcing evidence
 
 #### Trace receipt schema (v1, redaction-safe)
 

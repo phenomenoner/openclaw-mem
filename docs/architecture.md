@@ -109,6 +109,10 @@ Proposed output (to the LLM):
 - up to N short summaries (not raw logs)
 - 1–3 citations (record IDs / URLs), **no private paths**
 
+Balanced recall (future policy hook):
+- when meaningful contradictory evidence exists, packing should be able to preserve a tiny explicit **counterexample / dissent slot** instead of returning only the highest-scoring supporting rows
+- this is a selection-policy refinement, not a new storage substrate
+
 Preferred encoding (hybrid):
 - **bundle_text** for direct injection (human/LLM readable)
 - a shallow **ContextPack JSON** object for deterministic anchors (keys/arrays, provenance)
@@ -163,6 +167,10 @@ See also: [Thought-links →](thought-links.md)
 
 This module is the bridge between “memory governance” and “prompt cleanliness”.
 
+Forward-looking schema note:
+- today the system already distinguishes episodic capture and stable durable records such as facts/preferences/decisions.
+- a likely next hardening step is an explicit **prospective / plan-shaped** durable kind so future-triggered intent does not masquerade as a fact.
+
 ### 6) Graph semantic memory — **ROADMAP**
 
 Goal: support **idea → project matching** and path-justified recommendations.
@@ -204,3 +212,7 @@ OpenClaw’s memory backend (e.g. `memory-lancedb`) and `openclaw-mem` solve dif
 - Graph store choice & longevity (Kuzu and alternatives)
 - Extraction strategies for entities/edges (heuristic first; LLM optional)
 - Prompt cleanliness patterns: relevance filtering, bounded summaries, citations
+- Recall-balance policies: contradiction detection, counterexample quotas, and when dissent should be reserved in a pack bundle
+
+Related guarded-adoption note:
+- `docs/notes/2026-03-17_tradememory-guarded-adoption.md`
