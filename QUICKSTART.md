@@ -323,6 +323,29 @@ Use provenance concentration views when you need to inspect where edges come fro
 
 The first command gives path-level concentration. The second narrows to one exact source path while still returning edge-type breakdowns. The third scopes to a path family prefix before `#anchor` suffixes are considered.
 
+## Step 8.8: Install / enable slice for query-plane v0 (stable main)
+
+When you want the bounded operator-usable slice on a host that already has this repo checkout, the path is:
+
+```bash
+DB=/tmp/openclaw-mem-graph.db
+RUNTIME=/tmp/openclaw-mem-runtime.json
+
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json graph topology-refresh --file ./docs/topology.json
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json graph query provenance --group-by-source --limit 10
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json graph query drift --live-json "$RUNTIME" --limit 20
+```
+
+Notes:
+- `--db` is a **global** flag, so place it before `graph`.
+- This host lane has validated the install/enable path with **JSON topology files**.
+- `.yaml` / `.yml` topology files still require `PyYAML` to be available in the runtime environment.
+
+Rollback is trivial:
+- stop invoking the graph commands
+- delete the derived DB file (`rm -f "$DB"`)
+- keep the curated topology file as the source of truth
+
 ## Next steps
 
 - Full docs: `README.md`

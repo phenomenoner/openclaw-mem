@@ -1,11 +1,11 @@
 # Spec — Graphic Memory Query Plane v0
 
 ## Status
-- Stage: **stage-1 topology-file helper landed** (2026-03-19); stage-2 refresh/provenance is next
-- Scope: bounded operator slice now lives in `openclaw-mem` repo truth; deeper refresh/drift/provenance follow-through remains the next gate
+- Stage: **install/enable slice reached on stable main** (2026-03-19)
+- Scope: bounded operator slice now lives in `openclaw-mem` repo truth: stage-1 topology-file helper + stage-2 refresh/drift/provenance substrate + stage-3 operator docs/receipts
 - Recommendation: **keep implementing inside `openclaw-mem`**
 - Delivery posture: **repo-backed truth, derived graph query layer**
-- Implementation note: `graph query ... --topology <path>` now answers `upstream` / `downstream` / `writers` / `filter` directly from structured topology files; JSON is validated in this host lane, and YAML continues to require `PyYAML` when `.yaml/.yml` files are used
+- Implementation note: `graph query ... --topology <path>` answers `upstream` / `downstream` / `writers` / `filter` directly from structured topology files; `graph topology-refresh`, `graph query provenance`, and `graph query drift` provide the derived SQLite query plane. This host lane validated the operator path with JSON topology files; YAML continues to require `PyYAML` when `.yaml/.yml` files are used
 
 ## Why this belongs in openclaw-mem
 Graphic Memory query / topology retrieval is a natural extension of `openclaw-mem`:
