@@ -328,17 +328,19 @@ The first command gives path-level concentration. The second narrows to one exac
 When you want the bounded operator-usable slice on a host that already has this repo checkout, the path is:
 
 ```bash
-DB=/tmp/openclaw-mem-graph.db
+DB=/root/.openclaw/workspace/.state/openclaw-mem/query-plane-v0/host-active/graphic-memory-query-plane.db
 RUNTIME=/tmp/openclaw-mem-runtime.json
 
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json graph topology-refresh --file ./docs/topology.json
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json graph query provenance --group-by-source --limit 10
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json graph query drift --live-json "$RUNTIME" --limit 20
+openclaw-mem --db "$DB" --json graph topology-refresh --file /root/.openclaw/workspace/openclaw-mem/docs/topology.json
+openclaw-mem --db "$DB" --json graph query upstream artifact.daily-mission --topology /root/.openclaw/workspace/openclaw-mem/docs/topology.json
+openclaw-mem --db "$DB" --json graph query provenance --group-by-source --limit 10
+openclaw-mem --db "$DB" --json graph query drift --live-json "$RUNTIME" --limit 20
 ```
 
 Notes:
+- `openclaw-mem` is the host-default wrapper on this machine and points at stable `main`.
 - `--db` is a **global** flag, so place it before `graph`.
-- This host lane has validated the install/enable path with **JSON topology files**.
+- This host lane has validated the install/enable path with **JSON topology files** and a live host-active artifact at `/root/.openclaw/workspace/.state/openclaw-mem/query-plane-v0/host-active/`.
 - `.yaml` / `.yml` topology files still require `PyYAML` to be available in the runtime environment.
 
 Rollback is trivial:
