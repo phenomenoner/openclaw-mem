@@ -241,10 +241,21 @@ Load the curated topology fixture and run one deterministic query:
 
 ```bash
 uv run --python 3.13 --frozen -- python -m openclaw_mem graph topology-refresh --file ./docs/topology.json --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem graph query subgraph project.openclaw-mem --depth 1 --limit 20 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph query subgraph project.openclaw-mem --hops 1 --max-nodes 20 --max-edges 40 --json
 ```
 
 Use this when you want a quick read-only check that topology refresh + query plumbing is alive before deeper graph/drift debugging.
+
+
+Optional one-hop probes:
+
+```bash
+# One-hop operator probes against the refreshed local topology DB:
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph query upstream artifact.daily-mission --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph query downstream project.openclaw-mem --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph query writers artifact.daily-mission --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph query filter --tag background --not-tag human_facing --node-type cron_job --json
+```
 
 
 ## Step 8.6: Topology extract + diff smoke test (optional, dev)
