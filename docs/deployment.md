@@ -80,12 +80,16 @@ Add to `~/.openclaw/openclaw.json` (or `/etc/openclaw/openclaw.json` for system-
           "outputPath": "~/.openclaw/memory/openclaw-mem-observations.jsonl",
           "captureMessage": false,
           "redactSensitive": true,
-          
+
           // Recommended safety default: avoid persisting high-sensitivity tools.
           // This plugin captures *tool results* (not raw user inbound messages).
           // For user preferences / reminders, use `openclaw-mem store` explicitly.
-          "excludeTools": ["exec", "read", "browser", "gateway", "message", "nodes", "canvas"]
-          
+          "excludeTools": ["exec", "read", "browser", "gateway", "message", "nodes", "canvas"],
+
+          // Optional: keep watchdog / narrow cron lanes out of sidecar capture entirely.
+          // This is the bounded `openclaw-mem` adaptation of per-agent exclude.
+          "excludeAgents": ["cron-watchdog", "healthcheck" ]
+
           // Alternative (stricter): use includeTools allowlist instead.
           // "includeTools": ["web_search", "web_fetch"]
         }
@@ -98,10 +102,16 @@ Add to `~/.openclaw/openclaw.json` (or `/etc/openclaw/openclaw.json` for system-
 Note:
 - If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), set `outputPath` under that directory (e.g. `/some/dir/memory/openclaw-mem-observations.jsonl`).
 
-### About `excludeTools` (and your concern about missing personalization)
+### About `excludeTools` / `excludeAgents`
 
 - This plugin listens to **`tool_result_persist`** events, so it captures **tool results**, not raw inbound user messages.
 - Excluding `message` mainly avoids persisting **outbound sendMessage payloads** (which may include private info), and does **not** prevent you from storing user preferences.
+- `excludeAgents` is the per-agent carve-out for noisy or intentionally read-only lanes.
+  - Matching is **exact string match** against the OpenClaw agent id.
+  - When an agent id matches `excludeAgents`, the sidecar skips observation capture on `tool_result_persist` and skips `agent_end` episodic spool writes for that lane.
+  - The episodic-spool effect matters only when `plugins.entries.openclaw-mem.config.episodes.enabled=true`.
+  - This is useful for watchdog / healthcheck / lint / smoke loops where durable memory should stay clean by default.
+  - Rollback is one-line: remove the agent id from `excludeAgents` (or remove the key entirely).
 - Recommended pattern for personal / task-like facts ("buy coffee this afternoon", preferences, etc.):
   - use explicit CLI write **`openclaw-mem store`** when the agent/user says “remember this”.
 

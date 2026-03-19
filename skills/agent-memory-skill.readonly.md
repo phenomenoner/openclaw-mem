@@ -36,6 +36,7 @@ If asked to “remember” routine logs/OK checks:
 - Recall: `memory_recall(query)`
 - Docs: `memory_docs_search(query)`
 - Topology: repo inspection + (if available) `openclaw-mem graph query ...`
+  - prerequisite: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`)
 - Store: **disabled by default** in this lane
 
 ## Runtime enforcement (recommended)

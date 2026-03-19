@@ -183,6 +183,11 @@ Recommended usage:
 
 These cards are intentionally short. The rest of this page is the long-form SOP/manual.
 
+Asset generation note:
+- canonical source-of-truth lives in `skills/agent-memory-skill.global.md` and `skills/agent-memory-skill.readonly.md`
+- generated deployables live under `docs/agent-memory-skill-cards.md` and `docs/snippets/`
+- refresh/check them with `python3 scripts/generate_agent_memory_skill_assets.py` (or `--check`)
+
 ### Prompt wiring (real deployment surfaces)
 
 To make this *actually* deployable on OpenClaw prompt surfaces, this repo also ships copy/paste message templates:
@@ -204,6 +209,7 @@ Note: the read-only carve-out starts as a **prompt-layer contract**, but you sho
 - If you run only the **openclaw-mem sidecar**: this remains a prompt / runner-tooling contract unless your runner also supports tool allow/deny lists.
 - Otherwise: if your runner supports tool allow/deny lists, enforce it by *not granting* `memory_store` to these cron lanes.
 - For L3 graph query usage: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`).
+- For future hot-context runtime wiring, use the bridge contract in `docs/specs/openclaw-context-injection-contract-v0.md` rather than treating `MEMORY.md` as a per-turn transport.
 
 ### Default: apply almost everywhere
 

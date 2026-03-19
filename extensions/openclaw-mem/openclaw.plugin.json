@@ -20,6 +20,11 @@
         "items": { "type": "string" },
         "description": "If set, exclude these tools (denylist)"
       },
+      "excludeAgents": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Optional agent ids to exclude from observation capture and episodic spool writes"
+      },
       "captureMessage": {
         "type": "boolean",
         "default": false,

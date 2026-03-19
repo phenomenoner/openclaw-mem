@@ -42,6 +42,7 @@ type PluginConfig = {
   outputPath?: string;
   includeTools?: string[];
   excludeTools?: string[];
+  excludeAgents?: string[];
   captureMessage?: boolean; // Default: false (message can be huge)
   maxMessageLength?: number;
   redactSensitive?: boolean; // Default: true
@@ -78,6 +79,13 @@ function shouldCapture(toolName: string | undefined, cfg: PluginConfig): boolean
     return !exclude.includes(toolName);
   }
   return true;
+}
+
+function isAgentExcluded(agentId: unknown, cfg: PluginConfig): boolean {
+  if (!Array.isArray(cfg.excludeAgents) || cfg.excludeAgents.length === 0) return false;
+  const raw = typeof agentId === "string" ? agentId.trim() : String(agentId ?? "").trim();
+  if (!raw) return false;
+  return cfg.excludeAgents.some((item) => typeof item === "string" && item.trim() === raw);
 }
 
 function redactSensitiveText(text: string): string {
@@ -439,6 +447,7 @@ const plugin = {
     };
 
     api.on("tool_result_persist", (event, ctx) => {
+      if (isAgentExcluded(ctx.agentId, cfg)) return;
       if (!shouldCapture(event.toolName ?? ctx.toolName, cfg)) return;
 
       const toolName = (event.toolName ?? ctx.toolName)!;
@@ -566,6 +575,8 @@ const plugin = {
 
     if (episodesEnabled && (episodesCaptureOpsAlert || episodesCaptureConversationUser || episodesCaptureConversationAssistant)) {
       api.on("agent_end", (event: any) => {
+        if (isAgentExcluded(event?.agentId ?? event?.agent_id, cfg)) return;
+
         const tsMs = Number.isFinite(Date.parse(String(event?.timestamp ?? "")))
           ? Date.parse(String(event?.timestamp))
           : Date.now();
@@ -635,7 +646,7 @@ const plugin = {
     }
 
     api.logger.info(
-      `openclaw-mem: capturing tool results to ${outputPath} (backend=${resolvedMemoryBackend}, ready=${memoryBackendReady})`,
+      `openclaw-mem: capturing tool results to ${outputPath} (backend=${resolvedMemoryBackend}, ready=${memoryBackendReady}, excluded_agents=${Array.isArray(cfg.excludeAgents) ? cfg.excludeAgents.length : 0})`,
     );
 
     if (episodesEnabled) {

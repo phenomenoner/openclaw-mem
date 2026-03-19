@@ -173,7 +173,8 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
           "captureMessage": false,
           "redactSensitive": true,
           "backendMode": "auto",
-          "annotateMemoryTools": true
+          "annotateMemoryTools": true,
+          "excludeAgents": ["cron-watchdog", "healthcheck"]
         }
       }
     }
@@ -183,6 +184,8 @@ Minimal config fragment for `~/.openclaw/openclaw.json`:
 
 Note:
 - If your OpenClaw uses a non-default state dir (e.g. `OPENCLAW_STATE_DIR=/some/dir`), set `outputPath` and `tail -f` paths under that directory.
+- `excludeAgents` is the bounded per-agent carve-out for sidecar capture; matching is exact on OpenClaw agent id.
+- Rollback is one-line: remove the id from `excludeAgents` (or remove the key entirely).
 
 Verify capture is working:
 
