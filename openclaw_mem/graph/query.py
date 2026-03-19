@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openclaw_mem.provenance_trust_schema import parse_provenance_ref
 
+from .refresh import _load_topology_file, _normalize_edges, _normalize_nodes
 from .schema import connect_graph_db_for_query
 
 
@@ -170,6 +171,112 @@ def _query_edges(
         return _attach_nodes(edges, node_map)
     finally:
         conn.close()
+
+
+def _load_topology_snapshot(topology_path: str | Path) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
+    path = Path(topology_path)
+    topology = _load_topology_file(path)
+    nodes = _normalize_nodes(topology.get("nodes"))
+    node_map = {node["id"]: node for node in nodes}
+    edges = _normalize_edges(topology.get("edges"), set(node_map.keys()))
+    attached = _attach_nodes(
+        [
+            {
+                "src": edge["src"],
+                "dst": edge["dst"],
+                "type": edge["type"],
+                "provenance": edge["provenance"],
+                "provenance_ref": _parse_provenance_ref(edge["provenance"]),
+                "metadata": dict(edge.get("metadata") or {}),
+            }
+            for edge in edges
+        ],
+        node_map,
+    )
+    return node_map, attached
+
+
+def query_upstream_topology(*, topology_path: str | Path, node_id: str) -> Dict[str, Any]:
+    node = str(node_id or "").strip()
+    if not node:
+        raise ValueError("node_id is required")
+    _, edges = _load_topology_snapshot(topology_path)
+    matched = [edge for edge in edges if edge["dst"] == node]
+    return {
+        "ok": True,
+        "query": "upstream",
+        "node_id": node,
+        "count": len(matched),
+        "edges": matched,
+    }
+
+
+def query_downstream_topology(*, topology_path: str | Path, node_id: str) -> Dict[str, Any]:
+    node = str(node_id or "").strip()
+    if not node:
+        raise ValueError("node_id is required")
+    _, edges = _load_topology_snapshot(topology_path)
+    matched = [edge for edge in edges if edge["src"] == node]
+    return {
+        "ok": True,
+        "query": "downstream",
+        "node_id": node,
+        "count": len(matched),
+        "edges": matched,
+    }
+
+
+def query_writers_topology(*, topology_path: str | Path, artifact_id: str) -> Dict[str, Any]:
+    artifact = str(artifact_id or "").strip()
+    if not artifact:
+        raise ValueError("artifact_id is required")
+    _, edges = _load_topology_snapshot(topology_path)
+    matched = [edge for edge in edges if edge["dst"] == artifact and edge["type"] == "writes"]
+    return {
+        "ok": True,
+        "query": "writers",
+        "artifact_id": artifact,
+        "count": len(matched),
+        "edges": matched,
+    }
+
+
+def query_filter_nodes_topology(
+    *,
+    topology_path: str | Path,
+    tag: Optional[str] = None,
+    not_tag: Optional[str] = None,
+    node_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    include_tag = (tag or "").strip()
+    exclude_tag = (not_tag or "").strip()
+    only_type = (node_type or "").strip()
+
+    node_map, _ = _load_topology_snapshot(topology_path)
+
+    nodes: List[Dict[str, Any]] = []
+    for node_id in sorted(node_map.keys()):
+        node = node_map[node_id]
+        tags = set(str(x) for x in node.get("tags") or [])
+        if include_tag and include_tag not in tags:
+            continue
+        if exclude_tag and exclude_tag in tags:
+            continue
+        if only_type and str(node.get("type")) != only_type:
+            continue
+        nodes.append(node)
+
+    return {
+        "ok": True,
+        "query": "filter",
+        "filters": {
+            "tag": include_tag or None,
+            "not_tag": exclude_tag or None,
+            "node_type": only_type or None,
+        },
+        "count": len(nodes),
+        "nodes": nodes,
+    }
 
 
 def query_upstream(*, db_path: str | Path, node_id: str) -> Dict[str, Any]:

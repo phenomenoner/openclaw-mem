@@ -55,13 +55,17 @@ from openclaw_mem.optimization import build_memory_health_review, render_memory_
 from openclaw_mem.graph.drift import query_drift
 from openclaw_mem.graph.query import (
     query_downstream,
+    query_downstream_topology,
     query_filter_nodes,
+    query_filter_nodes_topology,
     query_lineage,
     query_provenance,
     query_refresh_receipts,
     query_subgraph,
     query_upstream,
+    query_upstream_topology,
     query_writers,
+    query_writers_topology,
 )
 from openclaw_mem.graph.topology_diff import compare_topology_files
 from openclaw_mem.graph.topology_extract import extract_topology_seed
@@ -8091,16 +8095,30 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _ = conn
     query_cmd = str(getattr(args, "graph_query_cmd", "") or "").strip().lower()
     db_path = str(getattr(args, "db", "") or "").strip()
+    topology_path = str(getattr(args, "topology", "") or "").strip()
 
-    if not db_path:
-        _emit({"error": "missing --db"}, True)
+    topology_supported = {"upstream", "downstream", "writers", "filter"}
+    use_topology = bool(topology_path)
+
+    if not db_path and not use_topology:
+        _emit({"error": "missing --db or --topology"}, True)
+        sys.exit(2)
+
+    if use_topology and query_cmd not in topology_supported:
+        _emit({"error": f"--topology is not supported for query command: {query_cmd}"}, True)
         sys.exit(2)
 
     try:
         if query_cmd == "upstream":
-            result = query_upstream(db_path=db_path, node_id=getattr(args, "node_id", None))
+            if use_topology:
+                result = query_upstream_topology(topology_path=topology_path, node_id=getattr(args, "node_id", None))
+            else:
+                result = query_upstream(db_path=db_path, node_id=getattr(args, "node_id", None))
         elif query_cmd == "downstream":
-            result = query_downstream(db_path=db_path, node_id=getattr(args, "node_id", None))
+            if use_topology:
+                result = query_downstream_topology(topology_path=topology_path, node_id=getattr(args, "node_id", None))
+            else:
+                result = query_downstream(db_path=db_path, node_id=getattr(args, "node_id", None))
         elif query_cmd == "lineage":
             result = query_lineage(
                 db_path=db_path,
@@ -8108,14 +8126,25 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 max_depth=getattr(args, "max_depth", 1),
             )
         elif query_cmd == "writers":
-            result = query_writers(db_path=db_path, artifact_id=getattr(args, "artifact_id", None))
+            if use_topology:
+                result = query_writers_topology(topology_path=topology_path, artifact_id=getattr(args, "artifact_id", None))
+            else:
+                result = query_writers(db_path=db_path, artifact_id=getattr(args, "artifact_id", None))
         elif query_cmd == "filter":
-            result = query_filter_nodes(
-                db_path=db_path,
-                tag=getattr(args, "tag", None),
-                not_tag=getattr(args, "not_tag", None),
-                node_type=getattr(args, "node_type", None),
-            )
+            if use_topology:
+                result = query_filter_nodes_topology(
+                    topology_path=topology_path,
+                    tag=getattr(args, "tag", None),
+                    not_tag=getattr(args, "not_tag", None),
+                    node_type=getattr(args, "node_type", None),
+                )
+            else:
+                result = query_filter_nodes(
+                    db_path=db_path,
+                    tag=getattr(args, "tag", None),
+                    not_tag=getattr(args, "not_tag", None),
+                    node_type=getattr(args, "node_type", None),
+                )
         elif query_cmd == "receipts":
             result = query_refresh_receipts(
                 db_path=db_path,
@@ -10033,10 +10062,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     q = qsub.add_parser("upstream", help="List incoming edges into node_id")
     q.add_argument("node_id", help="Target node id")
+    q.add_argument("--topology", help="Structured topology file path (.json/.yaml) for direct Stage-1 queries")
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("downstream", help="List outgoing edges from node_id")
     q.add_argument("node_id", help="Source node id")
+    q.add_argument("--topology", help="Structured topology file path (.json/.yaml) for direct Stage-1 queries")
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("lineage", help="List both upstream and downstream edges for node_id")
@@ -10046,6 +10077,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     q = qsub.add_parser("writers", help="List writes edges that target artifact_id")
     q.add_argument("artifact_id", help="Artifact node id")
+    q.add_argument("--topology", help="Structured topology file path (.json/.yaml) for direct Stage-1 queries")
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("subgraph", help="Emit a bounded subgraph around node_id (pack-style, provenance-first)")
@@ -10085,6 +10117,7 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--tag", help="Require tag")
     q.add_argument("--not-tag", dest="not_tag", help="Exclude tag")
     q.add_argument("--node-type", dest="node_type", help="Require node type")
+    q.add_argument("--topology", help="Structured topology file path (.json/.yaml) for direct Stage-1 queries")
     q.set_defaults(func=cmd_graph_query)
 
     q = qsub.add_parser("receipts", help="List recent deterministic refresh receipts")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -7,13 +8,17 @@ from pathlib import Path
 
 from openclaw_mem.graph.query import (
     query_downstream,
+    query_downstream_topology,
     query_filter_nodes,
+    query_filter_nodes_topology,
     query_lineage,
     query_subgraph,
     query_provenance,
     query_refresh_receipts,
     query_upstream,
+    query_upstream_topology,
     query_writers,
+    query_writers_topology,
 )
 from openclaw_mem.graph.refresh import refresh_topology
 
@@ -72,6 +77,50 @@ class TestGraphQuery(unittest.TestCase):
             self.assertEqual(writers["count"], 1)
             self.assertEqual(writers["edges"][0]["src"], "cron.job.alpha")
             self.assertEqual(writers["edges"][0]["type"], "writes")
+
+    def test_topology_file_queries_cover_stage1_slice(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "project.finlife", "type": "project"},
+                {"id": "cron.job.alpha", "type": "cron_job", "tags": ["background"]},
+                {"id": "cron.job.beta", "type": "cron_job", "tags": ["background", "human_facing"]},
+                {"id": "artifact.daily-mission", "type": "artifact", "tags": ["deliverable"]},
+            ],
+            "edges": [
+                {"src": "project.finlife", "dst": "cron.job.alpha", "type": "depends_on", "provenance": "docs/topology.json#L10"},
+                {"src": "cron.job.alpha", "dst": "artifact.daily-mission", "type": "writes", "provenance": "docs/topology.json#L20"},
+                {"src": "cron.job.beta", "dst": "artifact.daily-mission", "type": "alerts_to", "provenance": "docs/topology.json#L21"},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            topology_path = Path(td) / "topology.json"
+            topology_path.write_text(json.dumps(topology), encoding="utf-8")
+
+            upstream = query_upstream_topology(topology_path=topology_path, node_id="artifact.daily-mission")
+            self.assertTrue(upstream["ok"])
+            self.assertEqual(upstream["count"], 2)
+            self.assertEqual(upstream["edges"][0]["src"], "cron.job.alpha")
+
+            downstream = query_downstream_topology(topology_path=topology_path, node_id="project.finlife")
+            self.assertTrue(downstream["ok"])
+            self.assertEqual(downstream["count"], 1)
+            self.assertEqual(downstream["edges"][0]["dst"], "cron.job.alpha")
+
+            writers = query_writers_topology(topology_path=topology_path, artifact_id="artifact.daily-mission")
+            self.assertTrue(writers["ok"])
+            self.assertEqual(writers["count"], 1)
+            self.assertEqual(writers["edges"][0]["type"], "writes")
+
+            filtered = query_filter_nodes_topology(
+                topology_path=topology_path,
+                tag="background",
+                not_tag="human_facing",
+                node_type="cron_job",
+            )
+            self.assertTrue(filtered["ok"])
+            self.assertEqual(filtered["count"], 1)
+            self.assertEqual(filtered["nodes"][0]["id"], "cron.job.alpha")
 
     def test_filter_nodes_and_lineage(self) -> None:
         topology = {

@@ -53,6 +53,51 @@ class TestGraphQueryCli(unittest.TestCase):
             self.assertEqual(out["result"]["edges"][1]["src"], "cron.job.beta")
             conn.close()
 
+    def test_cmd_graph_query_upstream_supports_topology_file_json_payload(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "project.finlife", "type": "project"},
+                {"id": "cron.job.alpha", "type": "cron_job", "tags": ["background"]},
+                {"id": "cron.job.beta", "type": "cron_job", "tags": ["background", "human_facing"]},
+                {"id": "artifact.daily-mission", "type": "artifact", "tags": ["deliverable"]},
+            ],
+            "edges": [
+                {"src": "project.finlife", "dst": "cron.job.alpha", "type": "depends_on", "provenance": "docs/topology.json#L10"},
+                {"src": "cron.job.alpha", "dst": "artifact.daily-mission", "type": "writes", "provenance": "docs/topology.json#L20"},
+                {"src": "cron.job.beta", "dst": "artifact.daily-mission", "type": "alerts_to", "provenance": "docs/topology.json#L21"},
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "mem.sqlite"
+            topology_path = Path(td) / "topology.json"
+            topology_path.write_text(json.dumps(topology), encoding="utf-8")
+            conn = _connect(str(db_path))
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "graph_query_cmd": "upstream",
+                    "db": "",
+                    "topology": str(topology_path),
+                    "node_id": "artifact.daily-mission",
+                    "json": True,
+                },
+            )()
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_query(conn, args)
+
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["kind"], "openclaw-mem.graph.query.v0")
+            self.assertEqual(out["query_cmd"], "upstream")
+            self.assertEqual(out["result"]["count"], 2)
+            self.assertEqual(out["result"]["edges"][0]["src"], "cron.job.alpha")
+            self.assertEqual(out["result"]["edges"][0]["provenance_ref"]["kind"], "file_line")
+            conn.close()
+
     def test_cmd_graph_query_subgraph_json_payload(self) -> None:
         topology = {
             "nodes": [
@@ -232,6 +277,46 @@ class TestGraphQueryCli(unittest.TestCase):
                 {
                     "graph_query_cmd": "filter",
                     "db": str(db_path),
+                    "tag": "background",
+                    "not_tag": "human_facing",
+                    "node_type": "cron_job",
+                    "json": True,
+                },
+            )()
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_graph_query(conn, args)
+
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["query_cmd"], "filter")
+            self.assertEqual(out["result"]["count"], 1)
+            self.assertEqual(out["result"]["nodes"][0]["id"], "cron.job.alpha")
+            conn.close()
+
+    def test_cmd_graph_query_filter_supports_topology_file_json_payload(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "cron.job.alpha", "type": "cron_job", "tags": ["background"]},
+                {"id": "cron.job.beta", "type": "cron_job", "tags": ["background", "human_facing"]},
+                {"id": "artifact.receipt", "type": "artifact"},
+            ],
+            "edges": [],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "mem.sqlite"
+            topology_path = Path(td) / "topology.json"
+            topology_path.write_text(json.dumps(topology), encoding="utf-8")
+            conn = _connect(str(db_path))
+
+            args = type(
+                "Args",
+                (),
+                {
+                    "graph_query_cmd": "filter",
+                    "db": "",
+                    "topology": str(topology_path),
                     "tag": "background",
                     "not_tag": "human_facing",
                     "node_type": "cron_job",

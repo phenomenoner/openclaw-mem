@@ -291,11 +291,13 @@ Spec: `docs/specs/graphic-memory-auto-capture-auto-recall.md`
 Load the curated topology fixture and run one deterministic query:
 
 ```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem --json graph query upstream artifact.daily-mission --topology ./docs/topology.json
+uv run --python 3.13 --frozen -- python -m openclaw_mem --json graph query filter --tag background --not-tag human_facing --node-type cron_job --topology ./docs/topology.json
 uv run --python 3.13 --frozen -- python -m openclaw_mem --json graph topology-refresh --file ./docs/topology.json
 uv run --python 3.13 --frozen -- python -m openclaw_mem --json graph query subgraph project.openclaw-mem --hops 1 --max-nodes 20 --max-edges 40
 ```
 
-Use this when you want a quick read-only check that topology refresh + query plumbing is alive before deeper graph/drift debugging.
+Use the `--topology` queries for the Stage-1 read-only helper slice when you want one-hop answers directly from structured topology truth, before building the derived SQLite cache for deeper graph/drift debugging.
 
 
 ## Step 8.6: Topology extract + diff smoke test (optional, dev)
