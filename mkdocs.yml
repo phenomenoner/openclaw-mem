@@ -40,6 +40,7 @@ nav:
       - Topology demo: showcase/topology-demo.md
   - Launch:
       - Copy pack: launch/trust-aware-context-pack-copy-pack.md
+      - GitHub repo surface consistency: launch/github-repo-surface-consistency.md
   - Releases: https://github.com/phenomenoner/openclaw-mem/releases
   - Reference:
       - Ecosystem fit: ecosystem-fit.md
@@ -54,16 +55,35 @@ nav:
       - Importance grading: importance-grading.md
       - Automation status: automation-status.md
       - Roadmap: roadmap.md
+      - Product-facing improvement roadmap: openclaw-user-improvement-roadmap.md
       - Completeness roadmap: completeness-roadmap.md
+      - Dual-language memory strategy: dual-language-memory-strategy.md
+      - Upgrade checklist: upgrade-checklist.md
+      - Thought-links: thought-links.md
       - Privacy/export rules: privacy-export-rules.md
       - Obsidian: obsidian.md
+      - Obsidian durable graph: obsidian_durable_graph.md
       - Release checklist (repo rule): release-checklist.md
   - Specs:
       - Agent memory skill (blueprint v0): specs/agent-memory-skill-v0.md
       - Topology knowledge (L3 blueprint v0): specs/topology-knowledge-v0.md
       - Docs memory (hybrid search v0): specs/docs-memory-hybrid-search-v0.md
+      - Context budget sidecar (v0): specs/context-budget-sidecar-v0.md
       - Episodic events ledger (v0): specs/episodic-events-ledger-v0.md
       - Episodic auto-capture (v0): specs/episodic-auto-capture-v0.md
       - Graphic memory (GraphRAG-lite PRD): specs/graphic-memory-graphrag-lite-prd.md
+      - Graphic memory auto-capture / auto-recall: specs/graphic-memory-auto-capture-auto-recall.md
+      - Graphic memory preflight trigger policy: specs/graphic-memory-preflight-trigger-policy.md
+      - Graphic memory query plane (v0): specs/graphic-memory-query-plane-v0.md
+      - Mem-engine versioning safety net: specs/mem-engine-versioning-safety-net-v0.md
+      - Topology auto-extract (v0): specs/topology-auto-extract-v0.md
+      - Self-optimizing memory loop (v0): specs/self-optimizing-memory-loop-v0.md
+      - Self-optimizing memory assist-mode contract (v1): specs/self-optimizing-memory-assist-mode-contract-v1.md
+      - OpenClaw context injection contract (v0): specs/openclaw-context-injection-contract-v0.md
+      - Auto-recall activation vs retention (v1): specs/auto-recall-activation-vs-retention-v1.md
   - Archive:
+      - Archive home: archive/README.md
+      - Decisions (historical): archive/decisions/README.md
+      - Thought-links (historical): archive/thought-links/README.md
+      - Notes (historical): archive/notes/README.md
       - Adapter spec (v0.5.9, archived): v0.5.9-adapter-spec.md

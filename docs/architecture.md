@@ -215,4 +215,4 @@ OpenClaw’s memory backend (e.g. `memory-lancedb`) and `openclaw-mem` solve dif
 - Recall-balance policies: contradiction detection, counterexample quotas, and when dissent should be reserved in a pack bundle
 
 Related guarded-adoption note:
-- `docs/notes/2026-03-17_tradememory-guarded-adoption.md`
+- `docs/archive/notes/2026-03-17_tradememory-guarded-adoption.md`

@@ -53,7 +53,7 @@ That makes Cognee broader than a memory plugin. It is an extensible ingestion an
 - **Likely touchpoints**:
   - `openclaw_mem/cli.py`
   - lifecycle / pack / recall receipt paths
-  - `docs/notes/lifecycle-ref-decay.md`
+  - `docs/archive/notes/lifecycle-ref-decay.md`
   - `docs/roadmap.md`
 - **Risks / non-fits**:
   - write amplification if naively updated per item

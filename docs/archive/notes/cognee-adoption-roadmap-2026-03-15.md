@@ -1,7 +1,7 @@
 # Cognee selective-adoption roadmap for openclaw-mem
 
 Date: 2026-03-15
-Basis: `docs/notes/cognee-fit-assessment-2026-03-15.md`
+Basis: `docs/archive/notes/cognee-fit-assessment-2026-03-15.md`
 Status: planning / backlog only
 Topology check: no topology change proposed in this document
 
@@ -38,7 +38,7 @@ The right adoption order is:
 - `openclaw_mem/cli.py`
 - recall / pack selection paths
 - trace / receipt fields
-- `docs/notes/lifecycle-ref-decay.md`
+- `docs/archive/notes/lifecycle-ref-decay.md`
 
 **Acceptance**
 - selected recall items can refresh usage timestamps

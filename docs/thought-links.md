@@ -16,7 +16,7 @@ Additional trusted references (for lifecycle/decay):
 ## 0) Local thought-link notes (project receipts)
 
 - 2026-03-04 — Context Budget Sidecar (tool output offload + soft compaction continuity)
-  - `docs/docs/thought-links/2026-03-04_context-budget-sidecar-openclaw-token-cost.md`
+  - `docs/archive/thought-links/2026-03-04_context-budget-sidecar-openclaw-token-cost.md`
   - Spec: `docs/specs/context-budget-sidecar-v0.md`
 
 ## 1) Observational Memory → design constraints we adopt
