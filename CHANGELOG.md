@@ -73,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - new tools: `memory_docs_ingest`, `memory_docs_search`
   - `memory_recall` + `autoRecall` now optionally consult docs cold lane only when hot lane is insufficient (`minHotItems`)
   - bounded receipt/log markers: `openclaw-mem-engine:docsColdLane.ingest`, `openclaw-mem-engine:docsColdLane.search`, plus optional `coldLane` block in recall lifecycle receipts.
+  - scoped docs search now uses bounded candidate over-fetch before scope filtering, and search receipts/logs expose `rawCandidates` + `scopedCandidates` counters to distinguish index misses from scope starvation.
 
 ### Docs
 - Added QUICKSTART task-marker examples for solid-circle and hollow-circle markdown bullet wrappers (● TODO ..., ○[x] TODO ...) to mirror parser acceptance and existing upgrade-checklist coverage.

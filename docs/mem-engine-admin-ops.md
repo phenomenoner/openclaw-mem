@@ -162,7 +162,11 @@ openclaw tools invoke memory_docs_search --json '{"query":"status code decision"
 
 - ingest: `openclaw-mem-engine:docsColdLane.ingest`
 - search: `openclaw-mem-engine:docsColdLane.search`
+  - includes bounded search counters such as `requested`, `returned`, `filteredByScope`, `rawCandidates`, and `scopedCandidates`
 - recall receipt (`openclaw-mem-engine.recall.receipt.v1`) now carries optional `coldLane` summary
+
+Scoped docs search note:
+- when a strict scope is present, the plugin now over-fetches a bounded candidate pool before applying scope filtering, reducing false 0-hit cases caused by filter-after-limit starvation.
 
 ### Rollback
 

@@ -423,11 +423,29 @@ export async function docsSearchWithCli({
     return {
       items: [],
       filteredByScope: 0,
+      rawCandidates: 0,
+      scopedCandidates: 0,
       error: "empty_query",
     };
   }
 
   const boundedLimit = Math.max(1, Math.min(10, Math.floor(toNumber(limit, 3))));
+  const normalizedScope = normalizeScopeToken(scope);
+  const hasScopedQuery = Boolean(normalizedScope && normalizedScope !== "global");
+  const scopedOverfetchLimit = hasScopedQuery
+    ? Math.max(
+        boundedLimit,
+        Math.min(
+          50,
+          Math.max(
+            boundedLimit * 5,
+            Math.floor(toNumber(searchFtsK, 20)),
+            Math.floor(toNumber(searchVecK, 20)),
+          ),
+        ),
+      )
+    : boundedLimit;
+
   const args = [
     "--db",
     sqlitePath,
@@ -436,11 +454,11 @@ export async function docsSearchWithCli({
     "search",
     trimmedQuery,
     "--limit",
-    String(boundedLimit),
+    String(scopedOverfetchLimit),
     "--fts-k",
-    String(Math.max(boundedLimit, Math.floor(toNumber(searchFtsK, 20)))),
+    String(Math.max(scopedOverfetchLimit, Math.floor(toNumber(searchFtsK, 20)))),
     "--vec-k",
-    String(Math.max(boundedLimit, Math.floor(toNumber(searchVecK, 20)))),
+    String(Math.max(scopedOverfetchLimit, Math.floor(toNumber(searchVecK, 20)))),
     "--k",
     String(Math.max(1, Math.floor(toNumber(searchRrfK, 60)))),
   ];
@@ -450,6 +468,8 @@ export async function docsSearchWithCli({
     return {
       items: [],
       filteredByScope: 0,
+      rawCandidates: 0,
+      scopedCandidates: 0,
       error: result.error || "docs_search_failed",
     };
   }
@@ -460,9 +480,6 @@ export async function docsSearchWithCli({
   const strategy = ["none", "repo_prefix", "path_prefix", "map"].includes(scopeMappingStrategy)
     ? scopeMappingStrategy
     : "repo_prefix";
-
-  const normalizedScope = normalizeScopeToken(scope);
-  const hasScopedQuery = Boolean(normalizedScope && normalizedScope !== "global");
 
   const filtered = hasScopedQuery
     ? rawRows.filter((row) => matchesScope(row, normalizedScope, strategy, scopeMap))
@@ -475,6 +492,8 @@ export async function docsSearchWithCli({
   return {
     items,
     filteredByScope: hasScopedQuery ? Math.max(0, rawRows.length - filtered.length) : 0,
+    rawCandidates: rawRows.length,
+    scopedCandidates: filtered.length,
     error: result.ok ? null : result.error || "docs_search_failed",
   };
 }

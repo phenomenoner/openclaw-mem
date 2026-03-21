@@ -1738,6 +1738,8 @@ type RecallColdLaneReceipt = {
   requested: number;
   returned: number;
   filteredByScope: number;
+  rawCandidates: number;
+  scopedCandidates: number;
   sourceRootsCount: number;
   error?: string;
 };
@@ -3853,6 +3855,8 @@ const memoryPlugin = {
             requested: input.limit,
             returned: 0,
             filteredByScope: 0,
+            rawCandidates: 0,
+            scopedCandidates: 0,
             sourceRootsCount: docsColdLaneResolved.sourceRoots.length,
           },
         };
@@ -3881,6 +3885,8 @@ const memoryPlugin = {
         requested: boundedLimit,
         returned: result.items.length,
         filteredByScope: result.filteredByScope,
+        rawCandidates: result.rawCandidates,
+        scopedCandidates: result.scopedCandidates,
         sourceRootsCount: docsColdLaneResolved.sourceRoots.length,
         error: result.error,
       };
@@ -3892,6 +3898,8 @@ const memoryPlugin = {
           requested: boundedLimit,
           returned: result.items.length,
           filteredByScope: result.filteredByScope,
+          rawCandidates: result.rawCandidates,
+          scopedCandidates: result.scopedCandidates,
           strategy: docsColdLaneResolved.scopeMappingStrategy,
           sqlitePath: docsColdLaneResolved.sqlitePath,
           error: result.error ?? null,
@@ -5183,6 +5191,8 @@ const memoryPlugin = {
                   requested: 0,
                   returned: 0,
                   filteredByScope: 0,
+                  rawCandidates: 0,
+                  scopedCandidates: 0,
                   sourceRootsCount: docsColdLaneResolved.sourceRoots.length,
                 } as RecallColdLaneReceipt,
               },
