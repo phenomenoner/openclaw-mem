@@ -50,6 +50,8 @@ Status: **DONE (M1 shipped)**.
 Add-on (critical UX win, no local LLM):
 - **Docs memory**: index operator-authored repos (DECISIONS / roadmaps / specs) as a recall surface and include it as a cold lane.
   - Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
+  - Operational note: scoped retrieval starvation in the plugin was hardened in Slice 1 (`ef614f4`) via bounded overfetch before scope filtering.
+  - Next slice: [Docs cold lane — scope pushdown v1 →](specs/docs-cold-lane-scope-pushdown-v1.md)
 
 Acceptance criteria:
 - Slot switch + rollback is one line (`plugins.slots.memory`).

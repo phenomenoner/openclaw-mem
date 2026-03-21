@@ -371,6 +371,8 @@ Status (current):
 
 - Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
 - Ops guide: [mem-engine-admin-ops.md](mem-engine-admin-ops.md#docs-memory-cold-lane-installable)
+- Operational hardening note: [Scoped docs search starvation — root cause, first fix, and verifier (2026-03-21)](archive/notes/2026-03-21_scoped-docs-search-filter-after-limit-starvation.md)
+- Next design slice: [Docs cold lane — scope pushdown v1](specs/docs-cold-lane-scope-pushdown-v1.md)
 - Stance: **no local LLM**; rerank (if needed) is remote + bounded.
 
 ---
