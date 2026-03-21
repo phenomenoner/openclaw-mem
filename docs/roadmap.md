@@ -52,7 +52,7 @@ Add-on (critical UX win, no local LLM):
   - Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
   - Operational note: scoped retrieval starvation in the plugin was hardened in Slice 1 (`ef614f4`) via bounded overfetch before scope filtering.
   - Slice 2 first cut now lands repo-allowlist pushdown in `openclaw-mem docs search` plus plugin-side repo pushdown wiring, while retaining residual plugin filtering as defense-in-depth.
-  - Next closure target: shrink reliance on overfetch once pushdown receipts prove stable.
+  - Deferred optimization item: shrink reliance on scoped overfetch only after the broader docs-cold-lane / memory-engine development line reaches a later stable stage; treat this as optimization-phase work, not near-term delivery pressure.
   - Spec: [Docs cold lane — scope pushdown v1 →](specs/docs-cold-lane-scope-pushdown-v1.md)
 
 Acceptance criteria:

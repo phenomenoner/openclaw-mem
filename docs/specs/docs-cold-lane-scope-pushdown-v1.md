@@ -164,7 +164,7 @@ Rollback action:
 3. wire plugin `pushdownRepos`
 4. keep plugin residual `matchesScope()` filter on
 5. verify `filteredByScope` collapses toward zero
-6. only then consider removing or shrinking scoped overfetch
+6. defer overfetch reduction/removal to a later optimization phase after the broader docs-cold-lane / memory-engine development line reaches a stable stage
 
 ## Closure note
 
