@@ -1,6 +1,6 @@
 # Docs cold lane — scope pushdown v1
 
-Status: **planned**
+Status: **partial (first cut implemented: CLI repo allowlist + plugin repo pushdown; residual plugin-side filtering retained)**
 
 ## Purpose
 

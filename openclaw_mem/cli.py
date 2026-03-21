@@ -2087,6 +2087,18 @@ def _docs_repo_relpath(path: Path, git_cache: Dict[str, Optional[Path]]) -> Tupl
     return "local", path.name
 
 
+def _docs_scope_repos(value: Optional[Iterable[str]]) -> List[str]:
+    seen: Set[str] = set()
+    out: List[str] = []
+    for item in value or []:
+        repo = str(item or "").strip()
+        if not repo or repo in seen:
+            continue
+        seen.add(repo)
+        out.append(repo)
+    return out
+
+
 def _docs_embedding_input(*, title: str, heading_path: str, text: str) -> str:
     parts = [p.strip() for p in [title, heading_path, text] if (p or "").strip()]
     return "\n".join(parts)
@@ -2284,37 +2296,39 @@ def cmd_docs_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(stats, args.json)
 
 
-def _docs_fts_rows(conn: sqlite3.Connection, query: str, top_k: int) -> List[Dict[str, Any]]:
-    try:
-        rows = conn.execute(
-            """
+def _docs_fts_rows(
+    conn: sqlite3.Connection,
+    query: str,
+    top_k: int,
+    *,
+    scope_repos: Optional[Iterable[str]] = None,
+) -> List[Dict[str, Any]]:
+    repo_filter = _docs_scope_repos(scope_repos)
+    repo_sql = ""
+    repo_params: List[Any] = []
+    if repo_filter:
+        placeholders = ",".join(["?"] * len(repo_filter))
+        repo_sql = f" AND c.repo IN ({placeholders})"
+        repo_params = list(repo_filter)
+
+    sql = f"""
             SELECT c.id, c.doc_id, c.chunk_id, c.repo, c.path, c.doc_kind, c.heading_path, c.title, c.text,
                    bm25(docs_chunks_fts) AS score
             FROM docs_chunks_fts
             JOIN docs_chunks c ON c.id = docs_chunks_fts.rowid
-            WHERE docs_chunks_fts MATCH ?
+            WHERE docs_chunks_fts MATCH ?{repo_sql}
             ORDER BY score ASC, c.id ASC
             LIMIT ?
-            """,
-            (query, int(top_k)),
-        ).fetchall()
+            """
+
+    try:
+        rows = conn.execute(sql, (query, *repo_params, int(top_k))).fetchall()
     except sqlite3.OperationalError:
         q2 = query
         if "-" in query and not query.strip().startswith('"'):
             q2 = f'"{query}"'
         try:
-            rows = conn.execute(
-                """
-                SELECT c.id, c.doc_id, c.chunk_id, c.repo, c.path, c.doc_kind, c.heading_path, c.title, c.text,
-                       bm25(docs_chunks_fts) AS score
-                FROM docs_chunks_fts
-                JOIN docs_chunks c ON c.id = docs_chunks_fts.rowid
-                WHERE docs_chunks_fts MATCH ?
-                ORDER BY score ASC, c.id ASC
-                LIMIT ?
-                """,
-                (q2, int(top_k)),
-            ).fetchall()
+            rows = conn.execute(sql, (q2, *repo_params, int(top_k))).fetchall()
         except sqlite3.OperationalError:
             rows = []
 
@@ -2327,11 +2341,25 @@ def _docs_vec_rows(
     query_vec: List[float],
     model: str,
     top_k: int,
+    scope_repos: Optional[Iterable[str]] = None,
 ) -> List[Dict[str, Any]]:
-    emb_rows = conn.execute(
-        "SELECT chunk_rowid, vector, norm FROM docs_embeddings WHERE model = ?",
-        (model,),
-    ).fetchall()
+    repo_filter = _docs_scope_repos(scope_repos)
+    if repo_filter:
+        placeholders = ",".join(["?"] * len(repo_filter))
+        emb_rows = conn.execute(
+            f"""
+            SELECT e.chunk_rowid, e.vector, e.norm
+            FROM docs_embeddings e
+            JOIN docs_chunks c ON c.id = e.chunk_rowid
+            WHERE e.model = ? AND c.repo IN ({placeholders})
+            """,
+            (model, *repo_filter),
+        ).fetchall()
+    else:
+        emb_rows = conn.execute(
+            "SELECT chunk_rowid, vector, norm FROM docs_embeddings WHERE model = ?",
+            (model,),
+        ).fetchall()
 
     ranked = rank_cosine(
         query_vec=query_vec,
@@ -2367,8 +2395,9 @@ def cmd_docs_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     vec_k = max(limit, int(getattr(args, "vec_k", limit * 2) or (limit * 2)))
     rrf_k = max(1, int(getattr(args, "k", 60) or 60))
     model = str(getattr(args, "model", defaults.embed_model()))
+    scope_repos = _docs_scope_repos(getattr(args, "scope_repos", None))
 
-    fts_rows = _docs_fts_rows(conn, query, fts_k)
+    fts_rows = _docs_fts_rows(conn, query, fts_k, scope_repos=scope_repos)
     fts_ids = [int(r["id"]) for r in fts_rows]
 
     vec_rows: List[Dict[str, Any]] = []
@@ -2379,7 +2408,7 @@ def cmd_docs_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         try:
             client = OpenAIEmbeddingsClient(api_key=api_key, base_url=getattr(args, "base_url", defaults.openai_base_url()))
             query_vec = client.embed([query], model=model)[0]
-            vec_rows = _docs_vec_rows(conn, query_vec=query_vec, model=model, top_k=vec_k)
+            vec_rows = _docs_vec_rows(conn, query_vec=query_vec, model=model, top_k=vec_k, scope_repos=scope_repos)
         except Exception as e:
             vec_error = str(e)
     else:
@@ -2427,6 +2456,8 @@ def cmd_docs_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     payload: Dict[str, Any] = {
         "query": query,
         "results": final,
+        "pushdown_repos": scope_repos,
+        "pushdown_applied": bool(scope_repos),
     }
 
     if bool(getattr(args, "trace", False)):
@@ -2473,6 +2504,8 @@ def cmd_docs_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
         payload["trace"] = {
             "query": query,
+            "pushdown_repos": scope_repos,
+            "pushdown_applied": bool(scope_repos),
             "fts_top_k": fts_top,
             "vec_top_k": vec_top,
             "fused_ranking": fused_trace,
@@ -9801,6 +9834,7 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--fts-k", dest="fts_k", type=int, default=30, help="FTS candidate count before fusion (default: 30)")
     d.add_argument("--vec-k", dest="vec_k", type=int, default=30, help="Vector candidate count before fusion (default: 30)")
     d.add_argument("--k", type=int, default=60, help="RRF constant (default: 60)")
+    d.add_argument("--scope-repos", nargs="+", default=None, help="Repo allowlist for scoped retrieval pushdown")
     d.add_argument("--trace", action="store_true", help="Include trace receipt: fts top-k, vec top-k, fused ranking, selected chunks")
     d.add_argument(
         "--model",

@@ -68,6 +68,34 @@ function shortScopeKey(scope) {
   return normalized.split(/[/:]/)[0] || normalized;
 }
 
+function computeScopePushdownRepos(scope, strategy, scopeMap) {
+  const normalizedScope = normalizeScopeToken(scope);
+  if (!normalizedScope || normalizedScope === "global") return [];
+
+  if (strategy === "repo_prefix") {
+    const key = shortScopeKey(normalizedScope);
+    return key ? [key] : [];
+  }
+
+  if (strategy !== "map") return [];
+
+  const key = shortScopeKey(normalizedScope);
+  const direct = scopeMap?.[normalizedScope] || [];
+  const fallback = scopeMap?.[key] || [];
+
+  const seen = new Set();
+  const repos = [];
+  for (const item of [...direct, ...fallback]) {
+    const candidate = String(item || "").trim().replace(/^\/+/, "");
+    if (!candidate || candidate.includes("/")) continue;
+    const lowered = candidate.toLowerCase();
+    if (seen.has(lowered)) continue;
+    seen.add(lowered);
+    repos.push(candidate);
+  }
+  return repos;
+}
+
 function coerceArray(value, fallback = []) {
   if (!Array.isArray(value)) return fallback;
   return value
@@ -425,13 +453,19 @@ export async function docsSearchWithCli({
       filteredByScope: 0,
       rawCandidates: 0,
       scopedCandidates: 0,
+      pushdownRepos: [],
+      pushdownApplied: false,
       error: "empty_query",
     };
   }
 
   const boundedLimit = Math.max(1, Math.min(10, Math.floor(toNumber(limit, 3))));
+  const strategy = ["none", "repo_prefix", "path_prefix", "map"].includes(scopeMappingStrategy)
+    ? scopeMappingStrategy
+    : "repo_prefix";
   const normalizedScope = normalizeScopeToken(scope);
   const hasScopedQuery = Boolean(normalizedScope && normalizedScope !== "global");
+  const pushdownRepos = hasScopedQuery ? computeScopePushdownRepos(normalizedScope, strategy, scopeMap) : [];
   const scopedOverfetchLimit = hasScopedQuery
     ? Math.max(
         boundedLimit,
@@ -462,6 +496,9 @@ export async function docsSearchWithCli({
     "--k",
     String(Math.max(1, Math.floor(toNumber(searchRrfK, 60)))),
   ];
+  if (pushdownRepos.length > 0) {
+    args.push("--scope-repos", ...pushdownRepos);
+  }
 
   const result = await runOpenclawMemJson(args);
   if (!result.ok && !result.payload) {
@@ -470,16 +507,14 @@ export async function docsSearchWithCli({
       filteredByScope: 0,
       rawCandidates: 0,
       scopedCandidates: 0,
+      pushdownRepos,
+      pushdownApplied: false,
       error: result.error || "docs_search_failed",
     };
   }
 
   const payload = result.payload && typeof result.payload === "object" ? result.payload : {};
   const rawRows = Array.isArray(payload.results) ? payload.results : [];
-
-  const strategy = ["none", "repo_prefix", "path_prefix", "map"].includes(scopeMappingStrategy)
-    ? scopeMappingStrategy
-    : "repo_prefix";
 
   const filtered = hasScopedQuery
     ? rawRows.filter((row) => matchesScope(row, normalizedScope, strategy, scopeMap))
@@ -494,6 +529,8 @@ export async function docsSearchWithCli({
     filteredByScope: hasScopedQuery ? Math.max(0, rawRows.length - filtered.length) : 0,
     rawCandidates: rawRows.length,
     scopedCandidates: filtered.length,
+    pushdownRepos,
+    pushdownApplied: Boolean(payload.pushdown_applied || pushdownRepos.length > 0),
     error: result.ok ? null : result.error || "docs_search_failed",
   };
 }
@@ -503,4 +540,5 @@ export const __private__ = {
   globToRegExp,
   normalizeScopeToken,
   matchesScope,
+  computeScopePushdownRepos,
 };

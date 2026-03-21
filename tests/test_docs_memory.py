@@ -6,12 +6,43 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from openclaw_mem.cli import _connect, build_parser, cmd_docs_ingest, cmd_docs_search
-from openclaw_mem.docs_memory import chunk_markdown, fuse_rankings_rrf
+from openclaw_mem.docs_memory import chunk_content_hash, chunk_markdown, fuse_rankings_rrf
+from openclaw_mem.vector import l2_norm, pack_f32
 
 
 class TestDocsMemory(unittest.TestCase):
+    def _insert_doc_chunk(self, conn, *, repo: str, rel_path: str, text: str, title: str, chunk_id: str = "chunk:001") -> int:
+        now = "2026-03-22T00:00:00+00:00"
+        doc_id = f"{repo}:{rel_path}"
+        content_hash = chunk_content_hash(heading_path=title, title=title, text=text)
+        cur = conn.execute(
+            """
+            INSERT INTO docs_chunks (
+                doc_id, chunk_id, repo, path, doc_kind, heading_path, title,
+                text, source_kind, source_ref, ts_hint, content_hash, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                doc_id,
+                chunk_id,
+                repo,
+                rel_path,
+                "spec",
+                title,
+                title,
+                text,
+                "operator",
+                f"{repo}/{rel_path}",
+                None,
+                content_hash,
+                now,
+            ),
+        )
+        return int(cur.lastrowid)
+
     def test_chunking_stability(self):
         text = """
 # Title
@@ -62,6 +93,10 @@ third paragraph
         self.assertTrue(a.trace)
         self.assertTrue(a.json)
 
+        a = build_parser().parse_args(["docs", "search", "hybrid", "--scope-repos", "repo-a", "repo-b", "--json"])
+        self.assertEqual(a.scope_repos, ["repo-a", "repo-b"])
+        self.assertTrue(a.json)
+
     def test_docs_fts_query_returns_expected_doc(self):
         conn = _connect(":memory:")
 
@@ -102,6 +137,7 @@ third paragraph
                     "fts_k": 10,
                     "vec_k": 10,
                     "k": 60,
+                    "scope_repos": None,
                     "trace": True,
                     "model": "text-embedding-3-small",
                     "base_url": "https://api.openai.com/v1",
@@ -119,6 +155,119 @@ third paragraph
             self.assertIn("recordRef", out["results"][0])
             self.assertIn("trace", out)
             self.assertIn("fts_top_k", out["trace"])
+            self.assertFalse(out["pushdown_applied"])
+            self.assertEqual(out["pushdown_repos"], [])
+
+        conn.close()
+
+    def test_docs_search_scope_repos_filters_fts_results(self):
+        conn = _connect(":memory:")
+        self._insert_doc_chunk(conn, repo="repo-a", rel_path="alpha.md", title="Alpha", text="target phrase for scoped docs test")
+        self._insert_doc_chunk(conn, repo="repo-b", rel_path="beta.md", title="Beta", text="target phrase for scoped docs test")
+        conn.commit()
+
+        scoped_args = type(
+            "Args",
+            (),
+            {
+                "query": "target",
+                "limit": 5,
+                "fts_k": 10,
+                "vec_k": 10,
+                "k": 60,
+                "scope_repos": ["repo-a"],
+                "trace": True,
+                "model": "text-embedding-3-small",
+                "base_url": "https://api.openai.com/v1",
+                "json": True,
+            },
+        )()
+
+        with patch("openclaw_mem.cli._get_api_key", return_value=None):
+            scoped_buf = io.StringIO()
+            with redirect_stdout(scoped_buf):
+                cmd_docs_search(conn, scoped_args)
+
+            unscoped_args = type(
+                "Args",
+                (),
+                {
+                    "query": "target",
+                    "limit": 5,
+                    "fts_k": 10,
+                    "vec_k": 10,
+                    "k": 60,
+                    "scope_repos": None,
+                    "trace": True,
+                    "model": "text-embedding-3-small",
+                    "base_url": "https://api.openai.com/v1",
+                    "json": True,
+                },
+            )()
+            unscoped_buf = io.StringIO()
+            with redirect_stdout(unscoped_buf):
+                cmd_docs_search(conn, unscoped_args)
+
+        scoped = json.loads(scoped_buf.getvalue())
+        self.assertEqual([item["repo"] for item in scoped["results"]], ["repo-a"])
+        self.assertTrue(scoped["pushdown_applied"])
+        self.assertEqual(scoped["pushdown_repos"], ["repo-a"])
+        self.assertEqual(scoped["trace"]["pushdown_repos"], ["repo-a"])
+
+        unscoped = json.loads(unscoped_buf.getvalue())
+        self.assertEqual({item["repo"] for item in unscoped["results"]}, {"repo-a", "repo-b"})
+        self.assertFalse(unscoped["pushdown_applied"])
+
+        conn.close()
+
+    def test_docs_search_scope_repos_filters_vector_candidates(self):
+        conn = _connect(":memory:")
+        rid_a = self._insert_doc_chunk(conn, repo="repo-a", rel_path="alpha.md", title="Alpha", text="lexical miss one")
+        rid_b = self._insert_doc_chunk(conn, repo="repo-b", rel_path="beta.md", title="Beta", text="lexical miss two")
+        conn.execute(
+            "INSERT INTO docs_embeddings (chunk_rowid, model, dim, vector, norm, text_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (rid_a, "test-model", 2, pack_f32([1.0, 0.0]), l2_norm([1.0, 0.0]), "hash-a", "2026-03-22T00:00:00+00:00"),
+        )
+        conn.execute(
+            "INSERT INTO docs_embeddings (chunk_rowid, model, dim, vector, norm, text_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (rid_b, "test-model", 2, pack_f32([0.0, 1.0]), l2_norm([0.0, 1.0]), "hash-b", "2026-03-22T00:00:00+00:00"),
+        )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[0.0, 1.0] for _ in texts]
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "semantic only",
+                "limit": 5,
+                "fts_k": 5,
+                "vec_k": 5,
+                "k": 60,
+                "scope_repos": ["repo-b"],
+                "trace": True,
+                "model": "test-model",
+                "base_url": "https://example.com/v1",
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            with redirect_stdout(buf):
+                cmd_docs_search(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual([item["repo"] for item in out["results"]], ["repo-b"])
+        self.assertIn("vector", out["results"][0]["match"])
+        self.assertEqual(out["pushdown_repos"], ["repo-b"])
+        self.assertTrue(out["pushdown_applied"])
 
         conn.close()
 

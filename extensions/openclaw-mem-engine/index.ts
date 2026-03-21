@@ -1740,6 +1740,8 @@ type RecallColdLaneReceipt = {
   filteredByScope: number;
   rawCandidates: number;
   scopedCandidates: number;
+  pushdownRepos: string[];
+  pushdownApplied: boolean;
   sourceRootsCount: number;
   error?: string;
 };
@@ -3857,6 +3859,8 @@ const memoryPlugin = {
             filteredByScope: 0,
             rawCandidates: 0,
             scopedCandidates: 0,
+            pushdownRepos: [],
+            pushdownApplied: false,
             sourceRootsCount: docsColdLaneResolved.sourceRoots.length,
           },
         };
@@ -3887,6 +3891,8 @@ const memoryPlugin = {
         filteredByScope: result.filteredByScope,
         rawCandidates: result.rawCandidates,
         scopedCandidates: result.scopedCandidates,
+        pushdownRepos: result.pushdownRepos,
+        pushdownApplied: result.pushdownApplied,
         sourceRootsCount: docsColdLaneResolved.sourceRoots.length,
         error: result.error,
       };
@@ -3900,6 +3906,8 @@ const memoryPlugin = {
           filteredByScope: result.filteredByScope,
           rawCandidates: result.rawCandidates,
           scopedCandidates: result.scopedCandidates,
+          pushdownRepos: result.pushdownRepos,
+          pushdownApplied: result.pushdownApplied,
           strategy: docsColdLaneResolved.scopeMappingStrategy,
           sqlitePath: docsColdLaneResolved.sqlitePath,
           error: result.error ?? null,
@@ -5193,6 +5201,8 @@ const memoryPlugin = {
                   filteredByScope: 0,
                   rawCandidates: 0,
                   scopedCandidates: 0,
+                  pushdownRepos: [],
+                  pushdownApplied: false,
                   sourceRootsCount: docsColdLaneResolved.sourceRoots.length,
                 } as RecallColdLaneReceipt,
               },

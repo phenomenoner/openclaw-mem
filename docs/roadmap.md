@@ -51,7 +51,9 @@ Add-on (critical UX win, no local LLM):
 - **Docs memory**: index operator-authored repos (DECISIONS / roadmaps / specs) as a recall surface and include it as a cold lane.
   - Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
   - Operational note: scoped retrieval starvation in the plugin was hardened in Slice 1 (`ef614f4`) via bounded overfetch before scope filtering.
-  - Next slice: [Docs cold lane — scope pushdown v1 →](specs/docs-cold-lane-scope-pushdown-v1.md)
+  - Slice 2 first cut now lands repo-allowlist pushdown in `openclaw-mem docs search` plus plugin-side repo pushdown wiring, while retaining residual plugin filtering as defense-in-depth.
+  - Next closure target: shrink reliance on overfetch once pushdown receipts prove stable.
+  - Spec: [Docs cold lane — scope pushdown v1 →](specs/docs-cold-lane-scope-pushdown-v1.md)
 
 Acceptance criteria:
 - Slot switch + rollback is one line (`plugins.slots.memory`).
