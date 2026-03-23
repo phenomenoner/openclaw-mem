@@ -11,6 +11,7 @@ This repo runs CI in **locked** mode:
    - `pyproject.toml` `version = ...`
    - `openclaw_mem/__init__.py` `__version__ = ...`
    - `extensions/openclaw-mem/openclaw.plugin.json` `version`
+   - `extensions/openclaw-mem/package.json` `version`
 2) Update `CHANGELOG.md`
 3) Update lockfile
    ```bash
@@ -30,6 +31,23 @@ This repo runs CI in **locked** mode:
   git push origin vX.Y.Z
   ```
 - Create GitHub Release page (notes from CHANGELOG).
+
+## Optional ClawHub package publish (`extensions/openclaw-mem`)
+If the sidecar plugin package is part of the release, publish from the plugin folder rather than the repo root:
+
+```bash
+clawhub package publish ./extensions/openclaw-mem \
+  --family code-plugin \
+  --name openclaw-mem \
+  --display-name "OpenClaw Mem" \
+  --version X.Y.Z \
+  --changelog "<short release note>" \
+  --tags latest \
+  --source-repo phenomenoner/openclaw-mem \
+  --source-commit <git-sha> \
+  --source-ref main \
+  --source-path extensions/openclaw-mem
+```
 
 ## Why this exists
 We prefer reproducible builds. Locked-mode CI will fail fast if `uv.lock` is stale.

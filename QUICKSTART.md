@@ -152,11 +152,17 @@ Ownership model (important):
 
 For explicit memory writes/reads, use CLI commands (`store`, `hybrid`, etc.).
 
-```bash
-# Symlink plugin into OpenClaw
-ln -s ./extensions/openclaw-mem ~/.openclaw/plugins/openclaw-mem
+### Option A — local checkout
 
-# Restart gateway
+```bash
+openclaw plugins install -l ./extensions/openclaw-mem
+openclaw gateway restart
+```
+
+### Option B — marketplace package (after publish)
+
+```bash
+openclaw plugins install openclaw-mem
 openclaw gateway restart
 ```
 
