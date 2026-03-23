@@ -56,6 +56,7 @@ Delete the test DB or the repo checkout. No OpenClaw state changed.
 - point it at a JSONL output path
 - schedule `harvest` on a freshness cadence
 - optionally add embed/index on a slower cadence
+- if installing from a marketplace/package registry, this role maps to `@phenomenoner/openclaw-mem`
 
 ### What you get
 
@@ -94,6 +95,7 @@ Disable the plugin, stop harvest jobs, remove the symlink if you added one. Your
 - enable `openclaw-mem-engine`
 - switch `plugins.slots.memory`
 - smoke test store / recall / forget
+- if installing from a marketplace/package registry, this role maps to `@phenomenoner/openclaw-mem-engine`
 
 ### What you get
 

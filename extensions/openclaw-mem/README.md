@@ -8,7 +8,8 @@ What it does:
 - can annotate memory-tool activity for backend-aware receipts
 
 This package is the **sidecar capture plugin**, not the optional memory-slot backend.
-If you want the slot-owner lane, that is `openclaw-mem-engine` and it remains a separate, more opinionated surface.
+Inside the `openclaw-mem` family, it is the low-risk / sidecar role.
+If you want the slot-owner lane, that is `openclaw-mem-engine` — same family, different install and rollback boundary.
 
 ## Install
 

@@ -8,9 +8,11 @@ What it does:
 - exposes bounded autoRecall / autoCapture controls and lifecycle receipts
 - hosts the docs cold-lane ingest/search surfaces for operator-authored markdown
 
-This package is different from the sidecar capture plugin:
+This package is the engine-role package inside the same `openclaw-mem` family:
 - **`openclaw-mem`** = sidecar capture / observability / episodic spool / operator workflows
 - **`openclaw-mem-engine`** = active memory slot backend
+
+The marketplace split is there to keep install and rollback boundaries honest, not to imply two unrelated products.
 
 ## Install
 

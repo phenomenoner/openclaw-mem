@@ -47,6 +47,14 @@ Most agent-memory stories sound fine until a long-running system starts doing on
 
 ## Product shape
 
+`openclaw-mem` is one product family, but it ships in two operator roles and therefore two plugin install units when packaged for a marketplace.
+
+Marketplace/install mapping:
+- `@phenomenoner/openclaw-mem` → sidecar role
+- `@phenomenoner/openclaw-mem-engine` → engine role
+
+That split is there to preserve clean install and rollback boundaries. It is **not** a product-brand split.
+
 ### Sidecar (default)
 
 This is the normal starting point.

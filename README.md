@@ -142,11 +142,21 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 
 ## Product shape
 
-`openclaw-mem` has two parts:
+`openclaw-mem` is **one product family with two operator roles**:
 
 - **Sidecar (default):** capture, ingest, local recall, triage, pack receipts.
 - **Mem Engine (optional):** an OpenClaw memory-slot backend for hybrid recall and controlled automation.
 
+For repo/docs/product language, keep this family-first:
+- one repo
+- one product story
+- two deployment roles
+
+For marketplace/package language, keep the install boundary explicit:
+- `@phenomenoner/openclaw-mem` = sidecar package
+- `@phenomenoner/openclaw-mem-engine` = engine package
+
+The split is about install/rollback boundary, not about pretending they are unrelated products.
 The README stays focused on the product story: prove trust-aware context packing locally first, sidecar next, engine only when it earns the right to exist.
 
 ## License
