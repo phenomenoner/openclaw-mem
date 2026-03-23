@@ -1,4 +1,4 @@
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";

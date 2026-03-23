@@ -27,7 +27,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import type * as LanceDB from "@lancedb/lancedb";
 import { Type } from "@sinclair/typebox";
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import {
   clampEmbeddingInput,
   resolveEmbeddingClampConfig,
