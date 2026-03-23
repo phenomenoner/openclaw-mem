@@ -12,6 +12,8 @@ This repo runs CI in **locked** mode:
    - `openclaw_mem/__init__.py` `__version__ = ...`
    - `extensions/openclaw-mem/openclaw.plugin.json` `version`
    - `extensions/openclaw-mem/package.json` `version`
+   - `extensions/openclaw-mem-engine/openclaw.plugin.json` `version` (when releasing the engine package)
+   - `extensions/openclaw-mem-engine/package.json` `version` (when releasing the engine package)
 2) Update `CHANGELOG.md`
 3) Update lockfile
    ```bash
@@ -32,13 +34,13 @@ This repo runs CI in **locked** mode:
   ```
 - Create GitHub Release page (notes from CHANGELOG).
 
-## Optional ClawHub package publish (`extensions/openclaw-mem`)
-If the sidecar plugin package is part of the release, publish from the plugin folder rather than the repo root:
+## Optional ClawHub package publish (`extensions/openclaw-mem` / `extensions/openclaw-mem-engine`)
+If the plugin packages are part of the release, publish from the plugin folders rather than the repo root:
 
 ```bash
 clawhub package publish ./extensions/openclaw-mem \
   --family code-plugin \
-  --name openclaw-mem \
+  --name @phenomenoner/openclaw-mem \
   --display-name "OpenClaw Mem" \
   --version X.Y.Z \
   --changelog "<short release note>" \
@@ -47,6 +49,20 @@ clawhub package publish ./extensions/openclaw-mem \
   --source-commit <git-sha> \
   --source-ref main \
   --source-path extensions/openclaw-mem
+```
+
+```bash
+clawhub package publish ./extensions/openclaw-mem-engine \
+  --family code-plugin \
+  --name @phenomenoner/openclaw-mem-engine \
+  --display-name "OpenClaw Mem Engine" \
+  --version 0.0.1 \
+  --changelog "<short release note>" \
+  --tags latest \
+  --source-repo phenomenoner/openclaw-mem \
+  --source-commit <git-sha> \
+  --source-ref main \
+  --source-path extensions/openclaw-mem-engine
 ```
 
 ## Why this exists

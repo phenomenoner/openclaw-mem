@@ -1,9 +1,21 @@
 {
   "name": "openclaw-mem-engine",
-  "private": true,
+  "version": "0.0.1",
   "type": "module",
-  "description": "Local deps for openclaw-mem-engine writeback helper (cron) — do not publish.",
-  "license": "UNLICENSED",
+  "description": "Optional OpenClaw memory-slot backend with hybrid recall, docs cold-lane search, and bounded autoRecall/autoCapture controls.",
+  "license": "MIT",
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "memory",
+    "lancedb",
+    "hybrid-retrieval"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
   "dependencies": {
     "@lancedb/lancedb": "^0.26.2",
     "@sinclair/typebox": "^0.34.48"

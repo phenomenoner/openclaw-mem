@@ -23,7 +23,7 @@ openclaw plugins install -l ./extensions/openclaw-mem
 After publishing to ClawHub package marketplace:
 
 ```bash
-openclaw plugins install openclaw-mem
+openclaw plugins install @phenomenoner/openclaw-mem
 ```
 
 ## Minimal config
