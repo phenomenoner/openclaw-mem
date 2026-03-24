@@ -9,6 +9,11 @@ This docs site is organized around one wedge first:
 - keep trust tiers and provenance **visible**
 - keep stale / untrusted / hostile content from quietly polluting future answers
 
+Two-plane framing:
+
+- **Query plane (default):** recall + trust-aware context packing with citations and receipts.
+- **Action plane (optional):** recommendation-only hygiene and maintenance review queues (no silent writeback to durable memory).
+
 ## Start here
 
 - [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md) — canonical before/after artifact

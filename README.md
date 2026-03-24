@@ -11,6 +11,11 @@ It is built around four operator outcomes:
 - **recordRef citations + trace receipts** so you can inspect why something was included, excluded, or left fail-open
 - **safer memory admission / recall** before low-signal content becomes durable memory
 
+It operates across two planes:
+
+- **Query plane (default):** recall + trust-aware context packing with citations and receipts.
+- **Action plane (optional):** recommendation-only hygiene and maintenance review queues (no silent writeback to durable memory).
+
 ## See the proof first
 
 - **Canonical proof artifact:** [`docs/showcase/trust-aware-context-pack-proof.md`](docs/showcase/trust-aware-context-pack-proof.md)
@@ -33,7 +38,7 @@ Start with a local sidecar. Keep your current OpenClaw memory backend if you wan
 - **Local recall loop:** `search → timeline → get` keeps routine lookups fast and inspectable.
 - **Trust-aware pack surfaces:** `pack`, `--trace`, `--pack-trust-policy`, `policy_surface`, and `pack_lifecycle_shadow` provide inclusion/exclusion receipts.
 - **Graph/provenance surfaces:** `graph topology-refresh`, `graph query ...`, drift checks, and graph provenance gating for graph-derived pack candidates.
-- **Recommendation-only memory hygiene:** `optimize review` plus `optimize policy-loop` for read-only rollout readiness.
+- **Review-gated action plane (recommendation-only):** `optimize review` plus `optimize policy-loop` emit review queues for rollout readiness (no silent writeback).
 - **Policy-driven safety:** trust policies, graph provenance, and lifecycle logging (`--pack-trust-policy`, `--graph-provenance-policy`, `--graph-query-db`, `--pack-lifecycle-shadow`) keep memory grounded, auditable, and safer for automation.
 - **Episodic event lane:** append/extract/ingest/query/replay with redaction-first defaults.
 - **Optional Mem Engine upgrades:** hybrid recall controls, TODO guardrails, docs cold-lane ingest/search.

@@ -1,5 +1,5 @@
 site_name: openclaw-mem
-site_description: Local-first memory sidecar + optional hybrid memory engine for OpenClaw
+site_description: Trust-aware context packing + review-gated memory hygiene (sidecar-first) for OpenClaw
 site_url: https://phenomenoner.github.io/openclaw-mem/
 repo_url: https://github.com/phenomenoner/openclaw-mem
 repo_name: phenomenoner/openclaw-mem

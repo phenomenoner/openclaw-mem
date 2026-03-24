@@ -45,6 +45,15 @@ Most agent-memory stories sound fine until a long-running system starts doing on
 - capture/ingest episodic events with redaction-first defaults
 - optionally promote to `openclaw-mem-engine` for hybrid recall + policy controls
 
+## Query plane vs action plane
+
+`openclaw-mem` is designed to stay safe and inspectable as it grows.
+
+- **Query plane (default):** recall + trust-aware context packing with citations and receipts.
+- **Action plane (optional):** recommendation-only hygiene and maintenance review queues (no silent writeback to durable memory).
+
+If you adopt action-plane features, treat them as **suggestion-first and write-gated**: you review and apply changes explicitly.
+
 ## Product shape
 
 `openclaw-mem` is one product family, but it ships in two operator roles and therefore two plugin install units when packaged for a marketplace.
