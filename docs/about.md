@@ -39,7 +39,7 @@ Most agent-memory stories sound fine until a long-running system starts doing on
 
 `openclaw-mem` exists to make memory admission and recall more transparent, bounded, and inspectable.
 
-## What operators can do today (v1.1)
+## What operators can do today (v1.2.0)
 
 - run deterministic local recall (`search → timeline → get`) against SQLite
 - build compact packs with `pack`
@@ -50,7 +50,7 @@ Most agent-memory stories sound fine until a long-running system starts doing on
 - gate graph-derived candidates with graph provenance policy surfaces
 - run recommendation-only hygiene checks with `optimize review` (zero write path)
 - capture/ingest episodic events with redaction-first defaults
-- optionally promote to `openclaw-mem-engine` for hybrid recall + policy controls
+- optionally promote to `openclaw-mem-engine` for hybrid recall, docs cold-lane ingest/search, and policy controls
 
 ## Query plane vs action plane
 

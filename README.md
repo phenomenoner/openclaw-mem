@@ -156,17 +156,6 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 - **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
 - **Release notes:** <https://github.com/phenomenoner/openclaw-mem/releases>
 
-## Maintainer launch docs (internal guidance)
-
-These files define copy/governance rules for maintainers and release editors, not end-user product docs:
-
-- [`docs/launch/relaunch-information-architecture-v0.md`](docs/launch/relaunch-information-architecture-v0.md)
-- [`docs/launch/trust-aware-context-pack-copy-pack.md`](docs/launch/trust-aware-context-pack-copy-pack.md)
-- [`docs/launch/github-repo-surface-consistency.md`](docs/launch/github-repo-surface-consistency.md)
-- [`docs/launch/proof-first-relaunch-checklist.md`](docs/launch/proof-first-relaunch-checklist.md)
-- [`docs/launch/release-surface-proof-pack-v0.md`](docs/launch/release-surface-proof-pack-v0.md)
-- [`docs/launch/release-note-body-v0-final.md`](docs/launch/release-note-body-v0-final.md)
-
 ## Product shape
 
 `openclaw-mem` is **one product family with two operator roles**:

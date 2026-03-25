@@ -65,17 +65,6 @@ That split is the core design choice: start with something inspectable and rollb
 - [Automation status](automation-status.md)
 - [Roadmap](roadmap.md)
 
-## Maintainer launch docs (internal guidance)
-
-These documents are for release editors and maintainers. They govern outward wording but are not end-user product docs.
-
-- [Relaunch information architecture (v0)](launch/relaunch-information-architecture-v0.md)
-- [Trust-aware context pack copy pack](launch/trust-aware-context-pack-copy-pack.md)
-- [GitHub repo surface consistency](launch/github-repo-surface-consistency.md)
-- [Proof-first relaunch checklist](launch/proof-first-relaunch-checklist.md)
-- [Release-surface consistency note](launch/release-surface-proof-pack-v0.md)
-- [Release-note body draft](launch/release-note-body-v0-final.md)
-
 ## Releases
 
 - [GitHub releases](https://github.com/phenomenoner/openclaw-mem/releases)
