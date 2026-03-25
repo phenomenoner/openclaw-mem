@@ -1,11 +1,11 @@
-# Automation status (dev) — what is automatic vs cron vs not yet wired
+# Automation status (main-only) — what is automatic vs cron vs not yet wired
 
 This page is the operator-facing truth for `openclaw-mem` on our host.
 
 The system is intentionally split into layers:
 - **Plugin (sidecar)** captures observations.
-- **Cron (operator automation)** runs ingest/triage and other loops.
-- Some features exist as CLI tools but are **not yet auto-wired** into the agent loop.
+- **Cron (operator automation)** runs ingest/triage and related loops.
+- Some features exist as CLI tools but are **not yet auto-wired** into the default agent loop.
 
 ## 1) Automatic (plugin / sidecar) — already running
 These happen automatically once the OpenClaw plugin is enabled.
@@ -25,21 +25,19 @@ What this layer does *not* do:
 ## 2) Automatic (cron) — scheduled operator loops
 These are automated via OpenClaw cron jobs (so the system works without manual CLI calls).
 
-### Harvest + triage (dual-run)
+### Harvest + triage (main)
 - MAIN baseline: `a9f3066a-43ac-40b3-aacc-dcfa44e9106e` (`:05`)
   - code root: `/root/.openclaw/workspace/openclaw-mem` (main)
   - DB: `/root/.openclaw/memory/openclaw-mem.sqlite`
   - receipts: `/root/.openclaw/memory/openclaw-mem/{harvest_last.json,triage_last.json}`
-- DEV candidate: `8c69db59-abee-4b8f-8778-5bb5951454ab` (`:25`)
-  - code root: `/root/.openclaw/workspace/openclaw-mem-dev` (dev)
-  - DB: `/root/.openclaw/memory/openclaw-mem-dev.sqlite`
-  - receipts: `/root/.openclaw/memory/openclaw-mem-dev/{harvest_last.json,triage_last.json}`
-- DEV feature lane: `57d3e88c-4278-414a-8e33-c091baae7887` (`17,47 * * * *` Asia/Taipei)
-  - code root: `/root/.openclaw/workspace/openclaw-mem-dev` (dev)
-  - branch: `dev`
-  - lock: `openclaw-mem-dev-feature` + global heavy-python guard
 
-### AI compression (derived artifact, dev)
+### Feature lanes (A-fast / A-deep, main-governed)
+- A-fast: `57d3e88c-4278-414a-8e33-c091baae7887`
+- A-deep: `30adb125-88b9-4f2f-a644-5271baab7c0b`
+- governance: lane packets converge to `main`; no long-lived `dev` integration branch contract
+- lock: `openclaw-mem-dev-feature` + global heavy-python guard (legacy lock name retained)
+
+### AI compression (derived artifact)
 - Job: `58a7c87c-d1b2-4c9c-96fd-6ecccf623b85` (daily 00:35 Asia/Taipei)
 - Output (derived): `/root/.openclaw/workspace/memory/compressed/YYYY-MM-DD.md`
 - Receipt: `/root/.openclaw/workspace/memory/compressed/receipts/YYYY-MM-DD.json`
@@ -64,7 +62,7 @@ These are automated via OpenClaw cron jobs (so the system works without manual C
 - Not yet wired as the default per-request context feeder for OpenClaw.
 
 Why not wired yet:
-- We want a clear promotion gate (dev → main) and a burn-in window.
+- We want a clear promotion gate and a burn-in window.
 - We need confidence on determinism, privacy/redaction, and operator debuggability.
 
 Current pilot sequencing (2026-02):
