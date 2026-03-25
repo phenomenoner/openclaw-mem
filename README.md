@@ -34,7 +34,13 @@ Launch guardrails:
 - **Synthetic fixture + receipts:** [`docs/showcase/artifacts/index.md`](docs/showcase/artifacts/index.md)
 - **Companion 5-minute demo:** [`docs/showcase/inside-out-demo.md`](docs/showcase/inside-out-demo.md)
 
-Start with a local sidecar. Keep your current OpenClaw memory backend if you want. Promote to the optional mem engine later if you need hybrid recall, policy controls, and bounded automation.
+## Release CTA path (proof → sidecar → engine)
+
+1. **Prove it locally (5 minutes):** run the synthetic trust-aware pack proof first.
+2. **Run sidecar on existing OpenClaw (default):** keep your current memory backend and add capture/recall hygiene.
+3. **Promote to optional mem engine later:** switch slot ownership only when hybrid recall/policy controls are worth it.
+
+This keeps the launch story practical: prove the wedge first, then scale control with explicit rollback.
 
 ## Why people adopt it
 
@@ -152,6 +158,7 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 - **Copy pack:** [`docs/launch/trust-aware-context-pack-copy-pack.md`](docs/launch/trust-aware-context-pack-copy-pack.md)
 - **GitHub surface spec:** [`docs/launch/github-repo-surface-consistency.md`](docs/launch/github-repo-surface-consistency.md)
 - **Proof-first relaunch checklist:** [`docs/launch/proof-first-relaunch-checklist.md`](docs/launch/proof-first-relaunch-checklist.md)
+- **Release-surface proof pack (PASS 3):** [`docs/launch/release-surface-proof-pack-v0.md`](docs/launch/release-surface-proof-pack-v0.md)
 
 **Operate and extend**
 - **Release checklist:** [`docs/release-checklist.md`](docs/release-checklist.md)

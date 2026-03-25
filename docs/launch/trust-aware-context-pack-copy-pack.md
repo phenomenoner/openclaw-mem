@@ -147,3 +147,4 @@ It is **smaller, safer prompt packs with trust tiers and receipts**.
 - Raw fixture: `docs/showcase/artifacts/trust-aware-context-pack.synthetic.jsonl`
 - Companion demo: `docs/showcase/inside-out-demo.md`
 - Operator lock checklist: `docs/launch/proof-first-relaunch-checklist.md`
+- Release-surface proof pack: `docs/launch/release-surface-proof-pack-v0.md`

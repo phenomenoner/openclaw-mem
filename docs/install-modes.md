@@ -3,11 +3,11 @@
 There are **three sane ways** to adopt `openclaw-mem`.
 Pick the lightest one that solves your problem.
 
-## Fast decision shortcut
+## Fast decision shortcut (release CTA sync)
 
-- **“I just want proof this works.”** → start with **Local proof**
-- **“I already run OpenClaw and want better capture + recall hygiene.”** → choose **Sidecar on existing OpenClaw**
-- **“I want openclaw-mem to own the memory slot.”** → use **Optional Mem Engine**
+- **Prove it locally (5 minutes)** → start with **Path 1: Local proof**
+- **Run sidecar on existing OpenClaw (default)** → choose **Path 2: Sidecar on existing OpenClaw**
+- **Promote to optional mem engine when needed** → use **Path 3: Optional Mem Engine**
 
 ---
 

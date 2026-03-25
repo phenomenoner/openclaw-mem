@@ -6,7 +6,13 @@ Purpose: one bounded operator checklist to verify relaunch readiness without exp
 
 - [ ] README states the story path in this order.
 - [ ] `docs/index.md` and `docs/about.md` mirror the same order.
-- [ ] Launch copy docs (`trust-aware-context-pack-copy-pack.md`, `github-repo-surface-consistency.md`) use the same wedge wording.
+- [ ] Launch copy docs (`trust-aware-context-pack-copy-pack.md`, `github-repo-surface-consistency.md`, `release-surface-proof-pack-v0.md`) use the same wedge wording.
+
+## 1.5) Release-surface sync (headline / hero / CTA)
+
+- [ ] Release-note opening paragraph follows the same story route and boundary posture.
+- [ ] README + docs home hero copy both point at the same CTA ladder (proof → sidecar → engine).
+- [ ] Install-path fast decision shortcut uses the same CTA wording/order.
 
 ## 2) Proof-first contract
 

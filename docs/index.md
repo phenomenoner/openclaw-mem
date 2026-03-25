@@ -25,6 +25,12 @@ Boundary reminders:
 - KOL/GTM remains linked-but-separate from product/control docs.
 - Graph/reference/knowledge-graph is a flagship feature family, not a universal schema claim.
 
+## Release CTA path (proof → sidecar → engine)
+
+1. **Prove it locally (5 minutes)** — [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md)
+2. **Run sidecar on existing OpenClaw (default)** — [Choose an install path](install-modes.md)
+3. **Promote to optional mem engine when needed** — [Mem Engine reference](mem-engine.md)
+
 ## Start here
 
 - [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md) — canonical before/after artifact
@@ -70,6 +76,7 @@ That split is the core design choice: start with something inspectable and rollb
 - [Trust-aware context pack copy pack](launch/trust-aware-context-pack-copy-pack.md)
 - [GitHub repo surface consistency](launch/github-repo-surface-consistency.md)
 - [Proof-first relaunch checklist](launch/proof-first-relaunch-checklist.md)
+- [Release-surface proof pack (PASS 3)](launch/release-surface-proof-pack-v0.md)
 
 ## Releases
 

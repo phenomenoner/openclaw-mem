@@ -56,6 +56,7 @@ This page locks the relaunch structure for `openclaw-mem` so README / docs index
 - `docs/showcase/*`: proof and artifacts
 - `docs/install-modes.md` / `docs/mem-engine.md`: install boundary and expansion path
 - `docs/launch/proof-first-relaunch-checklist.md`: operator release-readiness lock list
+- `docs/launch/release-surface-proof-pack-v0.md`: release-note + hero + install CTA sync proof card
 
 ## Boundary rules (hard)
 
@@ -69,5 +70,5 @@ This page locks the relaunch structure for `openclaw-mem` so README / docs index
 ## Next increments (copy can improve later)
 
 1. tighten quickstart snippets and proof commands against latest flags,
-2. align release-note templates with this narrative route,
+2. keep release-note snippets synchronized as new feature families land,
 3. keep GitHub/About/social copy synchronized through the checklist.

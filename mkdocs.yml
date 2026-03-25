@@ -39,8 +39,11 @@ nav:
       - Inside-Out demo: showcase/inside-out-demo.md
       - Topology demo: showcase/topology-demo.md
   - Launch:
+      - Relaunch information architecture (v0): launch/relaunch-information-architecture-v0.md
       - Copy pack: launch/trust-aware-context-pack-copy-pack.md
       - GitHub repo surface consistency: launch/github-repo-surface-consistency.md
+      - Proof-first relaunch checklist: launch/proof-first-relaunch-checklist.md
+      - Release-surface proof pack (PASS 3): launch/release-surface-proof-pack-v0.md
   - Releases: https://github.com/phenomenoner/openclaw-mem/releases
   - Reference:
       - Ecosystem fit: ecosystem-fit.md

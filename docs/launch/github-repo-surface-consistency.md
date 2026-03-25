@@ -127,6 +127,7 @@ Use these for second-click depth after the one-line pitch:
 - Companion demo: `docs/showcase/inside-out-demo.md`
 - Copy pack: `docs/launch/trust-aware-context-pack-copy-pack.md`
 - Operator checklist: `docs/launch/proof-first-relaunch-checklist.md`
+- Release-surface proof pack: `docs/launch/release-surface-proof-pack-v0.md`
 
 ---
 
