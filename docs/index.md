@@ -47,7 +47,7 @@ Two-plane framing:
 - **Sidecar (default)** — capture, ingest, local recall, pack receipts, graph query/drift checks, hygiene review
 - **Mem Engine (optional)** — memory-slot backend for hybrid recall and bounded automation
 
-That split is the core design choice: start with something inspectable and rollbackable, then add power only when it earns its keep.
+Start with the inspectable sidecar, then add the engine only when you need it.
 
 ## Most common next stops
 

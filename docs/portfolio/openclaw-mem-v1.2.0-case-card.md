@@ -12,13 +12,13 @@ In long-running agent systems, failure often isn’t “storage.” It’s **adm
 - prompt packs bloat into hard-to-debug context dumps
 - operators lose the ability to answer “why did this enter context?”
 
-## The approach (what makes it notable)
+## The approach
 
 - **Proof-first:** behavior is demonstrated via a reproducible synthetic fixture and inspectable receipts.
 - **Trust tiers + receipts:** selection is not a black box—packs can include citations and traceable inclusion/exclusion reasons.
-- **Rollbackable adoption:** sidecar-first by default; promote to an optional engine only when the extra capability is earned.
+- **Rollbackable adoption:** sidecar-first by default; promote to an optional engine only when you need it.
 
-## What shipped in v1.2.0 (high-signal)
+## What shipped in v1.2.0
 
 - Deterministic local recall loop: `search → timeline → get`.
 - Trust-aware packing surfaces with trace receipts (`pack`, `--trace`, policy surfaces).

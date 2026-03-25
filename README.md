@@ -20,8 +20,8 @@ It operates across two planes:
 
 - Prevent context admission drift when long-running agents accumulate stale or hostile notes.
 - Use trust-aware context packing with explicit trust tiers, citations, and receipts.
-- Make value easy to verify with a reproducible synthetic proof.
-- Keep adoption practical: start sidecar-first, then promote to mem-engine only when needed.
+- Provide a reproducible synthetic proof so you can test behavior before deploying.
+- Start as a sidecar, then promote to mem-engine only when needed.
 
 ## See the proof first
 
@@ -36,15 +36,14 @@ It operates across two planes:
 2. **Run sidecar on existing OpenClaw (default):** keep your current memory backend and add capture/recall hygiene.
 3. **Promote to optional mem engine later:** switch slot ownership only when hybrid recall/policy controls are worth it.
 
-This keeps adoption practical: prove value locally first, then expand with explicit rollback options.
 
 ## Why people adopt it
 
 - **Long-running agent failures are often admission failures, not storage failures.** Old notes, stale assumptions, scraped suggestions, and hostile instructions can quietly shape future answers.
 - **Search alone is not enough.** You need a pack you can inspect, test, and audit before trusting it.
 - **Smaller, cited packs beat giant context dumps.** They are cheaper to inject, easier to reason about, and safer to debug.
-- **Receipts beat vibes.** JSON outputs, pack traces, policy surfaces, and lifecycle shadow logs make memory behavior visible.
-- **Sidecar-first keeps the risk low.** Prove the product locally before touching your OpenClaw memory slot.
+- **Receipts beat guesswork.** JSON outputs, pack traces, policy surfaces, and lifecycle shadow logs make memory behavior visible.
+- **Sidecar-first keeps the risk low.** Test locally before touching your OpenClaw memory slot.
 
 ## What ships today in v1.2.0
 
@@ -56,14 +55,14 @@ This keeps adoption practical: prove value locally first, then expand with expli
 - **Episodic event lane:** append/extract/ingest/query/replay with redaction-first defaults.
 - **Optional Mem Engine upgrades:** hybrid recall controls, TODO guardrails, docs cold-lane ingest/search.
 
-## Best first fit
+## Who it's for
 
 `openclaw-mem` is a strong fit when you want OpenClaw to keep working memory sharp across days or weeks of real work.
 
 Typical fits:
 - **OpenClaw operators** who want better recall freshness, auditability, and rollback posture
 - **Agent builders** who need a practical memory surface before adding more complexity
-- **Teams with docs / repos / decisions to remember** who want memory to stay explainable instead of opaque
+- **Teams with docs / repos / decisions to remember** who want memory that stays explainable
 
 ## Three adoption paths
 
@@ -167,7 +166,7 @@ Marketplace/package mapping keeps install boundaries explicit:
 - `@phenomenoner/openclaw-mem` = sidecar package
 - `@phenomenoner/openclaw-mem-engine` = engine package
 
-The split is about install/rollback boundary, not about pretending they are unrelated products.
+The split keeps install and rollback boundaries clean.
 
 ## License
 

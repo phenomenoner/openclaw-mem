@@ -69,7 +69,7 @@ Marketplace/install mapping:
 - `@phenomenoner/openclaw-mem` → sidecar role
 - `@phenomenoner/openclaw-mem-engine` → engine role
 
-That split is there to preserve clean install and rollback boundaries. It is **not** a product-brand split.
+That split preserves clean install and rollback boundaries.
 
 ### Sidecar (default)
 
@@ -129,7 +129,7 @@ You care about decisions, preferences, specs, notes, and operational breadcrumbs
 - **Not** a promise that retrieval quality comes from embeddings alone.
 - **Not** a requirement to replace OpenClaw native memory on day one.
 
-The sidecar-first posture is deliberate: prove the pack, then expand.
+Start with the sidecar, prove the pack works, then expand.
 
 ## Recommended way to adopt it
 
