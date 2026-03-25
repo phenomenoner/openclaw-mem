@@ -46,7 +46,7 @@ This keeps adoption practical: prove value locally first, then expand with expli
 - **Receipts beat vibes.** JSON outputs, pack traces, policy surfaces, and lifecycle shadow logs make memory behavior visible.
 - **Sidecar-first keeps the risk low.** Prove the product locally before touching your OpenClaw memory slot.
 
-## What ships today in v1.1.0
+## What ships today in v1.2.0
 
 - **Local recall loop:** `search → timeline → get` keeps routine lookups fast and inspectable.
 - **Trust-aware pack surfaces:** `pack`, `--trace`, `--pack-trust-policy`, `policy_surface`, and `pack_lifecycle_shadow` provide inclusion/exclusion receipts.

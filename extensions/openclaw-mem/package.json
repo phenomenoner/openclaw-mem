@@ -1,6 +1,6 @@
 {
   "name": "openclaw-mem",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "OpenClaw observation-capture plugin for openclaw-mem ingestion and bounded episodic spool receipts.",
   "type": "module",
   "license": "MIT",

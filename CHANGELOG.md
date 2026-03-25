@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-25
+
 ### Changed
 
 - `openclaw-mem docs search` now supports `--scope-repos <repo> [<repo> ...]` for exact repo-allowlist candidate pushdown in both FTS and vector docs retrieval paths.
