@@ -2,6 +2,8 @@
 
 Use this file as the durable spec for the GitHub-facing surfaces of `openclaw-mem`.
 
+Scope note: maintainer-facing guidance in a public repo; it governs outward language but is not itself end-user product documentation.
+
 ## Goal
 
 When someone encounters the repo through GitHub search, pinned repos, releases, or social previews, they should get the same first impression:
@@ -10,9 +12,9 @@ When someone encounters the repo through GitHub search, pinned repos, releases, 
 
 Not generic memory storage. Not backend internals first. Not a universal graph-schema claim.
 
-## Canonical message spine
+## Canonical messaging
 
-### One-line wedge
+### One-line description
 
 **Trust-aware context packing for OpenClaw — pack only what the agent should trust.**
 
@@ -26,12 +28,12 @@ Long-running agents do not just forget. They also admit stale, weak, or hostile 
 
 ---
 
-## Narrative order for repo surfaces (dream → concept → demo → how-to)
+## Public repo messaging sequence
 
-1. **Dream**: trustworthy memory behavior under long-running pressure.
-2. **Concept**: trust-aware context packing with explicit trust tiers + receipts.
-3. **Use case/demo**: synthetic before/after proof artifact as first deep link.
-4. **How-to**: sidecar-first install path, optional mem-engine promotion.
+1. **Problem**: trustworthy memory behavior under long-running pressure.
+2. **Approach**: trust-aware context packing with explicit trust tiers + receipts.
+3. **Proof**: synthetic before/after artifact as the first deep link.
+4. **Adoption path**: sidecar-first install path, optional mem-engine promotion.
 
 Use this order in README / About / release body intros.
 
@@ -131,7 +133,7 @@ Use these for second-click depth after the one-line pitch:
 
 ---
 
-## Topics posture
+## Repository topics guidance
 
 Keep topics aligned to positioning first, implementation second.
 
@@ -155,3 +157,4 @@ Backend-specific topics like `vector-search`, `hybrid-search`, `embeddings`, `la
 - KOL/GTM lanes remain linked-but-separate (no authority merge in this spec).
 - Query-plane default and action-plane write-gated framing remain explicit.
 - Graph/reference/knowledge-graph messaging stays a flagship feature family, not an overclaimed universal schema.
+- For publicly released materials, internal narrative and external narrative must remain clearly separated; do not publish internal framing formulas or backstage positioning language as outward-facing copy.

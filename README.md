@@ -16,16 +16,12 @@ It operates across two planes:
 - **Query plane (default):** recall + trust-aware context packing with citations and receipts.
 - **Action plane (optional):** recommendation-only hygiene and maintenance review queues (no silent writeback to durable memory).
 
-## Story path (dream → concept → demo → how-to)
+## What this product focuses on
 
-1. **Dream:** OpenClaw memory should stay useful under pressure without quietly importing untrusted context.
-2. **Concept:** trust-aware context packing with explicit trust tiers, citations, and receipts.
-3. **Use case / demo:** run the synthetic before/after proof and inspect exclusion receipts.
-4. **How-to / technical path:** start sidecar-first, then promote to mem-engine only when needed.
-
-Launch guardrails:
-- KOL/GTM is linked but separately governed (no controller merge in product docs).
-- Graph/reference capabilities are a flagship feature family and trust surface, not a universal schema claim.
+- Prevent context admission drift when long-running agents accumulate stale or hostile notes.
+- Use trust-aware context packing with explicit trust tiers, citations, and receipts.
+- Make value easy to verify with a reproducible synthetic proof.
+- Keep adoption practical: start sidecar-first, then promote to mem-engine only when needed.
 
 ## See the proof first
 
@@ -34,13 +30,13 @@ Launch guardrails:
 - **Synthetic fixture + receipts:** [`docs/showcase/artifacts/index.md`](docs/showcase/artifacts/index.md)
 - **Companion 5-minute demo:** [`docs/showcase/inside-out-demo.md`](docs/showcase/inside-out-demo.md)
 
-## Release CTA path (proof → sidecar → engine)
+## Recommended way to get started
 
 1. **Prove it locally (5 minutes):** run the synthetic trust-aware pack proof first.
 2. **Run sidecar on existing OpenClaw (default):** keep your current memory backend and add capture/recall hygiene.
 3. **Promote to optional mem engine later:** switch slot ownership only when hybrid recall/policy controls are worth it.
 
-This keeps the launch story practical: prove the wedge first, then scale control with explicit rollback.
+This keeps adoption practical: prove value locally first, then expand with explicit rollback options.
 
 ## Why people adopt it
 
@@ -72,7 +68,7 @@ Typical fits:
 ## Three adoption paths
 
 ### 1) Local proof in one repo
-Use this when you want to prove the wedge first.
+Use this when you want to prove value first.
 
 - clone the repo
 - ingest a synthetic trust-aware fixture
@@ -128,7 +124,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
   --pack-trust-policy exclude_quarantined_fail_open
 ```
 
-If that works, you have already shown the wedge:
+If that works, you have already shown the core behavior:
 - the same query can exclude quarantined memory with an explicit reason
 - the pack stays compact and cited
 - the selection remains inspectable through `trace`, `policy_surface`, and `lifecycle_shadow`
@@ -139,7 +135,6 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 
 **Understand the product**
 - **About the product:** [`docs/about.md`](docs/about.md)
-- **Relaunch information architecture (v0):** [`docs/launch/relaunch-information-architecture-v0.md`](docs/launch/relaunch-information-architecture-v0.md)
 - **Choose an install path:** [`docs/install-modes.md`](docs/install-modes.md)
 - **Docs site index:** [`docs/index.md`](docs/index.md)
 - **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
@@ -153,18 +148,24 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 **Proof / showcase path**
 - **Canonical proof:** [`docs/showcase/trust-aware-context-pack-proof.md`](docs/showcase/trust-aware-context-pack-proof.md)
 - **5-minute showcase:** [`docs/showcase/inside-out-demo.md`](docs/showcase/inside-out-demo.md)
-- **Relaunch IA map:** [`docs/launch/relaunch-information-architecture-v0.md`](docs/launch/relaunch-information-architecture-v0.md)
-- **About the wedge:** [`docs/about.md`](docs/about.md)
-- **Copy pack:** [`docs/launch/trust-aware-context-pack-copy-pack.md`](docs/launch/trust-aware-context-pack-copy-pack.md)
-- **GitHub surface spec:** [`docs/launch/github-repo-surface-consistency.md`](docs/launch/github-repo-surface-consistency.md)
-- **Proof-first relaunch checklist:** [`docs/launch/proof-first-relaunch-checklist.md`](docs/launch/proof-first-relaunch-checklist.md)
-- **Release-surface proof pack (PASS 3):** [`docs/launch/release-surface-proof-pack-v0.md`](docs/launch/release-surface-proof-pack-v0.md)
+- **About the product:** [`docs/about.md`](docs/about.md)
 
 **Operate and extend**
 - **Release checklist:** [`docs/release-checklist.md`](docs/release-checklist.md)
 - **Triage task-marker acceptance (TASK/TODO/REMINDER forms):** [`docs/upgrade-checklist.md`](docs/upgrade-checklist.md)
 - **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
 - **Release notes:** <https://github.com/phenomenoner/openclaw-mem/releases>
+
+## Maintainer launch docs (internal guidance)
+
+These files define copy/governance rules for maintainers and release editors, not end-user product docs:
+
+- [`docs/launch/relaunch-information-architecture-v0.md`](docs/launch/relaunch-information-architecture-v0.md)
+- [`docs/launch/trust-aware-context-pack-copy-pack.md`](docs/launch/trust-aware-context-pack-copy-pack.md)
+- [`docs/launch/github-repo-surface-consistency.md`](docs/launch/github-repo-surface-consistency.md)
+- [`docs/launch/proof-first-relaunch-checklist.md`](docs/launch/proof-first-relaunch-checklist.md)
+- [`docs/launch/release-surface-proof-pack-v0.md`](docs/launch/release-surface-proof-pack-v0.md)
+- [`docs/launch/release-note-body-v0-final.md`](docs/launch/release-note-body-v0-final.md)
 
 ## Product shape
 
@@ -173,17 +174,11 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 - **Sidecar (default):** capture, ingest, local recall, triage, pack receipts.
 - **Mem Engine (optional):** an OpenClaw memory-slot backend for hybrid recall and controlled automation.
 
-For repo/docs/product language, keep this family-first:
-- one repo
-- one product story
-- two deployment roles
-
-For marketplace/package language, keep the install boundary explicit:
+Marketplace/package mapping keeps install boundaries explicit:
 - `@phenomenoner/openclaw-mem` = sidecar package
 - `@phenomenoner/openclaw-mem-engine` = engine package
 
 The split is about install/rollback boundary, not about pretending they are unrelated products.
-The README stays focused on the product story: prove trust-aware context packing locally first, sidecar next, engine only when it earns the right to exist.
 
 ## License
 

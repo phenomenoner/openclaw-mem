@@ -10,20 +10,16 @@ In practical terms, it helps answer four questions:
 - **what should still be trusted**
 - **what should stay out of the pack**
 
-## Product story order (locked)
+## What this product is built for
 
-1. **Dream:** trustworthy memory behavior under long-running pressure.
-2. **Concept:** trust-aware context packing (query-plane first, action-plane optional).
-3. **Use case / demo:** synthetic proof that trust policy changes pack selection with receipts.
-4. **How-to / technical details:** sidecar-first install, optional mem-engine promotion, explicit rollback.
-
-Boundary posture for this story:
-- KOL/GTM remains a linked-but-separate lane (no authority merge here).
-- Graph/reference/knowledge-graph capabilities are a flagship feature family, not a universal schema claim.
+- trustworthy memory behavior under long-running pressure,
+- trust-aware context packing (query-plane first, action-plane optional),
+- reproducible proof that policy changes pack selection with receipts,
+- and a sidecar-first rollout with optional mem-engine promotion and explicit rollback.
 
 ## Start with proof, not adjectives
 
-If you want the wedge in one artifact first:
+If you want the core value in one artifact first:
 
 - [Canonical trust-aware pack proof](showcase/trust-aware-context-pack-proof.md)
 - [Before/after metrics JSON](showcase/artifacts/trust-aware-context-pack.metrics.json)
@@ -140,14 +136,6 @@ The sidecar-first posture is deliberate: prove the pack, then expand.
 1. **Start with the trust-aware proof** — run the synthetic fixture and compare pack receipts before/after trust policy.
 2. **Add the sidecar** — wire capture + harvest into your existing OpenClaw install.
 3. **Promote the engine only if needed** — switch slot ownership when hybrid recall and policy controls justify it.
-
-## Relaunch framing guardrails (v0)
-
-- Keep the product story query-plane first; treat action-plane features as optional and write-gated.
-- Keep install boundaries explicit: sidecar default, mem engine optional promotion.
-- Keep GTM/KOL execution as a linked-but-separate lane; this page defines product truth, not campaign control.
-- Canonical structure map: [Relaunch information architecture (v0)](launch/relaunch-information-architecture-v0.md).
-- Release lock checklist: [Proof-first relaunch checklist](launch/proof-first-relaunch-checklist.md).
 
 ## Read next
 

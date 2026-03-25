@@ -3,7 +3,7 @@
 There are **three sane ways** to adopt `openclaw-mem`.
 Pick the lightest one that solves your problem.
 
-## Fast decision shortcut (release CTA sync)
+## Quick-start decision guide
 
 - **Prove it locally (5 minutes)** → start with **Path 1: Local proof**
 - **Run sidecar on existing OpenClaw (default)** → choose **Path 2: Sidecar on existing OpenClaw**

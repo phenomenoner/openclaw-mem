@@ -2,30 +2,26 @@
 
 **Trust-aware context packing for OpenClaw.**
 
-This docs site is organized around one wedge first:
+This docs site is organized around one core idea:
 
 - keep prompt packs **small**
 - keep selection **inspectable**
 - keep trust tiers and provenance **visible**
 - keep stale / untrusted / hostile content from quietly polluting future answers
 
-Narrative order (dream → concept → demo → how-to):
+This docs site is organized around a practical product journey:
 
-1. Dream: memory that stays trustworthy under real operator pressure.
-2. Concept: trust-aware context packing as the core product contract.
-3. Use case/demo: synthetic proof + 5-minute walkthrough.
-4. How-to: sidecar-first install path, optional mem-engine promotion.
+1. what problem is being solved,
+2. how trust-aware packing addresses it,
+3. where to verify the proof quickly,
+4. and how to adopt with a low-risk rollout path.
 
 Two-plane framing:
 
 - **Query plane (default):** recall + trust-aware context packing with citations and receipts.
 - **Action plane (optional):** recommendation-only hygiene and maintenance review queues (no silent writeback to durable memory).
 
-Boundary reminders:
-- KOL/GTM remains linked-but-separate from product/control docs.
-- Graph/reference/knowledge-graph is a flagship feature family, not a universal schema claim.
-
-## Release CTA path (proof → sidecar → engine)
+## Recommended rollout sequence
 
 1. **Prove it locally (5 minutes)** — [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md)
 2. **Run sidecar on existing OpenClaw (default)** — [Choose an install path](install-modes.md)
@@ -34,8 +30,7 @@ Boundary reminders:
 ## Start here
 
 - [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md) — canonical before/after artifact
-- [About openclaw-mem](about.md) — product story, wedge, audience, and boundaries
-- [Relaunch information architecture (v0)](launch/relaunch-information-architecture-v0.md) — message hierarchy + page roles
+- [About openclaw-mem](about.md) — product scope, audience, and boundaries
 - [Quickstart](quickstart.md) — fastest local proof from a fresh clone
 - [Reality check & status](reality-check.md) — what is done, partial, and roadmap
 
@@ -70,13 +65,16 @@ That split is the core design choice: start with something inspectable and rollb
 - [Automation status](automation-status.md)
 - [Roadmap](roadmap.md)
 
-## Launch / external copy
+## Maintainer launch docs (internal guidance)
+
+These documents are for release editors and maintainers. They govern outward wording but are not end-user product docs.
 
 - [Relaunch information architecture (v0)](launch/relaunch-information-architecture-v0.md)
 - [Trust-aware context pack copy pack](launch/trust-aware-context-pack-copy-pack.md)
 - [GitHub repo surface consistency](launch/github-repo-surface-consistency.md)
 - [Proof-first relaunch checklist](launch/proof-first-relaunch-checklist.md)
-- [Release-surface proof pack (PASS 3)](launch/release-surface-proof-pack-v0.md)
+- [Release-surface consistency note](launch/release-surface-proof-pack-v0.md)
+- [Release-note body draft](launch/release-note-body-v0-final.md)
 
 ## Releases
 

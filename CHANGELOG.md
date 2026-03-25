@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Recorded the follow-up posture explicitly in docs truth: reducing scoped overfetch is deferred to a later optimization phase after the broader development line stabilizes.
 - Simplified the root `LICENSE` file to the canonical MIT text so GitHub/license scanners can detect a standard license instead of showing `Other`/`Unknown`, while preserving the repo's dual-license contract (`MIT OR Apache-2.0`) in `README.md` and `LICENSE-APACHE`.
 - Removed the redundant `LICENSE-MIT` file now that root `LICENSE` already carries the canonical MIT text; dual-license docs now point to `LICENSE` + `LICENSE-APACHE` only.
-- Tightened relaunch release surfaces around one CTA ladder (`prove locally → sidecar default → optional engine`) and added `docs/launch/release-surface-proof-pack-v0.md` as the PASS 3 release-note/hero/install sync proof card.
+- Tightened relaunch release surfaces around one consistent getting-started sequence (`prove locally`, `sidecar default`, `optional engine`) and added `docs/launch/release-surface-proof-pack-v0.md` as the release-note/hero/install sync proof card.
+- Finalized the relaunch release-note body source in `docs/launch/release-note-body-v0-final.md` and executed the proof-first relaunch checklist as PASS 4 release-candidate closure.
+- Completed PASS 4 external-language hygiene pass: removed internal writing-framework labels from public README/docs surfaces, moved launch-governance links under explicit maintainer-only sections, and added scope notes across `docs/launch/*` to keep internal vs external narratives clearly separated.
 
 ## [1.1.0] - 2026-03-10
 

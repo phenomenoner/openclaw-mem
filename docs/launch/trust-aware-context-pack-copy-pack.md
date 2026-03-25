@@ -2,23 +2,25 @@
 
 Use this file as the durable outward-facing copy source for `openclaw-mem`.
 
-## Positioning spine
+Scope note: maintainer-facing copy source in a public repo; this file is used to shape published copy but is not itself a user tutorial page.
+
+## Product positioning
 
 `openclaw-mem` is not trying to remember everything.
 It is a **trust-aware context packing layer for OpenClaw** that keeps prompt packs smaller, trust tiers visible, and receipts explicit for why a memory was included, excluded, or left fail-open.
 
-## Narrative lock (dream → concept → demo → how-to)
+## Public messaging baseline
 
-### Dream
+### Problem
 OpenClaw memory should stay trustworthy under pressure, not quietly import stale or hostile context.
 
-### Concept
+### Product approach
 Trust-aware context packing: smaller cited packs, visible trust tiers, and inspectable selection receipts.
 
-### Use case / demo
+### Proof surface
 Run the synthetic before/after proof and show that a trust policy can exclude quarantined rows while keeping receipts intact.
 
-### How-to
+### Adoption guidance
 Adopt sidecar-first; promote to mem-engine only when hybrid recall/policy controls are needed.
 
 ## Claims guardrails
@@ -41,6 +43,7 @@ Avoid these claims:
 Boundary rules for outward copy:
 - KOL/GTM is linked but separately governed; never merge control-lane authority into product copy.
 - Query-plane default and action-plane write-gated posture must remain explicit.
+- For publicly released materials, internal narrative and external narrative must remain clearly separated; do not publish internal framing formulas or backstage positioning language as outward-facing copy.
 
 ## Release-ready snippet
 
@@ -80,7 +83,7 @@ Pack only what the agent should trust
 
 ### Single-post version
 
-`openclaw-mem`'s wedge is now much cleaner:
+`openclaw-mem`'s core value proposition is now much cleaner:
 
 **trust-aware context packing for OpenClaw**
 - smaller prompt packs
@@ -111,7 +114,7 @@ The proof artifact is the key: same query, same DB, different trust policy — q
    same query, same DB, same limit.
    Turn on trust policy and the quarantined row is excluded, a trusted row replaces it, and the pack shrinks.
 
-6. Whole wedge:
+6. Whole value proposition:
    **smaller / safer prompt packs with receipts** — not “store everything and pray.”
 
 ## Demo-thread / one-pager script
