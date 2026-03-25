@@ -18,6 +18,7 @@ Two-plane framing:
 
 - [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md) — canonical before/after artifact
 - [About openclaw-mem](about.md) — product story, wedge, audience, and boundaries
+- [Relaunch information architecture (v0)](launch/relaunch-information-architecture-v0.md) — message hierarchy + page roles
 - [Quickstart](quickstart.md) — fastest local proof from a fresh clone
 - [Reality check & status](reality-check.md) — what is done, partial, and roadmap
 
@@ -54,6 +55,7 @@ That split is the core design choice: start with something inspectable and rollb
 
 ## Launch / external copy
 
+- [Relaunch information architecture (v0)](launch/relaunch-information-architecture-v0.md)
 - [Trust-aware context pack copy pack](launch/trust-aware-context-pack-copy-pack.md)
 - [GitHub repo surface consistency](launch/github-repo-surface-consistency.md)
 

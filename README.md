@@ -122,6 +122,7 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 
 **Understand the product**
 - **About the product:** [`docs/about.md`](docs/about.md)
+- **Relaunch information architecture (v0):** [`docs/launch/relaunch-information-architecture-v0.md`](docs/launch/relaunch-information-architecture-v0.md)
 - **Choose an install path:** [`docs/install-modes.md`](docs/install-modes.md)
 - **Docs site index:** [`docs/index.md`](docs/index.md)
 - **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
@@ -135,6 +136,7 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 **Proof / showcase path**
 - **Canonical proof:** [`docs/showcase/trust-aware-context-pack-proof.md`](docs/showcase/trust-aware-context-pack-proof.md)
 - **5-minute showcase:** [`docs/showcase/inside-out-demo.md`](docs/showcase/inside-out-demo.md)
+- **Relaunch IA map:** [`docs/launch/relaunch-information-architecture-v0.md`](docs/launch/relaunch-information-architecture-v0.md)
 - **About the wedge:** [`docs/about.md`](docs/about.md)
 - **Copy pack:** [`docs/launch/trust-aware-context-pack-copy-pack.md`](docs/launch/trust-aware-context-pack-copy-pack.md)
 - **GitHub surface spec:** [`docs/launch/github-repo-surface-consistency.md`](docs/launch/github-repo-surface-consistency.md)

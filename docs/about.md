@@ -130,6 +130,13 @@ The sidecar-first posture is deliberate: prove the pack, then expand.
 2. **Add the sidecar** — wire capture + harvest into your existing OpenClaw install.
 3. **Promote the engine only if needed** — switch slot ownership when hybrid recall and policy controls justify it.
 
+## Relaunch framing guardrails (v0)
+
+- Keep the product story query-plane first; treat action-plane features as optional and write-gated.
+- Keep install boundaries explicit: sidecar default, mem engine optional promotion.
+- Keep GTM/KOL execution as a linked-but-separate lane; this page defines product truth, not campaign control.
+- Canonical structure map: [Relaunch information architecture (v0)](launch/relaunch-information-architecture-v0.md).
+
 ## Read next
 
 - [Home / docs index](index.md)
