@@ -10,6 +10,17 @@ In practical terms, it helps answer four questions:
 - **what should still be trusted**
 - **what should stay out of the pack**
 
+## Product story order (locked)
+
+1. **Dream:** trustworthy memory behavior under long-running pressure.
+2. **Concept:** trust-aware context packing (query-plane first, action-plane optional).
+3. **Use case / demo:** synthetic proof that trust policy changes pack selection with receipts.
+4. **How-to / technical details:** sidecar-first install, optional mem-engine promotion, explicit rollback.
+
+Boundary posture for this story:
+- KOL/GTM remains a linked-but-separate lane (no authority merge here).
+- Graph/reference/knowledge-graph capabilities are a flagship feature family, not a universal schema claim.
+
 ## Start with proof, not adjectives
 
 If you want the wedge in one artifact first:
@@ -136,6 +147,7 @@ The sidecar-first posture is deliberate: prove the pack, then expand.
 - Keep install boundaries explicit: sidecar default, mem engine optional promotion.
 - Keep GTM/KOL execution as a linked-but-separate lane; this page defines product truth, not campaign control.
 - Canonical structure map: [Relaunch information architecture (v0)](launch/relaunch-information-architecture-v0.md).
+- Release lock checklist: [Proof-first relaunch checklist](launch/proof-first-relaunch-checklist.md).
 
 ## Read next
 

@@ -16,6 +16,17 @@ It operates across two planes:
 - **Query plane (default):** recall + trust-aware context packing with citations and receipts.
 - **Action plane (optional):** recommendation-only hygiene and maintenance review queues (no silent writeback to durable memory).
 
+## Story path (dream → concept → demo → how-to)
+
+1. **Dream:** OpenClaw memory should stay useful under pressure without quietly importing untrusted context.
+2. **Concept:** trust-aware context packing with explicit trust tiers, citations, and receipts.
+3. **Use case / demo:** run the synthetic before/after proof and inspect exclusion receipts.
+4. **How-to / technical path:** start sidecar-first, then promote to mem-engine only when needed.
+
+Launch guardrails:
+- KOL/GTM is linked but separately governed (no controller merge in product docs).
+- Graph/reference capabilities are a flagship feature family and trust surface, not a universal schema claim.
+
 ## See the proof first
 
 - **Canonical proof artifact:** [`docs/showcase/trust-aware-context-pack-proof.md`](docs/showcase/trust-aware-context-pack-proof.md)
@@ -140,6 +151,7 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 - **About the wedge:** [`docs/about.md`](docs/about.md)
 - **Copy pack:** [`docs/launch/trust-aware-context-pack-copy-pack.md`](docs/launch/trust-aware-context-pack-copy-pack.md)
 - **GitHub surface spec:** [`docs/launch/github-repo-surface-consistency.md`](docs/launch/github-repo-surface-consistency.md)
+- **Proof-first relaunch checklist:** [`docs/launch/proof-first-relaunch-checklist.md`](docs/launch/proof-first-relaunch-checklist.md)
 
 **Operate and extend**
 - **Release checklist:** [`docs/release-checklist.md`](docs/release-checklist.md)

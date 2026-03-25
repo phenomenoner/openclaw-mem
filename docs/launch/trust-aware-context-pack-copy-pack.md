@@ -5,7 +5,21 @@ Use this file as the durable outward-facing copy source for `openclaw-mem`.
 ## Positioning spine
 
 `openclaw-mem` is not trying to remember everything.
-It is a **trust-aware context packing layer for OpenClaw** that keeps prompt packs smaller, keeps trust tiers visible, and gives operators receipts for why a memory was included, excluded, or left fail-open.
+It is a **trust-aware context packing layer for OpenClaw** that keeps prompt packs smaller, trust tiers visible, and receipts explicit for why a memory was included, excluded, or left fail-open.
+
+## Narrative lock (dream → concept → demo → how-to)
+
+### Dream
+OpenClaw memory should stay trustworthy under pressure, not quietly import stale or hostile context.
+
+### Concept
+Trust-aware context packing: smaller cited packs, visible trust tiers, and inspectable selection receipts.
+
+### Use case / demo
+Run the synthetic before/after proof and show that a trust policy can exclude quarantined rows while keeping receipts intact.
+
+### How-to
+Adopt sidecar-first; promote to mem-engine only when hybrid recall/policy controls are needed.
 
 ## Claims guardrails
 
@@ -22,12 +36,19 @@ Avoid these claims:
 - “fully blocks all bad memory automatically”
 - “ships full provenance URLs for every citation today”
 - “replaces all native OpenClaw memory by default”
+- “graph/reference is the universal schema for everything”
+
+Boundary rules for outward copy:
+- KOL/GTM is linked but separately governed; never merge control-lane authority into product copy.
+- Query-plane default and action-plane write-gated posture must remain explicit.
 
 ## Release-ready snippet
 
-`openclaw-mem` is now positioned around **trust-aware context packing** instead of generic memory storage.
+`openclaw-mem` is positioned around **trust-aware context packing**, not generic memory storage.
 
-The point is simple: long-running agents do not just forget — they also admit stale, untrusted, or hostile context and quietly drag it into future prompts. `openclaw-mem` gives OpenClaw a local-first way to build **smaller, cited prompt packs** with **explicit trust tiers** and **trace receipts** for why something was included, excluded, or left fail-open. The canonical proof artifact shows the same query before/after trust policy: a quarantined row drops out, a trusted row takes its place, the pack gets smaller, and the receipts stay intact.
+Long-running agents do not only forget. They also admit stale, untrusted, or hostile context and quietly drag it into future prompts. `openclaw-mem` gives OpenClaw a local-first way to build **smaller, cited prompt packs** with **explicit trust tiers** and **trace receipts** for inclusion/exclusion/fail-open decisions.
+
+The canonical proof uses the same query against the same DB before/after trust policy: a quarantined row drops out, a trusted row takes its place, the pack gets smaller, and the receipts stay intact.
 
 Proof:
 - `docs/showcase/trust-aware-context-pack-proof.md`
@@ -41,7 +62,7 @@ Trust-aware context packing for OpenClaw: smaller prompt packs, explicit trust t
 
 ### Repo description / pin-safe line
 
-Trust-aware memory for OpenClaw — pack only what the agent should trust, with provenance, receipts, and local-first recall.
+Trust-aware context packing for OpenClaw — pack only what the agent should trust, with provenance, receipts, and local-first recall.
 
 ### Ultra-short line
 
@@ -65,22 +86,22 @@ Pack only what the agent should trust
 - smaller prompt packs
 - explicit trust tiers
 - recordRef citations + trace receipts
-- less chance that stale / hostile context quietly becomes durable memory
+- lower chance that stale / hostile context quietly re-enters future prompts
 
-The proof artifact is the fun part: same query, same DB, different trust policy — the quarantined row drops out, a trusted row takes its place, and the bundle gets smaller.
+The proof artifact is the key: same query, same DB, different trust policy — quarantined row drops out, trusted row takes its place, bundle gets smaller.
 
 ### Thread version
 
 1. Most “AI memory” products pitch storage.
-   The nastier production problem is **admission**: stale, untrusted, or hostile content quietly makes it into future prompts.
+   The nastier production problem is **admission**: stale, untrusted, or hostile content quietly enters future prompts.
 
-2. `openclaw-mem` is narrowing hard around that problem:
+2. `openclaw-mem` narrows around that:
    **trust-aware context packing for OpenClaw**.
 
-3. The baseline is local-first and inspectable:
+3. Baseline is local-first and inspectable:
    SQLite + JSON receipts + `search → timeline → get → pack`.
 
-4. The useful bit is the pack surface:
+4. The packing surface:
    `--trace`
    `--pack-trust-policy exclude_quarantined_fail_open`
    `policy_surface`
@@ -90,7 +111,7 @@ The proof artifact is the fun part: same query, same DB, different trust policy 
    same query, same DB, same limit.
    Turn on trust policy and the quarantined row is excluded, a trusted row replaces it, and the pack shrinks.
 
-6. That is the whole wedge:
+6. Whole wedge:
    **smaller / safer prompt packs with receipts** — not “store everything and pray.”
 
 ## Demo-thread / one-pager script
@@ -104,15 +125,15 @@ The problem is not only forgetting. It is letting stale or hostile text become d
 
 1. **Show the ungated pack**
    - run the proof fixture without trust policy
-   - point out that a quarantined row still enters the pack because it matches the query text
+   - point out that a quarantined row still enters the pack because it text-matches
 
 2. **Turn on trust policy**
    - rerun with `--pack-trust-policy exclude_quarantined_fail_open`
-   - show that the quarantined row is now excluded with an explicit reason
+   - show that the quarantined row is excluded with an explicit reason
 
 3. **Close on receipts**
    - show `trace`, `trust_policy`, `policy_surface`, and `lifecycle_shadow`
-   - emphasize that the system did not silently mutate memory; it changed **selection** and logged why
+   - emphasize selection changed with logs; memory was not silently mutated
 
 ### Closing line
 
@@ -125,3 +146,4 @@ It is **smaller, safer prompt packs with trust tiers and receipts**.
 - Metrics JSON: `docs/showcase/artifacts/trust-aware-context-pack.metrics.json`
 - Raw fixture: `docs/showcase/artifacts/trust-aware-context-pack.synthetic.jsonl`
 - Companion demo: `docs/showcase/inside-out-demo.md`
+- Operator lock checklist: `docs/launch/proof-first-relaunch-checklist.md`

@@ -9,10 +9,21 @@ This docs site is organized around one wedge first:
 - keep trust tiers and provenance **visible**
 - keep stale / untrusted / hostile content from quietly polluting future answers
 
+Narrative order (dream → concept → demo → how-to):
+
+1. Dream: memory that stays trustworthy under real operator pressure.
+2. Concept: trust-aware context packing as the core product contract.
+3. Use case/demo: synthetic proof + 5-minute walkthrough.
+4. How-to: sidecar-first install path, optional mem-engine promotion.
+
 Two-plane framing:
 
 - **Query plane (default):** recall + trust-aware context packing with citations and receipts.
 - **Action plane (optional):** recommendation-only hygiene and maintenance review queues (no silent writeback to durable memory).
+
+Boundary reminders:
+- KOL/GTM remains linked-but-separate from product/control docs.
+- Graph/reference/knowledge-graph is a flagship feature family, not a universal schema claim.
 
 ## Start here
 
@@ -58,6 +69,7 @@ That split is the core design choice: start with something inspectable and rollb
 - [Relaunch information architecture (v0)](launch/relaunch-information-architecture-v0.md)
 - [Trust-aware context pack copy pack](launch/trust-aware-context-pack-copy-pack.md)
 - [GitHub repo surface consistency](launch/github-repo-surface-consistency.md)
+- [Proof-first relaunch checklist](launch/proof-first-relaunch-checklist.md)
 
 ## Releases
 

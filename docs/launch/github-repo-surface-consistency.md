@@ -4,21 +4,21 @@ Use this file as the durable spec for the GitHub-facing surfaces of `openclaw-me
 
 ## Goal
 
-When someone encounters the repo through GitHub search, a pinned repo list, a release page, or a shared link preview, they should get the same first impression:
+When someone encounters the repo through GitHub search, pinned repos, releases, or social previews, they should get the same first impression:
 
 > `openclaw-mem` is about **trust-aware context packing** for OpenClaw.
 
-Not generic memory storage. Not vector-search-first packaging. Not backend internals.
+Not generic memory storage. Not backend internals first. Not a universal graph-schema claim.
 
 ## Canonical message spine
 
 ### One-line wedge
 
-**Trust-aware memory for OpenClaw — pack only what the agent should trust.**
+**Trust-aware context packing for OpenClaw — pack only what the agent should trust.**
 
 ### Expanded line
 
-Trust-aware memory for OpenClaw — pack only what the agent should trust, with provenance, receipts, and local-first recall.
+Trust-aware context packing for OpenClaw — pack only what the agent should trust, with provenance, receipts, and local-first recall.
 
 ### Problem statement
 
@@ -26,34 +26,45 @@ Long-running agents do not just forget. They also admit stale, weak, or hostile 
 
 ---
 
+## Narrative order for repo surfaces (dream → concept → demo → how-to)
+
+1. **Dream**: trustworthy memory behavior under long-running pressure.
+2. **Concept**: trust-aware context packing with explicit trust tiers + receipts.
+3. **Use case/demo**: synthetic before/after proof artifact as first deep link.
+4. **How-to**: sidecar-first install path, optional mem-engine promotion.
+
+Use this order in README / About / release body intros.
+
+---
+
 ## GitHub About / repo description
 
 ### Final description
 
-`Trust-aware memory for OpenClaw — pack only what the agent should trust, with provenance, receipts, and local-first recall.`
+`Trust-aware context packing for OpenClaw — pack only what the agent should trust, with provenance, receipts, and local-first recall.`
 
 ### Homepage
 
-Keep homepage pointed at the docs root:
+Keep homepage pointed at docs root:
 - `https://phenomenoner.github.io/openclaw-mem/`
 
 Why:
-- the root page is the stable landing surface
+- root page is the stable landing surface
 - proof pages are better as strong links from README/docs, not the repo website URL itself
 
 ---
 
 ## Pinned repo note
 
-GitHub pinned repositories do not expose a separate custom blurb beyond the repository description.
+Pinned repositories do not expose a separate custom blurb beyond repository description.
 
-That means the repo description itself is effectively the pin text.
+So the repo description is effectively pin text.
 
 Current pin-safe line:
 
-`Trust-aware memory for OpenClaw — pack only what the agent should trust, with provenance, receipts, and local-first recall.`
+`Trust-aware context packing for OpenClaw — pack only what the agent should trust, with provenance, receipts, and local-first recall.`
 
-If a shorter version is ever needed, use:
+Short fallback:
 
 `Trust-aware context packing for OpenClaw.`
 
@@ -69,13 +80,11 @@ If a shorter version is ever needed, use:
 
 `openclaw-mem` now frames its core value around **trust-aware context packing**: building smaller, safer prompt packs with visible trust tiers, provenance, and receipts.
 
-Use this line near the top of release notes when the release materially strengthens pack selection, provenance, citations, or memory hygiene.
+Use this line near the top of release notes when the release materially strengthens pack selection/provenance/citations/memory hygiene.
 
 ---
 
 ## Social preview spec
-
-GitHub social preview is best when it states the wedge in one glance.
 
 ### Recommended headline
 
@@ -94,14 +103,14 @@ GitHub social preview is best when it states the wedge in one glance.
 ### What the image should imply visually
 
 - before: noisy / larger / mixed-trust pack
-- after: smaller / cleaner / gated pack
+- after: smaller / cleaner / trust-gated pack
 - emphasis on selection, not storage volume
 
 ### Avoid on the social preview image
 
 - too many flags / CLI snippets
-- backend nouns as the headline (`LanceDB`, `hybrid engine`, `SQLite sidecar`)
-- giant walls of explanatory text
+- backend nouns as headline (`LanceDB`, `hybrid engine`, `SQLite sidecar`)
+- giant explanatory walls of text
 
 ### Suggested alt-text / caption
 
@@ -111,12 +120,13 @@ GitHub social preview is best when it states the wedge in one glance.
 
 ## Proof links to pair with GitHub surfaces
 
-Use these when you need a second click after the one-line pitch:
+Use these for second-click depth after the one-line pitch:
 
 - Canonical proof: `docs/showcase/trust-aware-context-pack-proof.md`
 - Proof metrics: `docs/showcase/artifacts/trust-aware-context-pack.metrics.json`
 - Companion demo: `docs/showcase/inside-out-demo.md`
 - Copy pack: `docs/launch/trust-aware-context-pack-copy-pack.md`
+- Operator checklist: `docs/launch/proof-first-relaunch-checklist.md`
 
 ---
 
@@ -124,7 +134,7 @@ Use these when you need a second click after the one-line pitch:
 
 Keep topics aligned to positioning first, implementation second.
 
-Current preferred set:
+Preferred set:
 - `openclaw`
 - `openclaw-plugin`
 - `agent-memory`
@@ -137,4 +147,10 @@ Current preferred set:
 - `observability`
 - `sqlite`
 
-Backend-specific topics like `vector-search`, `hybrid-search`, `embeddings`, and `lancedb` are true, but should not dominate first impression unless search-discovery data proves they matter more.
+Backend-specific topics like `vector-search`, `hybrid-search`, `embeddings`, `lancedb` are true, but should not dominate first impression unless discovery data proves they matter more.
+
+## Boundary checks (must stay true)
+
+- KOL/GTM lanes remain linked-but-separate (no authority merge in this spec).
+- Query-plane default and action-plane write-gated framing remain explicit.
+- Graph/reference/knowledge-graph messaging stays a flagship feature family, not an overclaimed universal schema.
