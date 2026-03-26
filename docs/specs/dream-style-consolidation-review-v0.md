@@ -46,6 +46,7 @@ Candidate families:
    - when lifecycle rows exist, a bounded lexical low-confidence backfill lane may add a small number of lexical-only pairs (hybrid gate, capped by `--link-lexical-backfill-max`)
    - lexical overlap remains as a cold-start fallback when lifecycle evidence is unavailable
    - emits pairwise proposals with shared tokens, confidence/evidence mode, receipt evidence, and source provenance refs
+   - confidence receipts now include a recency component (`co_selection_recency`) so newer lifecycle co-selection evidence contributes more than stale evidence, while staying inspectable in `confidence_components` / `receipt_evidence`
 
 ## Hard boundaries
 - no mutation of `episodic_events`
@@ -76,7 +77,6 @@ That distinction is load-bearing:
 - disabling/ignoring the command leaves runtime behavior unchanged
 
 ## Future work (not in this slice)
-- add optional recency weighting on top of the shipped evidence-weighted link confidence model (`evidence_weighted_v0`)
 - use-based decay scoring tied to successful task outcomes
 - optional reviewed writeback lane for approved summary/archive/link actions
 - integration into a higher-level maintenance command/cron wrapper

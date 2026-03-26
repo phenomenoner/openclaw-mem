@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 import unicodedata
@@ -53,6 +54,7 @@ _EPISODIC_RETENTION_DAYS: Dict[str, Optional[int]] = {
 
 _PACK_LIFECYCLE_SHADOW_TABLE = "pack_lifecycle_shadow_log"
 _OBS_REF_RE = re.compile(r"^obs:(\d+)$")
+_CO_SELECTION_RECENCY_HALF_LIFE_DAYS = 30.0
 
 _LINK_CONFIDENCE_MODEL_V0: Dict[str, Dict[str, Any]] = {
     "receipt_co_selection": {
@@ -61,6 +63,7 @@ _LINK_CONFIDENCE_MODEL_V0: Dict[str, Dict[str, Any]] = {
         "weights": {
             "co_selection_events": 0.16,
             "shared_selected_count": 0.12,
+            "co_selection_recency": 0.08,
             "lexical_score": 0.07,
             "shared_token_count": 0.05,
         },
@@ -71,6 +74,7 @@ _LINK_CONFIDENCE_MODEL_V0: Dict[str, Dict[str, Any]] = {
         "weights": {
             "co_selection_events": 0.00,
             "shared_selected_count": 0.00,
+            "co_selection_recency": 0.00,
             "lexical_score": 0.18,
             "shared_token_count": 0.10,
         },
@@ -81,6 +85,7 @@ _LINK_CONFIDENCE_MODEL_V0: Dict[str, Dict[str, Any]] = {
         "weights": {
             "co_selection_events": 0.00,
             "shared_selected_count": 0.00,
+            "co_selection_recency": 0.00,
             "lexical_score": 0.20,
             "shared_token_count": 0.11,
         },
@@ -483,12 +488,15 @@ def _receipt_link_evidence(
     *,
     recent_use_index: Dict[int, Dict[str, Any]],
     co_selected_pairs: Dict[tuple[int, int], Dict[str, Any]],
+    now_utc: datetime,
 ) -> Dict[str, Any]:
     shared_selected_obs_ids = sorted(obs_id for obs_id in (left_obs_ids & right_obs_ids) if obs_id in recent_use_index)
 
     co_selected_pairs_items: List[Dict[str, Any]] = []
     selection_signatures: List[str] = []
     co_selection_events = 0
+    co_selection_last_dt: Optional[datetime] = None
+    co_selection_last_ts: Optional[str] = None
 
     for left_obs_id in sorted(left_obs_ids):
         for right_obs_id in sorted(right_obs_ids):
@@ -502,11 +510,17 @@ def _receipt_link_evidence(
             if count <= 0:
                 continue
             co_selection_events += count
+            slot_last_ts = str(slot.get("last_selected_ts") or "").strip() or None
+            slot_last_dt = _parse_iso_utc(slot_last_ts) if slot_last_ts else None
+            if slot_last_dt is not None and (co_selection_last_dt is None or slot_last_dt > co_selection_last_dt):
+                co_selection_last_dt = slot_last_dt
+                co_selection_last_ts = slot_last_ts
             co_selected_pairs_items.append(
                 {
                     "left_record_ref": f"obs:{left_obs_id}",
                     "right_record_ref": f"obs:{right_obs_id}",
                     "count": count,
+                    "last_selected_ts": slot_last_ts,
                 }
             )
             for sig in slot.get("selection_signatures") or []:
@@ -522,11 +536,24 @@ def _receipt_link_evidence(
     )
 
     shared_selected_refs = [f"obs:{obs_id}" for obs_id in shared_selected_obs_ids]
+    co_selection_recency_days = None
+    co_selection_recency_score = 0.0
+    if co_selection_last_dt is not None:
+        now_anchor = now_utc.astimezone(timezone.utc)
+        age_days = max(0.0, (now_anchor - co_selection_last_dt).total_seconds() / 86400.0)
+        co_selection_recency_days = round(age_days, 3)
+        co_selection_recency_score = round(
+            _clip_unit(math.pow(2.0, -age_days / _CO_SELECTION_RECENCY_HALF_LIFE_DAYS)),
+            3,
+        )
 
     return {
         "shared_selected_refs": shared_selected_refs,
         "shared_selected_count": len(shared_selected_refs),
         "co_selection_events": co_selection_events,
+        "co_selection_last_ts": co_selection_last_ts,
+        "co_selection_recency_days": co_selection_recency_days,
+        "co_selection_recency_score": co_selection_recency_score,
         "co_selected_pair_count": len(co_selected_pairs_items),
         "co_selected_pairs": co_selected_pairs_items[:5],
         "selection_signatures": selection_signatures[:5],
@@ -558,6 +585,7 @@ def _link_confidence_from_evidence(
 
     co_selection_events = max(0, int((receipt_evidence or {}).get("co_selection_events") or 0))
     shared_selected_count = max(0, int((receipt_evidence or {}).get("shared_selected_count") or 0))
+    co_selection_recency_norm = _clip_unit((receipt_evidence or {}).get("co_selection_recency_score"))
     lexical_norm = _clip_unit(lexical_score)
     token_norm = _clip_unit(max(0, int(shared_token_count)) / 4.0)
     co_selection_events_norm = _clip_unit(co_selection_events / 3.0)
@@ -566,6 +594,7 @@ def _link_confidence_from_evidence(
     contributions = {
         "co_selection_events": round(float(weights.get("co_selection_events", 0.0)) * co_selection_events_norm, 3),
         "shared_selected_count": round(float(weights.get("shared_selected_count", 0.0)) * shared_selected_norm, 3),
+        "co_selection_recency": round(float(weights.get("co_selection_recency", 0.0)) * co_selection_recency_norm, 3),
         "lexical_score": round(float(weights.get("lexical_score", 0.0)) * lexical_norm, 3),
         "shared_token_count": round(float(weights.get("shared_token_count", 0.0)) * token_norm, 3),
     }
@@ -583,12 +612,16 @@ def _link_confidence_from_evidence(
             "inputs": {
                 "co_selection_events": co_selection_events,
                 "shared_selected_count": shared_selected_count,
+                "co_selection_last_ts": (receipt_evidence or {}).get("co_selection_last_ts"),
+                "co_selection_recency_days": (receipt_evidence or {}).get("co_selection_recency_days"),
+                "co_selection_recency_score": round(co_selection_recency_norm, 3),
                 "lexical_score": round(lexical_norm, 3),
                 "shared_token_count": max(0, int(shared_token_count)),
             },
             "weights": {
                 "co_selection_events": round(float(weights.get("co_selection_events", 0.0)), 3),
                 "shared_selected_count": round(float(weights.get("shared_selected_count", 0.0)), 3),
+                "co_selection_recency": round(float(weights.get("co_selection_recency", 0.0)), 3),
                 "lexical_score": round(float(weights.get("lexical_score", 0.0)), 3),
                 "shared_token_count": round(float(weights.get("shared_token_count", 0.0)), 3),
             },
@@ -940,6 +973,7 @@ def build_consolidation_review(
                     set(right.get("refs_obs_ids") or set()),
                     recent_use_index=recent_use_index,
                     co_selected_pairs=co_selected_pairs,
+                    now_utc=now,
                 )
                 has_receipt_evidence = bool(
                     evidence.get("shared_selected_count")
@@ -1118,6 +1152,7 @@ def build_consolidation_review(
                         "co_selection_events_saturation": 3,
                         "shared_selected_count_saturation": 2,
                         "shared_token_count_saturation": 4,
+                        "co_selection_recency_half_life_days": _CO_SELECTION_RECENCY_HALF_LIFE_DAYS,
                     },
                 },
             },

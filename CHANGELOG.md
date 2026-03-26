@@ -28,12 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - per-link `confidence` now blends inspectable components (`co_selection_events`, `shared_selected_count`, lexical overlap score, shared token count) with mode-specific base/cap weights
   - each link item now includes `confidence_components` for transparent scoring receipts
   - `signals.link_evidence.confidence_model` now publishes mode weights/caps and normalization constants used by the scorer
+- `optimize consolidation-review` receipt-backed link confidence now adds an explicit lifecycle recency component (`co_selection_recency`) so newer co-selection evidence scores higher than stale co-selection evidence.
+  - receipt evidence now emits `co_selection_last_ts`, `co_selection_recency_days`, and `co_selection_recency_score`
+  - `confidence_components` now includes recency inputs/weights/contributions without changing recommendation-only zero-write behavior
 - Documented use-based decay v0 in `README.md`, `QUICKSTART.md`, `docs/about.md`, `docs/reality-check.md`, `docs/specs/self-optimizing-memory-loop-v0.md`, and `docs/specs/use-based-decay-v0.md`.
 
 ### Testing
 
 - Added `tests/test_optimize_consolidation_review.py` coverage for parser wiring, zero-write JSON contract, summary/archive/link candidate detection, recent-use archive protection, and scope/session filtering.
 - Expanded `tests/test_optimize_consolidation_review.py` coverage for evidence-weighted link confidence receipts (`confidence_components`) and stronger co-selection → higher confidence ordering.
+- Added targeted recency-weighting coverage in `tests/test_optimize_consolidation_review.py` to verify equal-count receipt pairs score higher when lifecycle co-selection is newer.
 - Expanded `tests/test_optimize_review.py` coverage for `--lifecycle-limit`, `signals.recent_use`, and stale-candidate protection when old rows still show recent pack selection.
 
 

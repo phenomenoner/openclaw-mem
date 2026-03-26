@@ -7,10 +7,11 @@ from datetime import datetime, timedelta, timezone
 from openclaw_mem.cli import _connect, build_parser, cmd_optimize_consolidation_review
 
 
-def _insert_lifecycle_row(conn, *, selected_refs: list[str]) -> None:
+def _insert_lifecycle_row(conn, *, selected_refs: list[str], ts_iso: str | None = None) -> None:
+    ts_value = ts_iso or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     receipt = {
         "kind": "openclaw-mem.pack.lifecycle-shadow.v1",
-        "ts": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "ts": ts_value,
         "selection": {
             "pack_selected_refs": list(selected_refs),
             "citation_record_refs": list(selected_refs),
@@ -30,7 +31,7 @@ def _insert_lifecycle_row(conn, *, selected_refs: list[str]) -> None:
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            ts_value,
             "sha256:q",
             "sha256:test",
             len(selected_refs),
@@ -60,6 +61,11 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
     def _ts_days_ago(days: int) -> int:
         dt = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=days)
         return int(dt.timestamp() * 1000)
+
+    @staticmethod
+    def _iso_days_ago(days: int) -> str:
+        dt = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=days)
+        return dt.isoformat().replace("+00:00", "Z")
 
     @staticmethod
     def _insert_episode(
@@ -567,6 +573,108 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
         self.assertGreater(
             strong["confidence_components"]["contributions"]["co_selection_events"],
             weak["confidence_components"]["contributions"]["co_selection_events"],
+        )
+        conn.close()
+
+    def test_consolidation_review_receipt_confidence_boosts_recent_co_selection(self):
+        conn = _connect(":memory:")
+
+        self._insert_episode(
+            conn,
+            event_id="ev-old-1",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-old-a",
+            event_type="conversation.user",
+            summary="orion glacier spindle",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:10"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-old-2",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-old-b",
+            event_type="conversation.assistant",
+            summary="nebula kiln tracer",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:11"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-new-1",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-new-a",
+            event_type="conversation.user",
+            summary="atlas vector lattice",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:12"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-new-2",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-new-b",
+            event_type="conversation.assistant",
+            summary="phoenix relay anchor",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:13"},
+        )
+
+        _insert_lifecycle_row(conn, selected_refs=["obs:10", "obs:11"], ts_iso=self._iso_days_ago(45))
+        _insert_lifecycle_row(conn, selected_refs=["obs:12", "obs:13"], ts_iso=self._iso_days_ago(1))
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 500,
+                "scope": None,
+                "session_id": None,
+                "summary_min_group_size": 2,
+                "summary_min_shared_tokens": 2,
+                "archive_lookahead_days": 7,
+                "archive_min_signal_reasons": 2,
+                "link_min_shared_tokens": 2,
+                "link_lexical_backfill_max": 1,
+                "lifecycle_limit": 50,
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_consolidation_review(conn, args)
+        out = json.loads(buf.getvalue())
+
+        receipt_links = [it for it in out["candidates"]["links"]["items"] if it["evidence_mode"] == "receipt_co_selection"]
+        self.assertEqual(len(receipt_links), 2)
+
+        by_pair = {
+            tuple(sorted([it["left"]["event_id"], it["right"]["event_id"]])): it
+            for it in receipt_links
+        }
+        old_pair = by_pair[("ev-old-1", "ev-old-2")]
+        new_pair = by_pair[("ev-new-1", "ev-new-2")]
+
+        self.assertEqual(old_pair["receipt_evidence"]["co_selection_events"], 1)
+        self.assertEqual(new_pair["receipt_evidence"]["co_selection_events"], 1)
+        self.assertGreater(
+            new_pair["receipt_evidence"]["co_selection_recency_score"],
+            old_pair["receipt_evidence"]["co_selection_recency_score"],
+        )
+        self.assertGreater(new_pair["confidence"], old_pair["confidence"])
+        self.assertGreater(
+            new_pair["confidence_components"]["contributions"]["co_selection_recency"],
+            old_pair["confidence_components"]["contributions"]["co_selection_recency"],
+        )
+        self.assertEqual(
+            out["signals"]["link_evidence"]["confidence_model"]["normalization"]["co_selection_recency_half_life_days"],
+            30.0,
         )
         conn.close()
 
