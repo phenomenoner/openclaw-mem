@@ -76,7 +76,7 @@ That distinction is load-bearing:
 - disabling/ignoring the command leaves runtime behavior unchanged
 
 ## Future work (not in this slice)
-- richer receipt-evidence weighting for links (for example recency decay and stronger multi-receipt support thresholds)
+- add optional recency weighting on top of the shipped evidence-weighted link confidence model (`evidence_weighted_v0`)
 - use-based decay scoring tied to successful task outcomes
 - optional reviewed writeback lane for approved summary/archive/link actions
 - integration into a higher-level maintenance command/cron wrapper

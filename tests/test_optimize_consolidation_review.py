@@ -348,7 +348,12 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
 
         backfill = [it for it in links["items"] if it["evidence_mode"] == "lexical_backfill_low_confidence"]
         self.assertEqual(len(backfill), 1)
-        self.assertEqual(backfill[0]["confidence"], 0.42)
+        self.assertGreater(backfill[0]["confidence"], 0.35)
+        self.assertLess(backfill[0]["confidence"], 0.56)
+        self.assertEqual(backfill[0]["confidence_components"]["model"], "evidence_weighted_v0")
+
+        self.assertGreater(first["confidence"], backfill[0]["confidence"])
+        self.assertGreater(first["confidence_components"]["contributions"]["co_selection_events"], 0.0)
 
         link_evidence = out["signals"]["link_evidence"]
         self.assertEqual(link_evidence["receipt_supported_pairs"], 1)
@@ -358,6 +363,7 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
         self.assertEqual(link_evidence["lexical_backfill_suppressed_pairs"], 0)
         self.assertTrue(link_evidence["hybrid_gate"]["active"])
         self.assertEqual(link_evidence["hybrid_gate"]["lexical_backfill_max"], 1)
+        self.assertEqual(link_evidence["confidence_model"]["name"], "evidence_weighted_v0")
         conn.close()
 
     def test_consolidation_review_caps_lexical_backfill_when_multiple_candidates_exist(self):
@@ -466,6 +472,102 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
         self.assertEqual(link_evidence["lexical_backfill_candidate_pairs"], 2)
         self.assertEqual(link_evidence["lexical_backfill_pairs"], 1)
         self.assertEqual(link_evidence["lexical_backfill_suppressed_pairs"], 1)
+        conn.close()
+
+    def test_consolidation_review_receipt_confidence_tracks_co_selection_strength(self):
+        conn = _connect(":memory:")
+
+        self._insert_episode(
+            conn,
+            event_id="ev-weak-1",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-a",
+            event_type="conversation.user",
+            summary="orion controlplane handoff",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:1"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-weak-2",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-b",
+            event_type="conversation.assistant",
+            summary="nebula pager warmstart",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:2"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-strong-1",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-c",
+            event_type="conversation.user",
+            summary="atlas checkpoint freeze",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:3"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-strong-2",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-d",
+            event_type="conversation.assistant",
+            summary="phoenix ledger rotate",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:4"},
+        )
+
+        _insert_lifecycle_row(conn, selected_refs=["obs:1", "obs:2"])
+        _insert_lifecycle_row(conn, selected_refs=["obs:3", "obs:4"])
+        _insert_lifecycle_row(conn, selected_refs=["obs:3", "obs:4"])
+        _insert_lifecycle_row(conn, selected_refs=["obs:3", "obs:4"])
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 500,
+                "scope": None,
+                "session_id": None,
+                "summary_min_group_size": 2,
+                "summary_min_shared_tokens": 2,
+                "archive_lookahead_days": 7,
+                "archive_min_signal_reasons": 2,
+                "link_min_shared_tokens": 2,
+                "link_lexical_backfill_max": 1,
+                "lifecycle_limit": 50,
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_consolidation_review(conn, args)
+        out = json.loads(buf.getvalue())
+
+        receipt_links = [it for it in out["candidates"]["links"]["items"] if it["evidence_mode"] == "receipt_co_selection"]
+        self.assertEqual(len(receipt_links), 2)
+
+        by_pair = {
+            tuple(sorted([it["left"]["event_id"], it["right"]["event_id"]])): it
+            for it in receipt_links
+        }
+        weak = by_pair[("ev-weak-1", "ev-weak-2")]
+        strong = by_pair[("ev-strong-1", "ev-strong-2")]
+
+        self.assertEqual(weak["receipt_evidence"]["co_selection_events"], 1)
+        self.assertEqual(strong["receipt_evidence"]["co_selection_events"], 3)
+        self.assertGreater(strong["confidence"], weak["confidence"])
+        self.assertGreater(
+            strong["confidence_components"]["contributions"]["co_selection_events"],
+            weak["confidence_components"]["contributions"]["co_selection_events"],
+        )
         conn.close()
 
     def test_consolidation_review_protects_archive_candidates_with_recent_use_refs(self):

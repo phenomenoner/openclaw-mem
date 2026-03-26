@@ -54,6 +54,38 @@ _EPISODIC_RETENTION_DAYS: Dict[str, Optional[int]] = {
 _PACK_LIFECYCLE_SHADOW_TABLE = "pack_lifecycle_shadow_log"
 _OBS_REF_RE = re.compile(r"^obs:(\d+)$")
 
+_LINK_CONFIDENCE_MODEL_V0: Dict[str, Dict[str, Any]] = {
+    "receipt_co_selection": {
+        "base": 0.62,
+        "cap": 0.95,
+        "weights": {
+            "co_selection_events": 0.16,
+            "shared_selected_count": 0.12,
+            "lexical_score": 0.07,
+            "shared_token_count": 0.05,
+        },
+    },
+    "lexical_backfill_low_confidence": {
+        "base": 0.30,
+        "cap": 0.55,
+        "weights": {
+            "co_selection_events": 0.00,
+            "shared_selected_count": 0.00,
+            "lexical_score": 0.18,
+            "shared_token_count": 0.10,
+        },
+    },
+    "lexical_fallback": {
+        "base": 0.46,
+        "cap": 0.78,
+        "weights": {
+            "co_selection_events": 0.00,
+            "shared_selected_count": 0.00,
+            "lexical_score": 0.20,
+            "shared_token_count": 0.11,
+        },
+    },
+}
 
 
 def _parse_iso_utc(ts: Any) -> Optional[datetime]:
@@ -501,6 +533,72 @@ def _receipt_link_evidence(
     }
 
 
+def _clip_unit(raw: Any) -> float:
+    try:
+        value = float(raw)
+    except Exception:
+        return 0.0
+    if value <= 0.0:
+        return 0.0
+    if value >= 1.0:
+        return 1.0
+    return value
+
+
+def _link_confidence_from_evidence(
+    *,
+    evidence_mode: str,
+    receipt_evidence: Dict[str, Any],
+    lexical_score: float,
+    shared_token_count: int,
+) -> Dict[str, Any]:
+    mode = str(evidence_mode or "").strip() or "lexical_fallback"
+    model = _LINK_CONFIDENCE_MODEL_V0.get(mode) or _LINK_CONFIDENCE_MODEL_V0["lexical_fallback"]
+    weights = model.get("weights") or {}
+
+    co_selection_events = max(0, int((receipt_evidence or {}).get("co_selection_events") or 0))
+    shared_selected_count = max(0, int((receipt_evidence or {}).get("shared_selected_count") or 0))
+    lexical_norm = _clip_unit(lexical_score)
+    token_norm = _clip_unit(max(0, int(shared_token_count)) / 4.0)
+    co_selection_events_norm = _clip_unit(co_selection_events / 3.0)
+    shared_selected_norm = _clip_unit(shared_selected_count / 2.0)
+
+    contributions = {
+        "co_selection_events": round(float(weights.get("co_selection_events", 0.0)) * co_selection_events_norm, 3),
+        "shared_selected_count": round(float(weights.get("shared_selected_count", 0.0)) * shared_selected_norm, 3),
+        "lexical_score": round(float(weights.get("lexical_score", 0.0)) * lexical_norm, 3),
+        "shared_token_count": round(float(weights.get("shared_token_count", 0.0)) * token_norm, 3),
+    }
+    base = round(float(model.get("base", 0.0)), 3)
+    cap = round(float(model.get("cap", 1.0)), 3)
+    raw_confidence = round(base + sum(contributions.values()), 3)
+    confidence = round(min(cap, raw_confidence), 3)
+
+    return {
+        "confidence": confidence,
+        "confidence_components": {
+            "model": "evidence_weighted_v0",
+            "mode": mode,
+            "base": base,
+            "inputs": {
+                "co_selection_events": co_selection_events,
+                "shared_selected_count": shared_selected_count,
+                "lexical_score": round(lexical_norm, 3),
+                "shared_token_count": max(0, int(shared_token_count)),
+            },
+            "weights": {
+                "co_selection_events": round(float(weights.get("co_selection_events", 0.0)), 3),
+                "shared_selected_count": round(float(weights.get("shared_selected_count", 0.0)), 3),
+                "lexical_score": round(float(weights.get("lexical_score", 0.0)), 3),
+                "shared_token_count": round(float(weights.get("shared_token_count", 0.0)), 3),
+            },
+            "contributions": contributions,
+            "raw": raw_confidence,
+            "cap": cap,
+        },
+    }
+
+
 def _event_ref(item: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": item["id"],
@@ -864,7 +962,12 @@ def build_consolidation_review(
                             {
                                 **link_candidate,
                                 "evidence_mode": "receipt_co_selection",
-                                "confidence": 0.86,
+                                **_link_confidence_from_evidence(
+                                    evidence_mode="receipt_co_selection",
+                                    receipt_evidence=evidence,
+                                    lexical_score=lexical_score,
+                                    shared_token_count=len(shared),
+                                ),
                             }
                         )
                     elif len(shared) >= link_min_shared_tokens:
@@ -872,7 +975,12 @@ def build_consolidation_review(
                             {
                                 **link_candidate,
                                 "evidence_mode": "lexical_backfill_low_confidence",
-                                "confidence": 0.42,
+                                **_link_confidence_from_evidence(
+                                    evidence_mode="lexical_backfill_low_confidence",
+                                    receipt_evidence=evidence,
+                                    lexical_score=lexical_score,
+                                    shared_token_count=len(shared),
+                                ),
                             }
                         )
                     else:
@@ -884,7 +992,12 @@ def build_consolidation_review(
                         {
                             **link_candidate,
                             "evidence_mode": "lexical_fallback",
-                            "confidence": 0.58,
+                            **_link_confidence_from_evidence(
+                                evidence_mode="lexical_fallback",
+                                receipt_evidence=evidence,
+                                lexical_score=lexical_score,
+                                shared_token_count=len(shared),
+                            ),
                         }
                     )
                 seen_pairs.add(pair_key)
@@ -895,6 +1008,7 @@ def build_consolidation_review(
     if lifecycle_rows_scanned > 0 and link_lexical_backfill_max > 0 and lexical_backfill_candidates:
         lexical_backfill_candidates.sort(
             key=lambda x: (
+                x.get("confidence", 0),
                 x.get("shared_token_count", 0),
                 x.get("score", 0),
                 (x.get("right") or {}).get("id", 0),
@@ -908,6 +1022,7 @@ def build_consolidation_review(
 
     link_items.sort(
         key=lambda x: (
+            x.get("confidence", 0),
             int(((x.get("receipt_evidence") or {}).get("co_selection_events") or 0)),
             int(((x.get("receipt_evidence") or {}).get("shared_selected_count") or 0)),
             x.get("shared_token_count", 0),
@@ -985,6 +1100,25 @@ def build_consolidation_review(
                 "hybrid_gate": {
                     "active": bool(lifecycle_rows_scanned > 0),
                     "lexical_backfill_max": link_lexical_backfill_max,
+                },
+                "confidence_model": {
+                    "name": "evidence_weighted_v0",
+                    "modes": {
+                        mode: {
+                            "base": round(float(cfg.get("base", 0.0)), 3),
+                            "cap": round(float(cfg.get("cap", 1.0)), 3),
+                            "weights": {
+                                key: round(float(value), 3)
+                                for key, value in (cfg.get("weights") or {}).items()
+                            },
+                        }
+                        for mode, cfg in _LINK_CONFIDENCE_MODEL_V0.items()
+                    },
+                    "normalization": {
+                        "co_selection_events_saturation": 3,
+                        "shared_selected_count_saturation": 2,
+                        "shared_token_count_saturation": 4,
+                    },
                 },
             },
         },
