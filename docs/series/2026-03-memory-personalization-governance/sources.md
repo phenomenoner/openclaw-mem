@@ -35,10 +35,12 @@
    - Existing retention defaults by event type, useful when discussing typed retention instead of flat memory.
 
 ## Advisory lanes
-10. Standalone Claude CLI attempt (2026-03-26)
-   - Attempted with `--print --permission-mode bypassPermissions --bare`
-   - Blocked by host-side `--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons`
-   - Operationally relevant: local Claude lane still has a host/config posture issue.
+10. Standalone Claude CLI attempts (2026-03-26)
+   - Old bad path: `--permission-mode bypassPermissions` on this root-host lane
+   - That path reproduced the dangerous-permissions rejection and confirmed the guidance bug
+   - Latest corrected one-shot posture: `claude --print --model opus --bare --no-session-persistence --tools ""`
+   - Latest blocker is no longer permission posture but auth state: `Not logged in · Please run /login`
+   - Operationally relevant: the guidance bug is fixed; current unusability is an auth/login issue, not the old permission bug.
 
 11. Standalone Gemini CLI review (Gemini 2.5 Flash)
    - Main useful pushback:

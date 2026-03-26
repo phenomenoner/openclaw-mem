@@ -1,15 +1,19 @@
 # Advisory lane status
 
 ## Standalone Claude CLI
-- Intended posture:
-  - `claude --print --model opus --permission-mode bypassPermissions --bare --no-session-persistence --tools ""`
-- Result:
-  - failed before content generation
-  - host returned: `--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons`
+- Earlier bad path:
+  - `claude --permission-mode bypassPermissions --print ...`
+  - result: rejected under root/sudo because Claude mapped it to the dangerous-permissions path
+- Current corrected posture:
+  - `claude --print --model opus --bare --no-session-persistence --tools ""`
+- Latest result:
+  - permission posture no longer blocked the run first
+  - current blocker is now auth state: `Not logged in · Please run /login`
 - Interpretation:
-  - this local Claude lane still has a host/config posture issue that injects or implies dangerous-permissions behavior even in a read-only advisory call
+  - the original permission-guidance bug is materially cleared
+  - standalone Claude CLI is still **not presently usable** for this lane until login/auth is restored
 - Operational note:
-  - do not pretend this lane is healthy until the host-side permission posture is actually repaired
+  - stop here and report; do not keep retrying standalone Claude until auth is fixed
 
 ## Standalone Gemini CLI
 - First attempt:
