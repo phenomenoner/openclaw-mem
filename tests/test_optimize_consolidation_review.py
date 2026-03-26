@@ -119,6 +119,8 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
                 "3",
                 "--link-min-shared-tokens",
                 "4",
+                "--link-lexical-backfill-max",
+                "2",
                 "--lifecycle-limit",
                 "33",
                 "--top",
@@ -136,6 +138,7 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
         self.assertEqual(args.archive_lookahead_days, 9)
         self.assertEqual(args.archive_min_signal_reasons, 3)
         self.assertEqual(args.link_min_shared_tokens, 4)
+        self.assertEqual(args.link_lexical_backfill_max, 2)
         self.assertEqual(args.lifecycle_limit, 33)
         self.assertEqual(args.top, 6)
 
@@ -256,7 +259,7 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
         self.assertIn("review_link_candidates", rec_types)
         conn.close()
 
-    def test_consolidation_review_uses_receipt_co_selection_for_links_when_lifecycle_exists(self):
+    def test_consolidation_review_prefers_receipt_links_and_adds_bounded_lexical_backfill(self):
         conn = _connect(":memory:")
 
         # Receipt-supported pair (no lexical overlap required).
@@ -283,7 +286,7 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
             refs={"recordRef": "obs:2"},
         )
 
-        # Lexical-only pair should be suppressed once lifecycle evidence is available.
+        # Lexical-only pair should still be allowed in bounded low-confidence backfill.
         self._insert_episode(
             conn,
             event_id="ev-l1",
@@ -321,6 +324,7 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
                 "archive_lookahead_days": 7,
                 "archive_min_signal_reasons": 2,
                 "link_min_shared_tokens": 2,
+                "link_lexical_backfill_max": 1,
                 "lifecycle_limit": 50,
                 "top": 10,
                 "json": True,
@@ -333,18 +337,135 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
         out = json.loads(buf.getvalue())
 
         links = out["candidates"]["links"]
-        self.assertEqual(links["pairs"], 1)
-        link_item = links["items"][0]
-        self.assertEqual(link_item["evidence_mode"], "receipt_co_selection")
-        self.assertEqual(link_item["left"]["event_id"], "ev-r1")
-        self.assertEqual(link_item["right"]["event_id"], "ev-r2")
-        self.assertEqual(link_item["shared_token_count"], 0)
-        self.assertGreaterEqual(link_item["receipt_evidence"]["co_selection_events"], 1)
-        self.assertIn("sha256:test", link_item["receipt_evidence"]["selection_signatures"])
+        self.assertEqual(links["pairs"], 2)
+        first = links["items"][0]
+        self.assertEqual(first["evidence_mode"], "receipt_co_selection")
+        self.assertEqual(first["left"]["event_id"], "ev-r1")
+        self.assertEqual(first["right"]["event_id"], "ev-r2")
+        self.assertEqual(first["shared_token_count"], 0)
+        self.assertGreaterEqual(first["receipt_evidence"]["co_selection_events"], 1)
+        self.assertIn("sha256:test", first["receipt_evidence"]["selection_signatures"])
+
+        backfill = [it for it in links["items"] if it["evidence_mode"] == "lexical_backfill_low_confidence"]
+        self.assertEqual(len(backfill), 1)
+        self.assertEqual(backfill[0]["confidence"], 0.42)
 
         link_evidence = out["signals"]["link_evidence"]
         self.assertEqual(link_evidence["receipt_supported_pairs"], 1)
         self.assertEqual(link_evidence["lexical_fallback_pairs"], 0)
+        self.assertEqual(link_evidence["lexical_backfill_pairs"], 1)
+        self.assertEqual(link_evidence["lexical_backfill_candidate_pairs"], 1)
+        self.assertEqual(link_evidence["lexical_backfill_suppressed_pairs"], 0)
+        self.assertTrue(link_evidence["hybrid_gate"]["active"])
+        self.assertEqual(link_evidence["hybrid_gate"]["lexical_backfill_max"], 1)
+        conn.close()
+
+    def test_consolidation_review_caps_lexical_backfill_when_multiple_candidates_exist(self):
+        conn = _connect(":memory:")
+
+        self._insert_episode(
+            conn,
+            event_id="ev-r1",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-a",
+            event_type="conversation.user",
+            summary="orion pipeline coldpath handoff",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:1"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-r2",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-b",
+            event_type="conversation.assistant",
+            summary="nebula ledger warmstart guard",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:2"},
+        )
+
+        self._insert_episode(
+            conn,
+            event_id="ev-l1",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-c",
+            event_type="conversation.user",
+            summary="atlas drift reconciliation memo",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:30"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-l2",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-d",
+            event_type="conversation.assistant",
+            summary="atlas drift rollback checklist",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:31"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-l3",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-e",
+            event_type="conversation.user",
+            summary="phoenix cache warmup note",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:32"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-l4",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-f",
+            event_type="conversation.assistant",
+            summary="phoenix cache incident review",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:33"},
+        )
+
+        _insert_lifecycle_row(conn, selected_refs=["obs:1", "obs:2"])
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 500,
+                "scope": None,
+                "session_id": None,
+                "summary_min_group_size": 2,
+                "summary_min_shared_tokens": 2,
+                "archive_lookahead_days": 7,
+                "archive_min_signal_reasons": 2,
+                "link_min_shared_tokens": 2,
+                "link_lexical_backfill_max": 1,
+                "lifecycle_limit": 50,
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_consolidation_review(conn, args)
+        out = json.loads(buf.getvalue())
+
+        links = out["candidates"]["links"]
+        self.assertEqual(links["pairs"], 2)
+        self.assertEqual(sum(1 for it in links["items"] if it["evidence_mode"] == "receipt_co_selection"), 1)
+        self.assertEqual(sum(1 for it in links["items"] if it["evidence_mode"] == "lexical_backfill_low_confidence"), 1)
+
+        link_evidence = out["signals"]["link_evidence"]
+        self.assertEqual(link_evidence["lexical_backfill_candidate_pairs"], 2)
+        self.assertEqual(link_evidence["lexical_backfill_pairs"], 1)
+        self.assertEqual(link_evidence["lexical_backfill_suppressed_pairs"], 1)
         conn.close()
 
     def test_consolidation_review_protects_archive_candidates_with_recent_use_refs(self):

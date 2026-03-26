@@ -43,8 +43,9 @@ Candidate families:
 3. **link candidates**
    - cross-session proposals inside the same scope
    - **receipt-derived by default** when recent lifecycle evidence exists (co-selection from `pack_lifecycle_shadow_log` selection refs/signatures)
+   - when lifecycle rows exist, a bounded lexical low-confidence backfill lane may add a small number of lexical-only pairs (hybrid gate, capped by `--link-lexical-backfill-max`)
    - lexical overlap remains as a cold-start fallback when lifecycle evidence is unavailable
-   - emits pairwise proposals with shared tokens, receipt evidence, and source provenance refs
+   - emits pairwise proposals with shared tokens, confidence/evidence mode, receipt evidence, and source provenance refs
 
 ## Hard boundaries
 - no mutation of `episodic_events`

@@ -240,7 +240,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem optimize consolidation-r
 These commands are zero-write by design in the current release.
 
 - `optimize review` reports hygiene candidates (staleness, duplication, bloat, weakly-connected memories, repeated no-result `memory_recall` misses) and now uses recent pack-lifecycle evidence to protect still-used rows from naive age-only decay.
-- `optimize consolidation-review` scans `episodic_events` and emits dream-style **candidate** groups for summary compression, archive review, and cross-session link review — with provenance refs back to source episode IDs, recent-use protection when episode refs point at still-selected observations, and receipt-derived link evidence from recent lifecycle co-selection when available (lexical fallback on cold start).
+- `optimize consolidation-review` scans `episodic_events` and emits dream-style **candidate** groups for summary compression, archive review, and cross-session link review — with provenance refs back to source episode IDs, recent-use protection when episode refs point at still-selected observations, and receipt-first link evidence from recent lifecycle co-selection plus bounded lexical backfill (lexical fallback on cold start).
 
 If you are using importance grading, this is one of the easiest operator checks for “is bad memory starting to crowd out the good stuff?”
 

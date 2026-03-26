@@ -603,6 +603,7 @@ def build_consolidation_review(
     archive_lookahead_days: int = 7,
     archive_min_signal_reasons: int = 2,
     link_min_shared_tokens: int = 2,
+    link_lexical_backfill_max: int = 1,
     lifecycle_limit: int = 200,
     top: int = 10,
 ) -> Dict[str, Any]:
@@ -612,6 +613,7 @@ def build_consolidation_review(
     archive_lookahead_days = max(1, int(archive_lookahead_days))
     archive_min_signal_reasons = max(1, int(archive_min_signal_reasons))
     link_min_shared_tokens = max(1, int(link_min_shared_tokens))
+    link_lexical_backfill_max = max(0, int(link_lexical_backfill_max))
     lifecycle_limit = max(1, int(lifecycle_limit))
     top = max(1, int(top))
     scope_norm = _normalize_scope_token(scope)
@@ -816,6 +818,7 @@ def build_consolidation_review(
     co_selected_pairs = recent_use_meta.get("co_selected_pairs", {}) if isinstance(recent_use_meta, dict) else {}
 
     link_items: List[Dict[str, Any]] = []
+    lexical_backfill_candidates: List[Dict[str, Any]] = []
     scope_groups: Dict[str, List[Dict[str, Any]]] = {}
     for item in prepared:
         scope_groups.setdefault(item["scope"], []).append(item)
@@ -845,28 +848,64 @@ def build_consolidation_review(
                     or evidence.get("co_selection_events")
                 )
 
+                link_candidate = {
+                    "scope": scope_key,
+                    "shared_tokens": shared[:5],
+                    "shared_token_count": len(shared),
+                    "score": lexical_score,
+                    "receipt_evidence": evidence,
+                    "left": _event_ref(left),
+                    "right": _event_ref(right),
+                }
+
                 if lifecycle_rows_scanned > 0:
-                    if not has_receipt_evidence:
+                    if has_receipt_evidence:
+                        link_items.append(
+                            {
+                                **link_candidate,
+                                "evidence_mode": "receipt_co_selection",
+                                "confidence": 0.86,
+                            }
+                        )
+                    elif len(shared) >= link_min_shared_tokens:
+                        lexical_backfill_candidates.append(
+                            {
+                                **link_candidate,
+                                "evidence_mode": "lexical_backfill_low_confidence",
+                                "confidence": 0.42,
+                            }
+                        )
+                    else:
                         continue
-                    evidence_mode = "receipt_co_selection"
                 else:
                     if len(shared) < link_min_shared_tokens:
                         continue
-                    evidence_mode = "lexical_fallback"
-
-                link_items.append(
-                    {
-                        "scope": scope_key,
-                        "shared_tokens": shared[:5],
-                        "shared_token_count": len(shared),
-                        "score": lexical_score,
-                        "evidence_mode": evidence_mode,
-                        "receipt_evidence": evidence,
-                        "left": _event_ref(left),
-                        "right": _event_ref(right),
-                    }
-                )
+                    link_items.append(
+                        {
+                            **link_candidate,
+                            "evidence_mode": "lexical_fallback",
+                            "confidence": 0.58,
+                        }
+                    )
                 seen_pairs.add(pair_key)
+
+    lexical_backfill_candidate_pairs = len(lexical_backfill_candidates)
+    lexical_backfill_pairs = 0
+    lexical_backfill_suppressed_pairs = 0
+    if lifecycle_rows_scanned > 0 and link_lexical_backfill_max > 0 and lexical_backfill_candidates:
+        lexical_backfill_candidates.sort(
+            key=lambda x: (
+                x.get("shared_token_count", 0),
+                x.get("score", 0),
+                (x.get("right") or {}).get("id", 0),
+            ),
+            reverse=True,
+        )
+        selected_backfill = lexical_backfill_candidates[:link_lexical_backfill_max]
+        lexical_backfill_pairs = len(selected_backfill)
+        lexical_backfill_suppressed_pairs = max(0, lexical_backfill_candidate_pairs - lexical_backfill_pairs)
+        link_items.extend(selected_backfill)
+
     link_items.sort(
         key=lambda x: (
             int(((x.get("receipt_evidence") or {}).get("co_selection_events") or 0)),
@@ -919,6 +958,7 @@ def build_consolidation_review(
             "archive_lookahead_days": archive_lookahead_days,
             "archive_min_signal_reasons": archive_min_signal_reasons,
             "link_min_shared_tokens": link_min_shared_tokens,
+            "link_lexical_backfill_max": link_lexical_backfill_max,
             "lifecycle_limit": lifecycle_limit,
             "rare_token_max_freq": max_common_freq,
         },
@@ -936,9 +976,16 @@ def build_consolidation_review(
             },
             "link_evidence": {
                 "lifecycle_rows_scanned": lifecycle_rows_scanned,
-                "mode": "receipt_co_selection_when_available_else_lexical_fallback",
+                "mode": "receipt_first_with_bounded_lexical_backfill_when_lifecycle_exists",
                 "receipt_supported_pairs": receipt_link_pairs,
                 "lexical_fallback_pairs": lexical_fallback_link_pairs,
+                "lexical_backfill_pairs": lexical_backfill_pairs,
+                "lexical_backfill_candidate_pairs": lexical_backfill_candidate_pairs,
+                "lexical_backfill_suppressed_pairs": lexical_backfill_suppressed_pairs,
+                "hybrid_gate": {
+                    "active": bool(lifecycle_rows_scanned > 0),
+                    "lexical_backfill_max": link_lexical_backfill_max,
+                },
             },
         },
         "candidates": {

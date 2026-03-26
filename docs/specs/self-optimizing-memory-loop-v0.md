@@ -159,7 +159,7 @@ tests/
 - shipped read-only commands:
   - `openclaw-mem optimize consolidation-review --json`
     - scans `episodic_events`
-    - emits candidate-only summary compression groups, archive-review rows, and cross-session link proposals (receipt-derived from lifecycle co-selection when available, lexical fallback otherwise)
+    - emits candidate-only summary compression groups, archive-review rows, and cross-session link proposals (receipt-first with bounded lexical backfill when lifecycle rows exist; lexical fallback on cold start)
     - includes source episode refs / provenance back to the underlying episodic rows
     - now protects archive candidates when referenced observations still show recent pack selection
     - explicitly forbids canonical rewrite (`policy.canonical_rewrite=forbidden`)

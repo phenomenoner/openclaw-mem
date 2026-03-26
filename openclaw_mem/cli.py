@@ -1489,6 +1489,7 @@ def cmd_optimize_consolidation_review(conn: sqlite3.Connection, args: argparse.N
         archive_lookahead_days=int(getattr(args, "archive_lookahead_days", 7)),
         archive_min_signal_reasons=int(getattr(args, "archive_min_signal_reasons", 2)),
         link_min_shared_tokens=int(getattr(args, "link_min_shared_tokens", 2)),
+        link_lexical_backfill_max=int(getattr(args, "link_lexical_backfill_max", 1)),
         lifecycle_limit=int(getattr(args, "lifecycle_limit", 200)),
         top=int(getattr(args, "top", 10)),
     )
@@ -9807,6 +9808,7 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--archive-lookahead-days", dest="archive_lookahead_days", type=int, default=7, help="Flag low-signal rows this many days before retention GC (default: 7)")
     o.add_argument("--archive-min-signal-reasons", dest="archive_min_signal_reasons", type=int, default=2, help="Min low-signal hints before an archive candidate is emitted (default: 2)")
     o.add_argument("--link-min-shared-tokens", dest="link_min_shared_tokens", type=int, default=2, help="Min shared rare tokens for cross-session link candidates (default: 2)")
+    o.add_argument("--link-lexical-backfill-max", dest="link_lexical_backfill_max", type=int, default=1, help="When lifecycle rows exist, cap low-confidence lexical-only link backfill pairs (default: 1)")
     o.add_argument("--lifecycle-limit", dest="lifecycle_limit", type=int, default=200, help="Max pack_lifecycle_shadow rows scanned for recent-use protection on referenced observations (default: 200)")
     o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per section in output (default: 10)")
     o.set_defaults(func=cmd_optimize_consolidation_review)

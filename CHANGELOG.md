@@ -20,9 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - old rows still being selected into packs are protected from naive age-only stale recommendations
   - `optimize consolidation-review` now protects archive candidates when their episode refs point at observations with recent pack selection
   - added `--lifecycle-limit` to both review commands to bound lifecycle evidence scanning
-- `optimize consolidation-review` link candidates now prefer receipt-derived evidence from `pack_lifecycle_shadow_log` co-selection (`selection.pack_selected_refs` + `selection_signature`) when lifecycle rows exist, with lexical overlap kept as explicit cold-start fallback.
-  - link items now include inspectable `evidence_mode` and `receipt_evidence` surfaces (co-selection events, supporting ref pairs, and signature samples)
-  - lifecycle-present runs suppress lexical-only cross-session links that lack receipt evidence
+- `optimize consolidation-review` link candidates now use a bounded hybrid gate when lifecycle rows exist: receipt-derived co-selection remains the default path, with capped lexical low-confidence backfill for recall recovery.
+  - new CLI knob: `--link-lexical-backfill-max` (default: `1`) controls how many lexical-only cross-session pairs may backfill when lifecycle evidence exists
+  - link items now expose inspectable `evidence_mode` + `confidence` and `signals.link_evidence` carries hybrid-gate counters (`lexical_backfill_pairs`, candidate/suppressed counts, gate metadata)
+  - cold-start behavior still supports lexical fallback when lifecycle evidence is unavailable
 - Documented use-based decay v0 in `README.md`, `QUICKSTART.md`, `docs/about.md`, `docs/reality-check.md`, `docs/specs/self-optimizing-memory-loop-v0.md`, and `docs/specs/use-based-decay-v0.md`.
 
 ### Testing
