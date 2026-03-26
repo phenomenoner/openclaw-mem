@@ -119,6 +119,7 @@ repeat penalty 這種設計，表面上只是 ranking tweak，實際上很有 UX
 - mention policy 還沒有變成清楚、可操作的 contract
 - explainability 雖然有 receipts，但還需要更像「回答人類問題」而不是「輸出系統欄位」
 - adaptive personalization 也還沒真正解：如何讓使用者興趣自然演化，而不是黏在舊訊號上
+- 更老實地說，這一節目前仍然比較像**設計與 proof surface**，不是完整的 before/after casebook；如果要把它寫成更硬的實戰章，還需要補更多可重播的 failure→fix examples
 
 ## 8. 這套實戰經驗最重要的結論：small, trusted, cited beats big memory blob
 如果要把 `openclaw-mem` 的實戰經驗濃縮成一句最值錢的話，我會選這句：

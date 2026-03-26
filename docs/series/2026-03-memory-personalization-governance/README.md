@@ -12,6 +12,7 @@
 - `outline.md` — 系列弧線
 - `advisory_lane_status.md` — Claude / Gemini advisory lane receipts
 - `gemini_review.md` — Gemini second-opinion 摘要
+- `claude_review.md` — Claude second-opinion 摘要
 - `part-1_problem-context.md`
 - `part-2_solution-patterns.md`
 - `part-3_openclaw-mem-practice.md`

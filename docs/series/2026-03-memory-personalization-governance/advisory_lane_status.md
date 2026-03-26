@@ -4,16 +4,18 @@
 - Earlier bad path:
   - `claude --permission-mode bypassPermissions --print ...`
   - result: rejected under root/sudo because Claude mapped it to the dangerous-permissions path
-- Current corrected posture:
-  - `claude --print --model opus --bare --no-session-persistence --tools ""`
+- Additional trap discovered:
+  - `--bare` disables normal claude.ai login reuse, so a bare one-shot run can look falsely auth-broken on this host
+- Working posture:
+  - `claude --print --model opus --no-session-persistence --tools ""`
 - Latest result:
-  - permission posture no longer blocked the run first
-  - current blocker is now auth state: `Not logged in · Please run /login`
+  - smoke test succeeded (`CLAUDE_OK`)
+  - advisory run completed successfully after re-login and after removing the old bad flags/posture
 - Interpretation:
   - the original permission-guidance bug is materially cleared
-  - standalone Claude CLI is still **not presently usable** for this lane until login/auth is restored
+  - the lane is usable again when invoked with the non-bypass, non-bare posture
 - Operational note:
-  - stop here and report; do not keep retrying standalone Claude until auth is fixed
+  - for this host, prefer non-bypass one-shot Claude and avoid treating `--bare` + login-backed auth as a neutral flag combination
 
 ## Standalone Gemini CLI
 - First attempt:
