@@ -51,7 +51,12 @@ from openclaw_mem.docs_memory import (
     rrf_components,
 )
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
-from openclaw_mem.optimization import build_memory_health_review, render_memory_health_review
+from openclaw_mem.optimization import (
+    build_consolidation_review,
+    build_memory_health_review,
+    render_consolidation_review,
+    render_memory_health_review,
+)
 from openclaw_mem.graph.drift import query_drift
 from openclaw_mem.graph.query import (
     query_downstream,
@@ -1470,6 +1475,27 @@ def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         return
 
     print(render_memory_health_review(report))
+
+
+def cmd_optimize_consolidation_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    report = build_consolidation_review(
+        conn,
+        limit=int(getattr(args, "limit", 500)),
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+        summary_min_group_size=int(getattr(args, "summary_min_group_size", 2)),
+        summary_min_shared_tokens=int(getattr(args, "summary_min_shared_tokens", 2)),
+        archive_lookahead_days=int(getattr(args, "archive_lookahead_days", 7)),
+        archive_min_signal_reasons=int(getattr(args, "archive_min_signal_reasons", 2)),
+        link_min_shared_tokens=int(getattr(args, "link_min_shared_tokens", 2)),
+        top=int(getattr(args, "top", 10)),
+    )
+
+    if args.json:
+        _emit(report, True)
+        return
+
+    print(render_consolidation_review(report))
 
 
 def _optimize_policy_int(raw: Any, default: int, *, min_value: int = 0) -> int:
@@ -9767,6 +9793,19 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
     o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per signal in output (default: 10)")
     o.set_defaults(func=cmd_optimize_review)
+
+    o = osub.add_parser("consolidation-review", help="Review episodic consolidation/archive/link candidates (no writes)")
+    add_common(o)
+    o.add_argument("--limit", type=int, default=500, help="Max episodic rows to scan (default: 500)")
+    o.add_argument("--scope", default=None, help="Filter review to one scope token")
+    o.add_argument("--session-id", dest="session_id", default=None, help="Optional exact session_id filter")
+    o.add_argument("--summary-min-group-size", dest="summary_min_group_size", type=int, default=2, help="Min rows per consolidation cluster (default: 2)")
+    o.add_argument("--summary-min-shared-tokens", dest="summary_min_shared_tokens", type=int, default=2, help="Min shared rare tokens for consolidation clusters (default: 2)")
+    o.add_argument("--archive-lookahead-days", dest="archive_lookahead_days", type=int, default=7, help="Flag low-signal rows this many days before retention GC (default: 7)")
+    o.add_argument("--archive-min-signal-reasons", dest="archive_min_signal_reasons", type=int, default=2, help="Min low-signal hints before an archive candidate is emitted (default: 2)")
+    o.add_argument("--link-min-shared-tokens", dest="link_min_shared_tokens", type=int, default=2, help="Min shared rare tokens for cross-session link candidates (default: 2)")
+    o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per section in output (default: 10)")
+    o.set_defaults(func=cmd_optimize_consolidation_review)
 
     o = osub.add_parser("policy-loop", help="Read-only writeback+recall policy review with sunrise Stage B/C gates")
     add_common(o)

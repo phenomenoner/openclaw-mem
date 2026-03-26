@@ -154,13 +154,19 @@ tests/
 - no auto-apply
 - zero writes to memory rows (observe + propose only)
 
-### v0.2 — operator review lane (**partially shipped**)
-- keep `optimize review` contract stable and add policy-loop review output
-- shipped read-only command: `openclaw-mem optimize policy-loop --json`
-  - combines repeated recall-miss pressure, writeback linkage readiness, and lifecycle-shadow evidence
-  - writeback linkage readiness is scoped to `memory_store` rows from `memory_backend=openclaw-mem-engine` (legacy/non-target backends are excluded from the denominator)
-  - emits sunrise Stage B/C gate status (`ready|hold`) with explicit threshold/reason receipts
-  - remains strict zero-write (`policy.writes_performed=0`, `memory_mutation=none`)
+### v0.2 — operator review lane (**shipped foundation**)
+- keep `optimize review` contract stable and add adjacent review outputs rather than silent mutation paths
+- shipped read-only commands:
+  - `openclaw-mem optimize consolidation-review --json`
+    - scans `episodic_events`
+    - emits candidate-only summary compression groups, archive-review rows, and cross-session link proposals
+    - includes source episode refs / provenance back to the underlying episodic rows
+    - explicitly forbids canonical rewrite (`policy.canonical_rewrite=forbidden`)
+  - `openclaw-mem optimize policy-loop --json`
+    - combines repeated recall-miss pressure, writeback linkage readiness, and lifecycle-shadow evidence
+    - writeback linkage readiness is scoped to `memory_store` rows from `memory_backend=openclaw-mem-engine` (legacy/non-target backends are excluded from the denominator)
+    - emits sunrise Stage B/C gate status (`ready|hold`) with explicit threshold/reason receipts
+    - remains strict zero-write (`policy.writes_performed=0`, `memory_mutation=none`)
 - bounded recommendation budgets stay in place (`--top`, scoped miss groups)
 
 ### v0.3 — bounded low-risk apply (flagged; **not shipped in this phase**)

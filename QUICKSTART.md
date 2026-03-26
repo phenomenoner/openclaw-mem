@@ -234,9 +234,13 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem triage --mode tasks --ta
 
 ```bash
 uv run --python 3.13 --frozen -- python -m openclaw_mem optimize review --json --limit 500
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize consolidation-review --json --limit 500
 ```
 
-This command is zero-write by design in the current release: it only reports candidates (staleness, duplication, bloat, weakly-connected memories, repeated no-result `memory_recall` misses) and suggestions.
+These commands are zero-write by design in the current release.
+
+- `optimize review` reports hygiene candidates (staleness, duplication, bloat, weakly-connected memories, repeated no-result `memory_recall` misses).
+- `optimize consolidation-review` scans `episodic_events` and emits dream-style **candidate** groups for summary compression, archive review, and cross-session link review — with provenance refs back to source episode IDs.
 
 If you are using importance grading, this is one of the easiest operator checks for “is bad memory starting to crowd out the good stuff?”
 

@@ -42,6 +42,16 @@ _WORD_TOKEN_RE = re.compile(r"[a-z0-9_]{3,}")
 _CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
 
 
+_EPISODIC_RETENTION_DAYS: Dict[str, Optional[int]] = {
+    "conversation.user": 60,
+    "conversation.assistant": 90,
+    "tool.call": 30,
+    "tool.result": 30,
+    "ops.alert": 90,
+    "ops.decision": None,
+}
+
+
 
 def _parse_iso_utc(ts: Any) -> Optional[datetime]:
     if not isinstance(ts, str) or not ts.strip():
@@ -302,6 +312,437 @@ def _build_recommendations(report: Dict[str, Any]) -> List[Dict[str, Any]]:
         )
 
     return recs
+
+
+def _episodic_retention_days(event_type: str) -> Optional[int]:
+    return _EPISODIC_RETENTION_DAYS.get(str(event_type or "").strip().lower())
+
+
+def _parse_json_obj(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _event_ref(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": item["id"],
+        "event_id": item["event_id"],
+        "type": item["type"],
+        "scope": item["scope"],
+        "session_id": item["session_id"],
+        "ts_ms": item["ts_ms"],
+        "summary_preview": item["summary_preview"],
+    }
+
+
+def _cluster_draft_summary(cluster_items: List[Dict[str, Any]], shared_tokens: List[str]) -> str:
+    if not cluster_items:
+        return ""
+    scope = cluster_items[0].get("scope") or "global"
+    session_id = cluster_items[0].get("session_id") or "session"
+    type_counts: Dict[str, int] = {}
+    for item in cluster_items:
+        type_counts[str(item.get("type") or "unknown")] = type_counts.get(str(item.get("type") or "unknown"), 0) + 1
+    type_bits = [f"{k}:{v}" for k, v in sorted(type_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]]
+    token_bits = shared_tokens[:3]
+    token_part = ", ".join(token_bits) if token_bits else "related context"
+    type_part = " | ".join(type_bits) if type_bits else "mixed events"
+    return (
+        f"{len(cluster_items)} episodic events in {scope}/{session_id} repeatedly touch {token_part}; "
+        f"candidate consolidation over {type_part}."
+    )
+
+
+def _build_consolidation_recommendations(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    recs: List[Dict[str, Any]] = []
+    candidates = report.get("candidates", {})
+
+    summary = candidates.get("summary", {})
+    if summary.get("groups", 0) > 0:
+        recs.append(
+            {
+                "type": "review_summary_candidates",
+                "priority": "medium",
+                "confidence": 0.79,
+                "why": f"{summary['groups']} episodic clusters look compressible into summary candidates",
+                "evidence": {
+                    "groups": summary["groups"],
+                    "sample_event_ids": [
+                        (it.get("event_ids") or [])[:3] for it in summary.get("items", [])[:3]
+                    ],
+                },
+                "suggested_action": "Review draft summaries and decide whether to keep as proposals, archive sources, or discard.",
+                "safe_for_auto_apply": False,
+            }
+        )
+
+    archive = candidates.get("archive", {})
+    if archive.get("count", 0) > 0:
+        recs.append(
+            {
+                "type": "stage_archive_candidates",
+                "priority": "low",
+                "confidence": 0.72,
+                "why": f"{archive['count']} episodic rows are nearing retention horizon with low-signal traits",
+                "evidence": {
+                    "count": archive["count"],
+                    "sample_ids": [it.get("id") for it in archive.get("items", [])[:5]],
+                },
+                "suggested_action": "Stage low-signal episodes for archive or deletion review before GC windows close.",
+                "safe_for_auto_apply": False,
+            }
+        )
+
+    links = candidates.get("links", {})
+    if links.get("pairs", 0) > 0:
+        recs.append(
+            {
+                "type": "review_link_candidates",
+                "priority": "low",
+                "confidence": 0.68,
+                "why": f"{links['pairs']} cross-session lexical link candidates were found",
+                "evidence": {
+                    "pairs": links["pairs"],
+                    "sample_shared_tokens": [it.get("shared_tokens", [])[:3] for it in links.get("items", [])[:3]],
+                },
+                "suggested_action": "Review whether repeated cross-session motifs deserve explicit graph or note linkage.",
+                "safe_for_auto_apply": False,
+            }
+        )
+
+    return recs
+
+
+def build_consolidation_review(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 500,
+    scope: Optional[str] = None,
+    session_id: Optional[str] = None,
+    summary_min_group_size: int = 2,
+    summary_min_shared_tokens: int = 2,
+    archive_lookahead_days: int = 7,
+    archive_min_signal_reasons: int = 2,
+    link_min_shared_tokens: int = 2,
+    top: int = 10,
+) -> Dict[str, Any]:
+    row_limit = max(1, int(limit))
+    summary_min_group_size = max(2, int(summary_min_group_size))
+    summary_min_shared_tokens = max(1, int(summary_min_shared_tokens))
+    archive_lookahead_days = max(1, int(archive_lookahead_days))
+    archive_min_signal_reasons = max(1, int(archive_min_signal_reasons))
+    link_min_shared_tokens = max(1, int(link_min_shared_tokens))
+    top = max(1, int(top))
+    scope_norm = _normalize_scope_token(scope)
+    session_norm = str(session_id or "").strip() or None
+
+    prev_query_only = int(conn.execute("PRAGMA query_only").fetchone()[0])
+    if not prev_query_only:
+        conn.execute("PRAGMA query_only = ON")
+
+    try:
+        where_parts: List[str] = []
+        params_total: List[Any] = []
+        params_rows: List[Any] = []
+        if scope_norm:
+            where_parts.append("scope = ?")
+            params_total.append(scope_norm)
+            params_rows.append(scope_norm)
+        if session_norm:
+            where_parts.append("session_id = ?")
+            params_total.append(session_norm)
+            params_rows.append(session_norm)
+        where_sql = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
+        total_rows = int(conn.execute(f"SELECT COUNT(*) FROM episodic_events{where_sql}", params_total).fetchone()[0])
+        rows = conn.execute(
+            f"""
+            SELECT id, event_id, ts_ms, scope, session_id, agent_id, type, summary, payload_json, refs_json, redacted
+            FROM episodic_events{where_sql}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            params_rows + [row_limit],
+        ).fetchall()
+    finally:
+        if not prev_query_only:
+            conn.execute("PRAGMA query_only = OFF")
+
+    now = datetime.now(timezone.utc)
+    prepared: List[Dict[str, Any]] = []
+    for row in rows:
+        summary_raw = str(row["summary"] or "")
+        summary_norm = _normalize_summary(summary_raw)
+        dt = datetime.fromtimestamp(int(row["ts_ms"]) / 1000.0, tz=timezone.utc)
+        age_days = max(0, int((now - dt).total_seconds() // 86400))
+        refs_obj = _parse_json_obj(row["refs_json"])
+        payload_present = bool(str(row["payload_json"] or "").strip())
+        retention_days = _episodic_retention_days(str(row["type"] or ""))
+        days_until_gc = None if retention_days is None else max(0, int(retention_days - age_days))
+        prepared.append(
+            {
+                "id": int(row["id"]),
+                "event_id": str(row["event_id"]),
+                "ts_ms": int(row["ts_ms"]),
+                "scope": str(row["scope"]),
+                "session_id": str(row["session_id"]),
+                "agent_id": str(row["agent_id"]),
+                "type": str(row["type"]),
+                "summary": summary_norm,
+                "summary_preview": _preview(summary_raw),
+                "tokens": _tokenize(summary_norm),
+                "token_count": 0,
+                "summary_chars": len(summary_raw),
+                "refs": refs_obj,
+                "has_refs": bool(refs_obj),
+                "payload_present": payload_present,
+                "redacted": bool(int(row["redacted"] or 0)),
+                "retention_days": retention_days,
+                "age_days": age_days,
+                "days_until_gc": days_until_gc,
+            }
+        )
+    for item in prepared:
+        item["token_count"] = len(item["tokens"])
+
+    global_token_to_ids: Dict[str, Set[int]] = {}
+    for item in prepared:
+        for tok in item["tokens"]:
+            global_token_to_ids.setdefault(tok, set()).add(item["id"])
+    max_common_freq = max(3, int(len(prepared) * 0.80))
+
+    summary_items: List[Dict[str, Any]] = []
+    groups: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
+    for item in prepared:
+        groups.setdefault((item["scope"], item["session_id"]), []).append(item)
+
+    for (scope_key, session_key), group in groups.items():
+        if len(group) < summary_min_group_size:
+            continue
+        group_sorted = sorted(group, key=lambda x: x["id"])
+        adjacency: Dict[int, Set[int]] = {it["id"]: set() for it in group_sorted}
+        by_id = {it["id"]: it for it in group_sorted}
+        for idx, left in enumerate(group_sorted):
+            for right in group_sorted[idx + 1 :]:
+                shared = sorted(tok for tok in (left["tokens"] & right["tokens"]) if len(global_token_to_ids.get(tok, ())) <= max_common_freq)
+                if len(shared) < summary_min_shared_tokens:
+                    continue
+                adjacency[left["id"]].add(right["id"])
+                adjacency[right["id"]].add(left["id"])
+
+        seen: Set[int] = set()
+        for start in [it["id"] for it in group_sorted]:
+            if start in seen or not adjacency[start]:
+                continue
+            stack = [start]
+            component: List[int] = []
+            seen.add(start)
+            while stack:
+                cur = stack.pop()
+                component.append(cur)
+                for nxt in adjacency[cur]:
+                    if nxt in seen:
+                        continue
+                    seen.add(nxt)
+                    stack.append(nxt)
+            if len(component) < summary_min_group_size:
+                continue
+            cluster = [by_id[i] for i in sorted(component)]
+            token_counts: Dict[str, int] = {}
+            for item in cluster:
+                for tok in item["tokens"]:
+                    if len(global_token_to_ids.get(tok, ())) <= max_common_freq:
+                        token_counts[tok] = token_counts.get(tok, 0) + 1
+            shared_tokens = [tok for tok, count in sorted(token_counts.items(), key=lambda kv: (-kv[1], kv[0])) if count >= 2]
+            if len(shared_tokens) < summary_min_shared_tokens:
+                continue
+            type_counts: Dict[str, int] = {}
+            for item in cluster:
+                type_counts[item["type"]] = type_counts.get(item["type"], 0) + 1
+            summary_items.append(
+                {
+                    "scope": scope_key,
+                    "session_id": session_key,
+                    "count": len(cluster),
+                    "ids": [it["id"] for it in cluster],
+                    "event_ids": [it["event_id"] for it in cluster],
+                    "shared_tokens": shared_tokens[:5],
+                    "type_counts": type_counts,
+                    "time_range": {
+                        "start_ts_ms": min(it["ts_ms"] for it in cluster),
+                        "end_ts_ms": max(it["ts_ms"] for it in cluster),
+                    },
+                    "draft_summary": _cluster_draft_summary(cluster, shared_tokens),
+                    "source_event_refs": [_event_ref(it) for it in cluster[: min(len(cluster), 8)]],
+                }
+            )
+    summary_items.sort(key=lambda x: (x["count"], len(x["shared_tokens"]), x["ids"][-1]), reverse=True)
+
+    archive_items: List[Dict[str, Any]] = []
+    for item in prepared:
+        retention_days = item["retention_days"]
+        if retention_days is None or item["days_until_gc"] is None:
+            continue
+        if item["days_until_gc"] > archive_lookahead_days:
+            continue
+        reasons: List[str] = []
+        if not item["has_refs"]:
+            reasons.append("no_refs")
+        if item["token_count"] <= 4:
+            reasons.append("low_token_count")
+        if item["summary_chars"] <= 80:
+            reasons.append("short_summary")
+        if not item["payload_present"]:
+            reasons.append("no_payload")
+        if item["redacted"]:
+            reasons.append("redacted")
+        if len(reasons) < archive_min_signal_reasons:
+            continue
+        archive_items.append(
+            {
+                "id": item["id"],
+                "event_id": item["event_id"],
+                "scope": item["scope"],
+                "session_id": item["session_id"],
+                "type": item["type"],
+                "age_days": item["age_days"],
+                "retention_days": retention_days,
+                "days_until_gc": item["days_until_gc"],
+                "low_signal_reasons": reasons,
+                "summary_preview": item["summary_preview"],
+                "source_event_ref": _event_ref(item),
+            }
+        )
+    archive_items.sort(key=lambda x: (x["days_until_gc"], -x["age_days"], x["id"]))
+
+    link_items: List[Dict[str, Any]] = []
+    scope_groups: Dict[str, List[Dict[str, Any]]] = {}
+    for item in prepared:
+        scope_groups.setdefault(item["scope"], []).append(item)
+    seen_pairs: Set[tuple[int, int]] = set()
+    for scope_key, group in scope_groups.items():
+        ordered = sorted(group, key=lambda x: x["id"])
+        for idx, left in enumerate(ordered):
+            for right in ordered[idx + 1 :]:
+                if left["session_id"] == right["session_id"]:
+                    continue
+                pair_key = (left["id"], right["id"])
+                if pair_key in seen_pairs:
+                    continue
+                shared = sorted(tok for tok in (left["tokens"] & right["tokens"]) if len(global_token_to_ids.get(tok, ())) <= max_common_freq)
+                if len(shared) < link_min_shared_tokens:
+                    continue
+                union_size = max(1, len(left["tokens"] | right["tokens"]))
+                score = round(len(shared) / union_size, 3)
+                link_items.append(
+                    {
+                        "scope": scope_key,
+                        "shared_tokens": shared[:5],
+                        "shared_token_count": len(shared),
+                        "score": score,
+                        "left": _event_ref(left),
+                        "right": _event_ref(right),
+                    }
+                )
+                seen_pairs.add(pair_key)
+    link_items.sort(key=lambda x: (x["shared_token_count"], x["score"], x["right"]["id"]), reverse=True)
+
+    rows_scanned = len(prepared)
+    coverage_pct = round((rows_scanned / total_rows) * 100, 1) if total_rows > 0 else 100.0
+    warnings: List[Dict[str, Any]] = []
+    if total_rows > rows_scanned:
+        warnings.append(
+            {
+                "code": "sample_is_recent_window",
+                "message": "Review scans the most recent episodic rows only; older consolidation/archive candidates may exist outside the current sample window.",
+                "sample_order": "id_desc_recent_window",
+            }
+        )
+
+    report: Dict[str, Any] = {
+        "kind": "openclaw-mem.optimize.consolidation-review.v0",
+        "ts": now.isoformat(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "source": {
+            "table": "episodic_events",
+            "row_limit": row_limit,
+            "rows_scanned": rows_scanned,
+            "total_rows": total_rows,
+            "scope": scope_norm,
+            "session_id": session_norm,
+            "coverage_pct": coverage_pct,
+            "sample_order": "id_desc_recent_window",
+        },
+        "policy": {
+            "mode": "recommendation-first",
+            "writes_performed": 0,
+            "memory_mutation": "none",
+            "query_only_enforced": True,
+            "canonical_rewrite": "forbidden",
+        },
+        "thresholds": {
+            "summary_min_group_size": summary_min_group_size,
+            "summary_min_shared_tokens": summary_min_shared_tokens,
+            "archive_lookahead_days": archive_lookahead_days,
+            "archive_min_signal_reasons": archive_min_signal_reasons,
+            "link_min_shared_tokens": link_min_shared_tokens,
+            "rare_token_max_freq": max_common_freq,
+        },
+        "candidates": {
+            "summary": {"groups": len(summary_items), "items": summary_items[:top]},
+            "archive": {"count": len(archive_items), "items": archive_items[:top]},
+            "links": {"pairs": len(link_items), "items": link_items[:top]},
+        },
+        "warnings": warnings,
+    }
+    report["recommendations"] = _build_consolidation_recommendations(report)
+    return report
+
+
+def render_consolidation_review(report: Dict[str, Any]) -> str:
+    src = report.get("source", {})
+    candidates = report.get("candidates", {})
+    summary = candidates.get("summary", {})
+    archive = candidates.get("archive", {})
+    links = candidates.get("links", {})
+
+    lines = [
+        "openclaw-mem optimize consolidation-review (recommendation-only)",
+        (
+            "rows scanned: "
+            f"{src.get('rows_scanned', 0)}/{src.get('row_limit', 0)} "
+            f"(total_rows={src.get('total_rows', 0)}, coverage={src.get('coverage_pct', 0)}%, sample_order={src.get('sample_order', 'unknown')})"
+        ),
+        (
+            "candidates: "
+            f"summary={summary.get('groups', 0)} groups | "
+            f"archive={archive.get('count', 0)} | "
+            f"links={links.get('pairs', 0)} pairs"
+        ),
+    ]
+
+    warnings = report.get("warnings", [])
+    if warnings:
+        lines.append("warnings:")
+        for w in warnings:
+            lines.append(f"- {w.get('code')}: {w.get('message')}")
+
+    recs = report.get("recommendations", [])
+    if recs:
+        lines.append("recommendations:")
+        for rec in recs:
+            lines.append(f"- {rec.get('type')} (confidence={rec.get('confidence')}, priority={rec.get('priority')}): {rec.get('why')}")
+    else:
+        lines.append("recommendations: none")
+
+    return "\n".join(lines)
 
 
 def build_memory_health_review(

@@ -39,6 +39,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json search
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json timeline 2 --window 2
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json get 2
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize review --limit 200
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize consolidation-review --limit 200
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize policy-loop --review-limit 200 --writeback-limit 100 --lifecycle-limit 100
 ```
 
@@ -99,3 +100,4 @@ Expected:
 - Package/distribution ergonomics so `openclaw-mem` install/run flow is cleaner across `uv sync` / pip contexts
 - Graph roadmap depth: richer provenance wiring + higher-level operator queries on top of the shipped query plane
 - Topology seed automation (`topology-seed`) so curated graph truth is easier to bootstrap and maintain
+ Topology seed automation (`topology-seed`) so curated graph truth is easier to bootstrap and maintain

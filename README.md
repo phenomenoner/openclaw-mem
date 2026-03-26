@@ -50,7 +50,7 @@ It operates across two planes:
 - **Local recall loop:** `search → timeline → get` keeps routine lookups fast and inspectable.
 - **Trust-aware pack surfaces:** `pack`, `--trace`, `--pack-trust-policy`, `policy_surface`, and `pack_lifecycle_shadow` provide inclusion/exclusion receipts.
 - **Graph/provenance surfaces:** `graph topology-refresh`, `graph query ...`, drift checks, and graph provenance gating for graph-derived pack candidates.
-- **Review-gated action plane (recommendation-only):** `optimize review` plus `optimize policy-loop` emit review queues for rollout readiness (no silent writeback).
+- **Review-gated action plane (recommendation-only):** `optimize review`, `optimize consolidation-review`, and `optimize policy-loop` emit review queues for hygiene, dream-style candidate consolidation, and rollout readiness (no silent writeback).
 - **Policy-driven safety:** trust policies, graph provenance, and lifecycle logging (`--pack-trust-policy`, `--graph-provenance-policy`, `--graph-query-db`, `--pack-lifecycle-shadow`) keep memory grounded, auditable, and safer for automation.
 - **Episodic event lane:** append/extract/ingest/query/replay with redaction-first defaults.
 - **Optional Mem Engine upgrades:** hybrid recall controls, TODO guardrails, docs cold-lane ingest/search.

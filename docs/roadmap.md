@@ -200,7 +200,7 @@ Status: **PARTIAL** (v0.1 recommendation observer shipped; apply path still road
   - no hidden config mutation
 
 Shipped v0.1 slice:
-- `openclaw-mem optimize review` (zero-write observer/reporter)
+- `openclaw-mem optimize review` / `optimize consolidation-review` (zero-write observer/reporters)
 - bounded source-of-truth scan (`observations`, default limit 1000)
 - low-risk signals: staleness, duplication, bloat, weakly-connected candidates, repeated no-result `memory_recall` miss patterns
 - outputs structured report `openclaw-mem.optimize.review.v0` with recommendations (no mutation)

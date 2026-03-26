@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Added `openclaw-mem optimize consolidation-review` as a recommendation-only episodic maintenance observer for dream-style candidate generation without canonical rewrite.
+  - scans `episodic_events` under strict zero-write/query-only posture
+  - emits three bounded candidate families: summary compression groups, archive-review rows near GC horizon, and cross-session link proposals
+  - includes source episode refs/provenance in the JSON report `openclaw-mem.optimize.consolidation-review.v0`
+  - explicitly records `policy.canonical_rewrite=forbidden` so consolidation stays review-gated rather than silently mutating memory truth
+- Documented the new consolidation-review slice in `README.md`, `QUICKSTART.md`, `docs/about.md`, `docs/reality-check.md`, `docs/roadmap.md`, `docs/specs/self-optimizing-memory-loop-v0.md`, and added `docs/specs/dream-style-consolidation-review-v0.md` as the focused design note.
+
+### Testing
+
+- Added `tests/test_optimize_consolidation_review.py` coverage for parser wiring, zero-write JSON contract, summary/archive/link candidate detection, and scope/session filtering.
+
+
 ## [1.2.0] - 2026-03-25
 
 ### Changed
