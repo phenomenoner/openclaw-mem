@@ -51,6 +51,9 @@ _EPISODIC_RETENTION_DAYS: Dict[str, Optional[int]] = {
     "ops.decision": None,
 }
 
+_PACK_LIFECYCLE_SHADOW_TABLE = "pack_lifecycle_shadow_log"
+_OBS_REF_RE = re.compile(r"^obs:(\d+)$")
+
 
 
 def _parse_iso_utc(ts: Any) -> Optional[datetime]:
@@ -226,9 +229,10 @@ def _build_recommendations(report: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "type": "mark_stale_candidate",
                 "priority": "low",
                 "confidence": 0.74,
-                "why": f"{stale['count']} rows are older than {stale['threshold_days']} days",
+                "why": f"{stale['count']} rows are older than {stale['threshold_days']} days without recent-use protection",
                 "evidence": {
                     "count": stale["count"],
+                    "protected_recent_use": stale.get("protected_recent_use", 0),
                     "sample_ids": [it["id"] for it in stale["items"][:5]],
                 },
                 "suggested_action": "Review candidates for archive/summary tagging (manual approval).",
@@ -328,6 +332,90 @@ def _parse_json_obj(raw: Any) -> Dict[str, Any]:
     except Exception:
         return {}
     return obj if isinstance(obj, dict) else {}
+
+
+def _extract_obs_ids_from_refs(raw: Any) -> Set[int]:
+    out: Set[int] = set()
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, str):
+            m = _OBS_REF_RE.fullmatch(value.strip())
+            if m:
+                out.add(int(m.group(1)))
+            return
+        if isinstance(value, list):
+            for item in value:
+                _walk(item)
+            return
+        if isinstance(value, dict):
+            for v in value.values():
+                _walk(v)
+
+    _walk(raw)
+    return out
+
+
+def _recent_use_from_lifecycle(
+    conn: sqlite3.Connection,
+    *,
+    lifecycle_limit: int,
+) -> Dict[str, Any]:
+    rows = conn.execute(
+        f"""
+        SELECT id, ts, receipt_json
+        FROM {_PACK_LIFECYCLE_SHADOW_TABLE}
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (max(1, int(lifecycle_limit)),),
+    ).fetchall()
+
+    by_obs_id: Dict[int, Dict[str, Any]] = {}
+    selection_events = 0
+
+    for row in rows:
+        receipt_obj = _parse_json_obj(row["receipt_json"])
+        selection_obj = receipt_obj.get("selection") if isinstance(receipt_obj, dict) else {}
+        if not isinstance(selection_obj, dict):
+            selection_obj = {}
+        refs = selection_obj.get("pack_selected_refs")
+        if not isinstance(refs, list):
+            refs = []
+        ts = str(row["ts"] or "").strip() or None
+        for ref in refs:
+            if not isinstance(ref, str):
+                continue
+            m = _OBS_REF_RE.fullmatch(ref.strip())
+            if not m:
+                continue
+            obs_id = int(m.group(1))
+            slot = by_obs_id.setdefault(
+                obs_id,
+                {"count": 0, "last_selected_ts": None, "recent_ref": ref},
+            )
+            slot["count"] += 1
+            selection_events += 1
+            current_ts = slot.get("last_selected_ts")
+            if ts and (not current_ts or str(ts) > str(current_ts)):
+                slot["last_selected_ts"] = ts
+
+    return {
+        "lifecycle_rows_scanned": len(rows),
+        "selection_events": selection_events,
+        "by_obs_id": by_obs_id,
+    }
+
+
+def _recent_use_item(obs_id: int, recent_use_index: Dict[int, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    slot = recent_use_index.get(int(obs_id))
+    if not slot:
+        return None
+    return {
+        "id": int(obs_id),
+        "count": int(slot.get("count") or 0),
+        "last_selected_ts": slot.get("last_selected_ts"),
+        "record_ref": slot.get("recent_ref") or f"obs:{int(obs_id)}",
+    }
 
 
 def _event_ref(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -431,6 +519,7 @@ def build_consolidation_review(
     archive_lookahead_days: int = 7,
     archive_min_signal_reasons: int = 2,
     link_min_shared_tokens: int = 2,
+    lifecycle_limit: int = 200,
     top: int = 10,
 ) -> Dict[str, Any]:
     row_limit = max(1, int(limit))
@@ -439,6 +528,7 @@ def build_consolidation_review(
     archive_lookahead_days = max(1, int(archive_lookahead_days))
     archive_min_signal_reasons = max(1, int(archive_min_signal_reasons))
     link_min_shared_tokens = max(1, int(link_min_shared_tokens))
+    lifecycle_limit = max(1, int(lifecycle_limit))
     top = max(1, int(top))
     scope_norm = _normalize_scope_token(scope)
     session_norm = str(session_id or "").strip() or None
@@ -471,6 +561,7 @@ def build_consolidation_review(
             """,
             params_rows + [row_limit],
         ).fetchall()
+        recent_use_meta = _recent_use_from_lifecycle(conn, lifecycle_limit=lifecycle_limit)
     finally:
         if not prev_query_only:
             conn.execute("PRAGMA query_only = OFF")
@@ -483,6 +574,7 @@ def build_consolidation_review(
         dt = datetime.fromtimestamp(int(row["ts_ms"]) / 1000.0, tz=timezone.utc)
         age_days = max(0, int((now - dt).total_seconds() // 86400))
         refs_obj = _parse_json_obj(row["refs_json"])
+        refs_obs_ids = _extract_obs_ids_from_refs(refs_obj)
         payload_present = bool(str(row["payload_json"] or "").strip())
         retention_days = _episodic_retention_days(str(row["type"] or ""))
         days_until_gc = None if retention_days is None else max(0, int(retention_days - age_days))
@@ -501,6 +593,7 @@ def build_consolidation_review(
                 "token_count": 0,
                 "summary_chars": len(summary_raw),
                 "refs": refs_obj,
+                "refs_obs_ids": refs_obs_ids,
                 "has_refs": bool(refs_obj),
                 "payload_present": payload_present,
                 "redacted": bool(int(row["redacted"] or 0)),
@@ -585,7 +678,10 @@ def build_consolidation_review(
             )
     summary_items.sort(key=lambda x: (x["count"], len(x["shared_tokens"]), x["ids"][-1]), reverse=True)
 
+    recent_use_index = recent_use_meta.get("by_obs_id", {}) if isinstance(recent_use_meta, dict) else {}
     archive_items: List[Dict[str, Any]] = []
+    archive_protected_recent_use = 0
+    recent_use_refs_seen: Set[int] = set()
     for item in prepared:
         retention_days = item["retention_days"]
         if retention_days is None or item["days_until_gc"] is None:
@@ -604,6 +700,16 @@ def build_consolidation_review(
         if item["redacted"]:
             reasons.append("redacted")
         if len(reasons) < archive_min_signal_reasons:
+            continue
+        recent_use_evidence = [
+            _recent_use_item(obs_id, recent_use_index)
+            for obs_id in sorted(item.get("refs_obs_ids") or set())
+            if _recent_use_item(obs_id, recent_use_index) is not None
+        ]
+        if recent_use_evidence:
+            archive_protected_recent_use += 1
+            for ev in recent_use_evidence:
+                recent_use_refs_seen.add(int(ev["id"]))
             continue
         archive_items.append(
             {
@@ -693,11 +799,25 @@ def build_consolidation_review(
             "archive_lookahead_days": archive_lookahead_days,
             "archive_min_signal_reasons": archive_min_signal_reasons,
             "link_min_shared_tokens": link_min_shared_tokens,
+            "lifecycle_limit": lifecycle_limit,
             "rare_token_max_freq": max_common_freq,
+        },
+        "signals": {
+            "recent_use": {
+                "lifecycle_rows_scanned": int(recent_use_meta.get("lifecycle_rows_scanned") or 0),
+                "selection_events": int(recent_use_meta.get("selection_events") or 0),
+                "protected_archive_candidates": archive_protected_recent_use,
+                "linked_observation_rows": len(recent_use_refs_seen),
+                "items": [
+                    _recent_use_item(obs_id, recent_use_index)
+                    for obs_id in sorted(recent_use_refs_seen, key=lambda x: (recent_use_index.get(x, {}).get("count", 0), x), reverse=True)[:top]
+                    if _recent_use_item(obs_id, recent_use_index) is not None
+                ],
+            }
         },
         "candidates": {
             "summary": {"groups": len(summary_items), "items": summary_items[:top]},
-            "archive": {"count": len(archive_items), "items": archive_items[:top]},
+            "archive": {"count": len(archive_items), "protected_by_recent_use": archive_protected_recent_use, "items": archive_items[:top]},
             "links": {"pairs": len(link_items), "items": link_items[:top]},
         },
         "warnings": warnings,
@@ -712,6 +832,7 @@ def render_consolidation_review(report: Dict[str, Any]) -> str:
     summary = candidates.get("summary", {})
     archive = candidates.get("archive", {})
     links = candidates.get("links", {})
+    recent_use = (report.get("signals") or {}).get("recent_use", {})
 
     lines = [
         "openclaw-mem optimize consolidation-review (recommendation-only)",
@@ -723,8 +844,9 @@ def render_consolidation_review(report: Dict[str, Any]) -> str:
         (
             "candidates: "
             f"summary={summary.get('groups', 0)} groups | "
-            f"archive={archive.get('count', 0)} | "
-            f"links={links.get('pairs', 0)} pairs"
+            f"archive={archive.get('count', 0)} (protected_by_recent_use={archive.get('protected_by_recent_use', 0)}) | "
+            f"links={links.get('pairs', 0)} pairs | "
+            f"recent_use_links={recent_use.get('linked_observation_rows', 0)}"
         ),
     ]
 
@@ -755,6 +877,7 @@ def build_memory_health_review(
     bloat_detail_bytes: int = 4096,
     orphan_min_tokens: int = 2,
     miss_min_count: int = 2,
+    lifecycle_limit: int = 200,
     top: int = 10,
     scope: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -765,6 +888,7 @@ def build_memory_health_review(
     bloat_detail_bytes = max(256, int(bloat_detail_bytes))
     orphan_min_tokens = max(1, int(orphan_min_tokens))
     miss_min_count = max(2, int(miss_min_count))
+    lifecycle_limit = max(1, int(lifecycle_limit))
     top = max(1, int(top))
     scope_norm = _normalize_scope_token(scope)
 
@@ -800,11 +924,13 @@ def build_memory_health_review(
             """,
             params_rows,
         ).fetchall()
+        recent_use_meta = _recent_use_from_lifecycle(conn, lifecycle_limit=lifecycle_limit)
     finally:
         if not prev_query_only:
             conn.execute("PRAGMA query_only = OFF")
 
     now = datetime.now(timezone.utc)
+    recent_use_index = recent_use_meta.get("by_obs_id", {}) if isinstance(recent_use_meta, dict) else {}
     prepared: List[Dict[str, Any]] = []
 
     for r in rows:
@@ -820,6 +946,7 @@ def build_memory_health_review(
         if dt is not None:
             age_days = max(0, int((now - dt).total_seconds() // 86400))
 
+        recent_use_slot = recent_use_index.get(int(r["id"]), {})
         item = {
             "id": int(r["id"]),
             "ts": r["ts"],
@@ -838,20 +965,37 @@ def build_memory_health_review(
             "importance": _importance_label(detail_obj),
             "recall_query": recall_query,
             "recall_result_count": recall_result_count,
+            "recent_use_count": int(recent_use_slot.get("count") or 0),
+            "recent_use_last_ts": recent_use_slot.get("last_selected_ts"),
         }
         item["token_count"] = len(item["tokens"])
         prepared.append(item)
 
     # Staleness
     stale_items: List[Dict[str, Any]] = []
+    recent_use_items: List[Dict[str, Any]] = []
+    protected_from_stale = 0
     excluded_must_remember = 0
     for it in prepared:
+        if it.get("recent_use_count", 0) > 0:
+            recent_use_items.append(
+                {
+                    "id": it["id"],
+                    "recent_use_count": it["recent_use_count"],
+                    "last_selected_ts": it.get("recent_use_last_ts"),
+                    "age_days": it["age_days"],
+                    "summary_preview": it["summary_preview"],
+                }
+            )
         if it["age_days"] is None:
             continue
         if it["age_days"] < stale_days:
             continue
         if it["importance"] == "must_remember":
             excluded_must_remember += 1
+            continue
+        if it.get("recent_use_count", 0) > 0:
+            protected_from_stale += 1
             continue
         stale_items.append(
             {
@@ -864,6 +1008,7 @@ def build_memory_health_review(
             }
         )
     stale_items.sort(key=lambda x: (x["age_days"], x["id"]), reverse=True)
+    recent_use_items.sort(key=lambda x: (x["recent_use_count"], x["id"]), reverse=True)
 
     # Duplication (fingerprint cluster, scope-isolated)
     fp_map: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
@@ -1012,7 +1157,15 @@ def build_memory_health_review(
                 "count": len(stale_items),
                 "threshold_days": stale_days,
                 "excluded_must_remember": excluded_must_remember,
+                "protected_recent_use": protected_from_stale,
                 "items": stale_items[:top],
+            },
+            "recent_use": {
+                "rows_with_recent_use": len(recent_use_items),
+                "selection_events": int(recent_use_meta.get("selection_events") or 0),
+                "lifecycle_rows_scanned": int(recent_use_meta.get("lifecycle_rows_scanned") or 0),
+                "lifecycle_limit": lifecycle_limit,
+                "items": recent_use_items[:top],
             },
             "duplication": {
                 "groups": len(dup_items),
@@ -1060,6 +1213,7 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
     sig = report.get("signals", {})
 
     stale = sig.get("staleness", {})
+    recent_use = sig.get("recent_use", {})
     dup = sig.get("duplication", {})
     bloat = sig.get("bloat", {})
     weak = sig.get("weakly_connected", {})
@@ -1074,7 +1228,8 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
         ),
         (
             "signals: "
-            f"stale={stale.get('count', 0)} | "
+            f"stale={stale.get('count', 0)} (protected_recent_use={stale.get('protected_recent_use', 0)}) | "
+            f"recent_use={recent_use.get('rows_with_recent_use', 0)} rows | "
             f"duplicates={dup.get('groups', 0)} groups ({dup.get('duplicate_rows', 0)} extra rows) | "
             f"bloat={bloat.get('count', 0)} | "
             f"weakly_connected={weak.get('count', 0)} | "

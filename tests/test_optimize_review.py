@@ -16,6 +16,41 @@ def _iso_days_ago(days: int) -> str:
     ).isoformat().replace("+00:00", "Z")
 
 
+def _insert_lifecycle_row(conn, *, selected_refs: list[str]) -> None:
+    receipt = {
+        "kind": "openclaw-mem.pack.lifecycle-shadow.v1",
+        "ts": _iso_days_ago(0),
+        "selection": {
+            "pack_selected_refs": list(selected_refs),
+            "citation_record_refs": list(selected_refs),
+            "trace_refreshed_record_refs": list(selected_refs),
+            "selection_signature": "sha256:test",
+        },
+        "mutation": {
+            "memory_mutation": "none",
+            "auto_archive_applied": 0,
+            "auto_mutation_applied": 0,
+        },
+    }
+    conn.execute(
+        """
+        INSERT INTO pack_lifecycle_shadow_log (
+            ts, query_hash, selection_signature, selected_count, citation_count, candidate_count, receipt_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            _iso_days_ago(0),
+            "sha256:q",
+            "sha256:test",
+            len(selected_refs),
+            len(selected_refs),
+            len(selected_refs),
+            json.dumps(receipt, ensure_ascii=False, sort_keys=True),
+        ),
+    )
+    conn.commit()
+
+
 class TestOptimizeReview(unittest.TestCase):
     def test_optimize_parser_parses_review_flags(self):
         args = build_parser().parse_args(
@@ -36,6 +71,8 @@ class TestOptimizeReview(unittest.TestCase):
                 "4",
                 "--miss-min-count",
                 "5",
+                "--lifecycle-limit",
+                "44",
                 "--scope",
                 "finlife/mvp",
                 "--top",
@@ -52,6 +89,7 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertEqual(args.bloat_detail_bytes, 9000)
         self.assertEqual(args.orphan_min_tokens, 4)
         self.assertEqual(args.miss_min_count, 5)
+        self.assertEqual(args.lifecycle_limit, 44)
         self.assertEqual(args.scope, "finlife/mvp")
         self.assertEqual(args.top, 7)
 
@@ -247,6 +285,69 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertIn("widen_scope_candidate", rec_types)
         self.assertEqual(out["policy"]["writes_performed"], 0)
 
+        conn.close()
+
+    def test_optimize_review_protects_stale_rows_with_recent_use(self):
+        conn = _connect(":memory:")
+
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(120),
+                "kind": "fact",
+                "tool_name": "memory_store",
+                "summary": "Long-lived memory that still gets selected in pack",
+                "detail": {"importance": {"score": 0.55, "label": "nice_to_have"}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(120),
+                "kind": "fact",
+                "tool_name": "memory_store",
+                "summary": "Long-lived memory with no recent use evidence",
+                "detail": {"importance": {"score": 0.55, "label": "nice_to_have"}},
+            },
+        )
+        _insert_lifecycle_row(conn, selected_refs=["obs:1"])
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 1000,
+                "stale_days": 60,
+                "duplicate_min_count": 2,
+                "bloat_summary_chars": 240,
+                "bloat_detail_bytes": 4096,
+                "orphan_min_tokens": 2,
+                "miss_min_count": 2,
+                "lifecycle_limit": 50,
+                "scope": None,
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_review(conn, args)
+
+        out = json.loads(buf.getvalue())
+        stale = out["signals"]["staleness"]
+        recent_use = out["signals"]["recent_use"]
+
+        self.assertEqual(stale["count"], 1)
+        self.assertEqual(stale["protected_recent_use"], 1)
+        self.assertEqual(stale["items"][0]["id"], 2)
+        self.assertEqual(recent_use["rows_with_recent_use"], 1)
+        self.assertEqual(recent_use["selection_events"], 1)
+        self.assertEqual(recent_use["items"][0]["id"], 1)
+        self.assertEqual(recent_use["items"][0]["recent_use_count"], 1)
+
+        rec = next(r for r in out.get("recommendations", []) if r["type"] == "mark_stale_candidate")
+        self.assertEqual(rec["evidence"]["protected_recent_use"], 1)
         conn.close()
 
     def test_extract_recall_result_count_supports_common_schema_variants(self):

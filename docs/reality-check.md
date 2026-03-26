@@ -52,7 +52,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimi
   - `{ "inserted": 2, "ids": [1,2] }`
 - `search` returns a JSON array of compact rows containing at least: `id`, `ts`, `kind`, `summary`, plus `snippet` and `score` (it does **not** include `detail_json`).
 - `timeline` and `get` return JSON arrays of full rows containing at least: `id`, `ts`, `kind`, `summary`, and `detail_json`.
-- `optimize review` returns a recommendation-only report (`openclaw-mem.optimize.review.v0`) with signal counts and non-destructive recommendations.
+- `optimize review` returns a recommendation-only report (`openclaw-mem.optimize.review.v0`) with signal counts and non-destructive recommendations, including `signals.recent_use` and `staleness.protected_recent_use` when recent pack-lifecycle evidence exists.
 - `optimize policy-loop` returns a read-only rollout report (`openclaw-mem.optimize.policy-loop.v0`) with Stage B/C gate status, writeback linkage, and lifecycle-shadow evidence (no mutations).
 
 ### 3) Engine receipt debug smoke (local-only, no memory text)
@@ -85,7 +85,7 @@ Expected:
 - Hybrid retrieval (`hybrid`) + optional rerank providers — requires network/provider; still being evaluated
 - AI compression (`summarize`) — requires an API key
 - Graph query plane (`graph topology-refresh`, `graph query ...`, drift/provenance checks) — shipped foundation; deeper integrations still evolving
-- Recommendation-only optimization observer (`optimize review`) — shipped in the current release scope; proposes only, never mutates stored memories
+- Recommendation-only optimization observers (`optimize review`, `optimize consolidation-review`) — shipped in the current release scope; now include recent-use-aware decay protection while still proposing only and never mutating stored memories
 - Dual-language fields (`--text-en`, EN embedding table) — shipped, still evolving
 - Episodic event capture/ingest/query lane — shipped foundation; operator flows still evolving
 

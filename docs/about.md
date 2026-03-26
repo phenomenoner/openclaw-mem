@@ -48,7 +48,7 @@ Most agent-memory stories sound fine until a long-running system starts doing on
 - inspect `policy_surface` and `lifecycle_shadow` to see what was selected, excluded, and logged
 - inspect topology relationships and drift via `graph query ...` and `graph query drift`
 - gate graph-derived candidates with graph provenance policy surfaces
-- run recommendation-only hygiene checks with `optimize review` and dream-style episodic candidate review with `optimize consolidation-review` (zero write path)
+- run recommendation-only hygiene checks with `optimize review` (recent-use-aware decay protection) and dream-style episodic candidate review with `optimize consolidation-review` (zero write path)
 - capture/ingest episodic events with redaction-first defaults
 - optionally promote to `openclaw-mem-engine` for hybrid recall, docs cold-lane ingest/search, and policy controls
 

@@ -161,7 +161,11 @@ tests/
     - scans `episodic_events`
     - emits candidate-only summary compression groups, archive-review rows, and cross-session link proposals
     - includes source episode refs / provenance back to the underlying episodic rows
+    - now protects archive candidates when referenced observations still show recent pack selection
     - explicitly forbids canonical rewrite (`policy.canonical_rewrite=forbidden`)
+  - `openclaw-mem optimize review --json`
+    - now scans recent `pack_lifecycle_shadow_log` rows alongside `observations`
+    - emits `signals.recent_use` and protects old rows from naive stale recommendations when they still show recent pack selection
   - `openclaw-mem optimize policy-loop --json`
     - combines repeated recall-miss pressure, writeback linkage readiness, and lifecycle-shadow evidence
     - writeback linkage readiness is scoped to `memory_store` rows from `memory_backend=openclaw-mem-engine` (legacy/non-target backends are excluded from the denominator)

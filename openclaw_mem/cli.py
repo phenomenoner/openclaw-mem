@@ -1466,6 +1466,7 @@ def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         bloat_detail_bytes=int(getattr(args, "bloat_detail_bytes", 4096)),
         orphan_min_tokens=int(getattr(args, "orphan_min_tokens", 2)),
         miss_min_count=int(getattr(args, "miss_min_count", 2)),
+        lifecycle_limit=int(getattr(args, "lifecycle_limit", 200)),
         top=int(getattr(args, "top", 10)),
         scope=getattr(args, "scope", None),
     )
@@ -1488,6 +1489,7 @@ def cmd_optimize_consolidation_review(conn: sqlite3.Connection, args: argparse.N
         archive_lookahead_days=int(getattr(args, "archive_lookahead_days", 7)),
         archive_min_signal_reasons=int(getattr(args, "archive_min_signal_reasons", 2)),
         link_min_shared_tokens=int(getattr(args, "link_min_shared_tokens", 2)),
+        lifecycle_limit=int(getattr(args, "lifecycle_limit", 200)),
         top=int(getattr(args, "top", 10)),
     )
 
@@ -9790,6 +9792,7 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--bloat-detail-bytes", dest="bloat_detail_bytes", type=int, default=4096, help="detail_json size threshold for bloat candidates in bytes (default: 4096)")
     o.add_argument("--orphan-min-tokens", dest="orphan_min_tokens", type=int, default=2, help="Minimum token count for weakly connected candidates (default: 2)")
     o.add_argument("--miss-min-count", dest="miss_min_count", type=int, default=2, help="Min repeated no-result memory_recall events per query/scope group (default: 2)")
+    o.add_argument("--lifecycle-limit", dest="lifecycle_limit", type=int, default=200, help="Max pack_lifecycle_shadow rows scanned for recent-use protection (default: 200)")
     o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
     o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per signal in output (default: 10)")
     o.set_defaults(func=cmd_optimize_review)
@@ -9804,6 +9807,7 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--archive-lookahead-days", dest="archive_lookahead_days", type=int, default=7, help="Flag low-signal rows this many days before retention GC (default: 7)")
     o.add_argument("--archive-min-signal-reasons", dest="archive_min_signal_reasons", type=int, default=2, help="Min low-signal hints before an archive candidate is emitted (default: 2)")
     o.add_argument("--link-min-shared-tokens", dest="link_min_shared_tokens", type=int, default=2, help="Min shared rare tokens for cross-session link candidates (default: 2)")
+    o.add_argument("--lifecycle-limit", dest="lifecycle_limit", type=int, default=200, help="Max pack_lifecycle_shadow rows scanned for recent-use protection on referenced observations (default: 200)")
     o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per section in output (default: 10)")
     o.set_defaults(func=cmd_optimize_consolidation_review)
 

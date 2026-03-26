@@ -28,6 +28,8 @@ That means:
 ## What the command emits
 `openclaw-mem optimize consolidation-review --json`
 
+The current shipped slice also consults recent `pack_lifecycle_shadow_log` evidence so archive-review candidates can be **protected by recent use** when their episode refs point at observations that are still being selected into packs.
+
 Structured report kind:
 - `openclaw-mem.optimize.consolidation-review.v0`
 

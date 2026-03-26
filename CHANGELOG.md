@@ -15,10 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - includes source episode refs/provenance in the JSON report `openclaw-mem.optimize.consolidation-review.v0`
   - explicitly records `policy.canonical_rewrite=forbidden` so consolidation stays review-gated rather than silently mutating memory truth
 - Documented the new consolidation-review slice in `README.md`, `QUICKSTART.md`, `docs/about.md`, `docs/reality-check.md`, `docs/roadmap.md`, `docs/specs/self-optimizing-memory-loop-v0.md`, and added `docs/specs/dream-style-consolidation-review-v0.md` as the focused design note.
+- Added use-based decay v0 as a recommendation-only recent-use protection layer for review commands.
+  - `optimize review` now scans recent `pack_lifecycle_shadow_log` rows and emits `signals.recent_use` plus `staleness.protected_recent_use`
+  - old rows still being selected into packs are protected from naive age-only stale recommendations
+  - `optimize consolidation-review` now protects archive candidates when their episode refs point at observations with recent pack selection
+  - added `--lifecycle-limit` to both review commands to bound lifecycle evidence scanning
+- Documented use-based decay v0 in `README.md`, `QUICKSTART.md`, `docs/about.md`, `docs/reality-check.md`, `docs/specs/self-optimizing-memory-loop-v0.md`, and `docs/specs/use-based-decay-v0.md`.
 
 ### Testing
 
-- Added `tests/test_optimize_consolidation_review.py` coverage for parser wiring, zero-write JSON contract, summary/archive/link candidate detection, and scope/session filtering.
+- Added `tests/test_optimize_consolidation_review.py` coverage for parser wiring, zero-write JSON contract, summary/archive/link candidate detection, recent-use archive protection, and scope/session filtering.
+- Expanded `tests/test_optimize_review.py` coverage for `--lifecycle-limit`, `signals.recent_use`, and stale-candidate protection when old rows still show recent pack selection.
 
 
 ## [1.2.0] - 2026-03-25

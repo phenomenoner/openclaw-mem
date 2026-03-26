@@ -7,6 +7,41 @@ from datetime import datetime, timedelta, timezone
 from openclaw_mem.cli import _connect, build_parser, cmd_optimize_consolidation_review
 
 
+def _insert_lifecycle_row(conn, *, selected_refs: list[str]) -> None:
+    receipt = {
+        "kind": "openclaw-mem.pack.lifecycle-shadow.v1",
+        "ts": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "selection": {
+            "pack_selected_refs": list(selected_refs),
+            "citation_record_refs": list(selected_refs),
+            "trace_refreshed_record_refs": list(selected_refs),
+            "selection_signature": "sha256:test",
+        },
+        "mutation": {
+            "memory_mutation": "none",
+            "auto_archive_applied": 0,
+            "auto_mutation_applied": 0,
+        },
+    }
+    conn.execute(
+        """
+        INSERT INTO pack_lifecycle_shadow_log (
+            ts, query_hash, selection_signature, selected_count, citation_count, candidate_count, receipt_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "sha256:q",
+            "sha256:test",
+            len(selected_refs),
+            len(selected_refs),
+            len(selected_refs),
+            json.dumps(receipt, ensure_ascii=False, sort_keys=True),
+        ),
+    )
+    conn.commit()
+
+
 class TestOptimizeConsolidationReview(unittest.TestCase):
     def _run(self, conn, argv, *, expect_exit=None):
         args = build_parser().parse_args(argv)
@@ -84,6 +119,8 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
                 "3",
                 "--link-min-shared-tokens",
                 "4",
+                "--lifecycle-limit",
+                "33",
                 "--top",
                 "6",
             ]
@@ -99,6 +136,7 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
         self.assertEqual(args.archive_lookahead_days, 9)
         self.assertEqual(args.archive_min_signal_reasons, 3)
         self.assertEqual(args.link_min_shared_tokens, 4)
+        self.assertEqual(args.lifecycle_limit, 33)
         self.assertEqual(args.top, 6)
 
     def test_consolidation_review_reports_summary_archive_and_link_candidates(self):
@@ -179,6 +217,7 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
                 "archive_lookahead_days": 7,
                 "archive_min_signal_reasons": 2,
                 "link_min_shared_tokens": 2,
+                "lifecycle_limit": 200,
                 "top": 10,
                 "json": True,
             },
@@ -215,6 +254,67 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
         self.assertIn("review_summary_candidates", rec_types)
         self.assertIn("stage_archive_candidates", rec_types)
         self.assertIn("review_link_candidates", rec_types)
+        conn.close()
+
+    def test_consolidation_review_protects_archive_candidates_with_recent_use_refs(self):
+        conn = _connect(":memory:")
+        self._insert_episode(
+            conn,
+            event_id="ev-protected",
+            ts_ms=self._ts_days_ago(28),
+            scope="alpha",
+            session_id="s-old",
+            event_type="tool.result",
+            summary="temp low signal note",
+            payload=None,
+            refs={"recordRef": "obs:1"},
+            redacted=1,
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-plain",
+            ts_ms=self._ts_days_ago(28),
+            scope="alpha",
+            session_id="s-old",
+            event_type="tool.result",
+            summary="plain low signal note",
+            payload=None,
+            refs=None,
+            redacted=1,
+        )
+        _insert_lifecycle_row(conn, selected_refs=["obs:1"])
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 500,
+                "scope": None,
+                "session_id": None,
+                "summary_min_group_size": 2,
+                "summary_min_shared_tokens": 2,
+                "archive_lookahead_days": 7,
+                "archive_min_signal_reasons": 2,
+                "link_min_shared_tokens": 2,
+                "lifecycle_limit": 50,
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_consolidation_review(conn, args)
+        out = json.loads(buf.getvalue())
+
+        archive = out["candidates"]["archive"]
+        recent_use = out["signals"]["recent_use"]
+        self.assertEqual(archive["count"], 1)
+        self.assertEqual(archive["protected_by_recent_use"], 1)
+        self.assertEqual(archive["items"][0]["event_id"], "ev-plain")
+        self.assertEqual(recent_use["protected_archive_candidates"], 1)
+        self.assertEqual(recent_use["linked_observation_rows"], 1)
+        self.assertEqual(recent_use["items"][0]["id"], 1)
         conn.close()
 
     def test_consolidation_review_scope_and_session_filters(self):
@@ -266,6 +366,7 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
                 "archive_lookahead_days": 7,
                 "archive_min_signal_reasons": 2,
                 "link_min_shared_tokens": 2,
+                "lifecycle_limit": 200,
                 "top": 10,
                 "json": True,
             },
