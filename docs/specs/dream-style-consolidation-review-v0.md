@@ -41,8 +41,10 @@ Candidate families:
    - low-signal episodic rows nearing their retention GC horizon
    - includes low-signal reasons and source episode refs
 3. **link candidates**
-   - cross-session lexical overlap inside the same scope
-   - emits pairwise proposals with shared tokens and provenance refs
+   - cross-session proposals inside the same scope
+   - **receipt-derived by default** when recent lifecycle evidence exists (co-selection from `pack_lifecycle_shadow_log` selection refs/signatures)
+   - lexical overlap remains as a cold-start fallback when lifecycle evidence is unavailable
+   - emits pairwise proposals with shared tokens, receipt evidence, and source provenance refs
 
 ## Hard boundaries
 - no mutation of `episodic_events`
@@ -73,7 +75,7 @@ That distinction is load-bearing:
 - disabling/ignoring the command leaves runtime behavior unchanged
 
 ## Future work (not in this slice)
-- co-selection link proposals derived from pack/recall receipts rather than lexical overlap alone
+- richer receipt-evidence weighting for links (for example recency decay and stronger multi-receipt support thresholds)
 - use-based decay scoring tied to successful task outcomes
 - optional reviewed writeback lane for approved summary/archive/link actions
 - integration into a higher-level maintenance command/cron wrapper

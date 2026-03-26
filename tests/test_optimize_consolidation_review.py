@@ -256,6 +256,97 @@ class TestOptimizeConsolidationReview(unittest.TestCase):
         self.assertIn("review_link_candidates", rec_types)
         conn.close()
 
+    def test_consolidation_review_uses_receipt_co_selection_for_links_when_lifecycle_exists(self):
+        conn = _connect(":memory:")
+
+        # Receipt-supported pair (no lexical overlap required).
+        self._insert_episode(
+            conn,
+            event_id="ev-r1",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-a",
+            event_type="conversation.user",
+            summary="orion pipeline coldpath handoff",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:1"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-r2",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-b",
+            event_type="conversation.assistant",
+            summary="nebula ledger warmstart guard",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:2"},
+        )
+
+        # Lexical-only pair should be suppressed once lifecycle evidence is available.
+        self._insert_episode(
+            conn,
+            event_id="ev-l1",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-c",
+            event_type="conversation.user",
+            summary="memory recall latency triage",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:30"},
+        )
+        self._insert_episode(
+            conn,
+            event_id="ev-l2",
+            ts_ms=self._ts_days_ago(1),
+            scope="alpha",
+            session_id="s-d",
+            event_type="conversation.assistant",
+            summary="recall latency rollback plan",
+            payload={"kind": "msg"},
+            refs={"recordRef": "obs:31"},
+        )
+
+        _insert_lifecycle_row(conn, selected_refs=["obs:1", "obs:2"])
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 500,
+                "scope": None,
+                "session_id": None,
+                "summary_min_group_size": 2,
+                "summary_min_shared_tokens": 2,
+                "archive_lookahead_days": 7,
+                "archive_min_signal_reasons": 2,
+                "link_min_shared_tokens": 2,
+                "lifecycle_limit": 50,
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_consolidation_review(conn, args)
+        out = json.loads(buf.getvalue())
+
+        links = out["candidates"]["links"]
+        self.assertEqual(links["pairs"], 1)
+        link_item = links["items"][0]
+        self.assertEqual(link_item["evidence_mode"], "receipt_co_selection")
+        self.assertEqual(link_item["left"]["event_id"], "ev-r1")
+        self.assertEqual(link_item["right"]["event_id"], "ev-r2")
+        self.assertEqual(link_item["shared_token_count"], 0)
+        self.assertGreaterEqual(link_item["receipt_evidence"]["co_selection_events"], 1)
+        self.assertIn("sha256:test", link_item["receipt_evidence"]["selection_signatures"])
+
+        link_evidence = out["signals"]["link_evidence"]
+        self.assertEqual(link_evidence["receipt_supported_pairs"], 1)
+        self.assertEqual(link_evidence["lexical_fallback_pairs"], 0)
+        conn.close()
+
     def test_consolidation_review_protects_archive_candidates_with_recent_use_refs(self):
         conn = _connect(":memory:")
         self._insert_episode(

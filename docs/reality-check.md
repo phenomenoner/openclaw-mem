@@ -53,6 +53,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimi
 - `search` returns a JSON array of compact rows containing at least: `id`, `ts`, `kind`, `summary`, plus `snippet` and `score` (it does **not** include `detail_json`).
 - `timeline` and `get` return JSON arrays of full rows containing at least: `id`, `ts`, `kind`, `summary`, and `detail_json`.
 - `optimize review` returns a recommendation-only report (`openclaw-mem.optimize.review.v0`) with signal counts and non-destructive recommendations, including `signals.recent_use` and `staleness.protected_recent_use` when recent pack-lifecycle evidence exists.
+- `optimize consolidation-review` returns a recommendation-only episodic maintenance report (`openclaw-mem.optimize.consolidation-review.v0`) with summary/archive/link candidates, source episode refs, recent-use archive protection, and receipt-derived link evidence when lifecycle co-selection data exists (lexical fallback otherwise).
 - `optimize policy-loop` returns a read-only rollout report (`openclaw-mem.optimize.policy-loop.v0`) with Stage B/C gate status, writeback linkage, and lifecycle-shadow evidence (no mutations).
 
 ### 3) Engine receipt debug smoke (local-only, no memory text)

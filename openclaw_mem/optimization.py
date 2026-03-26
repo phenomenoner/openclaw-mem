@@ -362,7 +362,7 @@ def _recent_use_from_lifecycle(
 ) -> Dict[str, Any]:
     rows = conn.execute(
         f"""
-        SELECT id, ts, receipt_json
+        SELECT id, ts, selection_signature, receipt_json
         FROM {_PACK_LIFECYCLE_SHADOW_TABLE}
         ORDER BY id DESC
         LIMIT ?
@@ -371,6 +371,7 @@ def _recent_use_from_lifecycle(
     ).fetchall()
 
     by_obs_id: Dict[int, Dict[str, Any]] = {}
+    co_selected_pairs: Dict[tuple[int, int], Dict[str, Any]] = {}
     selection_events = 0
 
     for row in rows:
@@ -378,10 +379,15 @@ def _recent_use_from_lifecycle(
         selection_obj = receipt_obj.get("selection") if isinstance(receipt_obj, dict) else {}
         if not isinstance(selection_obj, dict):
             selection_obj = {}
+
         refs = selection_obj.get("pack_selected_refs")
         if not isinstance(refs, list):
             refs = []
+
         ts = str(row["ts"] or "").strip() or None
+        sig = str(row["selection_signature"] or "").strip() or str(selection_obj.get("selection_signature") or "").strip() or None
+
+        selected_obs_ids: Set[int] = set()
         for ref in refs:
             if not isinstance(ref, str):
                 continue
@@ -389,6 +395,7 @@ def _recent_use_from_lifecycle(
             if not m:
                 continue
             obs_id = int(m.group(1))
+            selected_obs_ids.add(obs_id)
             slot = by_obs_id.setdefault(
                 obs_id,
                 {"count": 0, "last_selected_ts": None, "recent_ref": ref},
@@ -399,10 +406,30 @@ def _recent_use_from_lifecycle(
             if ts and (not current_ts or str(ts) > str(current_ts)):
                 slot["last_selected_ts"] = ts
 
+        ordered = sorted(selected_obs_ids)
+        for idx, left_obs_id in enumerate(ordered):
+            for right_obs_id in ordered[idx + 1 :]:
+                key = (left_obs_id, right_obs_id)
+                slot = co_selected_pairs.setdefault(
+                    key,
+                    {
+                        "count": 0,
+                        "last_selected_ts": None,
+                        "selection_signatures": [],
+                    },
+                )
+                slot["count"] += 1
+                current_ts = slot.get("last_selected_ts")
+                if ts and (not current_ts or str(ts) > str(current_ts)):
+                    slot["last_selected_ts"] = ts
+                if sig and sig not in slot["selection_signatures"] and len(slot["selection_signatures"]) < 5:
+                    slot["selection_signatures"].append(sig)
+
     return {
         "lifecycle_rows_scanned": len(rows),
         "selection_events": selection_events,
         "by_obs_id": by_obs_id,
+        "co_selected_pairs": co_selected_pairs,
     }
 
 
@@ -415,6 +442,62 @@ def _recent_use_item(obs_id: int, recent_use_index: Dict[int, Dict[str, Any]]) -
         "count": int(slot.get("count") or 0),
         "last_selected_ts": slot.get("last_selected_ts"),
         "record_ref": slot.get("recent_ref") or f"obs:{int(obs_id)}",
+    }
+
+
+def _receipt_link_evidence(
+    left_obs_ids: Set[int],
+    right_obs_ids: Set[int],
+    *,
+    recent_use_index: Dict[int, Dict[str, Any]],
+    co_selected_pairs: Dict[tuple[int, int], Dict[str, Any]],
+) -> Dict[str, Any]:
+    shared_selected_obs_ids = sorted(obs_id for obs_id in (left_obs_ids & right_obs_ids) if obs_id in recent_use_index)
+
+    co_selected_pairs_items: List[Dict[str, Any]] = []
+    selection_signatures: List[str] = []
+    co_selection_events = 0
+
+    for left_obs_id in sorted(left_obs_ids):
+        for right_obs_id in sorted(right_obs_ids):
+            if left_obs_id == right_obs_id:
+                continue
+            key = (left_obs_id, right_obs_id) if left_obs_id < right_obs_id else (right_obs_id, left_obs_id)
+            slot = co_selected_pairs.get(key)
+            if not slot:
+                continue
+            count = int(slot.get("count") or 0)
+            if count <= 0:
+                continue
+            co_selection_events += count
+            co_selected_pairs_items.append(
+                {
+                    "left_record_ref": f"obs:{left_obs_id}",
+                    "right_record_ref": f"obs:{right_obs_id}",
+                    "count": count,
+                }
+            )
+            for sig in slot.get("selection_signatures") or []:
+                if not isinstance(sig, str) or not sig.strip() or sig in selection_signatures:
+                    continue
+                selection_signatures.append(sig)
+                if len(selection_signatures) >= 5:
+                    break
+
+    co_selected_pairs_items.sort(
+        key=lambda x: (x["count"], x["left_record_ref"], x["right_record_ref"]),
+        reverse=True,
+    )
+
+    shared_selected_refs = [f"obs:{obs_id}" for obs_id in shared_selected_obs_ids]
+
+    return {
+        "shared_selected_refs": shared_selected_refs,
+        "shared_selected_count": len(shared_selected_refs),
+        "co_selection_events": co_selection_events,
+        "co_selected_pair_count": len(co_selected_pairs_items),
+        "co_selected_pairs": co_selected_pairs_items[:5],
+        "selection_signatures": selection_signatures[:5],
     }
 
 
@@ -495,10 +578,11 @@ def _build_consolidation_recommendations(report: Dict[str, Any]) -> List[Dict[st
                 "type": "review_link_candidates",
                 "priority": "low",
                 "confidence": 0.68,
-                "why": f"{links['pairs']} cross-session lexical link candidates were found",
+                "why": f"{links['pairs']} cross-session link candidates were found (receipt-derived when lifecycle evidence exists)",
                 "evidence": {
                     "pairs": links["pairs"],
                     "sample_shared_tokens": [it.get("shared_tokens", [])[:3] for it in links.get("items", [])[:3]],
+                    "sample_evidence_mode": [it.get("evidence_mode") for it in links.get("items", [])[:3]],
                 },
                 "suggested_action": "Review whether repeated cross-session motifs deserve explicit graph or note linkage.",
                 "safe_for_auto_apply": False,
@@ -728,6 +812,9 @@ def build_consolidation_review(
         )
     archive_items.sort(key=lambda x: (x["days_until_gc"], -x["age_days"], x["id"]))
 
+    lifecycle_rows_scanned = int(recent_use_meta.get("lifecycle_rows_scanned") or 0)
+    co_selected_pairs = recent_use_meta.get("co_selected_pairs", {}) if isinstance(recent_use_meta, dict) else {}
+
     link_items: List[Dict[str, Any]] = []
     scope_groups: Dict[str, List[Dict[str, Any]]] = {}
     for item in prepared:
@@ -742,23 +829,56 @@ def build_consolidation_review(
                 pair_key = (left["id"], right["id"])
                 if pair_key in seen_pairs:
                     continue
+
                 shared = sorted(tok for tok in (left["tokens"] & right["tokens"]) if len(global_token_to_ids.get(tok, ())) <= max_common_freq)
-                if len(shared) < link_min_shared_tokens:
-                    continue
                 union_size = max(1, len(left["tokens"] | right["tokens"]))
-                score = round(len(shared) / union_size, 3)
+                lexical_score = round(len(shared) / union_size, 3)
+
+                evidence = _receipt_link_evidence(
+                    set(left.get("refs_obs_ids") or set()),
+                    set(right.get("refs_obs_ids") or set()),
+                    recent_use_index=recent_use_index,
+                    co_selected_pairs=co_selected_pairs,
+                )
+                has_receipt_evidence = bool(
+                    evidence.get("shared_selected_count")
+                    or evidence.get("co_selection_events")
+                )
+
+                if lifecycle_rows_scanned > 0:
+                    if not has_receipt_evidence:
+                        continue
+                    evidence_mode = "receipt_co_selection"
+                else:
+                    if len(shared) < link_min_shared_tokens:
+                        continue
+                    evidence_mode = "lexical_fallback"
+
                 link_items.append(
                     {
                         "scope": scope_key,
                         "shared_tokens": shared[:5],
                         "shared_token_count": len(shared),
-                        "score": score,
+                        "score": lexical_score,
+                        "evidence_mode": evidence_mode,
+                        "receipt_evidence": evidence,
                         "left": _event_ref(left),
                         "right": _event_ref(right),
                     }
                 )
                 seen_pairs.add(pair_key)
-    link_items.sort(key=lambda x: (x["shared_token_count"], x["score"], x["right"]["id"]), reverse=True)
+    link_items.sort(
+        key=lambda x: (
+            int(((x.get("receipt_evidence") or {}).get("co_selection_events") or 0)),
+            int(((x.get("receipt_evidence") or {}).get("shared_selected_count") or 0)),
+            x.get("shared_token_count", 0),
+            x.get("score", 0),
+            (x.get("right") or {}).get("id", 0),
+        ),
+        reverse=True,
+    )
+    receipt_link_pairs = sum(1 for item in link_items if item.get("evidence_mode") == "receipt_co_selection")
+    lexical_fallback_link_pairs = sum(1 for item in link_items if item.get("evidence_mode") == "lexical_fallback")
 
     rows_scanned = len(prepared)
     coverage_pct = round((rows_scanned / total_rows) * 100, 1) if total_rows > 0 else 100.0
@@ -813,7 +933,13 @@ def build_consolidation_review(
                     for obs_id in sorted(recent_use_refs_seen, key=lambda x: (recent_use_index.get(x, {}).get("count", 0), x), reverse=True)[:top]
                     if _recent_use_item(obs_id, recent_use_index) is not None
                 ],
-            }
+            },
+            "link_evidence": {
+                "lifecycle_rows_scanned": lifecycle_rows_scanned,
+                "mode": "receipt_co_selection_when_available_else_lexical_fallback",
+                "receipt_supported_pairs": receipt_link_pairs,
+                "lexical_fallback_pairs": lexical_fallback_link_pairs,
+            },
         },
         "candidates": {
             "summary": {"groups": len(summary_items), "items": summary_items[:top]},
