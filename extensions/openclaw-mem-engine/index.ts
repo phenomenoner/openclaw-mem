@@ -43,6 +43,7 @@ import {
 } from "./todoGuardrails.js";
 import { docsIngestWithCli, docsSearchWithCli } from "./docsColdLane.js";
 import { runTierFirstV1, selectTierQuotaV1 } from "./tierSelection.js";
+import { runWeiJiMemoryPreflight } from "./weiJiMemoryPreflight.js";
 
 // ============================================================================
 // Config
@@ -149,6 +150,19 @@ type DocsColdLaneConfigInput = {
   scopeMap?: Record<string, string[]>;
 };
 
+type WeiJiMemoryPreflightFailMode = "open" | "closed";
+
+type WeiJiMemoryPreflightConfigInput = {
+  enabled?: boolean;
+  command?: string;
+  commandArgs?: string[];
+  dbPath?: string;
+  timeoutMs?: number;
+  failMode?: WeiJiMemoryPreflightFailMode;
+  failOnQueued?: boolean;
+  failOnRejected?: boolean;
+};
+
 type DocsColdLaneConfig = {
   enabled: boolean;
   sqlitePath: string;
@@ -186,6 +200,7 @@ type PluginConfig = {
   workingSet?: boolean | WorkingSetConfigInput;
   receipts?: boolean | ReceiptsConfigInput;
   docsColdLane?: boolean | DocsColdLaneConfigInput;
+  weijiMemoryPreflight?: boolean | WeiJiMemoryPreflightConfigInput;
   // Hard write-path guard. When enabled, reject memory_store/memory_forget/memory_import/memory_docs_ingest
   // and disable autoCapture.
   readOnly?: boolean;
@@ -268,6 +283,17 @@ type ReceiptsConfig = {
   enabled: boolean;
   verbosity: ReceiptsVerbosity;
   maxItems: number;
+};
+
+type WeiJiMemoryPreflightConfig = {
+  enabled: boolean;
+  command: string;
+  commandArgs: string[];
+  dbPath?: string;
+  timeoutMs: number;
+  failMode: WeiJiMemoryPreflightFailMode;
+  failOnQueued: boolean;
+  failOnRejected: boolean;
 };
 
 type AutoCaptureCategory = "preference" | "decision" | "todo";
@@ -353,6 +379,16 @@ const DEFAULT_DOCS_COLD_LANE_CONFIG: DocsColdLaneConfig = {
   searchRrfK: 60,
   scopeMappingStrategy: "repo_prefix",
   scopeMap: {},
+};
+
+const DEFAULT_WEIJI_MEMORY_PREFLIGHT_CONFIG: WeiJiMemoryPreflightConfig = {
+  enabled: false,
+  command: "weiji-memory-preflight",
+  commandArgs: [],
+  timeoutMs: 12_000,
+  failMode: "open",
+  failOnQueued: false,
+  failOnRejected: false,
 };
 
 function vectorDimsForModel(model: string): number {
@@ -932,6 +968,47 @@ function resolveDocsColdLaneConfig(input: PluginConfig["docsColdLane"]): DocsCol
     }),
     scopeMappingStrategy,
     scopeMap: Object.keys(normalizedScopeMap).length > 0 ? normalizedScopeMap : defaults.scopeMap,
+  };
+}
+
+function resolveWeiJiMemoryPreflightConfig(input: PluginConfig["weijiMemoryPreflight"]): WeiJiMemoryPreflightConfig {
+  const defaults = DEFAULT_WEIJI_MEMORY_PREFLIGHT_CONFIG;
+
+  if (input === false) {
+    return { ...defaults, enabled: false };
+  }
+
+  if (input === true) {
+    return { ...defaults, enabled: true };
+  }
+
+  if (input == null) {
+    return { ...defaults };
+  }
+
+  if (typeof input !== "object" || Array.isArray(input)) {
+    return { ...defaults };
+  }
+
+  const raw = input as WeiJiMemoryPreflightConfigInput;
+  const command = typeof raw.command === "string" && raw.command.trim() ? raw.command.trim() : defaults.command;
+  const commandArgs = Array.isArray(raw.commandArgs)
+    ? raw.commandArgs.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean).slice(0, 64)
+    : defaults.commandArgs;
+
+  return {
+    enabled: normalizeBoolean(raw.enabled, defaults.enabled),
+    command,
+    commandArgs,
+    dbPath: typeof raw.dbPath === "string" && raw.dbPath.trim() ? raw.dbPath.trim() : undefined,
+    timeoutMs: normalizeNumberInRange(raw.timeoutMs, defaults.timeoutMs, {
+      min: 1000,
+      max: 120000,
+      integer: true,
+    }),
+    failMode: raw.failMode === "closed" ? "closed" : defaults.failMode,
+    failOnQueued: normalizeBoolean(raw.failOnQueued, defaults.failOnQueued),
+    failOnRejected: normalizeBoolean(raw.failOnRejected, defaults.failOnRejected),
   };
 }
 
@@ -3404,6 +3481,25 @@ const memoryEngineConfigSchema = {
       workingSet: parseWorkingSet(cfg.workingSet),
       receipts: parseReceipts(cfg.receipts),
       docsColdLane: parseDocsColdLane(cfg.docsColdLane),
+      weijiMemoryPreflight:
+        cfg.weijiMemoryPreflight === false || cfg.weijiMemoryPreflight === true
+          ? cfg.weijiMemoryPreflight
+          : (cfg.weijiMemoryPreflight && typeof cfg.weijiMemoryPreflight === "object" && !Array.isArray(cfg.weijiMemoryPreflight)
+              ? {
+                  enabled: typeof cfg.weijiMemoryPreflight.enabled === "boolean" ? cfg.weijiMemoryPreflight.enabled : undefined,
+                  command: typeof cfg.weijiMemoryPreflight.command === "string" ? cfg.weijiMemoryPreflight.command : undefined,
+                  commandArgs: Array.isArray(cfg.weijiMemoryPreflight.commandArgs)
+                    ? cfg.weijiMemoryPreflight.commandArgs.filter((item): item is string => typeof item === "string")
+                    : undefined,
+                  dbPath: typeof cfg.weijiMemoryPreflight.dbPath === "string" ? cfg.weijiMemoryPreflight.dbPath : undefined,
+                  timeoutMs: typeof cfg.weijiMemoryPreflight.timeoutMs === "number" ? cfg.weijiMemoryPreflight.timeoutMs : undefined,
+                  failMode: cfg.weijiMemoryPreflight.failMode === "closed" || cfg.weijiMemoryPreflight.failMode === "open"
+                    ? cfg.weijiMemoryPreflight.failMode
+                    : undefined,
+                  failOnQueued: typeof cfg.weijiMemoryPreflight.failOnQueued === "boolean" ? cfg.weijiMemoryPreflight.failOnQueued : undefined,
+                  failOnRejected: typeof cfg.weijiMemoryPreflight.failOnRejected === "boolean" ? cfg.weijiMemoryPreflight.failOnRejected : undefined,
+                }
+              : undefined),
       readOnly: typeof cfg.readOnly === "boolean" ? cfg.readOnly : undefined,
     };
   },
@@ -3645,6 +3741,46 @@ const memoryEngineConfigSchema = {
       help: "Consult docs lane only when hot memories are below this count",
       advanced: true,
     },
+    "weijiMemoryPreflight.enabled": {
+      label: "Wei Ji Memory Preflight",
+      help: "Run Wei Ji before memory_store writes so risky memory promotion gets one more gate.",
+      advanced: true,
+    },
+    "weijiMemoryPreflight.command": {
+      label: "Wei Ji Preflight Command",
+      help: "Executable used to invoke Wei Ji memory preflight.",
+      advanced: true,
+    },
+    "weijiMemoryPreflight.commandArgs": {
+      label: "Wei Ji Preflight Command Args",
+      help: "Static arguments prepended before the wrapper flags (for example: uv run --project <repo>).",
+      advanced: true,
+    },
+    "weijiMemoryPreflight.dbPath": {
+      label: "Wei Ji Verdict DB",
+      help: "Verdict store passed to Wei Ji via --db.",
+      advanced: true,
+    },
+    "weijiMemoryPreflight.timeoutMs": {
+      label: "Wei Ji Preflight Timeout",
+      help: "Maximum subprocess runtime in milliseconds.",
+      advanced: true,
+    },
+    "weijiMemoryPreflight.failMode": {
+      label: "Wei Ji Failure Mode",
+      help: "open (default) allows writes when Wei Ji runtime fails; closed blocks on runtime failure.",
+      advanced: true,
+    },
+    "weijiMemoryPreflight.failOnQueued": {
+      label: "Wei Ji Fail On Queued",
+      help: "Block memory_store when Wei Ji queues the write for review.",
+      advanced: true,
+    },
+    "weijiMemoryPreflight.failOnRejected": {
+      label: "Wei Ji Fail On Rejected",
+      help: "Block memory_store when Wei Ji rejects the write.",
+      advanced: true,
+    },
   },
 };
 
@@ -3669,6 +3805,7 @@ const memoryPlugin = {
     const workingSetCfg = resolveWorkingSetConfig(cfg.workingSet);
     const receiptsCfg = resolveReceiptsConfig(cfg.receipts);
     const docsColdLaneCfg = resolveDocsColdLaneConfig(cfg.docsColdLane);
+    const weijiMemoryPreflightCfg = resolveWeiJiMemoryPreflightConfig(cfg.weijiMemoryPreflight);
 
     const model = cfg.embedding?.model ?? DEFAULT_MODEL;
     const vectorDim = vectorDimsForModel(model);
@@ -3683,13 +3820,19 @@ const memoryPlugin = {
       sqlitePath: resolveStateRelativePath(api, docsColdLaneCfg.sqlitePath, docsColdLaneCfg.sqlitePath),
       sourceRoots: docsColdLaneCfg.sourceRoots.map((root) => resolveStateRelativePath(api, root, root)),
     };
+    const weijiMemoryPreflightResolved: WeiJiMemoryPreflightConfig = {
+      ...weijiMemoryPreflightCfg,
+      dbPath: weijiMemoryPreflightCfg.dbPath
+        ? resolveStateRelativePath(api, weijiMemoryPreflightCfg.dbPath, weijiMemoryPreflightCfg.dbPath)
+        : undefined,
+    };
 
     const db = new MemoryDB(resolvedDbPath, tableName, vectorDim);
     const embeddingClampCfg = resolveEmbeddingClampConfig(cfg.embedding);
     const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model, embeddingClampCfg) : null;
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, weijiMemoryPreflight=${weijiMemoryPreflightResolved.enabled ? `${weijiMemoryPreflightResolved.failOnQueued || weijiMemoryPreflightResolved.failOnRejected ? "enforced" : "advisory"}|${weijiMemoryPreflightResolved.failMode}|cmd=${weijiMemoryPreflightResolved.command}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
     );
 
     const resolveAdminFilters = (input: {
@@ -4708,6 +4851,79 @@ const memoryPlugin = {
 
           const normalizedImportance = toImportanceRecord(importance);
           const normalizedLabel = importanceLabel(normalizedImportance);
+          const id = randomUUID();
+          let weiJiMemoryPreflightReceipt: Record<string, unknown> | null = null;
+
+          if (weijiMemoryPreflightResolved.enabled) {
+            const preflight = await runWeiJiMemoryPreflight({
+              intent: {
+                id,
+                tool: "memory_store",
+                source: "openclaw-mem-engine.memory_store",
+                scope,
+                category,
+                text,
+                importance: normalizedImportance,
+              },
+              config: weijiMemoryPreflightResolved,
+            });
+
+            weiJiMemoryPreflightReceipt = (preflight.receipt ?? null) as Record<string, unknown> | null;
+
+            api.logger.info(
+              `openclaw-mem-engine:weijiMemoryPreflight ${JSON.stringify({
+                id,
+                decision: (preflight.receipt as { decision?: unknown } | undefined)?.decision ?? null,
+                mode: (preflight.receipt as { mode?: unknown } | undefined)?.mode ?? null,
+                wrapperExitCode: (preflight.receipt as { wrapperExitCode?: unknown } | undefined)?.wrapperExitCode ?? null,
+                wrapperFailReason: (preflight.receipt as { wrapperFailReason?: unknown } | undefined)?.wrapperFailReason ?? null,
+                governorStatus: (preflight.receipt as { governorStatus?: unknown } | undefined)?.governorStatus ?? null,
+                reviewRequired: (preflight.receipt as { reviewRequired?: unknown } | undefined)?.reviewRequired ?? null,
+                runtimeFailed: (preflight.receipt as { runtimeFailed?: unknown } | undefined)?.runtimeFailed ?? null,
+                failMode: weijiMemoryPreflightResolved.failMode,
+              })}`,
+            );
+
+            if (preflight.blocked) {
+              const latencyMs = Math.round(performance.now() - t0);
+              return {
+                content: [{ type: "text", text: "Memory write held by Wei Ji preflight policy. No memory was stored." }],
+                details: {
+                  error: "weiji_memory_preflight_blocked",
+                  action: "blocked",
+                  id,
+                  category,
+                  importance: normalizedImportance ?? null,
+                  importance_label: normalizedLabel,
+                  scope,
+                  receipt: {
+                    dbPath: resolvedDbPath,
+                    tableName,
+                    model,
+                    latencyMs,
+                    scope,
+                    scopeMode,
+                    scopeFilterApplied: true,
+                    scopeValidation: {
+                      validationMode: scopePolicyCfg.validationMode,
+                      invalid: scopeResolved.invalid,
+                      normalized: scopeResolved.normalized,
+                    },
+                    embeddingSkipped: null,
+                    embeddingSkipReason: null,
+                    weiJiMemoryPreflight: weiJiMemoryPreflightReceipt,
+                  },
+                },
+              };
+            }
+
+            if ((preflight.receipt as { runtimeFailed?: boolean } | undefined)?.runtimeFailed) {
+              api.logger.warn(
+                `openclaw-mem-engine:weijiMemoryPreflight fail-open id=${id} reason=${String((preflight.receipt as { wrapperFailReason?: unknown } | undefined)?.wrapperFailReason ?? "runtime_failed")}`,
+              );
+            }
+          }
+
           let vector: number[];
           let embeddingSkipped = false;
           let embeddingSkipReason: RecallRejectionReason | null = null;
@@ -4721,7 +4937,6 @@ const memoryPlugin = {
               : "provider_unavailable";
             vector = Array.from<number>({ length: vectorDim }).fill(0);
           }
-          const id = randomUUID();
           const createdAt = Date.now();
 
           const row: MemoryRow = {
@@ -4772,6 +4987,7 @@ const memoryPlugin = {
                 },
                 embeddingSkipped,
                 embeddingSkipReason,
+                weiJiMemoryPreflight: weiJiMemoryPreflightReceipt,
               },
             },
           };

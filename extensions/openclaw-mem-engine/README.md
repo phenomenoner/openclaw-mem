@@ -7,6 +7,7 @@ What it does:
 - provides hybrid recall controls (FTS + vector) with scope-aware policies
 - exposes bounded autoRecall / autoCapture controls and lifecycle receipts
 - hosts the docs cold-lane ingest/search surfaces for operator-authored markdown
+- can optionally auto-run **Wei Ji memory preflight** before `memory_store` writes
 
 This package is the engine-role package inside the same `openclaw-mem` family:
 - **`openclaw-mem`** = sidecar capture / observability / episodic spool / operator workflows
@@ -55,9 +56,56 @@ openclaw plugins install @phenomenoner/openclaw-mem-engine
 }
 ```
 
+## Wei Ji memory preflight (optional)
+
+`memory_store` can be guarded by Wei Ji before the engine writes memory into LanceDB.
+
+Example host config:
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem-engine": {
+        "enabled": true,
+        "config": {
+          "weijiMemoryPreflight": {
+            "enabled": true,
+            "command": "uv",
+            "commandArgs": [
+              "run",
+              "--project",
+              "/root/.openclaw/workspace/delirium-to-weiji",
+              "weiji-memory-preflight"
+            ],
+            "dbPath": "/root/.openclaw/workspace/delirium-to-weiji/.state/d2w/verdicts.sqlite3",
+            "timeoutMs": 12000,
+            "failMode": "open",
+            "failOnQueued": false,
+            "failOnRejected": false
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Behavior:
+- `enabled=false` (default): no Wei Ji subprocess call
+- `failMode=open`: runtime/preflight execution failure does **not** block memory writes
+- `failMode=closed`: runtime/preflight execution failure blocks the write
+- `failOnQueued=true`: block when Wei Ji queues the write for review
+- `failOnRejected=true`: block when Wei Ji rejects the write
+
+Receipts:
+- `memory_store.details.receipt.weiJiMemoryPreflight`
+
 ## Rollback
 
-Switch `plugins.slots.memory` back to `memory-lancedb` or `memory-core`, then restart the gateway.
+- Disable `plugins.entries.openclaw-mem-engine.config.weijiMemoryPreflight.enabled`
+- Or switch `plugins.slots.memory` back to `memory-lancedb` or `memory-core`
+- Restart the gateway after either change
 
 ## More context
 

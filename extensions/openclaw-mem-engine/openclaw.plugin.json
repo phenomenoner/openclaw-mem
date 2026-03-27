@@ -241,6 +241,46 @@
       "label": "Working Set Item Max Chars",
       "help": "Maximum characters kept per bullet",
       "advanced": true
+    },
+    "weijiMemoryPreflight.enabled": {
+      "label": "Wei Ji Memory Preflight",
+      "help": "Run Wei Ji before memory_store writes so risky memory promotion gets one more gate.",
+      "advanced": true
+    },
+    "weijiMemoryPreflight.command": {
+      "label": "Wei Ji Preflight Command",
+      "help": "Executable used to invoke Wei Ji memory preflight.",
+      "advanced": true
+    },
+    "weijiMemoryPreflight.commandArgs": {
+      "label": "Wei Ji Preflight Command Args",
+      "help": "Static arguments prepended before the wrapper flags (for example: uv run --project <repo>).",
+      "advanced": true
+    },
+    "weijiMemoryPreflight.dbPath": {
+      "label": "Wei Ji Verdict DB",
+      "help": "Verdict store passed to Wei Ji via --db.",
+      "advanced": true
+    },
+    "weijiMemoryPreflight.timeoutMs": {
+      "label": "Wei Ji Preflight Timeout",
+      "help": "Maximum subprocess runtime in milliseconds.",
+      "advanced": true
+    },
+    "weijiMemoryPreflight.failMode": {
+      "label": "Wei Ji Failure Mode",
+      "help": "open (default) allows writes when Wei Ji runtime fails; closed blocks on runtime failure.",
+      "advanced": true
+    },
+    "weijiMemoryPreflight.failOnQueued": {
+      "label": "Wei Ji Fail On Queued",
+      "help": "Block memory_store when Wei Ji queues the write for review.",
+      "advanced": true
+    },
+    "weijiMemoryPreflight.failOnRejected": {
+      "label": "Wei Ji Fail On Rejected",
+      "help": "Block memory_store when Wei Ji rejects the write.",
+      "advanced": true
     }
   },
   "configSchema": {
@@ -705,6 +745,59 @@
                 "minimum": 40,
                 "maximum": 400,
                 "default": 180
+              }
+            }
+          }
+        ]
+      },
+      "weijiMemoryPreflight": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "command": {
+                "type": "string",
+                "default": "weiji-memory-preflight"
+              },
+              "commandArgs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "dbPath": {
+                "type": "string"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 1000,
+                "maximum": 120000,
+                "default": 12000
+              },
+              "failMode": {
+                "type": "string",
+                "enum": [
+                  "open",
+                  "closed"
+                ],
+                "default": "open"
+              },
+              "failOnQueued": {
+                "type": "boolean",
+                "default": false
+              },
+              "failOnRejected": {
+                "type": "boolean",
+                "default": false
               }
             }
           }

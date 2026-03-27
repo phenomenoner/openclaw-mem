@@ -425,6 +425,40 @@ Fail-open UX:
   - `--force-fields` (comma-separated): restrict overwrite to selected fields (default safe subset: `importance,importance_label,scope,category`; `trust_tier` must be explicit).
 - Writeback receipts should report: `forceOverwrite`, `forceFields`, `updated`, `skipped`, `overwritten`, `overwrittenFields`, and missing IDs.
 
+#### Wei Ji memory preflight (optional, now hookable)
+
+`openclaw-mem-engine` can now call Wei Ji automatically **before** `memory_store` writes.
+
+Purpose:
+- move governance to the dangerous moment right before memory becomes system truth
+- reduce operator memory burden (the flow asks Wei Ji first)
+- keep the lane rollbackable and bounded
+
+Config gate:
+- `plugins.entries.openclaw-mem-engine.config.weijiMemoryPreflight`
+
+Recommended host posture:
+- `enabled: true`
+- `failMode: "open"`
+- `failOnQueued: false`
+- `failOnRejected: false`
+
+That gives an **advisory-first** live lane:
+- Wei Ji runs automatically
+- runtime failure does not brick memory writes
+- receipts still expose what Wei Ji said
+
+Receipts surface:
+- `memory_store.details.receipt.weiJiMemoryPreflight`
+
+Blocking modes:
+- `failMode: "closed"` blocks on runtime/subprocess failure
+- `failOnQueued: true` blocks if Wei Ji queues review
+- `failOnRejected: true` blocks if Wei Ji rejects
+
+Rollback:
+- disable the config gate, then restart the gateway
+
 ### Importance grading integration
 
 - The **heuristic-v1** scorer (and later scorers) live in the sidecar.
