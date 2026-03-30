@@ -90,6 +90,35 @@ See:
 - `docs/showcase/artifacts/trust-aware-context-pack.metrics.json`
 - `docs/showcase/inside-out-demo.md` for the companion narrative demo
 
+## Step 2.2: Build a portable governed pack capsule (optional)
+
+When you want a memvid-style portable artifact **without** collapsing governance into a black box, package the pack into a small capsule directory:
+
+```bash
+DB=/tmp/openclaw-mem-proof.sqlite
+OUT=/tmp/openclaw-mem-capsules/trust-aware-demo
+
+python3 ./tools/pack_capsule.py seal \
+  --db "$DB" \
+  --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
+  --pack-trust-policy exclude_quarantined_fail_open \
+  --stash-artifact \
+  --gzip-artifact \
+  --out "$OUT"
+
+CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
+python3 ./tools/pack_capsule.py verify "$CAPSULE"
+```
+
+Expected files:
+- `manifest.json`
+- `bundle.json`
+- `bundle_text.md`
+- `trace.json` (when available)
+- `artifact_stash.json` (when artifact stash is enabled)
+
+This is a thin helper slice over `openclaw-mem pack` + `openclaw-mem artifact stash`, so portability improves while citations/trace/rollback posture stay intact.
+
 ---
 
 ## Step 3: Ingest sample data

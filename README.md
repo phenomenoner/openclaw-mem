@@ -130,6 +130,35 @@ If that works, you have already shown the core behavior:
 
 Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proof.md`](docs/showcase/trust-aware-context-pack-proof.md).
 
+## Portable governed pack capsule (memvid-inspired thin slice)
+
+If you want a **portable memory capsule** without surrendering trust/provenance governance, use the checked-in helper:
+
+```bash
+DB=/tmp/openclaw-mem-proof.sqlite
+OUT=/tmp/openclaw-mem-capsules/trust-aware-demo
+
+python3 ./tools/pack_capsule.py seal \
+  --db "$DB" \
+  --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
+  --pack-trust-policy exclude_quarantined_fail_open \
+  --stash-artifact \
+  --gzip-artifact \
+  --out "$OUT"
+
+CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
+python3 ./tools/pack_capsule.py verify "$CAPSULE"
+```
+
+It creates a small capsule directory with:
+- `manifest.json`
+- `bundle.json`
+- `bundle_text.md`
+- `trace.json` (when available)
+- `artifact_stash.json` (when artifact stash is enabled)
+
+This keeps the memvid-style portability win in a **thin helper lane** while preserving `openclaw-mem` citations, trace receipts, and rollback posture.
+
 ## Start here
 
 **Understand the product**
