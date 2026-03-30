@@ -1,0 +1,27 @@
+Sakura execution note — canonical packet + slow-path diff (thin slice)
+
+Chosen command surfaces:
+1) packet/report lane: `openclaw-mem capsule inspect <canonical_dir> --write-report-md [--json]`
+2) slow-path diff lane: `openclaw-mem capsule diff <canonical_dir> --db <target.sqlite> [--write-receipt] [--write-report-md]`
+
+Match rule (canonical slow-path):
+- exact multiset equality over the canonical artifact’s indexed columns (`index.json -> columns`)
+- per-row signature uses ordered column values from `observations.jsonl` vs target `observations` rows
+- no fuzzy matching, no restore simulation, no mutation
+
+Primary files planned:
+- openclaw_mem/capsule.py (CLI args + inspect report write + canonical diff implementation)
+- tests/test_capsule_cli.py (new tests for packet write + canonical diff truthfulness)
+- README.md
+- QUICKSTART.md
+- docs/portable-pack-capsules.md
+- docs/index.md (if wording update needed)
+
+Known risks / guardrails:
+- ambiguous schema/column mismatch: return structured non-ok diff (do not fake compare)
+- large artifacts: keep output truthful but bounded in markdown samples
+- no restore/merge/migrate behavior touched
+
+Stop-loss:
+- max 2 meaningful attempts per root cause
+- stop and report if >15 min without a core artifact (packet file or canonical diff receipt)

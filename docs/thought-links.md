@@ -24,6 +24,7 @@ Additional trusted references (for lifecycle/decay):
   - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_canonical-restore-contract-brief.md`
   - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_export-canonical-contract-brief.md`
   - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_export-canonical-writer_landed.md`
+  - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_canonical-operator-packet_and_slowdiff_landed.md`
   - Product doc: `portable-pack-capsules.md`
 
 ## 1) memvid / portable capsule pattern → what we take and what we refuse
