@@ -148,6 +148,7 @@ python3 ./tools/pack_capsule.py seal \
 
 CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
 python3 ./tools/pack_capsule.py verify "$CAPSULE"
+python3 ./tools/pack_capsule.py diff "$CAPSULE" --db "$DB" --write-receipt
 ```
 
 It creates a small capsule directory with:
@@ -156,6 +157,12 @@ It creates a small capsule directory with:
 - `bundle_text.md`
 - `trace.json` (when available)
 - `artifact_stash.json` (when artifact stash is enabled)
+- `diff.latest.json` (when `diff --write-receipt` is used)
+
+`diff` is the next high-ROI read-only companion command:
+- verifies the capsule first
+- compares capsule items against a target governed store
+- reports `present` vs `missing` with **no mutation**
 
 This keeps the memvid-style portability win in a **thin helper lane** while preserving `openclaw-mem` citations, trace receipts, and rollback posture.
 

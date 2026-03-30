@@ -13,12 +13,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def utc_now() -> str:
@@ -55,6 +57,21 @@ def load_json(path: Path) -> Dict[str, Any]:
     return value
 
 
+def normalize_text(value: Any) -> str:
+    text = str(value or "")
+    return " ".join(text.split()).strip()
+
+
+def item_signature(kind: Any, summary: Any) -> str:
+    return f"{normalize_text(kind).lower()}\t{normalize_text(summary)}"
+
+
+def default_db_path() -> str:
+    from openclaw_mem.cli import DEFAULT_DB
+
+    return str(Path((os.environ.get("OPENCLAW_MEM_DB") or DEFAULT_DB)).expanduser())
+
+
 def add_shared_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--db", help="Optional SQLite DB path passed through to openclaw-mem")
     p.add_argument("--query-en", default="", help="Optional English query passed through to pack")
@@ -79,6 +96,11 @@ def parse_args() -> argparse.Namespace:
 
     verify = sub.add_parser("verify", help="Verify capsule file presence + sha256 integrity")
     verify.add_argument("capsule", type=Path, help="Path to capsule directory")
+
+    diff = sub.add_parser("diff", help="Compare capsule items against a target governed store (read-only)")
+    diff.add_argument("capsule", type=Path, help="Path to capsule directory")
+    diff.add_argument("--db", help="Target SQLite DB path (default: OPENCLAW_MEM_DB or host default)")
+    diff.add_argument("--write-receipt", action="store_true", help="Write diff.latest.json into the capsule directory")
 
     return p.parse_args()
 
@@ -254,8 +276,7 @@ def cmd_seal(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_verify(args: argparse.Namespace) -> int:
-    capsule_dir = args.capsule.expanduser().resolve()
+def verify_capsule(capsule_dir: Path) -> Dict[str, Any]:
     manifest_path = capsule_dir / "manifest.json"
     manifest = load_json(manifest_path)
     files = manifest.get("files")
@@ -289,16 +310,107 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 "ok": match,
             }
         )
-
-    summary = {
+    return {
         "schema": "openclaw-mem.pack-capsule.verify.v1",
         "ok": ok,
         "command": "verify",
         "capsule_dir": str(capsule_dir),
         "checks": checks,
     }
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    capsule_dir = args.capsule.expanduser().resolve()
+    summary = verify_capsule(capsule_dir)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    return 0 if ok else 1
+    return 0 if bool(summary.get("ok")) else 1
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    capsule_dir = args.capsule.expanduser().resolve()
+    verify_summary = verify_capsule(capsule_dir)
+    if not bool(verify_summary.get("ok")):
+        print(json.dumps(verify_summary, ensure_ascii=False, indent=2))
+        return 1
+
+    bundle = load_json(capsule_dir / "bundle.json")
+    items_raw = bundle.get("items")
+    items = items_raw if isinstance(items_raw, list) else []
+
+    db_path = str(Path(args.db).expanduser()) if getattr(args, "db", None) else default_db_path()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    table_status = "ok"
+    try:
+        try:
+            rows = conn.execute("SELECT id, kind, summary, ts FROM observations").fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                rows = []
+                table_status = "missing_observations_table"
+            else:
+                raise
+    finally:
+        conn.close()
+
+    store_index: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        sig = item_signature(row["kind"], row["summary"])
+        store_index.setdefault(sig, []).append(
+            {
+                "id": int(row["id"]),
+                "kind": row["kind"],
+                "summary": row["summary"],
+                "ts": row["ts"],
+            }
+        )
+
+    present: List[Dict[str, Any]] = []
+    missing: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        sig = item_signature(item.get("kind"), item.get("summary"))
+        record = {
+            "recordRef": item.get("recordRef"),
+            "kind": item.get("kind"),
+            "summary": item.get("summary"),
+            "signature": sig,
+        }
+        matches = store_index.get(sig) or []
+        if matches:
+            record["matches"] = matches[:20]
+            present.append(record)
+        else:
+            missing.append(record)
+
+    summary = {
+        "schema": "openclaw-mem.pack-capsule.diff.v1",
+        "ok": True,
+        "command": "diff",
+        "capsule_dir": str(capsule_dir),
+        "db": db_path,
+        "verify": verify_summary,
+        "counts": {
+            "capsule_items": len([item for item in items if isinstance(item, dict)]),
+            "store_observations": len(rows),
+            "present": len(present),
+            "missing": len(missing),
+        },
+        "present": present,
+        "missing": missing,
+        "receipt": {
+            "match_rule": "normalized kind + summary exact match",
+            "mutation": "none",
+            "topology": "unchanged",
+            "target_store_table_status": table_status,
+        },
+    }
+    if getattr(args, "write_receipt", False):
+        write_json(capsule_dir / "diff.latest.json", summary)
+        summary["diff_receipt_path"] = str(capsule_dir / "diff.latest.json")
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
 
 
 def main() -> int:
@@ -307,6 +419,8 @@ def main() -> int:
         return cmd_seal(args)
     if args.command == "verify":
         return cmd_verify(args)
+    if args.command == "diff":
+        return cmd_diff(args)
     raise RuntimeError(f"unknown command: {args.command}")
 
 
