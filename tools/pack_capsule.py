@@ -46,6 +46,10 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -96,6 +100,10 @@ def parse_args() -> argparse.Namespace:
 
     verify = sub.add_parser("verify", help="Verify capsule file presence + sha256 integrity")
     verify.add_argument("capsule", type=Path, help="Path to capsule directory")
+
+    inspect = sub.add_parser("inspect", help="Inspect capsule metadata and contents without touching any store")
+    inspect.add_argument("capsule", type=Path, help="Path to capsule directory")
+    inspect.add_argument("--json", action="store_true", help="Emit structured JSON instead of markdown-like text")
 
     diff = sub.add_parser("diff", help="Compare capsule items against a target governed store (read-only)")
     diff.add_argument("capsule", type=Path, help="Path to capsule directory")
@@ -154,6 +162,13 @@ def run_artifact_stash(bundle_json: str, *, gzip_artifact: bool) -> Dict[str, An
     return {"command": cmd, "payload": payload}
 
 
+def file_set_integrity_hash(file_entries: List[Dict[str, Any]]) -> str:
+    lines = []
+    for entry in sorted(file_entries, key=lambda item: str(item.get("name") or "")):
+        lines.append(f"{entry.get('name')}\t{entry.get('sha256')}\t{entry.get('bytes')}")
+    return "sha256:" + sha256_text("\n".join(lines))
+
+
 def build_manifest(
     *,
     args: argparse.Namespace,
@@ -166,10 +181,13 @@ def build_manifest(
 ) -> Dict[str, Any]:
     items = payload.get("items") if isinstance(payload.get("items"), list) else []
     citations = payload.get("citations") if isinstance(payload.get("citations"), list) else []
+    created_at = utc_now()
     return {
         "schema": "openclaw-mem.pack-capsule.v1",
+        "capsule_version": 0,
         "capsule_id": final_dir.name,
-        "created_at": utc_now(),
+        "created_at": created_at,
+        "exported_at": created_at,
         "label": args.label,
         "query": args.query,
         "query_en": args.query_en or None,
@@ -182,6 +200,7 @@ def build_manifest(
             "pack_trust_policy": args.pack_trust_policy,
         },
         "files": file_entries,
+        "integrity_hash": file_set_integrity_hash(file_entries),
         "stats": {
             "items": len(items),
             "citations": len(citations),
@@ -320,6 +339,47 @@ def verify_capsule(capsule_dir: Path) -> Dict[str, Any]:
     }
 
 
+def render_inspect_report(summary: Dict[str, Any]) -> str:
+    manifest = summary.get("manifest") if isinstance(summary.get("manifest"), dict) else {}
+    stats = manifest.get("stats") if isinstance(manifest.get("stats"), dict) else {}
+    files = manifest.get("files") if isinstance(manifest.get("files"), list) else []
+    preview = str(summary.get("bundle_text_preview") or "")
+
+    lines: List[str] = []
+    lines.append("# Pack Capsule Inspect")
+    lines.append("")
+    lines.append(f"- Capsule: `{summary.get('capsule_dir')}`")
+    lines.append(f"- Schema: `{manifest.get('schema')}`")
+    lines.append(f"- Capsule version: `{manifest.get('capsule_version')}`")
+    lines.append(f"- Exported at: `{manifest.get('exported_at')}`")
+    lines.append(f"- Integrity hash: `{manifest.get('integrity_hash')}`")
+    lines.append(f"- Restorable: `{summary.get('restorable')}`")
+    lines.append("")
+    lines.append("## Counts")
+    lines.append("")
+    lines.append(f"- Items: {stats.get('items', 0)}")
+    lines.append(f"- Citations: {stats.get('citations', 0)}")
+    lines.append(f"- Bundle chars: {stats.get('bundle_text_chars', 0)}")
+    lines.append("")
+    lines.append("## Files")
+    lines.append("")
+    for entry in files:
+        if isinstance(entry, dict):
+            lines.append(f"- `{entry.get('name')}` bytes={entry.get('bytes')} sha256={entry.get('sha256')}")
+    if not files:
+        lines.append("- none")
+    lines.append("")
+    lines.append("## Bundle preview")
+    lines.append("")
+    lines.append(preview if preview else "- empty")
+    lines.append("")
+    lines.append("## Notes")
+    lines.append("")
+    lines.append("- Current pack capsules are portable audit artifacts, not canonical restore artifacts.")
+    lines.append("- A future restore CLI requires a stronger artifact contract with observation-level detail/provenance.")
+    return "\n".join(lines) + "\n"
+
+
 def render_diff_report(summary: Dict[str, Any]) -> str:
     counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
     receipt = summary.get("receipt") if isinstance(summary.get("receipt"), dict) else {}
@@ -369,6 +429,33 @@ def render_diff_report(summary: Dict[str, Any]) -> str:
     lines.append("- This is a read-only audit report. It does not mutate the target store.")
     lines.append("- A future restore/import line must prove canonical observation fidelity first; this report does not claim restore safety.")
     return "\n".join(lines) + "\n"
+
+
+def cmd_inspect(args: argparse.Namespace) -> int:
+    capsule_dir = args.capsule.expanduser().resolve()
+    verify_summary = verify_capsule(capsule_dir)
+    if not bool(verify_summary.get("ok")):
+        print(json.dumps(verify_summary, ensure_ascii=False, indent=2))
+        return 1
+
+    manifest = load_json(capsule_dir / "manifest.json")
+    bundle = load_json(capsule_dir / "bundle.json")
+    out = {
+        "schema": "openclaw-mem.pack-capsule.inspect.v1",
+        "ok": True,
+        "command": "inspect",
+        "capsule_dir": str(capsule_dir),
+        "verify": verify_summary,
+        "manifest": manifest,
+        "bundle_text_preview": str(bundle.get("bundle_text") or "")[:600],
+        "restorable": False,
+        "reason": "pack capsule v0 preserves pack-level selection output, not canonical observation-level restore detail",
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+    else:
+        print(render_inspect_report(out), end="")
+    return 0
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -473,6 +560,8 @@ def main() -> int:
     args = parse_args()
     if args.command == "seal":
         return cmd_seal(args)
+    if args.command == "inspect":
+        return cmd_inspect(args)
     if args.command == "verify":
         return cmd_verify(args)
     if args.command == "diff":

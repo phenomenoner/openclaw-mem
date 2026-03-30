@@ -147,6 +147,7 @@ python3 ./tools/pack_capsule.py seal \
   --out "$OUT"
 
 CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
+python3 ./tools/pack_capsule.py inspect "$CAPSULE"
 python3 ./tools/pack_capsule.py verify "$CAPSULE"
 python3 ./tools/pack_capsule.py diff "$CAPSULE" --db "$DB" --write-receipt --write-report-md
 ```
@@ -159,6 +160,10 @@ It creates a small capsule directory with:
 - `artifact_stash.json` (when artifact stash is enabled)
 - `diff.latest.json` (when `diff --write-receipt` is used)
 - `diff.latest.md` (when `diff --write-report-md` is used)
+
+`inspect` is the forward-compat/readability companion command:
+- verifies first and shows capsule metadata + bundle preview
+- marks current v0 pack capsules as portable audit artifacts, not restore artifacts
 
 `diff` is the next high-ROI read-only companion command:
 - verifies the capsule first

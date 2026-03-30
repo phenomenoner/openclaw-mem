@@ -37,14 +37,20 @@ python3 ./tools/pack_capsule.py seal \
   --out "$OUT"
 ```
 
-### 2) Verify capsule integrity
+### 2) Inspect the capsule (read-only)
 
 ```bash
 CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
+python3 ./tools/pack_capsule.py inspect "$CAPSULE"
+```
+
+### 3) Verify capsule integrity
+
+```bash
 python3 ./tools/pack_capsule.py verify "$CAPSULE"
 ```
 
-### 3) Diff the capsule against a target store (read-only)
+### 4) Diff the capsule against a target store (read-only)
 
 ```bash
 python3 ./tools/pack_capsule.py diff \
@@ -58,6 +64,7 @@ python3 ./tools/pack_capsule.py diff \
 
 After `seal`:
 - `manifest.json`
+  - includes forward-compat metadata like `capsule_version`, `exported_at`, and `integrity_hash`
 - `bundle.json`
 - `bundle_text.md`
 - `trace.json` (when available)
@@ -74,6 +81,11 @@ After `diff --write-receipt --write-report-md`:
 - packages the result into a timestamped capsule directory
 - optional `artifact stash` is a receipt convenience, not a new storage system
 
+### `inspect`
+- verifies first, then shows capsule metadata and a small bundle preview
+- can emit human-readable output or structured JSON
+- explicitly marks current v0 pack capsules as **not restorable**
+
 ### `verify`
 - checks declared capsule files against `manifest.json`
 - validates sha256 + byte counts
@@ -86,11 +98,11 @@ After `diff --write-receipt --write-report-md`:
 - emits `present` vs `missing`
 - **does not mutate** the target store
 
-## Why diff comes before restore
+## Why inspect + diff come before restore
 
-We explicitly chose **diff before restore** because the current capsule captures pack-level selection output, not full canonical observation detail/provenance.
+We explicitly chose **inspect/diff before restore** because the current capsule captures pack-level selection output, not full canonical observation detail/provenance.
 
-So `diff` is an honest read-only audit/report lane.
+So `inspect` and `diff` are honest read-only lanes.
 A future restore/import line would need a stronger canonical artifact contract first.
 
 ## Verifier checklist
@@ -114,6 +126,7 @@ This host also exposes a thin wrapper:
 
 ```bash
 openclaw-mem-pack-capsule seal ...
+openclaw-mem-pack-capsule inspect <capsule_dir>
 openclaw-mem-pack-capsule verify <capsule_dir>
 openclaw-mem-pack-capsule diff <capsule_dir> --db <path> --write-receipt --write-report-md
 ```

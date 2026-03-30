@@ -107,6 +107,7 @@ python3 ./tools/pack_capsule.py seal \
   --out "$OUT"
 
 CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
+python3 ./tools/pack_capsule.py inspect "$CAPSULE"
 python3 ./tools/pack_capsule.py verify "$CAPSULE"
 python3 ./tools/pack_capsule.py diff "$CAPSULE" --db "$DB" --write-receipt --write-report-md
 ```
