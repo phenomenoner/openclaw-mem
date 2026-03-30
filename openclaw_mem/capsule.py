@@ -19,7 +19,14 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+
+CANONICAL_MANIFEST_SCHEMA = "openclaw-mem.canonical-capsule.v1"
+CANONICAL_INDEX_SCHEMA = "openclaw-mem.canonical-capsule.index.v1"
+CANONICAL_PROVENANCE_SCHEMA = "openclaw-mem.canonical-capsule.provenance.v1"
+CANONICAL_CAPSULE_VERSION = 1
+RESTORE_REQUIRED_COLUMNS = ("id", "ts", "kind", "summary")
 
 
 def utc_now() -> str:
@@ -144,7 +151,7 @@ def _add_capsule_subcommands(sub: argparse._SubParsersAction, *, for_integrated_
 
     export_canonical = sub.add_parser(
         "export-canonical",
-        help="Write canonical export artifact (restore not supported yet); use --dry-run for preview",
+        help="Write canonical export artifact for bounded isolated restore; use --dry-run for preview",
     )
     export_canonical.add_argument(
         "--db",
@@ -166,6 +173,25 @@ def _add_capsule_subcommands(sub: argparse._SubParsersAction, *, for_integrated_
     )
     export_canonical.set_defaults(capsule_handler=cmd_export_canonical)
 
+    restore = sub.add_parser(
+        "restore",
+        help="Restore canonical capsule rows into an isolated target store (dry-run preflight or bounded apply)",
+    )
+    restore.add_argument("capsule", type=Path, help="Path to canonical capsule directory")
+    mode = restore.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true", help="Preflight only. No target mutation.")
+    mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="Bounded apply into isolated/new target store only (append-only).",
+    )
+    restore.add_argument(
+        "--db",
+        help="Target SQLite DB path. Required for --apply. --dry-run defaults to OPENCLAW_MEM_DB or host default when omitted.",
+    )
+    restore.add_argument("--json", action="store_true", help="Emit structured JSON output")
+    restore.set_defaults(capsule_handler=cmd_restore)
+
     if for_integrated_cli:
         # Keep the parent command routed through cmd_capsule for thin parser edge in openclaw_mem.cli.
         pass
@@ -176,7 +202,7 @@ def add_capsule_parser_to_cli(sub: argparse._SubParsersAction) -> None:
 
     sp = sub.add_parser(
         "capsule",
-        help="Portable governed pack capsule helpers (seal/inspect/verify/diff/export-canonical)",
+        help="Portable governed pack capsule helpers (seal/inspect/verify/diff/export-canonical/restore)",
     )
     csub = sp.add_subparsers(dest="capsule_cmd", required=True)
     _add_capsule_subcommands(csub, for_integrated_cli=True)
@@ -452,7 +478,7 @@ def render_inspect_report(summary: Dict[str, Any]) -> str:
     lines.append("## Notes")
     lines.append("")
     lines.append("- Current pack capsules are portable audit artifacts, not canonical restore artifacts.")
-    lines.append("- A future restore CLI requires a stronger artifact contract with observation-level detail/provenance.")
+    lines.append("- Use canonical artifacts (`export-canonical`) + `capsule restore` for bounded isolated replay.")
     return "\n".join(lines) + "\n"
 
 
@@ -502,7 +528,7 @@ def render_canonical_inspect_report(summary: Dict[str, Any]) -> str:
     lines.append("")
     lines.append(f"- Restorable: `{restore.get('supported')}`")
     lines.append(f"- Reason: {restore.get('reason')}")
-    lines.append("- This artifact preserves rows/index/provenance for future restore design; restore is not implemented.")
+    lines.append("- Restore is bounded: isolated/new target only, same-engine only, append-only only.")
     return "\n".join(lines) + "\n"
 
 
@@ -553,7 +579,7 @@ def render_diff_report(summary: Dict[str, Any]) -> str:
     lines.append("## Notes")
     lines.append("")
     lines.append("- This is a read-only audit report. It does not mutate the target store.")
-    lines.append("- A future restore/import line must prove canonical observation fidelity first; this report does not claim restore safety.")
+    lines.append("- This report is for pack capsules only; bounded replay uses canonical artifacts via `capsule restore`.")
     return "\n".join(lines) + "\n"
 
 
@@ -586,7 +612,7 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             print(render_inspect_report(out), end="")
         return 0
 
-    if schema == "openclaw-mem.canonical-capsule.v1":
+    if schema == CANONICAL_MANIFEST_SCHEMA:
         index_path = capsule_dir / "index.json"
         index_payload = load_json(index_path) if index_path.exists() else {}
         observations_preview: List[str] = []
@@ -605,8 +631,8 @@ def cmd_inspect(args: argparse.Namespace) -> int:
             "manifest": manifest,
             "index": index_payload,
             "observations_preview": observations_preview,
-            "restorable": False,
-            "reason": "canonical export artifact is restore-ready input surface only; restore/import CLI is not implemented",
+            "restorable": True,
+            "reason": "restore is supported only for isolated/new target store, same-engine, append-only replay",
         }
         if getattr(args, "json", False):
             print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -741,6 +767,718 @@ def cmd_diff(args: argparse.Namespace) -> int:
     return 0
 
 
+def _read_jsonl_records(path: Path) -> List[Dict[str, Any]]:
+    records: List[Dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as fh:
+        for line_no, raw_line in enumerate(fh, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"invalid JSONL at {path}:{line_no}") from exc
+            if not isinstance(value, dict):
+                raise RuntimeError(f"JSONL row must be object at {path}:{line_no}")
+            records.append(value)
+    return records
+
+
+def _sha256_jsonl_records(records: Sequence[Dict[str, Any]], columns: Sequence[str]) -> str:
+    h = hashlib.sha256()
+    for record in records:
+        ordered = {col: record.get(col) for col in columns}
+        line = json.dumps(ordered, ensure_ascii=False) + "\n"
+        h.update(line.encode("utf-8"))
+    return h.hexdigest()
+
+
+def _canonical_to_sql_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        encoding = str(value.get("encoding") or "")
+        if encoding != "base64":
+            raise RuntimeError("unsupported serialized sql value object")
+        payload = value.get("value")
+        if not isinstance(payload, str):
+            raise RuntimeError("base64 serialized value must include string field 'value'")
+        decoded = base64.b64decode(payload.encode("ascii"), validate=True)
+        declared_bytes = value.get("bytes")
+        if declared_bytes is not None and int(declared_bytes) != len(decoded):
+            raise RuntimeError("serialized sql value byte-length mismatch")
+        return decoded
+    return value
+
+
+def _infer_sqlite_affinity(values: Sequence[Any]) -> str:
+    has_blob = False
+    has_real = False
+    has_int = False
+    has_text = False
+
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            has_blob = True
+            continue
+        if isinstance(value, bool):
+            has_int = True
+            continue
+        if isinstance(value, int):
+            has_int = True
+            continue
+        if isinstance(value, float):
+            has_real = True
+            continue
+        has_text = True
+
+    if has_blob:
+        return "BLOB"
+    if has_text:
+        return "TEXT"
+    if has_real:
+        return "REAL"
+    if has_int:
+        return "INTEGER"
+    return "TEXT"
+
+
+def _build_observations_create_sql(columns: Sequence[str], records: Sequence[Dict[str, Any]]) -> str:
+    defs: List[str] = []
+    for col in columns:
+        col_values = [_canonical_to_sql_value(row.get(col)) for row in records]
+        affinity = _infer_sqlite_affinity(col_values)
+        if col == "id" and affinity == "INTEGER":
+            defs.append(f"{_quote_ident(col)} INTEGER PRIMARY KEY")
+        else:
+            defs.append(f"{_quote_ident(col)} {affinity}")
+    return "CREATE TABLE observations (" + ", ".join(defs) + ")"
+
+
+def _inspect_target_store(db_path: str) -> Dict[str, Any]:
+    target = Path(db_path).expanduser().resolve()
+    out: Dict[str, Any] = {
+        "db": str(target),
+        "exists": target.exists(),
+        "table_status": "missing_target_db",
+        "observations_rows": 0,
+        "observations_columns": [],
+        "id_range": {"min": None, "max": None},
+    }
+    if out["exists"] and not target.is_file():
+        out["table_status"] = "invalid_target_path"
+        return out
+    if not out["exists"]:
+        return out
+
+    conn = sqlite3.connect(str(target))
+    conn.row_factory = sqlite3.Row
+    try:
+        table_exists = bool(
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='observations'"
+            ).fetchone()
+        )
+        if not table_exists:
+            out["table_status"] = "missing_observations_table"
+            return out
+
+        out["table_status"] = "ok"
+        pragma_rows = conn.execute("PRAGMA table_info(observations)").fetchall()
+        columns = [str(row[1]) for row in pragma_rows if row and len(row) > 1]
+        out["observations_columns"] = columns
+
+        cnt_row = conn.execute("SELECT COUNT(*) AS cnt FROM observations").fetchone()
+        row_count = int(cnt_row["cnt"] if cnt_row else 0)
+        out["observations_rows"] = row_count
+
+        if "id" in columns:
+            id_row = conn.execute("SELECT MIN(id) AS id_min, MAX(id) AS id_max FROM observations").fetchone()
+            out["id_range"] = {
+                "min": id_row["id_min"] if id_row else None,
+                "max": id_row["id_max"] if id_row else None,
+            }
+    finally:
+        conn.close()
+    return out
+
+
+def _load_canonical_restore_artifact(capsule_dir: Path) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    manifest = load_json(capsule_dir / "manifest.json")
+    manifest_schema = str(manifest.get("schema") or "")
+    if manifest_schema != CANONICAL_MANIFEST_SCHEMA:
+        return None, {
+            "code": "unsupported_manifest_schema",
+            "message": "restore supports canonical artifacts only",
+            "manifest_schema": manifest_schema,
+            "supported_manifest_schema": CANONICAL_MANIFEST_SCHEMA,
+        }
+
+    try:
+        capsule_version = int(manifest.get("capsule_version"))
+    except Exception:
+        capsule_version = None
+    if capsule_version != CANONICAL_CAPSULE_VERSION:
+        return None, {
+            "code": "unsupported_capsule_version",
+            "message": "unsupported canonical capsule version",
+            "capsule_version": capsule_version,
+            "supported_capsule_version": CANONICAL_CAPSULE_VERSION,
+        }
+
+    index = load_json(capsule_dir / "index.json")
+    if str(index.get("schema") or "") != CANONICAL_INDEX_SCHEMA:
+        return None, {
+            "code": "unsupported_index_schema",
+            "message": "unsupported canonical index schema",
+            "index_schema": str(index.get("schema") or ""),
+            "supported_index_schema": CANONICAL_INDEX_SCHEMA,
+        }
+
+    provenance = load_json(capsule_dir / "provenance.json")
+    if str(provenance.get("schema") or "") != CANONICAL_PROVENANCE_SCHEMA:
+        return None, {
+            "code": "unsupported_provenance_schema",
+            "message": "unsupported canonical provenance schema",
+            "provenance_schema": str(provenance.get("schema") or ""),
+            "supported_provenance_schema": CANONICAL_PROVENANCE_SCHEMA,
+        }
+
+    source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+    source_table = str(source.get("table") or "")
+    if source_table and source_table != "observations":
+        return None, {
+            "code": "unsupported_source_table",
+            "message": "canonical restore currently supports observations table only",
+            "source_table": source_table,
+        }
+
+    columns = index.get("columns")
+    if not isinstance(columns, list) or not columns or any(not isinstance(col, str) or not col for col in columns):
+        return None, {
+            "code": "invalid_index_columns",
+            "message": "canonical index columns must be a non-empty string list",
+        }
+
+    missing_required = [col for col in RESTORE_REQUIRED_COLUMNS if col not in columns]
+    if missing_required:
+        return None, {
+            "code": "unsupported_engine_columns",
+            "message": "canonical restore requires same-engine observations columns",
+            "required_columns": list(RESTORE_REQUIRED_COLUMNS),
+            "missing_required_columns": missing_required,
+        }
+
+    observations_path = capsule_dir / "observations.jsonl"
+    records = _read_jsonl_records(observations_path)
+
+    for idx, record in enumerate(records, start=1):
+        keys = set(record.keys())
+        missing_cols = [col for col in columns if col not in keys]
+        extra_cols = sorted(keys - set(columns))
+        if missing_cols or extra_cols:
+            return None, {
+                "code": "observation_row_shape_mismatch",
+                "message": "observation row keys do not match canonical index columns",
+                "row_number": idx,
+                "missing_columns": missing_cols,
+                "extra_columns": extra_cols,
+            }
+        for col in columns:
+            try:
+                _canonical_to_sql_value(record.get(col))
+            except Exception as exc:
+                return None, {
+                    "code": "unsupported_serialized_sql_value",
+                    "message": "canonical observation contains unsupported serialized SQL value",
+                    "row_number": idx,
+                    "column": col,
+                    "detail": str(exc),
+                }
+
+    expected_rows = int(index.get("rows") or 0)
+    if expected_rows != len(records):
+        return None, {
+            "code": "row_count_mismatch",
+            "message": "canonical observation row count mismatch",
+            "index_rows": expected_rows,
+            "observations_rows": len(records),
+        }
+
+    index_obs = index.get("observations") if isinstance(index.get("observations"), dict) else {}
+    expected_obs_name = str(index_obs.get("name") or "")
+    if expected_obs_name and expected_obs_name != "observations.jsonl":
+        return None, {
+            "code": "unsupported_observations_filename",
+            "message": "canonical restore requires observations.jsonl",
+            "index_observations_name": expected_obs_name,
+        }
+
+    expected_sha = str(index_obs.get("sha256") or "").strip()
+    actual_sha = sha256_file(observations_path)
+    if expected_sha and expected_sha != actual_sha:
+        return None, {
+            "code": "observations_sha_mismatch",
+            "message": "canonical observations digest mismatch",
+            "expected_sha256": expected_sha,
+            "actual_sha256": actual_sha,
+        }
+
+    return (
+        {
+            "manifest": manifest,
+            "index": index,
+            "provenance": provenance,
+            "records": records,
+            "columns": columns,
+            "rows": len(records),
+            "observations_sha256": actual_sha,
+            "source_db": str(source.get("db") or "").strip() or None,
+        },
+        None,
+    )
+
+
+def _build_restore_preflight(
+    *,
+    capsule_dir: Path,
+    db_raw: Optional[str],
+    db_explicit: bool,
+    apply_mode: bool,
+) -> Dict[str, Any]:
+    artifact, artifact_error = _load_canonical_restore_artifact(capsule_dir)
+    target_db = str(Path(db_raw).expanduser().resolve()) if db_raw else str(Path(default_db_path()).expanduser().resolve())
+    target = _inspect_target_store(target_db)
+
+    conflicts: List[Dict[str, Any]] = []
+    warnings: List[Dict[str, Any]] = []
+
+    if artifact_error:
+        conflicts.append(
+            {
+                "code": str(artifact_error.get("code") or "unsupported_artifact_contract"),
+                "message": str(artifact_error.get("message") or "unsupported canonical artifact contract"),
+                **{k: v for k, v in artifact_error.items() if k not in {"code", "message"}},
+            }
+        )
+
+    if apply_mode and not db_explicit:
+        conflicts.append(
+            {
+                "code": "apply_requires_explicit_db",
+                "message": "--apply requires explicit --db target path",
+            }
+        )
+
+    if target.get("table_status") == "invalid_target_path":
+        conflicts.append(
+            {
+                "code": "invalid_target_path",
+                "message": "target --db must point to a file path",
+                "target_db": target_db,
+            }
+        )
+
+    live_default_db = str(Path(default_db_path()).expanduser().resolve())
+    if target_db == live_default_db:
+        guard = {
+            "code": "live_target_guard",
+            "message": "default host DB path is treated as live target and forbidden for apply",
+            "target_db": target_db,
+        }
+        if apply_mode:
+            conflicts.append(guard)
+        else:
+            warnings.append(guard)
+
+    if artifact and artifact.get("source_db"):
+        source_db = str(Path(str(artifact.get("source_db"))).expanduser().resolve())
+        if target_db == source_db:
+            conflicts.append(
+                {
+                    "code": "source_db_target_forbidden",
+                    "message": "target --db must differ from artifact source DB",
+                    "target_db": target_db,
+                    "source_db": source_db,
+                }
+            )
+
+    if target.get("observations_rows", 0) > 0:
+        conflicts.append(
+            {
+                "code": "non_empty_target_store",
+                "message": "restore apply is limited to isolated/new target store (existing observations rows must be zero)",
+                "target_rows": target.get("observations_rows", 0),
+            }
+        )
+
+    if artifact and target.get("table_status") == "ok":
+        target_cols = [str(col) for col in (target.get("observations_columns") or [])]
+        artifact_cols = [str(col) for col in (artifact.get("columns") or [])]
+        if target_cols != artifact_cols:
+            conflicts.append(
+                {
+                    "code": "target_columns_mismatch",
+                    "message": "target observations columns must exactly match canonical index columns for append-only replay",
+                    "target_columns": target_cols,
+                    "artifact_columns": artifact_cols,
+                }
+            )
+
+    mode = "apply" if apply_mode else "dry-run"
+    artifact_meta: Dict[str, Any] = {
+        "supported": artifact_error is None,
+    }
+    if artifact:
+        manifest = artifact.get("manifest") if isinstance(artifact.get("manifest"), dict) else {}
+        artifact_meta.update(
+            {
+                "manifest_schema": manifest.get("schema"),
+                "capsule_version": manifest.get("capsule_version"),
+                "capsule_id": manifest.get("capsule_id"),
+                "rows": artifact.get("rows", 0),
+                "columns": artifact.get("columns", []),
+                "observations_sha256": artifact.get("observations_sha256"),
+                "source_db": artifact.get("source_db"),
+            }
+        )
+    else:
+        artifact_meta.update(
+            {
+                "manifest_schema": artifact_error.get("manifest_schema") if artifact_error else None,
+                "capsule_version": artifact_error.get("capsule_version") if artifact_error else None,
+                "rows": 0,
+                "columns": [],
+            }
+        )
+
+    operations: List[str] = []
+    if target.get("table_status") in {"missing_target_db", "missing_observations_table"}:
+        operations.append("create_observations_table")
+    operations.extend(["append_observation_rows", "write_rollback_manifest", "readback_verify_exact"])
+
+    summary = {
+        "schema": "openclaw-mem.canonical-capsule.restore.v1",
+        "ok": len(conflicts) == 0,
+        "command": "restore",
+        "mode": mode,
+        "capsule_dir": str(capsule_dir),
+        "artifact": artifact_meta,
+        "target": {
+            "db": target.get("db"),
+            "exists": target.get("exists"),
+            "table_status": target.get("table_status"),
+            "observations_rows": target.get("observations_rows"),
+            "observations_columns": target.get("observations_columns"),
+            "id_range": target.get("id_range"),
+        },
+        "plan": {
+            "mutation": "append_only" if apply_mode else "none",
+            "isolation_required": True,
+            "append_only": True,
+            "same_engine_required": True,
+            "operations": operations,
+            "rows_to_append": int(artifact.get("rows", 0)) if artifact else 0,
+        },
+        "conflicts": conflicts,
+        "warnings": warnings,
+    }
+
+    return {
+        "summary": summary,
+        "artifact": artifact,
+        "target": target,
+    }
+
+
+def _render_restore_text(summary: Dict[str, Any]) -> str:
+    artifact = summary.get("artifact") if isinstance(summary.get("artifact"), dict) else {}
+    target = summary.get("target") if isinstance(summary.get("target"), dict) else {}
+    plan = summary.get("plan") if isinstance(summary.get("plan"), dict) else {}
+    conflicts = summary.get("conflicts") if isinstance(summary.get("conflicts"), list) else []
+    warnings = summary.get("warnings") if isinstance(summary.get("warnings"), list) else []
+
+    lines: List[str] = []
+    lines.append("# Capsule Restore")
+    lines.append("")
+    lines.append(f"- Mode: {summary.get('mode')}")
+    lines.append(f"- OK: {summary.get('ok')}")
+    lines.append(f"- Capsule: {summary.get('capsule_dir')}")
+    lines.append(f"- Target DB: {target.get('db')}")
+    lines.append(f"- Artifact supported: {artifact.get('supported')}")
+    lines.append(f"- Rows to append: {plan.get('rows_to_append')}")
+    lines.append(f"- Planned mutation: {plan.get('mutation')}")
+    lines.append("")
+    if warnings:
+        lines.append("## Warnings")
+        lines.append("")
+        for warning in warnings:
+            if isinstance(warning, dict):
+                lines.append(f"- {warning.get('code')}: {warning.get('message')}")
+        lines.append("")
+    lines.append("## Conflicts")
+    lines.append("")
+    if conflicts:
+        for conflict in conflicts:
+            if isinstance(conflict, dict):
+                lines.append(f"- {conflict.get('code')}: {conflict.get('message')}")
+    else:
+        lines.append("- none")
+    lines.append("")
+    lines.append("## Operations")
+    lines.append("")
+    for op in plan.get("operations") if isinstance(plan.get("operations"), list) else []:
+        lines.append(f"- {op}")
+    if not isinstance(plan.get("operations"), list) or not plan.get("operations"):
+        lines.append("- none")
+    return "\n".join(lines) + "\n"
+
+
+def _apply_canonical_restore(
+    *,
+    capsule_dir: Path,
+    preflight: Dict[str, Any],
+) -> Dict[str, Any]:
+    artifact = preflight.get("artifact") if isinstance(preflight.get("artifact"), dict) else {}
+    target = preflight.get("target") if isinstance(preflight.get("target"), dict) else {}
+    records = artifact.get("records") if isinstance(artifact.get("records"), list) else []
+    columns = artifact.get("columns") if isinstance(artifact.get("columns"), list) else []
+
+    target_db = str(target.get("db") or "")
+    target_path = Path(target_db)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    restore_tag = stamp()
+    rollback_manifest_path = target_path.parent / f"{target_path.name}.restore-{restore_tag}.rollback.json"
+    restore_receipt_path = target_path.parent / f"{target_path.name}.restore-{restore_tag}.receipt.json"
+
+    target_exists_before = bool(target.get("exists"))
+    target_rows_before = int(target.get("observations_rows") or 0)
+    table_created = False
+
+    rollback_manifest = {
+        "schema": "openclaw-mem.canonical-capsule.restore.rollback-manifest.v1",
+        "created_at": utc_now(),
+        "status": "planned",
+        "capsule_dir": str(capsule_dir),
+        "capsule_id": artifact.get("manifest", {}).get("capsule_id") if isinstance(artifact.get("manifest"), dict) else None,
+        "target_db": target_db,
+        "preconditions": {
+            "target_observations_rows_before": target_rows_before,
+            "target_table_status_before": target.get("table_status"),
+            "isolated_target_required": True,
+        },
+        "planned": {
+            "rows_to_append": len(records),
+            "append_only": True,
+            "same_engine_required": True,
+        },
+        "rollback_actions": [
+            {
+                "action": "delete_target_db_file" if not target_exists_before else "delete_all_observations_rows",
+                "target": target_db,
+                "sql": "DELETE FROM observations;" if target_exists_before else None,
+                "guard": "valid only because preflight required target observations rows = 0 before apply",
+            }
+        ],
+    }
+    write_json(rollback_manifest_path, rollback_manifest)
+
+    applied_rows = 0
+    readback_records: List[Dict[str, Any]] = []
+    readback_sha = None
+
+    conn = sqlite3.connect(target_db)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+
+        if target.get("table_status") in {"missing_target_db", "missing_observations_table"}:
+            create_sql = _build_observations_create_sql(columns, records)
+            conn.execute(create_sql)
+            table_created = True
+
+        quoted_cols = ", ".join(_quote_ident(col) for col in columns)
+        placeholders = ", ".join("?" for _ in columns)
+        insert_sql = f"INSERT INTO observations ({quoted_cols}) VALUES ({placeholders})"
+
+        for record in records:
+            values = [_canonical_to_sql_value(record.get(col)) for col in columns]
+            conn.execute(insert_sql, values)
+            applied_rows += 1
+
+        order_by: List[str] = []
+        if "id" in columns:
+            order_by.append(f"{_quote_ident('id')} ASC")
+        if "ts" in columns:
+            order_by.append(f"{_quote_ident('ts')} ASC")
+        if not order_by:
+            order_by.append("rowid ASC")
+
+        read_sql = f"SELECT {quoted_cols} FROM observations ORDER BY {', '.join(order_by)}"
+        rows = conn.execute(read_sql).fetchall()
+        readback_records = [{col: _jsonable_sql_value(row[col]) for col in columns} for row in rows]
+
+        if len(readback_records) != len(records):
+            raise RuntimeError(
+                f"readback row count mismatch after apply: expected={len(records)} actual={len(readback_records)}"
+            )
+
+        readback_sha = _sha256_jsonl_records(readback_records, columns)
+        expected_sha = str(artifact.get("observations_sha256") or "")
+        if expected_sha and readback_sha != expected_sha:
+            raise RuntimeError(
+                "readback digest mismatch after apply "
+                f"(expected={expected_sha} actual={readback_sha})"
+            )
+
+        if readback_records != records:
+            raise RuntimeError("readback canonical rows differ from source observations")
+
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        rollback_manifest["status"] = "failed"
+        rollback_manifest["failed_at"] = utc_now()
+        rollback_manifest["failure"] = {
+            "error": "restore_apply_failed",
+            "message": str(exc),
+        }
+        write_json(rollback_manifest_path, rollback_manifest)
+
+        failure_receipt = {
+            "schema": "openclaw-mem.canonical-capsule.restore.receipt.v1",
+            "ok": False,
+            "command": "restore",
+            "mode": "apply",
+            "applied_at": utc_now(),
+            "capsule_dir": str(capsule_dir),
+            "target_db": target_db,
+            "mutation": "append_only",
+            "rows_planned": len(records),
+            "rows_applied": applied_rows,
+            "table_created": table_created,
+            "readback": {
+                "ok": False,
+                "rule": "canonical_columns_ordered_exact",
+                "expected_rows": len(records),
+                "actual_rows": len(readback_records),
+                "expected_sha256": artifact.get("observations_sha256"),
+                "actual_sha256": readback_sha,
+            },
+            "rollback_manifest_path": str(rollback_manifest_path),
+            "error": "restore_apply_failed",
+            "message": str(exc),
+        }
+        write_json(restore_receipt_path, failure_receipt)
+        return {
+            "ok": False,
+            "error": "restore_apply_failed",
+            "message": str(exc),
+            "rollback_manifest_path": str(rollback_manifest_path),
+            "restore_receipt_path": str(restore_receipt_path),
+            "apply_receipt": failure_receipt,
+        }
+    finally:
+        conn.close()
+
+    target_rows_after = target_rows_before + applied_rows
+    rollback_manifest["status"] = "applied"
+    rollback_manifest["applied_at"] = utc_now()
+    rollback_manifest["applied"] = {
+        "rows_applied": applied_rows,
+        "target_rows_before": target_rows_before,
+        "target_rows_after": target_rows_after,
+        "table_created": table_created,
+    }
+    write_json(rollback_manifest_path, rollback_manifest)
+
+    success_receipt = {
+        "schema": "openclaw-mem.canonical-capsule.restore.receipt.v1",
+        "ok": True,
+        "command": "restore",
+        "mode": "apply",
+        "applied_at": utc_now(),
+        "capsule_dir": str(capsule_dir),
+        "capsule_id": artifact.get("manifest", {}).get("capsule_id") if isinstance(artifact.get("manifest"), dict) else None,
+        "target_db": target_db,
+        "mutation": "append_only",
+        "table_created": table_created,
+        "target_existed_before": target_exists_before,
+        "target_rows_before": target_rows_before,
+        "target_rows_after": target_rows_after,
+        "rows_applied": applied_rows,
+        "readback": {
+            "ok": True,
+            "rule": "canonical_columns_ordered_exact",
+            "expected_rows": len(records),
+            "actual_rows": len(readback_records),
+            "expected_sha256": artifact.get("observations_sha256"),
+            "actual_sha256": readback_sha,
+        },
+        "rollback_manifest_path": str(rollback_manifest_path),
+        "topology": "new_isolated_target_only",
+    }
+    write_json(restore_receipt_path, success_receipt)
+
+    return {
+        "ok": True,
+        "rollback_manifest_path": str(rollback_manifest_path),
+        "restore_receipt_path": str(restore_receipt_path),
+        "apply_receipt": success_receipt,
+    }
+
+
+def cmd_restore(args: argparse.Namespace) -> int:
+    capsule_dir = args.capsule.expanduser().resolve()
+    verify_summary = verify_capsule(capsule_dir)
+    if not bool(verify_summary.get("ok")):
+        if bool(getattr(args, "json", False)):
+            print(json.dumps(verify_summary, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps(verify_summary, ensure_ascii=False, indent=2))
+        return 1
+
+    apply_mode = bool(getattr(args, "apply", False))
+    preflight = _build_restore_preflight(
+        capsule_dir=capsule_dir,
+        db_raw=getattr(args, "db", None),
+        db_explicit=bool(getattr(args, "db", None)),
+        apply_mode=apply_mode,
+    )
+    summary = preflight.get("summary") if isinstance(preflight.get("summary"), dict) else {}
+    summary["verify"] = verify_summary
+
+    if not bool(summary.get("ok")):
+        if bool(getattr(args, "json", False)):
+            print(json.dumps(summary, ensure_ascii=False, indent=2))
+        else:
+            print(_render_restore_text(summary), end="")
+        return 2
+
+    if not apply_mode:
+        if bool(getattr(args, "json", False)):
+            print(json.dumps(summary, ensure_ascii=False, indent=2))
+        else:
+            print(_render_restore_text(summary), end="")
+        return 0
+
+    apply_out = _apply_canonical_restore(capsule_dir=capsule_dir, preflight=preflight)
+    summary["ok"] = bool(apply_out.get("ok"))
+    summary["apply"] = apply_out.get("apply_receipt")
+    summary["rollback_manifest_path"] = apply_out.get("rollback_manifest_path")
+    summary["restore_receipt_path"] = apply_out.get("restore_receipt_path")
+    if not bool(apply_out.get("ok")):
+        summary["error"] = apply_out.get("error")
+        summary["message"] = apply_out.get("message")
+
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+    else:
+        print(_render_restore_text(summary), end="")
+    return 0 if bool(apply_out.get("ok")) else 1
+
+
 def _quote_ident(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 
@@ -843,8 +1581,9 @@ def _canonical_manifest_preview(db_path: str, *, planned_dir: str) -> Dict[str, 
             "manifest_written": False,
         },
         "restore": {
-            "supported": False,
-            "reason": "restore/import is not implemented yet for capsule canonical lane",
+            "supported": True,
+            "mode": "isolated_target_append_only",
+            "reason": "restore is bounded to isolated/new target store, same-engine, append-only replay",
         },
         "migration": {
             "supported": False,
@@ -930,7 +1669,7 @@ def _write_export_canonical_artifact(*, db_path: str, artifact_dir: Path) -> Dic
 
         observations_sha = sha256_file(observations_path)
         index_payload = {
-            "schema": "openclaw-mem.canonical-capsule.index.v1",
+            "schema": CANONICAL_INDEX_SCHEMA,
             "generated_at": utc_now(),
             "rows": observations_count,
             "columns": columns,
@@ -948,7 +1687,7 @@ def _write_export_canonical_artifact(*, db_path: str, artifact_dir: Path) -> Dic
         write_json(index_path, index_payload)
 
         provenance_payload = {
-            "schema": "openclaw-mem.canonical-capsule.provenance.v1",
+            "schema": CANONICAL_PROVENANCE_SCHEMA,
             "generated_at": utc_now(),
             "source": {
                 "db": db_path,
@@ -956,7 +1695,7 @@ def _write_export_canonical_artifact(*, db_path: str, artifact_dir: Path) -> Dic
                 "table_status": table_status,
             },
             "non_goals": {
-                "restore": "not_implemented",
+                "live_target_restore": "not_supported",
                 "cross_store_migration": "not_supported",
                 "merge": "not_supported",
             },
@@ -974,8 +1713,8 @@ def _write_export_canonical_artifact(*, db_path: str, artifact_dir: Path) -> Dic
             )
 
         manifest = {
-            "schema": "openclaw-mem.canonical-capsule.v1",
-            "capsule_version": 1,
+            "schema": CANONICAL_MANIFEST_SCHEMA,
+            "capsule_version": CANONICAL_CAPSULE_VERSION,
             "capsule_id": artifact_dir.name,
             "exported_at": utc_now(),
             "contract_mode": "canonical_export_write",
@@ -992,8 +1731,9 @@ def _write_export_canonical_artifact(*, db_path: str, artifact_dir: Path) -> Dic
             "files": file_entries,
             "integrity_hash": file_set_integrity_hash(file_entries),
             "restore": {
-                "supported": False,
-                "reason": "restore/import CLI is not implemented in this slice",
+                "supported": True,
+                "mode": "isolated_target_append_only",
+                "reason": "restore is bounded to isolated/new target store, same-engine, append-only replay",
             },
             "migration": {
                 "supported": False,
@@ -1053,6 +1793,7 @@ def _render_export_canonical_text(summary: Dict[str, Any]) -> str:
             "## Restore status",
             "",
             f"- Supported: {restore.get('supported')}",
+            f"- Mode: {restore.get('mode')}",
             f"- Reason: {restore.get('reason')}",
             "",
             "## Notes",
@@ -1065,6 +1806,7 @@ def _render_export_canonical_text(summary: Dict[str, Any]) -> str:
     else:
         lines.append("- Canonical artifact was written with manifest/index/provenance structure.")
         lines.append("- Self-verify passed for declared files.")
+        lines.append("- Use `openclaw-mem capsule restore --dry-run|--apply` for bounded isolated replay.")
     return "\n".join(lines) + "\n"
 
 
@@ -1084,8 +1826,8 @@ def cmd_export_canonical(args: argparse.Namespace) -> int:
             "db": db_path,
             "planned_output": planned_path,
             "manifest": manifest,
-            "restore_supported": False,
-            "restore_message": "restore/import is not implemented yet",
+            "restore_supported": True,
+            "restore_message": "restore is bounded to isolated/new target store, same-engine, append-only replay",
             "archive_written": False,
             "topology": "unchanged",
         }
@@ -1107,8 +1849,8 @@ def cmd_export_canonical(args: argparse.Namespace) -> int:
         "manifest_path": result["manifest_path"],
         "manifest": result["manifest"],
         "verify": result["verify"],
-        "restore_supported": False,
-        "restore_message": "restore/import is not implemented yet",
+        "restore_supported": True,
+        "restore_message": "restore is bounded to isolated/new target store, same-engine, append-only replay",
         "archive_written": True,
         "topology": "unchanged",
     }

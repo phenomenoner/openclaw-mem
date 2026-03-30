@@ -154,6 +154,11 @@ openclaw-mem capsule diff "$CAPSULE" --db "$DB" --write-receipt --write-report-m
 CANONICAL_OUT=/tmp/openclaw-mem-canonical-export
 openclaw-mem capsule export-canonical --db "$DB" --to "$CANONICAL_OUT" --json
 openclaw-mem capsule export-canonical --db "$DB" --dry-run --to "$CANONICAL_OUT" --json
+
+CANONICAL=$(find "$CANONICAL_OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
+ISOLATED_DB=/tmp/openclaw-mem-restore-isolated.sqlite
+openclaw-mem capsule restore "$CANONICAL" --dry-run --db "$ISOLATED_DB" --json
+openclaw-mem capsule restore "$CANONICAL" --apply --db "$ISOLATED_DB" --json
 ```
 
 `seal` creates a small pack capsule directory with:
@@ -173,20 +178,26 @@ openclaw-mem capsule export-canonical --db "$DB" --dry-run --to "$CANONICAL_OUT"
 
 `inspect` is the forward-compat/readability companion command:
 - verifies first and shows capsule metadata + bundle preview
-- marks current v0 pack capsules as portable audit artifacts, not restore artifacts
+- marks v0 pack capsules as portable audit artifacts (not restore artifacts)
+- marks canonical capsules as restorable only under bounded isolated-target rules
 
 `diff` is the read-only comparison companion command:
 - verifies the capsule first
-- compares capsule items against a target governed store
+- compares pack capsule items against a target governed store
 - reports `present` vs `missing` with **no mutation**
 
-`export-canonical` is now a bounded real writer:
+`export-canonical` is the canonical artifact writer:
 - non-dry-run writes a versioned canonical artifact directory and self-verifies file integrity
-- `--dry-run` still emits a manifest contract preview with planned layout/path
-- keeps restore/import explicitly unsupported
-- keeps cross-store migration/merge out of scope
+- `--dry-run` emits a manifest contract preview with planned layout/path
+- preserves explicit non-goals for migration/merge/live-target restore
 
-Compatibility paths still work:
+`restore` is the bounded replay lane for canonical artifacts only:
+- `--dry-run` performs preflight contract + conflict planning with **no mutation**
+- `--apply` is allowed only for isolated/new target store, same-engine, append-only replay
+- rejects non-canonical schema/version or live-risky targets cleanly
+- emits rollback manifest + restore receipt + readback verifier proof
+
+Compatibility paths still work (including `restore`):
 - `openclaw-mem-pack-capsule ...` (wrapper command)
 - `python3 ./tools/pack_capsule.py ...` (thin delegator)
 

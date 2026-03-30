@@ -114,6 +114,11 @@ openclaw-mem capsule diff "$CAPSULE" --db "$DB" --write-receipt --write-report-m
 CANONICAL_OUT=/tmp/openclaw-mem-canonical-export
 openclaw-mem capsule export-canonical --db "$DB" --to "$CANONICAL_OUT" --json
 openclaw-mem capsule export-canonical --db "$DB" --dry-run --to "$CANONICAL_OUT" --json
+
+CANONICAL=$(find "$CANONICAL_OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
+ISOLATED_DB=/tmp/openclaw-mem-restore-isolated.sqlite
+openclaw-mem capsule restore "$CANONICAL" --dry-run --db "$ISOLATED_DB" --json
+openclaw-mem capsule restore "$CANONICAL" --apply --db "$ISOLATED_DB" --json
 ```
 
 Expected `seal` files:
@@ -131,7 +136,11 @@ Expected `export-canonical` artifact files (inside the timestamped dir under `--
 - `index.json`
 - `provenance.json`
 
-`export-canonical` now writes a bounded canonical artifact on non-dry-run and keeps `--dry-run` as contract preview; restore/import remains out of scope.
+Expected `restore --apply` outputs (next to target `--db`):
+- `<target>.restore-<stamp>.rollback.json`
+- `<target>.restore-<stamp>.receipt.json`
+
+`export-canonical` writes the canonical artifact; `restore` replays that artifact only under bounded safety rules (isolated/new target, same-engine, append-only, no live-target semantics).
 
 Compatibility lanes remain available if needed:
 - `openclaw-mem-pack-capsule ...`

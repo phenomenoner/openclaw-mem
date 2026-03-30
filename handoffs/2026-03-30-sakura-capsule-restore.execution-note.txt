@@ -1,0 +1,29 @@
+Sakura execution note — canonical capsule restore (isolated replay slice)
+
+Blade map:
+1) Add restore execution contract and parser lane: `openclaw-mem capsule restore <capsule> --dry-run|--apply --db <target>`.
+2) Implement dry-run preflight for canonical artifacts only (schema/version validation + target conflict plan), zero mutation.
+3) Implement bounded apply only for isolated/new target store: same-engine assumptions, append-only inserts, canonical artifact only.
+4) Add rollback + receipt surfaces and readback verifier so replay proof is explicit and auditable.
+5) Update docs (README / QUICKSTART / docs/portable-pack-capsules.md / docs/index.md) to match bounded restore posture.
+6) Write follow-up queue note for non-Sakura scope (live-target policy, migration/merge/encryption, drill cadence).
+7) Run tests/smokes, then commit/push with receipts.
+
+Exact safety boundary:
+- No live-target restore semantics.
+- No overwrite/merge/migrate/upload/encryption/registry work.
+- Apply allowed only when target is isolated/new (empty observations table or missing table).
+- Canonical artifacts only (`openclaw-mem.canonical-capsule.v1`, capsule_version=1).
+- Same-engine only guardrail through canonical schema + required observations columns contract.
+
+Verifier plan:
+- Unit tests for parser exposure, dry-run preflight contract, unsupported schema/version rejection, live-risk rejection, and isolated apply success path.
+- CLI smokes on host command surface:
+  - `openclaw-mem capsule restore --dry-run ...`
+  - `openclaw-mem capsule restore --apply ...`
+- Apply receipt must include rollback manifest path + readback verifier result with expected vs actual row/digest checks.
+
+Stop-loss:
+- Max 2 meaningful attempts per root-cause.
+- Stop/report if >15 minutes without core restore artifact (preflight contract or apply receipt path).
+- If restore path demands broad store refactor or ambiguous rollback semantics, narrow scope and return blocker report.

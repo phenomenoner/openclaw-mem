@@ -10556,6 +10556,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
 
+    if getattr(args, "cmd", None) == "capsule":
+        # Capsule commands own their DB semantics (including explicit dry-run/apply guards).
+        # Avoid global DB coercion + _connect side effects here.
+        args.json = bool(getattr(args, "json", False) or getattr(args, "json_global", False))
+        conn = sqlite3.connect(":memory:")
+        try:
+            args.func(conn, args)
+        finally:
+            conn.close()
+        return
+
     # Merge global flags (before subcommand) + per-command flags (after subcommand)
     base_db = os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB)
     args.db = getattr(args, "db", None) or getattr(args, "db_global", None) or base_db
