@@ -18,8 +18,32 @@ Additional trusted references (for lifecycle/decay):
 - 2026-03-04 — Context Budget Sidecar (tool output offload + soft compaction continuity)
   - `docs/archive/thought-links/2026-03-04_context-budget-sidecar-openclaw-token-cost.md`
   - Spec: `docs/specs/context-budget-sidecar-v0.md`
+- 2026-03-30 — memvid guarded adoption (portable capsule + seal/verify/diff, not stack replacement)
+  - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_memvid_guarded-adoption_roi-cut_and_capsule-slice.md`
+  - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_capsule-diff_chosen-over-restore.md`
+  - Product doc: `portable-pack-capsules.md`
 
-## 1) Observational Memory → design constraints we adopt
+## 1) memvid / portable capsule pattern → what we take and what we refuse
+
+Source (external; product/reference only, not an authority surface):
+- `memvid/memvid`: <https://github.com/memvid/memvid>
+
+**What we take (portable pattern):**
+- a **portable capsule** is a useful product surface when operators want to move, archive, or re-check a bounded memory artifact
+- explicit **seal / verify** lifecycle is worth copying
+- read-only **diff** is a safer next step than jumping straight to import/merge
+
+**What we refuse:**
+- treating a portable capsule as the new canonical governed store
+- collapsing provenance/trust tiers/graph families into one generalized blob
+- shipping restore/merge theater before canonical observation fidelity exists in the artifact contract
+
+**How it lands in openclaw-mem:**
+- `tools/pack_capsule.py` provides `seal`, `verify`, and `diff`
+- `diff` is intentionally read-only and audit-first
+- future restore/import work is deferred until a stronger canonical artifact contract exists
+
+## 2) Observational Memory → design constraints we adopt
 
 **What we take (pattern, not branding):**
 - **Text-first derived memory layer**: a compact “observation log” that’s easy to diff/debug.
@@ -38,7 +62,7 @@ Additional trusted references (for lifecycle/decay):
 - Compression must be **fail-open** (a bad compressor cannot break ingest/recall).
 - Anything committed/shared must remain **redaction-safe** (aggregate-only receipts by default).
 
-## 2) LongMemEval → benchmark strategy constraints we adopt
+## 3) LongMemEval → benchmark strategy constraints we adopt
 
 LongMemEval tests long-term interactive memory across categories that map well to our roadmap:
 - **Information Extraction** → capture + recall stability
@@ -54,7 +78,7 @@ LongMemEval tests long-term interactive memory across categories that map well t
   - observational compression (stable log text)
   - (later) live adapter chaining: openclaw-mem → memory backend
 
-## 3) Concrete implementation hooks (where this lands)
+## 4) Concrete implementation hooks (where this lands)
 
 - `docs/architecture.md`:
   - Context Packer includes an **observational-memory mode** variant (two-block window).
@@ -62,13 +86,13 @@ LongMemEval tests long-term interactive memory across categories that map well t
   - retrieval reports should include **per-question-type breakdown**
   - the compare runner should support an **observational compression arm** (derived dataset) as a cheap, reproducible proxy.
 
-## 4) What we deliberately do *not* claim (yet)
+## 5) What we deliberately do *not* claim (yet)
 
 - We do not claim SoTA LongMemEval scores.
 - We do not claim observational compression beats retrieval.
 - We only claim what we can reproduce with artifacts (manifests + receipts + compare reports).
 
-## 5) OpenClaw SuperMemory (SQLite FTS) → ops + safety takeaways
+## 6) OpenClaw SuperMemory (SQLite FTS) → ops + safety takeaways
 
 Source (external, medium trust; small repo, concept clear):
 - `openclaw-supermemory`: <https://github.com/yedanyagamiai/openclaw-supermemory>
@@ -88,7 +112,7 @@ Source (external, medium trust; small repo, concept clear):
 - Add an explicit injected-context marker + ignore-list in capture/harvest.
 - Add an optional FTS5 lexical fallback lane for `--no-embed` runs.
 
-## 6) QMD (hybrid local search engine) → retrieval router + benchmark hooks
+## 7) QMD (hybrid local search engine) → retrieval router + benchmark hooks
 
 Source (external; high concept clarity):
 - `tobi/qmd`: <https://github.com/tobi/qmd>
@@ -120,7 +144,7 @@ A local “docs-first” search engine for markdown/transcripts that does **FTS5
 - Local GGUF model downloads + rerank latency can be heavy; quality-first is fine, but we need hard caps and a clear “disable rerank” path.
 - “Docs-first” indexing is great for markdown, but we must ensure redaction-safe exports when sourcing from private session transcripts.
 
-## 7) OpenViking (context database / filesystem paradigm) → observability + layered loading reference
+## 8) OpenViking (context database / filesystem paradigm) → observability + layered loading reference
 
 Source (external; concept clarity high):
 - `volcengine/OpenViking`: <https://github.com/volcengine/OpenViking>
@@ -144,7 +168,7 @@ A “context database” for agents that models **resources + memory + skills** 
 **Scope note (CK decision):**
 - Treat OpenViking as **thought-link only** for now (we are not committing to it as a backend/adapter arm yet).
 
-## 8) Reference-based decay ("forgetting curve") → lifecycle governance hook
+## 9) Reference-based decay ("forgetting curve") → lifecycle governance hook
 
 Key takeaway:
 - Retention should be governed by **use** (recency/frequency), not a fixed “delete after N days since write” rule.
@@ -161,7 +185,7 @@ Trusted references:
 Untrusted inspiration (idea source; treat as a field note):
 - X thread (xiyu): <https://x.com/ohxiyu/status/2022924956594806821>
 
-## 9) MCP Tool Search (Claude Code) → dynamic discovery + “Skill Card / Manual” split
+## 10) MCP Tool Search (Claude Code) → dynamic discovery + “Skill Card / Manual” split
 
 Source (external; concept clarity high):
 - 好豪：*MCP Tool Search：Claude Code 如何終結 Token 消耗大爆炸* <https://haosquare.com/mcp-tool-search-claude-code/>
@@ -185,7 +209,7 @@ Source (external; concept clarity high):
   - explicit `outputs` + receipt rules
 - Provide a small helper surface (CLI or adapter) that returns top-N card matches as JSON, then fetches the chosen manual on demand.
 
-## 10) Trait / interface-first (systems kernel mindset) → contracts over vibes
+## 11) Trait / interface-first (systems kernel mindset) → contracts over vibes
 
 Source (external; concept clarity high):
 - `theonlyhennygod/zeroclaw`: <https://github.com/theonlyhennygod/zeroclaw>
@@ -199,7 +223,7 @@ Source (external; concept clarity high):
 - “Memory governance” is our control-plane; backends remain swappable behind adapters.
 - Roadmap candidates: strict config (`additionalProperties:false`), stable JSON schemas for receipts, and a `profile`/stats surface.
 
-## 11) PAI (continuous learning + self-upgrade loop) → "learning records" as a first-class memory type
+## 12) PAI (continuous learning + self-upgrade loop) → "learning records" as a first-class memory type
 
 Source (external; concept clarity high):
 - Daniel Miessler — *Personal AI Infrastructure (PAI)*: <https://github.com/danielmiessler/Personal_AI_Infrastructure>
@@ -226,7 +250,7 @@ Source (external; concept clarity high):
 - Infinite self-ingest loops (context blocks re-captured as learnings).
   - Mitigate with explicit injected-context markers + ignore-lists (see SuperMemory takeaways above).
 
-## 12) Lossless Context Management (LCM) / lossless-claw → fresh-tail protection + provenance + “expand” tooling reference
+## 13) Lossless Context Management (LCM) / lossless-claw → fresh-tail protection + provenance + “expand” tooling reference
 
 Source (external; concept clarity high):
 - `martian-engineering/lossless-claw`: <https://github.com/martian-engineering/lossless-claw>
@@ -248,3 +272,7 @@ A pluggable context engine for OpenClaw that stores all session messages in SQLi
 See also:
 - `docs/context-pack.md` (ContextPack v1 direction)
 - `docs/architecture.md` (Context Packer)
+
+
+
+

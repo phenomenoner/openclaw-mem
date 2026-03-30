@@ -101,6 +101,7 @@ def parse_args() -> argparse.Namespace:
     diff.add_argument("capsule", type=Path, help="Path to capsule directory")
     diff.add_argument("--db", help="Target SQLite DB path (default: OPENCLAW_MEM_DB or host default)")
     diff.add_argument("--write-receipt", action="store_true", help="Write diff.latest.json into the capsule directory")
+    diff.add_argument("--write-report-md", action="store_true", help="Write diff.latest.md into the capsule directory")
 
     return p.parse_args()
 
@@ -319,6 +320,57 @@ def verify_capsule(capsule_dir: Path) -> Dict[str, Any]:
     }
 
 
+def render_diff_report(summary: Dict[str, Any]) -> str:
+    counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+    receipt = summary.get("receipt") if isinstance(summary.get("receipt"), dict) else {}
+    present = summary.get("present") if isinstance(summary.get("present"), list) else []
+    missing = summary.get("missing") if isinstance(summary.get("missing"), list) else []
+
+    lines: List[str] = []
+    lines.append("# Pack Capsule Diff Report")
+    lines.append("")
+    lines.append(f"- Capsule: `{summary.get('capsule_dir')}`")
+    lines.append(f"- Target DB: `{summary.get('db')}`")
+    lines.append(f"- Match rule: {receipt.get('match_rule')}")
+    lines.append(f"- Target store status: `{receipt.get('target_store_table_status')}`")
+    lines.append(f"- Mutation: `{receipt.get('mutation')}`")
+    lines.append("")
+    lines.append("## Counts")
+    lines.append("")
+    lines.append(f"- Capsule items: {counts.get('capsule_items', 0)}")
+    lines.append(f"- Store observations: {counts.get('store_observations', 0)}")
+    lines.append(f"- Present: {counts.get('present', 0)}")
+    lines.append(f"- Missing: {counts.get('missing', 0)}")
+    lines.append("")
+
+    lines.append("## Present")
+    lines.append("")
+    if present:
+        for item in present:
+            lines.append(f"- [{item.get('recordRef')}] `{item.get('kind')}` {item.get('summary')}")
+            matches = item.get('matches') if isinstance(item.get('matches'), list) else []
+            for match in matches[:5]:
+                if isinstance(match, dict):
+                    lines.append(f"  - match obs:{match.get('id')} ts={match.get('ts')} :: {match.get('summary')}")
+    else:
+        lines.append("- none")
+    lines.append("")
+
+    lines.append("## Missing")
+    lines.append("")
+    if missing:
+        for item in missing:
+            lines.append(f"- [{item.get('recordRef')}] `{item.get('kind')}` {item.get('summary')}")
+    else:
+        lines.append("- none")
+    lines.append("")
+    lines.append("## Notes")
+    lines.append("")
+    lines.append("- This is a read-only audit report. It does not mutate the target store.")
+    lines.append("- A future restore/import line must prove canonical observation fidelity first; this report does not claim restore safety.")
+    return "\n".join(lines) + "\n"
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     capsule_dir = args.capsule.expanduser().resolve()
     summary = verify_capsule(capsule_dir)
@@ -409,6 +461,10 @@ def cmd_diff(args: argparse.Namespace) -> int:
     if getattr(args, "write_receipt", False):
         write_json(capsule_dir / "diff.latest.json", summary)
         summary["diff_receipt_path"] = str(capsule_dir / "diff.latest.json")
+    if getattr(args, "write_report_md", False):
+        report_path = capsule_dir / "diff.latest.md"
+        report_path.write_text(render_diff_report(summary), encoding="utf-8")
+        summary["diff_report_path"] = str(report_path)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 

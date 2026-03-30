@@ -32,6 +32,7 @@ Two-plane framing:
 - [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md) — canonical before/after artifact
 - [About openclaw-mem](about.md) — product scope, audience, and boundaries
 - [Quickstart](quickstart.md) — fastest local proof from a fresh clone
+- [Portable pack capsules](portable-pack-capsules.md) — seal / verify / diff the memvid-inspired portable artifact lane
 - [Reality check & status](reality-check.md) — what is done, partial, and roadmap
 
 ## Proof artifacts

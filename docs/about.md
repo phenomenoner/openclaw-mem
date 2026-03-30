@@ -142,6 +142,7 @@ Start with the sidecar, prove the pack works, then expand.
 - [Home / docs index](index.md)
 - [Choose an install path](install-modes.md)
 - [Quickstart](quickstart.md)
+- [Portable pack capsules](portable-pack-capsules.md)
 - [Reality check & status](reality-check.md)
 - [Context pack](context-pack.md)
 - [Mem Engine reference](mem-engine.md)

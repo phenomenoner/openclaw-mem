@@ -1,0 +1,122 @@
+# Portable Pack Capsules
+
+`openclaw-mem` can package a governed pack into a small **portable capsule** without pretending that the capsule is the new source of truth.
+
+This is the memvid-inspired line we chose to adopt:
+- keep portability
+- keep receipts
+- keep provenance/trust governance outside the capsule itself
+
+## Why this exists
+
+A portable capsule is useful when you want to:
+- move a bounded pack between hosts
+- archive a specific recall result with integrity checks
+- compare a past capsule against a current governed store
+- produce a small audit artifact instead of replaying a whole retrieval live
+
+What it is **not**:
+- not a governed restore/import contract
+- not a replacement for `openclaw-mem` storage/governance
+- not a merge engine
+
+## Commands
+
+### 1) Seal a capsule
+
+```bash
+DB=/tmp/openclaw-mem-proof.sqlite
+OUT=/tmp/openclaw-mem-capsules/trust-aware-demo
+
+python3 ./tools/pack_capsule.py seal \
+  --db "$DB" \
+  --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
+  --pack-trust-policy exclude_quarantined_fail_open \
+  --stash-artifact \
+  --gzip-artifact \
+  --out "$OUT"
+```
+
+### 2) Verify capsule integrity
+
+```bash
+CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
+python3 ./tools/pack_capsule.py verify "$CAPSULE"
+```
+
+### 3) Diff the capsule against a target store (read-only)
+
+```bash
+python3 ./tools/pack_capsule.py diff \
+  "$CAPSULE" \
+  --db "$DB" \
+  --write-receipt \
+  --write-report-md
+```
+
+## Files you get
+
+After `seal`:
+- `manifest.json`
+- `bundle.json`
+- `bundle_text.md`
+- `trace.json` (when available)
+- `artifact_stash.json` (when artifact stash is enabled)
+
+After `diff --write-receipt --write-report-md`:
+- `diff.latest.json`
+- `diff.latest.md`
+
+## Boundary rules
+
+### `seal`
+- wraps `openclaw-mem pack --json --trace`
+- packages the result into a timestamped capsule directory
+- optional `artifact stash` is a receipt convenience, not a new storage system
+
+### `verify`
+- checks declared capsule files against `manifest.json`
+- validates sha256 + byte counts
+- fails on tamper/drift
+
+### `diff`
+- verifies first
+- compares capsule items to a target observation store
+- current match rule: normalized `kind + summary` exact match
+- emits `present` vs `missing`
+- **does not mutate** the target store
+
+## Why diff comes before restore
+
+We explicitly chose **diff before restore** because the current capsule captures pack-level selection output, not full canonical observation detail/provenance.
+
+So `diff` is an honest read-only audit/report lane.
+A future restore/import line would need a stronger canonical artifact contract first.
+
+## Verifier checklist
+
+### Same-store audit
+- seal from a test DB
+- verify passes
+- diff against the same DB → `present > 0`, `missing = 0`
+
+### Empty-store audit
+- diff against an empty/missing observations store → `missing > 0`
+- `target_store_table_status` should make the situation explicit
+
+### Tamper detection
+- modify `bundle_text.md`
+- verify should fail non-zero
+
+## Host wrapper
+
+This host also exposes a thin wrapper:
+
+```bash
+openclaw-mem-pack-capsule seal ...
+openclaw-mem-pack-capsule verify <capsule_dir>
+openclaw-mem-pack-capsule diff <capsule_dir> --db <path> --write-receipt --write-report-md
+```
+
+That wrapper simply forwards to:
+- `/root/.openclaw/workspace/openclaw-mem/tools/pack_capsule.py`

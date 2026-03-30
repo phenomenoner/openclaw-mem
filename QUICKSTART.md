@@ -108,7 +108,7 @@ python3 ./tools/pack_capsule.py seal \
 
 CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
 python3 ./tools/pack_capsule.py verify "$CAPSULE"
-python3 ./tools/pack_capsule.py diff "$CAPSULE" --db "$DB" --write-receipt
+python3 ./tools/pack_capsule.py diff "$CAPSULE" --db "$DB" --write-receipt --write-report-md
 ```
 
 Expected files:
@@ -118,6 +118,7 @@ Expected files:
 - `trace.json` (when available)
 - `artifact_stash.json` (when artifact stash is enabled)
 - `diff.latest.json` (when `diff --write-receipt` is used)
+- `diff.latest.md` (when `diff --write-report-md` is used)
 
 This is a thin helper slice over `openclaw-mem pack` + `openclaw-mem artifact stash`, and `diff` adds a read-only audit path before any future restore/import debate. Portability improves while citations/trace/rollback posture stay intact.
 
