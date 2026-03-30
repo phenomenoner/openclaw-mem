@@ -18,11 +18,12 @@ Additional trusted references (for lifecycle/decay):
 - 2026-03-04 — Context Budget Sidecar (tool output offload + soft compaction continuity)
   - `docs/archive/thought-links/2026-03-04_context-budget-sidecar-openclaw-token-cost.md`
   - Spec: `docs/specs/context-budget-sidecar-v0.md`
-- 2026-03-30 — memvid guarded adoption (portable capsule + seal/verify/diff/inspect, not stack replacement)
+- 2026-03-30 — memvid guarded adoption (portable capsule + seal/verify/diff/inspect/export-canonical, not stack replacement)
   - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_memvid_guarded-adoption_roi-cut_and_capsule-slice.md`
   - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_capsule-diff_chosen-over-restore.md`
   - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_canonical-restore-contract-brief.md`
   - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_export-canonical-contract-brief.md`
+  - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_export-canonical-writer_landed.md`
   - Product doc: `portable-pack-capsules.md`
 
 ## 1) memvid / portable capsule pattern → what we take and what we refuse

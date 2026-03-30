@@ -60,10 +60,12 @@ openclaw-mem capsule diff \
   --write-report-md
 ```
 
-### 5) Export canonical contract preview (dry-run only)
+### 5) Export canonical artifact (bounded write + dry-run preview)
 
 ```bash
-openclaw-mem capsule export-canonical --db "$DB" --dry-run --json
+CANONICAL_OUT=/tmp/openclaw-mem-canonical-export
+openclaw-mem capsule export-canonical --db "$DB" --to "$CANONICAL_OUT" --json
+openclaw-mem capsule export-canonical --db "$DB" --dry-run --to "$CANONICAL_OUT" --json
 ```
 
 ## Files you get
@@ -79,6 +81,12 @@ After `seal`:
 After `diff --write-receipt --write-report-md`:
 - `diff.latest.json`
 - `diff.latest.md`
+
+After `export-canonical` (non-dry-run; timestamped directory under `--to`):
+- `manifest.json` (`openclaw-mem.canonical-capsule.v1`)
+- `observations.jsonl`
+- `index.json`
+- `provenance.json`
 
 ## Boundary rules
 
@@ -104,11 +112,12 @@ After `diff --write-receipt --write-report-md`:
 - emits `present` vs `missing`
 - **does not mutate** the target store
 
-### `export-canonical --dry-run`
-- emits a canonical-manifest contract preview only
+### `export-canonical`
+- non-dry-run writes a versioned canonical artifact directory and runs self-verify
+- `--dry-run` emits canonical-manifest contract preview only
 - supports machine-readable JSON output (`--json`)
-- no archive or bundle write in this slice
 - explicitly states restore/import is not supported yet
+- explicitly keeps cross-store migration/merge out of scope
 
 ## Why inspect + diff come before restore
 
@@ -143,7 +152,8 @@ openclaw-mem-pack-capsule seal ...
 openclaw-mem-pack-capsule inspect <capsule_dir>
 openclaw-mem-pack-capsule verify <capsule_dir>
 openclaw-mem-pack-capsule diff <capsule_dir> --db <path> --write-receipt --write-report-md
-python3 ./tools/pack_capsule.py export-canonical --dry-run --json
+openclaw-mem-pack-capsule export-canonical --to <output_root> --json
+python3 ./tools/pack_capsule.py export-canonical --dry-run --to <output_root> --json
 ```
 
 Both wrappers delegate to the same implementation as `openclaw-mem capsule ...`.

@@ -110,10 +110,13 @@ CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
 openclaw-mem capsule inspect "$CAPSULE"
 openclaw-mem capsule verify "$CAPSULE"
 openclaw-mem capsule diff "$CAPSULE" --db "$DB" --write-receipt --write-report-md
-openclaw-mem capsule export-canonical --db "$DB" --dry-run --json
+
+CANONICAL_OUT=/tmp/openclaw-mem-canonical-export
+openclaw-mem capsule export-canonical --db "$DB" --to "$CANONICAL_OUT" --json
+openclaw-mem capsule export-canonical --db "$DB" --dry-run --to "$CANONICAL_OUT" --json
 ```
 
-Expected files:
+Expected `seal` files:
 - `manifest.json`
 - `bundle.json`
 - `bundle_text.md`
@@ -122,7 +125,13 @@ Expected files:
 - `diff.latest.json` (when `diff --write-receipt` is used)
 - `diff.latest.md` (when `diff --write-report-md` is used)
 
-`export-canonical --dry-run` currently emits only a manifest contract preview (no archive write; restore/import not supported yet).
+Expected `export-canonical` artifact files (inside the timestamped dir under `--to`):
+- `manifest.json`
+- `observations.jsonl`
+- `index.json`
+- `provenance.json`
+
+`export-canonical` now writes a bounded canonical artifact on non-dry-run and keeps `--dry-run` as contract preview; restore/import remains out of scope.
 
 Compatibility lanes remain available if needed:
 - `openclaw-mem-pack-capsule ...`

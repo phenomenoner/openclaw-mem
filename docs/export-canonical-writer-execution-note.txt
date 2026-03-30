@@ -1,0 +1,38 @@
+export-canonical writer — execution note (thin real artifact slice)
+
+Chosen artifact:
+- Directory artifact written by `openclaw-mem capsule export-canonical`.
+- Versioned schema: `openclaw-mem.canonical-capsule.v1`.
+- Default directory name: `<UTCSTAMP>_canonical-v1` (under `--to` when provided, else CWD).
+
+Planned file layout:
+- manifest.json
+  - schema/version, source DB stats, restore stance (`supported=false`), file checksums/bytes, integrity hash.
+- observations.jsonl
+  - row-level export of `observations` table records (dynamic column set from live DB schema).
+- index.json
+  - export index for future restore design (column list, row counts, id/ts ranges, kind histogram, observation file digest).
+- provenance.json
+  - export command/runtime provenance + explicit non-goals for this slice.
+
+Boundaries kept:
+- Keep `--dry-run` behavior and contract output.
+- No restore/import implementation.
+- No migration/cross-store promises.
+- No encryption/registry/upload/merge.
+
+Integrity/self-verify plan:
+- Compute sha256+bytes for each artifact file and store in manifest.
+- Run internal verify pass immediately after write; fail command if verification fails.
+
+Main risks:
+1) Existing `inspect` assumes pack capsule `bundle.json`.
+   - Mitigation: make inspect schema-aware (pack capsule vs canonical capsule).
+2) Unknown `observations` schema drift across hosts.
+   - Mitigation: introspect columns dynamically and export raw rows deterministically.
+3) Path semantics (`--to` file vs dir) confusion.
+   - Mitigation: explicit resolver rules + surfaced `artifact_dir` in output.
+
+Stop-loss:
+- Max 2 meaningful attempts per root cause.
+- Stop early if writer format choice expands into a large framework/abstraction decision.

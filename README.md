@@ -150,10 +150,13 @@ CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
 openclaw-mem capsule inspect "$CAPSULE"
 openclaw-mem capsule verify "$CAPSULE"
 openclaw-mem capsule diff "$CAPSULE" --db "$DB" --write-receipt --write-report-md
-openclaw-mem capsule export-canonical --db "$DB" --dry-run --json
+
+CANONICAL_OUT=/tmp/openclaw-mem-canonical-export
+openclaw-mem capsule export-canonical --db "$DB" --to "$CANONICAL_OUT" --json
+openclaw-mem capsule export-canonical --db "$DB" --dry-run --to "$CANONICAL_OUT" --json
 ```
 
-It creates a small capsule directory with:
+`seal` creates a small pack capsule directory with:
 - `manifest.json`
 - `bundle.json`
 - `bundle_text.md`
@@ -161,6 +164,12 @@ It creates a small capsule directory with:
 - `artifact_stash.json` (when artifact stash is enabled)
 - `diff.latest.json` (when `diff --write-receipt` is used)
 - `diff.latest.md` (when `diff --write-report-md` is used)
+
+`export-canonical` writes a separate timestamped canonical artifact directory under `--to` with:
+- `manifest.json` (`openclaw-mem.canonical-capsule.v1`)
+- `observations.jsonl` (row-level snapshot of the `observations` table)
+- `index.json` (counts/ranges/columns + digest pointers)
+- `provenance.json` (export provenance + explicit non-goals)
 
 `inspect` is the forward-compat/readability companion command:
 - verifies first and shows capsule metadata + bundle preview
@@ -171,11 +180,11 @@ It creates a small capsule directory with:
 - compares capsule items against a target governed store
 - reports `present` vs `missing` with **no mutation**
 
-`export-canonical --dry-run` is the honest next slice:
-- emits a manifest-only canonical export contract preview
-- supports machine-readable JSON output
-- explicitly states restore/import is not supported yet
-- writes no archive in this slice
+`export-canonical` is now a bounded real writer:
+- non-dry-run writes a versioned canonical artifact directory and self-verifies file integrity
+- `--dry-run` still emits a manifest contract preview with planned layout/path
+- keeps restore/import explicitly unsupported
+- keeps cross-store migration/merge out of scope
 
 Compatibility paths still work:
 - `openclaw-mem-pack-capsule ...` (wrapper command)

@@ -49,16 +49,50 @@ class TestCapsuleCli(unittest.TestCase):
             self.assertEqual(out["manifest"]["schema"], "openclaw-mem.pack-capsule.canonical-manifest.v1")
             self.assertEqual(out["manifest"]["source"]["observations_count"], 1)
 
-    def test_export_canonical_rejects_non_dry_run(self):
-        args = SimpleNamespace(dry_run=False, db=None, to=None, json=True)
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            rc = cmd_export_canonical(args)
+    def test_export_canonical_write_and_verify_inspect(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "mem.sqlite"
+            out_root = Path(td) / "exports"
 
-        self.assertEqual(rc, 2)
-        out = json.loads(buf.getvalue())
-        self.assertFalse(out["ok"])
-        self.assertEqual(out["error"], "dry_run_required")
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "CREATE TABLE observations (id INTEGER PRIMARY KEY, ts TEXT, kind TEXT, summary TEXT, scope TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO observations (ts, kind, summary, scope) VALUES (?, ?, ?, ?)",
+                ("2026-03-30T03:00:00Z", "fact", "portable capsule sample", "test"),
+            )
+            conn.commit()
+            conn.close()
+
+            export_buf = io.StringIO()
+            with redirect_stdout(export_buf):
+                rc = cmd_export_canonical(
+                    SimpleNamespace(dry_run=False, db=str(db_path), to=str(out_root), json=True)
+                )
+            self.assertEqual(rc, 0)
+            export_out = json.loads(export_buf.getvalue())
+            self.assertTrue(export_out["archive_written"])
+            artifact_dir = Path(export_out["artifact_dir"])
+            self.assertTrue((artifact_dir / "manifest.json").exists())
+            self.assertTrue((artifact_dir / "observations.jsonl").exists())
+            self.assertTrue((artifact_dir / "index.json").exists())
+            self.assertTrue((artifact_dir / "provenance.json").exists())
+
+            verify_buf = io.StringIO()
+            with redirect_stdout(verify_buf):
+                verify_rc = cmd_verify(SimpleNamespace(capsule=artifact_dir))
+            self.assertEqual(verify_rc, 0)
+            verify_out = json.loads(verify_buf.getvalue())
+            self.assertTrue(verify_out["ok"])
+
+            inspect_buf = io.StringIO()
+            with redirect_stdout(inspect_buf):
+                inspect_rc = cmd_inspect(SimpleNamespace(capsule=artifact_dir, json=True))
+            self.assertEqual(inspect_rc, 0)
+            inspect_out = json.loads(inspect_buf.getvalue())
+            self.assertEqual(inspect_out["schema"], "openclaw-mem.canonical-capsule.inspect.v1")
+            self.assertFalse(inspect_out["restorable"])
 
     def test_capsule_seal_verify_inspect_diff_smoke_with_stub_pack(self):
         fake_payload = {

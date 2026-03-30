@@ -9,6 +9,7 @@ This module powers both:
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -143,7 +144,7 @@ def _add_capsule_subcommands(sub: argparse._SubParsersAction, *, for_integrated_
 
     export_canonical = sub.add_parser(
         "export-canonical",
-        help="Manifest-only canonical export contract preview (restore not supported yet)",
+        help="Write canonical export artifact (restore not supported yet); use --dry-run for preview",
     )
     export_canonical.add_argument(
         "--db",
@@ -152,11 +153,11 @@ def _add_capsule_subcommands(sub: argparse._SubParsersAction, *, for_integrated_
     export_canonical.add_argument(
         "--dry-run",
         action="store_true",
-        help="Required in this slice. Emits manifest contract preview only; writes nothing.",
+        help="Preview only. Emits manifest contract and planned layout; writes nothing.",
     )
     export_canonical.add_argument(
         "--to",
-        help="Planned output path for a future archive/manifest write (recorded in dry-run receipt only)",
+        help="Output root directory. Non-dry-run creates a timestamped canonical artifact directory under this path.",
     )
     export_canonical.add_argument(
         "--json",
@@ -455,6 +456,56 @@ def render_inspect_report(summary: Dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_canonical_inspect_report(summary: Dict[str, Any]) -> str:
+    manifest = summary.get("manifest") if isinstance(summary.get("manifest"), dict) else {}
+    source = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
+    index = summary.get("index") if isinstance(summary.get("index"), dict) else {}
+    restore = manifest.get("restore") if isinstance(manifest.get("restore"), dict) else {}
+    files = manifest.get("files") if isinstance(manifest.get("files"), list) else []
+
+    lines: List[str] = []
+    lines.append("# Canonical Capsule Inspect")
+    lines.append("")
+    lines.append(f"- Capsule: `{summary.get('capsule_dir')}`")
+    lines.append(f"- Schema: `{manifest.get('schema')}`")
+    lines.append(f"- Capsule version: `{manifest.get('capsule_version')}`")
+    lines.append(f"- Exported at: `{manifest.get('exported_at')}`")
+    lines.append(f"- DB: `{source.get('db')}`")
+    lines.append(f"- Table status: `{source.get('table_status')}`")
+    lines.append(f"- Observations: {source.get('observations_count', 0)}")
+    lines.append(f"- Integrity hash: `{manifest.get('integrity_hash')}`")
+    lines.append("")
+    lines.append("## Index")
+    lines.append("")
+    lines.append(f"- Columns: {', '.join(index.get('columns') or []) or '-'}")
+    lines.append(f"- ID range: {index.get('id_range')}")
+    lines.append(f"- TS range: {index.get('ts_range')}")
+    lines.append("")
+    lines.append("## Files")
+    lines.append("")
+    for entry in files:
+        if isinstance(entry, dict):
+            lines.append(f"- `{entry.get('name')}` bytes={entry.get('bytes')} sha256={entry.get('sha256')}")
+    if not files:
+        lines.append("- none")
+    lines.append("")
+    lines.append("## Observations preview")
+    lines.append("")
+    preview = summary.get("observations_preview") if isinstance(summary.get("observations_preview"), list) else []
+    if preview:
+        for row in preview:
+            lines.append(f"- {row}")
+    else:
+        lines.append("- empty")
+    lines.append("")
+    lines.append("## Notes")
+    lines.append("")
+    lines.append(f"- Restorable: `{restore.get('supported')}`")
+    lines.append(f"- Reason: {restore.get('reason')}")
+    lines.append("- This artifact preserves rows/index/provenance for future restore design; restore is not implemented.")
+    return "\n".join(lines) + "\n"
+
+
 def render_diff_report(summary: Dict[str, Any]) -> str:
     counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
     receipt = summary.get("receipt") if isinstance(summary.get("receipt"), dict) else {}
@@ -514,23 +565,66 @@ def cmd_inspect(args: argparse.Namespace) -> int:
         return 1
 
     manifest = load_json(capsule_dir / "manifest.json")
-    bundle = load_json(capsule_dir / "bundle.json")
+    schema = str(manifest.get("schema") or "")
+
+    if schema == "openclaw-mem.pack-capsule.v1":
+        bundle = load_json(capsule_dir / "bundle.json")
+        out = {
+            "schema": "openclaw-mem.pack-capsule.inspect.v1",
+            "ok": True,
+            "command": "inspect",
+            "capsule_dir": str(capsule_dir),
+            "verify": verify_summary,
+            "manifest": manifest,
+            "bundle_text_preview": str(bundle.get("bundle_text") or "")[:600],
+            "restorable": False,
+            "reason": "pack capsule v0 preserves pack-level selection output, not canonical observation-level restore detail",
+        }
+        if getattr(args, "json", False):
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+        else:
+            print(render_inspect_report(out), end="")
+        return 0
+
+    if schema == "openclaw-mem.canonical-capsule.v1":
+        index_path = capsule_dir / "index.json"
+        index_payload = load_json(index_path) if index_path.exists() else {}
+        observations_preview: List[str] = []
+        obs_path = capsule_dir / "observations.jsonl"
+        if obs_path.exists():
+            with obs_path.open("r", encoding="utf-8") as fh:
+                for _, line in zip(range(3), fh):
+                    observations_preview.append(line.strip())
+
+        out = {
+            "schema": "openclaw-mem.canonical-capsule.inspect.v1",
+            "ok": True,
+            "command": "inspect",
+            "capsule_dir": str(capsule_dir),
+            "verify": verify_summary,
+            "manifest": manifest,
+            "index": index_payload,
+            "observations_preview": observations_preview,
+            "restorable": False,
+            "reason": "canonical export artifact is restore-ready input surface only; restore/import CLI is not implemented",
+        }
+        if getattr(args, "json", False):
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+        else:
+            print(render_canonical_inspect_report(out), end="")
+        return 0
+
     out = {
-        "schema": "openclaw-mem.pack-capsule.inspect.v1",
-        "ok": True,
+        "schema": "openclaw-mem.capsule.inspect.error.v1",
+        "ok": False,
         "command": "inspect",
         "capsule_dir": str(capsule_dir),
-        "verify": verify_summary,
-        "manifest": manifest,
-        "bundle_text_preview": str(bundle.get("bundle_text") or "")[:600],
-        "restorable": False,
-        "reason": "pack capsule v0 preserves pack-level selection output, not canonical observation-level restore detail",
+        "error": "unsupported_manifest_schema",
+        "manifest_schema": schema,
+        "message": "Unsupported capsule manifest schema for inspect",
     }
-    if getattr(args, "json", False):
-        print(json.dumps(out, ensure_ascii=False, indent=2))
-    else:
-        print(render_inspect_report(out), end="")
-    return 0
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 2
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -546,6 +640,22 @@ def cmd_diff(args: argparse.Namespace) -> int:
     if not bool(verify_summary.get("ok")):
         print(json.dumps(verify_summary, ensure_ascii=False, indent=2))
         return 1
+
+    manifest = load_json(capsule_dir / "manifest.json")
+    manifest_schema = str(manifest.get("schema") or "")
+    if manifest_schema != "openclaw-mem.pack-capsule.v1":
+        out = {
+            "schema": "openclaw-mem.pack-capsule.diff.v1",
+            "ok": False,
+            "command": "diff",
+            "capsule_dir": str(capsule_dir),
+            "error": "unsupported_capsule_schema",
+            "manifest_schema": manifest_schema,
+            "message": "diff currently supports pack capsules only (openclaw-mem.pack-capsule.v1)",
+            "mutation": "none",
+        }
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 2
 
     bundle = load_json(capsule_dir / "bundle.json")
     items_raw = bundle.get("items")
@@ -631,43 +741,104 @@ def cmd_diff(args: argparse.Namespace) -> int:
     return 0
 
 
-def _canonical_manifest_preview(db_path: str, *, planned_path: Optional[str]) -> Dict[str, Any]:
+def _quote_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _jsonable_sql_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        return {
+            "encoding": "base64",
+            "bytes": len(raw),
+            "value": base64.b64encode(raw).decode("ascii"),
+        }
+    return str(value)
+
+
+def _resolve_export_artifact_dir(raw_to: Optional[str], *, now_stamp: Optional[str] = None) -> Path:
+    root = Path(raw_to).expanduser() if raw_to else Path.cwd()
+    if root.exists() and root.is_file():
+        raise RuntimeError(f"output root is a file, expected directory: {root}")
+    return root / f"{now_stamp or stamp()}_canonical-v1"
+
+
+def _probe_observations_table(db_path: str) -> Dict[str, Any]:
     table_status = "ok"
     observations_count = 0
     oldest_ts = None
     newest_ts = None
+    id_min = None
+    id_max = None
+    columns: List[str] = []
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        try:
-            row = conn.execute(
-                "SELECT COUNT(*) AS cnt, MIN(ts) AS oldest_ts, MAX(ts) AS newest_ts FROM observations"
+        table_exists = bool(
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='observations'"
             ).fetchone()
-            observations_count = int(row["cnt"] if row else 0)
-            oldest_ts = row["oldest_ts"] if row else None
-            newest_ts = row["newest_ts"] if row else None
-        except sqlite3.OperationalError as exc:
-            if "no such table" in str(exc).lower():
-                table_status = "missing_observations_table"
-            else:
-                raise
+        )
+        if not table_exists:
+            table_status = "missing_observations_table"
+            return {
+                "table_status": table_status,
+                "observations_count": observations_count,
+                "oldest_ts": oldest_ts,
+                "newest_ts": newest_ts,
+                "id_range": {"min": id_min, "max": id_max},
+                "columns": columns,
+            }
+
+        pragma_rows = conn.execute("PRAGMA table_info(observations)").fetchall()
+        columns = [str(row[1]) for row in pragma_rows if row and len(row) > 1]
+
+        count_row = conn.execute("SELECT COUNT(*) AS cnt FROM observations").fetchone()
+        observations_count = int(count_row["cnt"] if count_row else 0)
+
+        if "ts" in columns:
+            ts_row = conn.execute("SELECT MIN(ts) AS oldest_ts, MAX(ts) AS newest_ts FROM observations").fetchone()
+            oldest_ts = ts_row["oldest_ts"] if ts_row else None
+            newest_ts = ts_row["newest_ts"] if ts_row else None
+
+        if "id" in columns:
+            id_row = conn.execute("SELECT MIN(id) AS id_min, MAX(id) AS id_max FROM observations").fetchone()
+            id_min = id_row["id_min"] if id_row else None
+            id_max = id_row["id_max"] if id_row else None
     finally:
         conn.close()
 
+    return {
+        "table_status": table_status,
+        "observations_count": observations_count,
+        "oldest_ts": oldest_ts,
+        "newest_ts": newest_ts,
+        "id_range": {"min": id_min, "max": id_max},
+        "columns": columns,
+    }
+
+
+def _canonical_manifest_preview(db_path: str, *, planned_dir: str) -> Dict[str, Any]:
+    source = _probe_observations_table(db_path)
     return {
         "schema": "openclaw-mem.pack-capsule.canonical-manifest.v1",
         "generated_at": utc_now(),
         "contract_mode": "manifest_only_dry_run",
         "source": {
             "db": db_path,
-            "table_status": table_status,
-            "observations_count": observations_count,
-            "oldest_ts": oldest_ts,
-            "newest_ts": newest_ts,
+            **source,
         },
         "planned_output": {
-            "path": planned_path,
+            "path": planned_dir,
+            "layout": [
+                "manifest.json",
+                "observations.jsonl",
+                "index.json",
+                "provenance.json",
+            ],
             "archive_written": False,
             "manifest_written": False,
         },
@@ -675,67 +846,270 @@ def _canonical_manifest_preview(db_path: str, *, planned_path: Optional[str]) ->
             "supported": False,
             "reason": "restore/import is not implemented yet for capsule canonical lane",
         },
+        "migration": {
+            "supported": False,
+            "reason": "cross-store migration is out of scope for this slice",
+        },
     }
+
+
+def _write_export_canonical_artifact(*, db_path: str, artifact_dir: Path) -> Dict[str, Any]:
+    artifact_dir = artifact_dir.expanduser().resolve()
+    artifact_dir.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = artifact_dir.parent / f".{artifact_dir.name}.tmp"
+
+    if artifact_dir.exists() or tmp_dir.exists():
+        raise RuntimeError(f"artifact path already exists: {artifact_dir}")
+
+    moved = False
+    try:
+        tmp_dir.mkdir(parents=False, exist_ok=False)
+
+        observations_path = tmp_dir / "observations.jsonl"
+        index_path = tmp_dir / "index.json"
+        provenance_path = tmp_dir / "provenance.json"
+        manifest_path = tmp_dir / "manifest.json"
+
+        table_status = "ok"
+        columns: List[str] = []
+        observations_count = 0
+        oldest_ts = None
+        newest_ts = None
+        id_min = None
+        id_max = None
+        kind_histogram: Dict[str, int] = {}
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            table_exists = bool(
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='observations'"
+                ).fetchone()
+            )
+            with observations_path.open("w", encoding="utf-8") as out_fh:
+                if table_exists:
+                    pragma_rows = conn.execute("PRAGMA table_info(observations)").fetchall()
+                    columns = [str(row[1]) for row in pragma_rows if row and len(row) > 1]
+                    if columns:
+                        quoted_cols = ", ".join(_quote_ident(col) for col in columns)
+                        order_cols: List[str] = []
+                        if "id" in columns:
+                            order_cols.append(f"{_quote_ident('id')} ASC")
+                        if "ts" in columns:
+                            order_cols.append(f"{_quote_ident('ts')} ASC")
+                        sql = f"SELECT {quoted_cols} FROM observations"
+                        if order_cols:
+                            sql += " ORDER BY " + ", ".join(order_cols)
+                        rows = conn.execute(sql)
+                        for row in rows:
+                            record = {col: _jsonable_sql_value(row[col]) for col in columns}
+                            out_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                            observations_count += 1
+
+                            if "ts" in record and record["ts"] is not None:
+                                ts_text = str(record["ts"])
+                                oldest_ts = ts_text if oldest_ts is None or ts_text < str(oldest_ts) else oldest_ts
+                                newest_ts = ts_text if newest_ts is None or ts_text > str(newest_ts) else newest_ts
+
+                            if "id" in record and record["id"] is not None:
+                                try:
+                                    id_value = int(record["id"])
+                                except Exception:
+                                    id_value = None
+                                if id_value is not None:
+                                    id_min = id_value if id_min is None or id_value < int(id_min) else id_min
+                                    id_max = id_value if id_max is None or id_value > int(id_max) else id_max
+
+                            kind_key = normalize_text(record.get("kind") if isinstance(record, dict) else "") or "<empty>"
+                            kind_histogram[kind_key] = int(kind_histogram.get(kind_key, 0)) + 1
+                else:
+                    table_status = "missing_observations_table"
+        finally:
+            conn.close()
+
+        observations_sha = sha256_file(observations_path)
+        index_payload = {
+            "schema": "openclaw-mem.canonical-capsule.index.v1",
+            "generated_at": utc_now(),
+            "rows": observations_count,
+            "columns": columns,
+            "id_range": {"min": id_min, "max": id_max},
+            "ts_range": {"oldest": oldest_ts, "newest": newest_ts},
+            "kind_histogram": [
+                {"kind": kind, "count": count}
+                for kind, count in sorted(kind_histogram.items(), key=lambda item: item[0])
+            ],
+            "observations": {
+                "name": observations_path.name,
+                "sha256": observations_sha,
+            },
+        }
+        write_json(index_path, index_payload)
+
+        provenance_payload = {
+            "schema": "openclaw-mem.canonical-capsule.provenance.v1",
+            "generated_at": utc_now(),
+            "source": {
+                "db": db_path,
+                "table": "observations",
+                "table_status": table_status,
+            },
+            "non_goals": {
+                "restore": "not_implemented",
+                "cross_store_migration": "not_supported",
+                "merge": "not_supported",
+            },
+        }
+        write_json(provenance_path, provenance_payload)
+
+        file_entries: List[Dict[str, Any]] = []
+        for path in [observations_path, index_path, provenance_path]:
+            file_entries.append(
+                {
+                    "name": path.name,
+                    "sha256": sha256_file(path),
+                    "bytes": path.stat().st_size,
+                }
+            )
+
+        manifest = {
+            "schema": "openclaw-mem.canonical-capsule.v1",
+            "capsule_version": 1,
+            "capsule_id": artifact_dir.name,
+            "exported_at": utc_now(),
+            "contract_mode": "canonical_export_write",
+            "source": {
+                "db": db_path,
+                "table": "observations",
+                "table_status": table_status,
+                "observations_count": observations_count,
+                "oldest_ts": oldest_ts,
+                "newest_ts": newest_ts,
+                "id_range": {"min": id_min, "max": id_max},
+                "columns": columns,
+            },
+            "files": file_entries,
+            "integrity_hash": file_set_integrity_hash(file_entries),
+            "restore": {
+                "supported": False,
+                "reason": "restore/import CLI is not implemented in this slice",
+            },
+            "migration": {
+                "supported": False,
+                "reason": "cross-store migration is out of scope for this slice",
+            },
+        }
+        write_json(manifest_path, manifest)
+
+        tmp_dir.rename(artifact_dir)
+        moved = True
+
+        verify_summary = verify_capsule(artifact_dir)
+        if not bool(verify_summary.get("ok")):
+            raise RuntimeError("self-verify failed after canonical artifact write")
+
+        manifest["self_verify"] = {
+            "ok": True,
+            "checked_at": utc_now(),
+            "check_count": len(verify_summary.get("checks") or []),
+        }
+        write_json(artifact_dir / "manifest.json", manifest)
+
+        return {
+            "artifact_dir": str(artifact_dir),
+            "manifest_path": str(artifact_dir / "manifest.json"),
+            "manifest": manifest,
+            "verify": verify_summary,
+        }
+    except Exception:
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+        if moved and artifact_dir.exists():
+            shutil.rmtree(artifact_dir)
+        raise
 
 
 def _render_export_canonical_text(summary: Dict[str, Any]) -> str:
     manifest = summary.get("manifest") if isinstance(summary.get("manifest"), dict) else {}
     src = manifest.get("source") if isinstance(manifest.get("source"), dict) else {}
     restore = manifest.get("restore") if isinstance(manifest.get("restore"), dict) else {}
+    is_dry_run = bool(summary.get("dry_run"))
+    title = "# Capsule Export Canonical (dry-run)" if is_dry_run else "# Capsule Export Canonical (write)"
     lines = [
-        "# Capsule Export Canonical (dry-run)",
+        title,
         "",
         f"- OK: {summary.get('ok')}",
         f"- DB: {summary.get('db')}",
         f"- Table status: {src.get('table_status')}",
         f"- Observations: {src.get('observations_count')}",
         f"- Planned output path: {summary.get('planned_output') or '-'}",
-        "",
-        "## Restore status",
-        "",
-        f"- Supported: {restore.get('supported')}",
-        f"- Reason: {restore.get('reason')}",
-        "",
-        "## Notes",
-        "",
-        "- This command currently emits a manifest contract preview only.",
-        "- Archive writing is intentionally not implemented in this slice.",
     ]
+    if not is_dry_run:
+        lines.append(f"- Artifact dir: {summary.get('artifact_dir')}")
+    lines.extend(
+        [
+            "",
+            "## Restore status",
+            "",
+            f"- Supported: {restore.get('supported')}",
+            f"- Reason: {restore.get('reason')}",
+            "",
+            "## Notes",
+            "",
+        ]
+    )
+    if is_dry_run:
+        lines.append("- This command emitted a manifest contract preview only.")
+        lines.append("- No artifact was written in dry-run mode.")
+    else:
+        lines.append("- Canonical artifact was written with manifest/index/provenance structure.")
+        lines.append("- Self-verify passed for declared files.")
     return "\n".join(lines) + "\n"
 
 
 def cmd_export_canonical(args: argparse.Namespace) -> int:
     dry_run = bool(getattr(args, "dry_run", False))
     db_path = str(Path(getattr(args, "db", None) or default_db_path()).expanduser())
-    planned_path = str(Path(args.to).expanduser()) if getattr(args, "to", None) else None
+    export_dir = _resolve_export_artifact_dir(getattr(args, "to", None))
+    planned_path = str(export_dir)
 
-    if not dry_run:
+    if dry_run:
+        manifest = _canonical_manifest_preview(db_path, planned_dir=planned_path)
         out = {
             "schema": "openclaw-mem.pack-capsule.export-canonical.v1",
-            "ok": False,
+            "ok": True,
             "command": "export-canonical",
-            "error": "dry_run_required",
-            "message": "Only --dry-run is supported in this slice; archive writing is not implemented.",
+            "dry_run": True,
+            "db": db_path,
+            "planned_output": planned_path,
+            "manifest": manifest,
             "restore_supported": False,
+            "restore_message": "restore/import is not implemented yet",
+            "archive_written": False,
+            "topology": "unchanged",
         }
         if bool(getattr(args, "json", False)):
             print(json.dumps(out, ensure_ascii=False, indent=2))
         else:
-            print("ERROR: Only --dry-run is supported in this slice; archive writing is not implemented.", file=sys.stderr)
-        return 2
+            print(_render_export_canonical_text(out), end="")
+        return 0
 
-    manifest = _canonical_manifest_preview(db_path, planned_path=planned_path)
+    result = _write_export_canonical_artifact(db_path=db_path, artifact_dir=export_dir)
     out = {
         "schema": "openclaw-mem.pack-capsule.export-canonical.v1",
         "ok": True,
         "command": "export-canonical",
-        "dry_run": True,
+        "dry_run": False,
         "db": db_path,
         "planned_output": planned_path,
-        "manifest": manifest,
+        "artifact_dir": result["artifact_dir"],
+        "manifest_path": result["manifest_path"],
+        "manifest": result["manifest"],
+        "verify": result["verify"],
         "restore_supported": False,
         "restore_message": "restore/import is not implemented yet",
-        "archive_written": False,
+        "archive_written": True,
         "topology": "unchanged",
     }
     if bool(getattr(args, "json", False)):
