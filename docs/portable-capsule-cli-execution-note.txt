@@ -1,0 +1,28 @@
+Portable capsule CLI promotion — execution note (thin integration)
+
+Command map
+- New first-class family under main CLI:
+  - openclaw-mem capsule seal
+  - openclaw-mem capsule inspect
+  - openclaw-mem capsule verify
+  - openclaw-mem capsule diff
+  - openclaw-mem capsule export-canonical --dry-run
+- Compatibility lanes kept:
+  - openclaw-mem-pack-capsule ... (console script)
+  - python3 ./tools/pack_capsule.py ... (wrapper)
+
+Target files
+- openclaw_mem/capsule.py (new: capsule logic + parser wiring + standalone wrapper main)
+- openclaw_mem/cli.py (register capsule command family into main parser)
+- pyproject.toml (new console script: openclaw-mem-pack-capsule)
+- tools/pack_capsule.py (thin compatibility delegator)
+- README.md / QUICKSTART.md / docs/portable-pack-capsules.md / docs/index.md (docs truth update)
+- tests/test_capsule_cli.py (parser + dry-run export contract + diff/inspect/verify smoke)
+
+Main risks
+- Parser edge collision risk with existing --db/--json flags in nested commands.
+  - Mitigation: keep capsule parsing self-contained; avoid shared add_common on capsule subcommands.
+- Runtime coupling risk if capsule sealing shells out to unavailable CLI binary.
+  - Mitigation: invoke current interpreter lane via `python -m openclaw_mem`.
+- Scope creep risk toward fake restore/import behavior.
+  - Mitigation: hard-gate export-canonical to --dry-run only; explicit restore_not_supported contract in output.

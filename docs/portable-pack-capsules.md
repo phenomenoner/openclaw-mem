@@ -28,7 +28,7 @@ What it is **not**:
 DB=/tmp/openclaw-mem-proof.sqlite
 OUT=/tmp/openclaw-mem-capsules/trust-aware-demo
 
-python3 ./tools/pack_capsule.py seal \
+openclaw-mem capsule seal \
   --db "$DB" \
   --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
   --pack-trust-policy exclude_quarantined_fail_open \
@@ -41,23 +41,29 @@ python3 ./tools/pack_capsule.py seal \
 
 ```bash
 CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
-python3 ./tools/pack_capsule.py inspect "$CAPSULE"
+openclaw-mem capsule inspect "$CAPSULE"
 ```
 
 ### 3) Verify capsule integrity
 
 ```bash
-python3 ./tools/pack_capsule.py verify "$CAPSULE"
+openclaw-mem capsule verify "$CAPSULE"
 ```
 
 ### 4) Diff the capsule against a target store (read-only)
 
 ```bash
-python3 ./tools/pack_capsule.py diff \
+openclaw-mem capsule diff \
   "$CAPSULE" \
   --db "$DB" \
   --write-receipt \
   --write-report-md
+```
+
+### 5) Export canonical contract preview (dry-run only)
+
+```bash
+openclaw-mem capsule export-canonical --db "$DB" --dry-run --json
 ```
 
 ## Files you get
@@ -98,6 +104,12 @@ After `diff --write-receipt --write-report-md`:
 - emits `present` vs `missing`
 - **does not mutate** the target store
 
+### `export-canonical --dry-run`
+- emits a canonical-manifest contract preview only
+- supports machine-readable JSON output (`--json`)
+- no archive or bundle write in this slice
+- explicitly states restore/import is not supported yet
+
 ## Why inspect + diff come before restore
 
 We explicitly chose **inspect/diff before restore** because the current capsule captures pack-level selection output, not full canonical observation detail/provenance.
@@ -120,16 +132,18 @@ A future restore/import line would need a stronger canonical artifact contract f
 - modify `bundle_text.md`
 - verify should fail non-zero
 
-## Host wrapper
+## Compatibility wrappers
 
-This host also exposes a thin wrapper:
+Primary lane is now first-class under `openclaw-mem capsule ...`.
+
+Compatibility wrappers still exist:
 
 ```bash
 openclaw-mem-pack-capsule seal ...
 openclaw-mem-pack-capsule inspect <capsule_dir>
 openclaw-mem-pack-capsule verify <capsule_dir>
 openclaw-mem-pack-capsule diff <capsule_dir> --db <path> --write-receipt --write-report-md
+python3 ./tools/pack_capsule.py export-canonical --dry-run --json
 ```
 
-That wrapper simply forwards to:
-- `/root/.openclaw/workspace/openclaw-mem/tools/pack_capsule.py`
+Both wrappers delegate to the same implementation as `openclaw-mem capsule ...`.

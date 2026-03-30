@@ -132,13 +132,13 @@ Want the narrated walkthrough? See [`docs/showcase/trust-aware-context-pack-proo
 
 ## Portable governed pack capsule (memvid-inspired thin slice)
 
-If you want a **portable memory capsule** without surrendering trust/provenance governance, use the checked-in helper:
+If you want a **portable memory capsule** without surrendering trust/provenance governance, use the first-class command family:
 
 ```bash
 DB=/tmp/openclaw-mem-proof.sqlite
 OUT=/tmp/openclaw-mem-capsules/trust-aware-demo
 
-python3 ./tools/pack_capsule.py seal \
+openclaw-mem capsule seal \
   --db "$DB" \
   --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
   --pack-trust-policy exclude_quarantined_fail_open \
@@ -147,9 +147,10 @@ python3 ./tools/pack_capsule.py seal \
   --out "$OUT"
 
 CAPSULE=$(find "$OUT" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
-python3 ./tools/pack_capsule.py inspect "$CAPSULE"
-python3 ./tools/pack_capsule.py verify "$CAPSULE"
-python3 ./tools/pack_capsule.py diff "$CAPSULE" --db "$DB" --write-receipt --write-report-md
+openclaw-mem capsule inspect "$CAPSULE"
+openclaw-mem capsule verify "$CAPSULE"
+openclaw-mem capsule diff "$CAPSULE" --db "$DB" --write-receipt --write-report-md
+openclaw-mem capsule export-canonical --db "$DB" --dry-run --json
 ```
 
 It creates a small capsule directory with:
@@ -165,12 +166,20 @@ It creates a small capsule directory with:
 - verifies first and shows capsule metadata + bundle preview
 - marks current v0 pack capsules as portable audit artifacts, not restore artifacts
 
-`diff` is the next high-ROI read-only companion command:
+`diff` is the read-only comparison companion command:
 - verifies the capsule first
 - compares capsule items against a target governed store
 - reports `present` vs `missing` with **no mutation**
 
-This keeps the memvid-style portability win in a **thin helper lane** while preserving `openclaw-mem` citations, trace receipts, and rollback posture.
+`export-canonical --dry-run` is the honest next slice:
+- emits a manifest-only canonical export contract preview
+- supports machine-readable JSON output
+- explicitly states restore/import is not supported yet
+- writes no archive in this slice
+
+Compatibility paths still work:
+- `openclaw-mem-pack-capsule ...` (wrapper command)
+- `python3 ./tools/pack_capsule.py ...` (thin delegator)
 
 ## Start here
 

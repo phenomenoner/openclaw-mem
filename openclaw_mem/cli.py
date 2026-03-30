@@ -81,6 +81,7 @@ from openclaw_mem.provenance_trust_schema import (
     normalize_trust_tier,
 )
 from openclaw_mem.task_markers import summary_has_task_marker as _summary_has_task_marker_impl
+from openclaw_mem.capsule import add_capsule_parser_to_cli
 
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
@@ -10078,6 +10079,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)
 
+    add_capsule_parser_to_cli(sub)
 
     # Graphic memory (GraphRAG-lite) — v0 command group
     sp = sub.add_parser("graph", help="Graphic memory helpers (index-first graph recall + packing)")
