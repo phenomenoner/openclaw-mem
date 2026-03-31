@@ -41,8 +41,11 @@ openclaw-mem ...
 ## Step 2: Quick test
 
 ```bash
-# Creates/opens a DB and prints stats
+# Creates/opens a DB and prints compact store/runtime status
 uv run --python 3.13 --frozen -- python -m openclaw_mem --json status
+
+# Run a compact health check (DB/config/backend/plugin/spool posture)
+uv run --python 3.13 --frozen -- python -m openclaw_mem --json doctor
 
 # Inspect active OpenClaw memory backend + fallback posture
 uv run --python 3.13 --frozen -- python -m openclaw_mem --json backend
@@ -51,6 +54,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --json backend
 What this proves:
 - the local ledger is alive
 - the CLI surface is working
+- you have a one-shot doctor surface for common setup/health questions
 - you can inspect memory posture before wiring anything deeper
 
 ---

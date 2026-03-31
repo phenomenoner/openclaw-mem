@@ -1239,6 +1239,67 @@ def _iter_jsonl(fp) -> Iterable[Dict[str, Any]]:
         yield json.loads(line)
 
 
+def _path_health(path_str: str) -> Dict[str, Any]:
+    path = Path(path_str).expanduser()
+    exists = path.exists()
+    out: Dict[str, Any] = {
+        "path": str(path),
+        "exists": bool(exists),
+    }
+    if exists:
+        out["is_file"] = path.is_file()
+        out["size_bytes"] = int(path.stat().st_size) if path.is_file() else None
+    return out
+
+
+
+def _build_backend_status(config: Dict[str, Any]) -> Dict[str, Any]:
+    slot = _resolve_memory_slot(config)
+    memory_core_enabled = _is_enabled_entry(config, "memory-core")
+    memory_lancedb_enabled = _is_enabled_entry(config, "memory-lancedb")
+    openclaw_mem_enabled = _is_enabled_entry(config, "openclaw-mem")
+    return {
+        "memory_slot": slot,
+        "entries": {
+            "memory-core": {"enabled": memory_core_enabled},
+            "memory-lancedb": {
+                "enabled": memory_lancedb_enabled,
+                "embedding_api_key_ready": _lancedb_api_key_ready(config),
+            },
+            "openclaw-mem": {"enabled": openclaw_mem_enabled},
+        },
+        "fallback": {
+            "recommended_slot": "memory-core",
+            "reason": "Fast rollback path if memory-lancedb has runtime issues",
+        },
+    }
+
+
+
+def _build_runtime_health(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+    db_preexisted = getattr(args, "db_preexisted", None)
+    config_path = _resolve_openclaw_config_path()
+    return {
+        "db": {
+            "path": str(args.db),
+            "preexisting": None if db_preexisted is None else bool(db_preexisted),
+        },
+        "config": _path_health(config_path),
+        "state_files": {
+            "episodic_spool": _path_health(DEFAULT_EPISODIC_SPOOL_PATH),
+            "episodic_ingest_state": _path_health(DEFAULT_EPISODIC_INGEST_STATE_PATH),
+            "graph_capture_state": _path_health(DEFAULT_GRAPH_CAPTURE_STATE_PATH),
+            "graph_capture_md_state": _path_health(DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH),
+        },
+        "graph_auto": {
+            "OPENCLAW_MEM_GRAPH_AUTO_RECALL": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_RECALL", default=False),
+            "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_CAPTURE", default=False),
+            "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD", default=False),
+        },
+    }
+
+
+
 def cmd_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     row = conn.execute("SELECT COUNT(*) AS n, MIN(ts) AS min_ts, MAX(ts) AS max_ts FROM observations").fetchone()
     emb_row = conn.execute("SELECT COUNT(*) AS n FROM observation_embeddings").fetchone()
@@ -1249,22 +1310,149 @@ def cmd_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     emb_en_models = conn.execute(
         "SELECT model, COUNT(*) AS n FROM observation_embeddings_en GROUP BY model ORDER BY n DESC"
     ).fetchall()
+    cfg = _read_openclaw_config()
 
     data = {
-        "db": args.db,
-        "count": row["n"],
+        "kind": "openclaw-mem.status.v1",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v1"},
+        "db": {
+            "path": args.db,
+            "preexisting": bool(getattr(args, "db_preexisted", False)),
+        },
+        "count": int(row["n"] or 0),
         "min_ts": row["min_ts"],
         "max_ts": row["max_ts"],
         "embeddings": {
-            "count": emb_row["n"],
-            "models": [{"model": r["model"], "count": r["n"]} for r in emb_models],
+            "count": int(emb_row["n"] or 0),
+            "models": [{"model": r["model"], "count": int(r["n"])} for r in emb_models],
         },
         "embeddings_en": {
-            "count": emb_en_row["n"],
-            "models": [{"model": r["model"], "count": r["n"]} for r in emb_en_models],
+            "count": int(emb_en_row["n"] or 0),
+            "models": [{"model": r["model"], "count": int(r["n"])} for r in emb_en_models],
         },
+        "backend": _build_backend_status(cfg),
+        "runtime": _build_runtime_health(cfg, args),
     }
     _emit(data, args.json)
+
+
+
+def cmd_doctor(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    row = conn.execute("SELECT COUNT(*) AS n, MIN(ts) AS min_ts, MAX(ts) AS max_ts FROM observations").fetchone()
+    cfg = _read_openclaw_config()
+    backend = _build_backend_status(cfg)
+    runtime = _build_runtime_health(cfg, args)
+
+    checks: List[Dict[str, Any]] = []
+
+    def add_check(name: str, ok: bool, severity: str, detail: str, extra: Optional[Dict[str, Any]] = None) -> None:
+        item: Dict[str, Any] = {
+            "name": name,
+            "ok": bool(ok),
+            "severity": severity,
+            "detail": detail,
+        }
+        if extra:
+            item.update(extra)
+        checks.append(item)
+
+    db_preexisting = runtime["db"].get("preexisting")
+    add_check(
+        "db.connection",
+        True,
+        "info",
+        "SQLite connection opened and core schema is readable.",
+        {"db": runtime["db"]},
+    )
+    add_check(
+        "db.preexisting",
+        bool(db_preexisting),
+        "warn" if not db_preexisting else "info",
+        "DB file already existed before this run." if db_preexisting else "DB file did not exist before this run; first-run bootstrap likely created it.",
+    )
+
+    config_exists = bool(runtime["config"].get("exists"))
+    add_check(
+        "openclaw.config",
+        config_exists,
+        "warn" if not config_exists else "info",
+        "OpenClaw config is readable." if config_exists else "OpenClaw config path is missing; backend inspection is using defaults/fallbacks.",
+        {"path": runtime["config"].get("path")},
+    )
+
+    slot = str(backend.get("memory_slot") or "memory-core")
+    lancedb = backend.get("entries", {}).get("memory-lancedb", {})
+    lancedb_ok = not (slot == "memory-lancedb" and not bool(lancedb.get("embedding_api_key_ready")))
+    add_check(
+        "memory.backend",
+        lancedb_ok,
+        "error" if not lancedb_ok else "info",
+        (
+            "Active memory slot looks consistent enough for local ops."
+            if lancedb_ok
+            else "memory-lancedb is the active slot but its embedding API key is not ready."
+        ),
+        {"slot": slot},
+    )
+
+    om_enabled = bool(backend.get("entries", {}).get("openclaw-mem", {}).get("enabled"))
+    add_check(
+        "openclaw-mem.entry",
+        om_enabled,
+        "warn" if not om_enabled else "info",
+        "openclaw-mem plugin entry is enabled." if om_enabled else "openclaw-mem plugin entry is disabled; CLI still works, but sidecar/plugin behavior is off.",
+    )
+
+    spool_exists = bool(runtime.get("state_files", {}).get("episodic_spool", {}).get("exists"))
+    add_check(
+        "episodic.spool",
+        spool_exists,
+        "warn" if not spool_exists else "info",
+        "episodic spool file exists." if spool_exists else "episodic spool file is absent; auto-capture may simply have no backlog yet.",
+        {"path": runtime.get("state_files", {}).get("episodic_spool", {}).get("path")},
+    )
+
+    count = int(row["n"] or 0)
+    add_check(
+        "observations.presence",
+        count > 0,
+        "warn" if count == 0 else "info",
+        "Observations are present in the local DB." if count > 0 else "No observations found yet; first proof/ingest may still be pending.",
+        {"count": count, "min_ts": row["min_ts"], "max_ts": row["max_ts"]},
+    )
+
+    errors = sum(1 for item in checks if item["severity"] == "error" and not item["ok"])
+    warnings = sum(1 for item in checks if item["severity"] == "warn" and not item["ok"])
+    payload = {
+        "kind": "openclaw-mem.doctor.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": errors == 0,
+        "summary": {
+            "errors": errors,
+            "warnings": warnings,
+            "observations": count,
+            "active_memory_slot": slot,
+        },
+        "checks": checks,
+        "backend": backend,
+        "runtime": runtime,
+    }
+
+    if args.json:
+        _emit(payload, True)
+        return
+
+    lines = [
+        f"openclaw-mem doctor: ok={str(payload['ok']).lower()} errors={errors} warnings={warnings}",
+        f"active slot: {slot}",
+        f"observations: {count}",
+    ]
+    for item in checks:
+        status = "ok" if item.get("ok") else item.get("severity", "info")
+        lines.append(f"- {item['name']}: {status} — {item['detail']}")
+    print("\n".join(lines))
 
 
 def cmd_profile(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -1432,29 +1620,7 @@ def _lancedb_api_key_ready(config: Dict[str, Any]) -> bool:
 
 def cmd_backend(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     cfg = _read_openclaw_config()
-
-    slot = _resolve_memory_slot(cfg)
-    memory_core_enabled = _is_enabled_entry(cfg, "memory-core")
-    memory_lancedb_enabled = _is_enabled_entry(cfg, "memory-lancedb")
-    openclaw_mem_enabled = _is_enabled_entry(cfg, "openclaw-mem")
-
-    out = {
-        "memory_slot": slot,
-        "entries": {
-            "memory-core": {"enabled": memory_core_enabled},
-            "memory-lancedb": {
-                "enabled": memory_lancedb_enabled,
-                "embedding_api_key_ready": _lancedb_api_key_ready(cfg),
-            },
-            "openclaw-mem": {"enabled": openclaw_mem_enabled},
-        },
-        "fallback": {
-            "recommended_slot": "memory-core",
-            "reason": "Fast rollback path if memory-lancedb has runtime issues",
-        },
-    }
-
-    _emit(out, args.json)
+    _emit(_build_backend_status(cfg), args.json)
 
 
 def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -9698,6 +9864,7 @@ def build_parser() -> argparse.ArgumentParser:
         "Examples:\n"
         "  # Observation store\n"
         "  openclaw-mem status --json\n"
+        "  openclaw-mem doctor --json\n"
         "  openclaw-mem profile --json --recent-limit 15\n"
         "  openclaw-mem backend --json\n"
         "  openclaw-mem ingest --file observations.jsonl --json\n"
@@ -9766,9 +9933,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("status", help="Show store stats")
+    sp = sub.add_parser("status", help="Show compact store/runtime status")
     add_common(sp)
     sp.set_defaults(func=cmd_status)
+
+    sp = sub.add_parser("doctor", help="Run compact operator health checks")
+    add_common(sp)
+    sp.set_defaults(func=cmd_doctor)
 
     sp = sub.add_parser("profile", help="Show ops profile (counts/ranges/labels/recent)")
     add_common(sp)
@@ -10571,6 +10742,7 @@ def main() -> None:
     base_db = os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB)
     args.db = getattr(args, "db", None) or getattr(args, "db_global", None) or base_db
     args.json = bool(getattr(args, "json", False) or getattr(args, "json_global", False))
+    args.db_preexisted = True if str(args.db) == ":memory:" else Path(str(args.db)).expanduser().exists()
 
     conn = _connect(args.db)
     args.func(conn, args)

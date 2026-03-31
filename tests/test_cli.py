@@ -2,9 +2,10 @@ import io
 import json
 import sys
 import unittest
+from unittest.mock import patch
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
+from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
 
 
 class TestCliM0(unittest.TestCase):
@@ -25,6 +26,32 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertIn("embeddings_en", out)
         self.assertEqual(out["embeddings_en"]["count"], 0)
+        self.assertEqual(out["kind"], "openclaw-mem.status.v1")
+        self.assertIn("backend", out)
+        self.assertIn("runtime", out)
+        conn.close()
+
+    def test_doctor_emits_compact_health_contract(self):
+        conn = _connect(":memory:")
+        args = type("Args", (), {"db": ":memory:", "json": True, "db_preexisted": True})()
+        fake_cfg = {
+            "plugins": {
+                "slots": {"memory": "memory-core"},
+                "entries": {
+                    "memory-core": {"enabled": True},
+                    "memory-lancedb": {"enabled": False, "config": {}},
+                    "openclaw-mem": {"enabled": True},
+                },
+            }
+        }
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._read_openclaw_config", return_value=fake_cfg), redirect_stdout(buf):
+            cmd_doctor(conn, args)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.doctor.v0")
+        self.assertIn("summary", out)
+        self.assertIn("checks", out)
+        self.assertTrue(any(item["name"] == "db.connection" for item in out["checks"]))
         conn.close()
 
     def test_pack_falls_back_to_fts_when_no_api_key(self):
@@ -253,6 +280,11 @@ class TestCliM0(unittest.TestCase):
         self.assertFalse(_summary_has_task_marker("TODO! fix this later"))
         self.assertFalse(_summary_has_task_marker("[TODO) fix this later"))
         self.assertFalse(_summary_has_task_marker("TODOs: plural shouldn't match"))
+
+    def test_parser_accepts_doctor_command(self):
+        args = build_parser().parse_args(["doctor", "--json"])
+        self.assertEqual(args.cmd, "doctor")
+        self.assertTrue(args.json)
 
     def test_parser_merges_global_and_command_json_flags(self):
         before_args = build_parser().parse_args(["--json", "status"])

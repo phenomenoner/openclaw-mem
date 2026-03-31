@@ -47,6 +47,7 @@ It operates across two planes:
 
 ## What ships today in v1.2.0
 
+- **Local operator diagnostics:** `status`, `doctor`, and `backend` provide a compact health/readiness surface before deeper debugging.
 - **Local recall loop:** `search → timeline → get` keeps routine lookups fast and inspectable.
 - **Trust-aware pack surfaces:** `pack`, `--trace`, `--pack-trust-policy`, `policy_surface`, and `pack_lifecycle_shadow` provide inclusion/exclusion receipts.
 - **Graph/provenance surfaces:** `graph topology-refresh`, `graph query ...`, drift checks, and graph provenance gating for graph-derived pack candidates.
