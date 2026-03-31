@@ -50,6 +50,13 @@ It operates across two planes:
 - **Local operator diagnostics:** `status`, `doctor`, and `backend` provide a compact health/readiness surface before deeper debugging.
 - **Local recall loop:** `search → timeline → get` keeps routine lookups fast and inspectable.
 - **Trust-aware pack surfaces:** `pack`, `--trace`, `--pack-trust-policy`, `policy_surface`, and `pack_lifecycle_shadow` provide inclusion/exclusion receipts.
+
+### Operator surface quick read
+
+- `status` = **snapshot surface** (`kind` + `ts` + rich state/runtime posture). Read this for current shape, not pass/fail.
+- `doctor` = **doctor surface** (`kind` + `ts` + `ok` + `summary` + `checks`). Read this for compact health/readiness.
+- `backend` = config/backend posture helper when you need the memory slot/fallback read directly.
+- Family compare card: `openclaw-async-coding-playbook/projects/openclaw-ops/docs/operator-surface-contract-family.v0.md`
 - **Graph/provenance surfaces:** `graph topology-refresh`, `graph query ...`, drift checks, and graph provenance gating for graph-derived pack candidates.
 - **Review-gated action plane (recommendation-only):** `optimize review`, `optimize consolidation-review`, and `optimize policy-loop` emit review queues for hygiene, recent-use-aware decay protection, dream-style candidate consolidation, and rollout readiness (no silent writeback).
 - **Policy-driven safety:** trust policies, graph provenance, and lifecycle logging (`--pack-trust-policy`, `--graph-provenance-policy`, `--graph-query-db`, `--pack-lifecycle-shadow`) keep memory grounded, auditable, and safer for automation.
