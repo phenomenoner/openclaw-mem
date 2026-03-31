@@ -1,7 +1,7 @@
 # Spec — Graphic Memory Query Plane v0
 
 ## Status
-- Stage: **install/enable slice reached on stable main** (2026-03-19)
+- Stage: **DONE / operator query plane shipped on stable main** (closure revalidated 2026-03-31; initial stable-main landing 2026-03-19)
 - Scope: bounded operator slice now lives in `openclaw-mem` repo truth: stage-1 topology-file helper + stage-2 refresh/drift/provenance substrate + stage-3 operator docs/receipts
 - Recommendation: **keep implementing inside `openclaw-mem`**
 - Delivery posture: **repo-backed truth, derived graph query layer**

@@ -2,6 +2,7 @@
 
 ## Status
 - Version: v1.1
+- Stage: **DONE / product integration shipped on stable main** (closure revalidated 2026-03-31)
 - Scope: OpenClaw agents using `openclaw-mem` + `openclaw-mem` product integration
 - Posture: **soft trigger**, **fail-open**, **low-noise**
 

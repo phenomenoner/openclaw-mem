@@ -1,0 +1,50 @@
+{
+  "kind": "openclaw-mem.graph.query.v0",
+  "ts": "2026-03-31T05:01:40.817119+00:00",
+  "query_cmd": "upstream",
+  "result": {
+    "ok": true,
+    "query": "upstream",
+    "node_id": "artifact.openclaw-mem.sqlite",
+    "count": 1,
+    "edges": [
+      {
+        "src": "script.harvest",
+        "dst": "artifact.openclaw-mem.sqlite",
+        "type": "writes",
+        "provenance": "docs/deployment.md",
+        "provenance_ref": {
+          "raw": "docs/deployment.md",
+          "kind": "opaque",
+          "is_structured": false,
+          "path": null,
+          "line_start": null,
+          "line_end": null,
+          "anchor": null,
+          "url": null
+        },
+        "metadata": {},
+        "src_node": {
+          "id": "script.harvest",
+          "type": "script",
+          "tags": [
+            "ops"
+          ],
+          "metadata": {
+            "cmd": "python -m openclaw_mem harvest"
+          }
+        },
+        "dst_node": {
+          "id": "artifact.openclaw-mem.sqlite",
+          "type": "artifact",
+          "tags": [
+            "state"
+          ],
+          "metadata": {
+            "path": "~/.openclaw/memory/openclaw-mem.sqlite"
+          }
+        }
+      }
+    ]
+  }
+}

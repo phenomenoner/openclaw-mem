@@ -1,8 +1,8 @@
 # Spec — Self-Optimizing Memory Loop v0
 
 ## Status
-- Stage: **partial implementation shipped** (v0.1 observer + v0.2 policy-loop gate)
-- Scope: `openclaw-mem` dev branch only
+- Stage: **DONE / shadow-only review loop shipped on stable main** (closure revalidated 2026-03-31)
+- Scope: stable-main shadow/recommendation surface only; apply path remains future work
 - Posture: **shadow/recommendation-first**
 
 ## Problem

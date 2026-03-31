@@ -1,0 +1,151 @@
+{
+  "kind": "openclaw-mem.optimize.policy-loop.v0",
+  "ts": "2026-03-31T05:06:23.952393+00:00",
+  "version": {
+    "openclaw_mem": "1.2.0",
+    "schema": "v0"
+  },
+  "source": {
+    "scope": null,
+    "review_limit": 1000,
+    "writeback_limit": 500,
+    "lifecycle_limit": 200,
+    "sunrise_state": "handoffs/receipts/2026-03-31_optimize-shadow/sunrise_state.json"
+  },
+  "signals": {
+    "recall": {
+      "repeated_misses": {
+        "groups": 1,
+        "miss_events": 2,
+        "min_count": 2,
+        "items": [
+          {
+            "scope": "alpha",
+            "query": "cache invalidation policy",
+            "count": 2,
+            "ids": [
+              10,
+              11
+            ],
+            "latest_id": 11,
+            "latest_ts": "2026-03-30T05:06:03Z"
+          }
+        ]
+      }
+    },
+    "writeback": {
+      "total_rows": 8,
+      "filtered_non_target_rows": 1,
+      "scanned": 7,
+      "eligible": 2,
+      "missing_lancedb_id": 5,
+      "eligible_ratio": 0.2857,
+      "unique_lancedb_ids": 2,
+      "update_field_counts": {
+        "importance": 2,
+        "importance_label": 2,
+        "scope": 2,
+        "category": 2,
+        "trust_tier": 0
+      },
+      "sample_missing_observation_ids": [
+        8,
+        5,
+        3,
+        2,
+        1
+      ]
+    },
+    "lifecycle_shadow": {
+      "runs": 3,
+      "selected_total": 7,
+      "citation_total": 7,
+      "candidate_total": 8,
+      "avg_selected_per_run": 2.333,
+      "avg_candidate_per_run": 2.667,
+      "zero_selection_runs": 0,
+      "selection_signature_unique": 1,
+      "trust_policy_modes": {
+        "exclude_quarantined_fail_open": 3
+      },
+      "graph_provenance_policy_modes": {
+        "structured_only_fail_open": 3
+      },
+      "receipt_parse_errors": 0,
+      "non_shadow_mutation_rows": 0
+    }
+  },
+  "sunrise": {
+    "stage_a_state": {
+      "path": "handoffs/receipts/2026-03-31_optimize-shadow/sunrise_state.json",
+      "stage": "A-live",
+      "lastHealthy": true,
+      "readyForStageB": true,
+      "liveGreenStreak": 20,
+      "dryGreenStreak": 0,
+      "lastRunAt": "2026-03-31T05:06:03Z"
+    },
+    "stage_a_state_error": null,
+    "stage_b": {
+      "status": "hold",
+      "reasons": [
+        "insufficient_lifecycle_runs",
+        "writeback_eligible_ratio_below_threshold"
+      ],
+      "thresholds": {
+        "min_live_green_streak": 18,
+        "min_lifecycle_runs": 12,
+        "min_writeback_eligible_ratio": 0.6
+      }
+    },
+    "stage_c": {
+      "status": "hold",
+      "reasons": [
+        "insufficient_lifecycle_runs",
+        "stage_b_not_ready"
+      ],
+      "thresholds": {
+        "min_lifecycle_runs": 24,
+        "max_repeated_miss_groups": 1
+      }
+    }
+  },
+  "policy": {
+    "mode": "review_only",
+    "writes_performed": 0,
+    "memory_mutation": "none",
+    "sunrise_freeze_respected": true
+  },
+  "recommendations": [
+    {
+      "type": "improve_writeback_linkage",
+      "priority": "high",
+      "why": "writeback coverage is below policy threshold",
+      "evidence": {
+        "eligible_ratio": 0.2857,
+        "threshold": 0.6,
+        "sample_missing_observation_ids": [
+          8,
+          5,
+          3,
+          2,
+          1
+        ]
+      },
+      "safe_for_auto_apply": false
+    },
+    {
+      "type": "target_recall_gap_review",
+      "priority": "medium",
+      "why": "repeated no-result recall patterns are present",
+      "evidence": {
+        "groups": 1,
+        "events": 2,
+        "sample_queries": [
+          "cache invalidation policy"
+        ]
+      },
+      "safe_for_auto_apply": false
+    }
+  ]
+}

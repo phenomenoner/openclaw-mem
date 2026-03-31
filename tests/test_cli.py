@@ -3571,6 +3571,188 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_pack_use_graph_auto_keyword_trigger_is_traceable(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "roadmap summary",
+                    "summary_en": "roadmap summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args([
+            "pack",
+            "--query",
+            "where is roadmap",
+            "--json",
+            "--trace",
+            "--use-graph",
+            "auto",
+        ])
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [
+                {
+                    "recordRef": "obs:1",
+                    "id": 1,
+                    "ts": "2026-02-04T13:00:00Z",
+                    "kind": "fact",
+                    "tool_name": "memory_store",
+                    "score": -9.0,
+                    "title": "stub",
+                    "why_relevant": "fts_match",
+                }
+            ],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\n",
+        }
+
+        fake_graph_pack_payload = {
+            "kind": "openclaw-mem.graph.pack.v0",
+            "ts": "2026-02-04T13:00:00Z",
+            "budget": {"budgetTokens": 1200, "estimatedTokens": 20},
+            "items": [
+                {
+                    "recordRef": "obs:1",
+                    "id": 1,
+                    "ts": "2026-02-04T13:00:00Z",
+                    "kind": "fact",
+                    "tool_name": "memory_store",
+                    "summary": "roadmap summary",
+                }
+            ],
+            "bundle_text": "[GRAPH_CONTEXT v0]\nItems: 1\n\n1) obs:1 :: roadmap summary\n",
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
+        ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["graph"]["triggered"])
+        self.assertEqual(out["graph"]["trigger_reason"], "keyword:A+B")
+        self.assertEqual(out["graph"]["stage1"]["categories"], ["A", "B"])
+        self.assertEqual(out["graph"]["probe"], {"ran": False})
+        self.assertIn("[GRAPH_CONTEXT v0]", out["bundle_text_with_graph"])
+
+        ext = out["trace"]["extensions"]["graph"]
+        self.assertTrue(ext["triggered"])
+        self.assertEqual(ext["trigger_reason"], "keyword:A+B")
+        self.assertEqual(ext["probe"], {"ran": False})
+        conn.close()
+
+    def test_pack_use_graph_auto_probe_strong_triggers_preflight(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "latency spike summary",
+                    "summary_en": "latency spike summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args([
+            "pack",
+            "--query",
+            "latency spike recall lane",
+            "--json",
+            "--trace",
+            "--use-graph",
+            "auto",
+        ])
+
+        fake_probe = {
+            "ran": True,
+            "latency_ms": 7,
+            "hit_count": 1,
+            "best_score": -9.5,
+            "scores": [-9.5],
+        }
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [
+                {
+                    "recordRef": "obs:1",
+                    "id": 1,
+                    "ts": "2026-02-04T13:00:00Z",
+                    "kind": "fact",
+                    "tool_name": "memory_store",
+                    "score": -9.5,
+                    "title": "stub",
+                    "why_relevant": "fts_match",
+                }
+            ],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\n",
+        }
+
+        fake_graph_pack_payload = {
+            "kind": "openclaw-mem.graph.pack.v0",
+            "ts": "2026-02-04T13:00:00Z",
+            "budget": {"budgetTokens": 1200, "estimatedTokens": 20},
+            "items": [
+                {
+                    "recordRef": "obs:1",
+                    "id": 1,
+                    "ts": "2026-02-04T13:00:00Z",
+                    "kind": "fact",
+                    "tool_name": "memory_store",
+                    "summary": "latency spike summary",
+                }
+            ],
+            "bundle_text": "[GRAPH_CONTEXT v0]\nItems: 1\n\n1) obs:1 :: latency spike summary\n",
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._pack_graph_probe_observations", return_value=fake_probe
+        ), patch("openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload), patch(
+            "openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload
+        ):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["graph"]["triggered"])
+        self.assertEqual(out["graph"]["trigger_reason"], "probe_strong")
+        self.assertEqual(out["graph"]["probe_decision"], "fire_probe_strong")
+        self.assertEqual(out["graph"]["stage1"]["categories"], [])
+        self.assertEqual(out["graph"]["probe"]["hit_count"], 1)
+        self.assertEqual(out["trace"]["extensions"]["graph"]["probe_decision"], "fire_probe_strong")
+        conn.close()
+
     def test_pack_use_graph_on_provenance_policy_filters_unstructured_graph_candidates(self):
         conn = _connect(":memory:")
 

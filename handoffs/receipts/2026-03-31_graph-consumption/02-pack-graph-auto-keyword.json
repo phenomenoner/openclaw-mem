@@ -1,0 +1,432 @@
+{
+  "bundle_text": "- [obs:1] openclaw-mem roadmap dependency note and graph integration receipt",
+  "items": [
+    {
+      "recordRef": "obs:1",
+      "layer": "L1",
+      "id": 1,
+      "summary": "openclaw-mem roadmap dependency note and graph integration receipt",
+      "kind": "fact",
+      "lang": null
+    }
+  ],
+  "citations": [
+    {
+      "recordRef": "obs:1",
+      "url": null
+    }
+  ],
+  "graph": {
+    "use_graph": "auto",
+    "triggered": true,
+    "trigger_reason": "keyword:A+B",
+    "fail_open": false,
+    "error_first_line": null,
+    "stage0": {
+      "fired": false,
+      "reason": null
+    },
+    "stage1": {
+      "hit": true,
+      "categories": [
+        "A",
+        "B"
+      ],
+      "matched_keywords": [
+        "roadmap",
+        "where is"
+      ]
+    },
+    "probe": {
+      "ran": false
+    },
+    "probe_decision": null,
+    "selection_count_pre_policy": 0,
+    "selection_count": 0,
+    "budget_tokens": 1200,
+    "take": 12,
+    "scope": null,
+    "provenance_policy": {
+      "kind": "openclaw-mem.pack.graph.provenance-policy.v1",
+      "mode": "structured_only_fail_open",
+      "require_structured_provenance": true,
+      "graph_query_db_configured": false,
+      "bounds": {
+        "hops": 1,
+        "max_nodes": 40,
+        "max_edges": 80
+      },
+      "checked_count": 0,
+      "included_count": 0,
+      "excluded_count": 0,
+      "fail_open_count": 0,
+      "decision_reason_counts": {},
+      "decisions": [],
+      "selected_refs": []
+    },
+    "preflight": {
+      "kind": "openclaw-mem.graph.preflight.v0",
+      "query": {
+        "text": "where is roadmap",
+        "scope": null
+      },
+      "selection": {
+        "take": 12,
+        "prePolicyCount": 0,
+        "selectedCount": 0,
+        "prePolicyRecordRefs": [],
+        "recordRefs": []
+      },
+      "budget": {
+        "budgetTokens": 1200,
+        "estimatedTokens": 1
+      },
+      "provenance_policy": {
+        "kind": "openclaw-mem.pack.graph.provenance-policy.v1",
+        "mode": "structured_only_fail_open",
+        "require_structured_provenance": true,
+        "graph_query_db_configured": false,
+        "bounds": {
+          "hops": 1,
+          "max_nodes": 40,
+          "max_edges": 80
+        },
+        "checked_count": 0,
+        "included_count": 0,
+        "excluded_count": 0,
+        "fail_open_count": 0,
+        "decision_reason_counts": {},
+        "decisions": [],
+        "selected_refs": []
+      },
+      "pack": {
+        "kind": "openclaw-mem.graph.pack.v0",
+        "ts": "2026-03-31T06:42:16.236987+00:00",
+        "budget": {
+          "budgetTokens": 1200,
+          "estimatedTokens": 0
+        },
+        "items": [],
+        "bundle_text": ""
+      },
+      "items": [],
+      "bundle_text": ""
+    }
+  },
+  "policy_surface": {
+    "kind": "openclaw-mem.pack.policy-surface.v1",
+    "selection": {
+      "pack_selected_refs": [
+        "obs:1"
+      ],
+      "citation_record_refs": [
+        "obs:1"
+      ],
+      "trust_selected_refs": null,
+      "graph_selected_refs": [],
+      "shared_pack_and_graph_refs": []
+    },
+    "counts": {
+      "pack_selected_count": 1,
+      "citation_count": 1,
+      "candidate_count": 1,
+      "pack_excluded_count": 0
+    },
+    "reasons": {
+      "pack_included_reason_counts": {
+        "matched_fts": 1,
+        "within_budget": 1,
+        "within_item_limit": 1
+      },
+      "pack_excluded_reason_counts": {},
+      "trust_policy_reason_counts": {},
+      "graph_provenance_reason_counts": {}
+    },
+    "policies": {
+      "trust_policy": null,
+      "graph_provenance_policy": {
+        "kind": "openclaw-mem.pack.graph.provenance-policy.v1",
+        "mode": "structured_only_fail_open",
+        "checked_count": 0,
+        "included_count": 0,
+        "excluded_count": 0,
+        "fail_open_count": 0,
+        "decision_reason_counts": {},
+        "selected_refs": []
+      }
+    },
+    "consistency": {
+      "pack_items_match_citations": true,
+      "pack_items_subset_of_trust_selected_refs": null,
+      "pack_items_missing_from_trust_selected_refs": null
+    }
+  },
+  "trace": {
+    "kind": "openclaw-mem.pack.trace.v1",
+    "ts": "2026-03-31T06:42:16.247853+00:00",
+    "version": {
+      "openclaw_mem": "1.2.0",
+      "schema": "v1"
+    },
+    "query": {
+      "text": "where is roadmap",
+      "scope": null,
+      "intent": null
+    },
+    "budgets": {
+      "budgetTokens": 1200,
+      "maxItems": 12,
+      "maxL2Items": 0,
+      "niceCap": 100
+    },
+    "lanes": [
+      {
+        "name": "hot",
+        "source": "session/recent",
+        "searched": false,
+        "retrievers": []
+      },
+      {
+        "name": "warm",
+        "source": "sqlite-observations",
+        "searched": true,
+        "retrievers": [
+          {
+            "kind": "fts5",
+            "topK": 36,
+            "k": null
+          },
+          {
+            "kind": "vector",
+            "topK": 36,
+            "k": null
+          },
+          {
+            "kind": "rrf",
+            "topK": null,
+            "k": 60
+          }
+        ]
+      },
+      {
+        "name": "cold",
+        "source": "curated/durable",
+        "searched": false,
+        "retrievers": []
+      }
+    ],
+    "candidates": [
+      {
+        "id": "obs:1",
+        "layer": "L1",
+        "importance": "must_remember",
+        "trust": "trusted",
+        "scores": {
+          "rrf": 0.01639344262295082,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:1"
+        }
+      }
+    ],
+    "output": {
+      "includedCount": 1,
+      "excludedCount": 0,
+      "l2IncludedCount": 0,
+      "citationsCount": 1,
+      "refreshedRecordRefs": [
+        "obs:1"
+      ],
+      "coverage": {
+        "rationaleMissingCount": 0,
+        "citationMissingCount": 0,
+        "allIncludedHaveRationale": true,
+        "allIncludedHaveCitations": true
+      }
+    },
+    "timing": {
+      "durationMs": 13
+    },
+    "extensions": {
+      "graph": {
+        "triggered": true,
+        "trigger_reason": "keyword:A+B",
+        "stage0": {
+          "fired": false,
+          "reason": null
+        },
+        "stage1": {
+          "hit": true,
+          "categories": [
+            "A",
+            "B"
+          ],
+          "matched_keywords": [
+            "roadmap",
+            "where is"
+          ]
+        },
+        "probe": {
+          "ran": false
+        },
+        "probe_decision": null,
+        "selection_count_pre_policy": 0,
+        "selected_refs_count": 0,
+        "budget_tokens": 1200,
+        "take": 12,
+        "scope": null,
+        "provenance_policy": {
+          "kind": "openclaw-mem.pack.graph.provenance-policy.v1",
+          "mode": "structured_only_fail_open",
+          "require_structured_provenance": true,
+          "graph_query_db_configured": false,
+          "bounds": {
+            "hops": 1,
+            "max_nodes": 40,
+            "max_edges": 80
+          },
+          "checked_count": 0,
+          "included_count": 0,
+          "excluded_count": 0,
+          "fail_open_count": 0,
+          "decision_reason_counts": {},
+          "decisions": [],
+          "selected_refs": []
+        },
+        "fail_open": false,
+        "error_first_line": null,
+        "preflight_kind": "openclaw-mem.graph.preflight.v0"
+      },
+      "policy_surface": {
+        "kind": "openclaw-mem.pack.policy-surface.v1",
+        "selection": {
+          "pack_selected_refs": [
+            "obs:1"
+          ],
+          "citation_record_refs": [
+            "obs:1"
+          ],
+          "trust_selected_refs": null,
+          "graph_selected_refs": [],
+          "shared_pack_and_graph_refs": []
+        },
+        "counts": {
+          "pack_selected_count": 1,
+          "citation_count": 1,
+          "candidate_count": 1,
+          "pack_excluded_count": 0
+        },
+        "reasons": {
+          "pack_included_reason_counts": {
+            "matched_fts": 1,
+            "within_budget": 1,
+            "within_item_limit": 1
+          },
+          "pack_excluded_reason_counts": {},
+          "trust_policy_reason_counts": {},
+          "graph_provenance_reason_counts": {}
+        },
+        "policies": {
+          "trust_policy": null,
+          "graph_provenance_policy": {
+            "kind": "openclaw-mem.pack.graph.provenance-policy.v1",
+            "mode": "structured_only_fail_open",
+            "checked_count": 0,
+            "included_count": 0,
+            "excluded_count": 0,
+            "fail_open_count": 0,
+            "decision_reason_counts": {},
+            "selected_refs": []
+          }
+        },
+        "consistency": {
+          "pack_items_match_citations": true,
+          "pack_items_subset_of_trust_selected_refs": null,
+          "pack_items_missing_from_trust_selected_refs": null
+        }
+      },
+      "lifecycle_shadow": {
+        "kind": "openclaw-mem.pack.lifecycle-shadow.v1",
+        "mode": "shadow_receipt_only",
+        "ts": "2026-03-31T06:42:16.237989+00:00",
+        "query": {
+          "hash": "sha256:9fe1e13bc4a4dc451880821e",
+          "chars": 16
+        },
+        "selection": {
+          "pack_selected_refs": [
+            "obs:1"
+          ],
+          "citation_record_refs": [
+            "obs:1"
+          ],
+          "trace_refreshed_record_refs": [
+            "obs:1"
+          ],
+          "selection_signature": "sha256:b61b29bc42ebb771d6649351"
+        },
+        "counts": {
+          "selected_total": 1,
+          "citation_total": 1,
+          "candidate_total": 1,
+          "excluded_total": 0,
+          "selected_by_trust": {
+            "trusted": 1
+          },
+          "selected_by_importance": {
+            "must_remember": 1
+          }
+        },
+        "reasons": {
+          "pack_included_reason_counts": {
+            "matched_fts": 1,
+            "within_budget": 1,
+            "within_item_limit": 1
+          },
+          "pack_excluded_reason_counts": {},
+          "trust_policy_reason_counts": {},
+          "graph_provenance_reason_counts": {}
+        },
+        "policies": {
+          "trust_policy_mode": "off",
+          "graph_provenance_policy_mode": "structured_only_fail_open"
+        },
+        "mutation": {
+          "memory_mutation": "none",
+          "auto_archive_applied": 0,
+          "auto_mutation_applied": 0,
+          "writes_observations": 0,
+          "writes_embeddings": 0,
+          "writes_lifecycle_state": 0,
+          "writes_shadow_log": 1
+        },
+        "storage": {
+          "table": "pack_lifecycle_shadow_log",
+          "append_only": true,
+          "max_rows": 2000,
+          "error_code": null
+        }
+      }
+    }
+  }
+}

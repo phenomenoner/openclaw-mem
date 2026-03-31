@@ -1,6 +1,6 @@
 # Importance grading (MVP v1)
 
-Status: **PARTIAL** (shipped and usable; rollout / reporting still evolving).
+Status: **DONE** (MVP v1 closure packet landed on 2026-03-31; deterministic scorer + benchmarked receipt).
 
 ## What this is
 `openclaw-mem` supports **importance grading** so downstream workflows can:
@@ -81,9 +81,11 @@ A deterministic scorer exists at:
 
 It produces the canonical object (`method=heuristic-v1`).
 
-### Regression test corpus
-A shared JSONL testcase corpus is stored under:
-- `tests/data/HEURISTIC_TESTCASES.jsonl`
+### Regression + benchmark corpus
+The operator-curated MVP benchmark corpus is stored under:
+- `benchmarks/importance_grading_set.v1.jsonl`
+
+The scorer regression test reads the same benchmark corpus so the benchmark and test lane stay aligned.
 
 Run the scorer regression tests:
 
@@ -94,6 +96,19 @@ uv run --python 3.13 -- python -m unittest -q tests/test_heuristic_v1.py
 # Option B: system python (no uv)
 python3 -m unittest -q tests/test_heuristic_v1.py
 ```
+
+Run the benchmark receipt generator:
+
+```bash
+PYTHONPATH=. python3 tools/importance_benchmark.py \
+  --input benchmarks/importance_grading_set.v1.jsonl \
+  --output handoffs/receipts/2026-03-31_importance-benchmark/importance-benchmark.v1.json
+```
+
+Latest closure packet:
+- benchmark source: `benchmarks/importance_grading_set.v1.jsonl`
+- benchmark receipt: `handoffs/receipts/2026-03-31_importance-benchmark/importance-benchmark.v1.json`
+- closure note: `docs/2026-03-31_importance-grading-benchmark-closure.md`
 
 ## Autograde on ingest/harvest (feature-flagged)
 

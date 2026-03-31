@@ -57,7 +57,7 @@ It operates across two planes:
 - `doctor` = **doctor surface** (`kind` + `ts` + `ok` + `summary` + `checks`). Read this for compact health/readiness.
 - `backend` = config/backend posture helper when you need the memory slot/fallback read directly.
 - Family compare card: `openclaw-async-coding-playbook/projects/openclaw-ops/docs/operator-surface-contract-family.v0.md`
-- **Graph/provenance surfaces:** `graph topology-refresh`, `graph query ...`, drift checks, and graph provenance gating for graph-derived pack candidates.
+- **Graph/provenance surfaces:** `graph topology-refresh`, `graph query ...`, drift checks, graph provenance gating for graph-derived pack candidates, and `pack --use-graph=off|auto|on` for deterministic graph-preflight consumption.
 - **Review-gated action plane (recommendation-only):** `optimize review`, `optimize consolidation-review`, and `optimize policy-loop` emit review queues for hygiene, recent-use-aware decay protection, dream-style candidate consolidation, and rollout readiness (no silent writeback).
 - **Policy-driven safety:** trust policies, graph provenance, and lifecycle logging (`--pack-trust-policy`, `--graph-provenance-policy`, `--graph-query-db`, `--pack-lifecycle-shadow`) keep memory grounded, auditable, and safer for automation.
 - **Episodic event lane:** append/extract/ingest/query/replay with redaction-first defaults.

@@ -77,6 +77,7 @@ Expected:
 - JSON receipts (`--json`)
 - Progressive recall: `ingest → search → timeline → get`
 - Context pack command (`pack`) with fail-open baseline behavior
+- Deterministic graph-preflight pack integration: `pack --use-graph=off|auto|on` with traceable trigger/probe receipts
 - Pack decision surfaces (`trust_policy`, graph `provenance_policy`, `policy_surface`, `lifecycle_shadow`) with bounded trace receipts
 - Deterministic triage for automation (`triage --mode heartbeat|cron-errors|tasks`)
 

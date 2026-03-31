@@ -64,12 +64,16 @@ Acceptance criteria:
 
 ### 1.7) Graphic Memory consumption (triggered preflight → pack integration)
 
-Status: **ROADMAP**.
+Status: **DONE** (pack integration shipped on stable main; `off|auto|on` posture and traceable trigger/provenance receipts revalidated on 2026-03-31).
 
-- Problem: Graphic Memory has working auto-capture and `graph preflight`, but it is not yet **routinely consumed** in doc/decision/dependency lookup flows.
-- Plan (two-step):
-  1) Spec-level: add a deterministic, bilingual trigger policy for when to run `graph preflight` (soft + fail-open).
-  2) Product-level: integrate the same trigger into `openclaw-mem pack` / `hybrid` via `--use-graph=auto` (default OFF).
+- Problem: Graphic Memory had working auto-capture and `graph preflight`, but it was not yet **routinely consumed** in doc/decision/dependency lookup flows.
+- Shipped slice:
+  - `openclaw-mem pack --use-graph=off|auto|on`
+  - deterministic Stage 0/1/2 trigger envelope in `--trace` (`stage0`, `stage1`, `probe`, `trigger_reason`, `probe_decision`)
+  - graph preflight integration stays fail-open and does not break baseline pack behavior
+  - graph-derived candidate inclusion can consume query-plane provenance quality with deterministic include/exclude reasons
+  - policy/usage receipts stay bounded via `graph_provenance_policy`, `policy_surface`, and `lifecycle_shadow`
+  - fresh closure packet: `docs/2026-03-31_graph-consumption-closure.md`
 
 Artifacts:
 - Spec: `docs/specs/graphic-memory-preflight-trigger-policy.md`
@@ -82,7 +86,7 @@ Acceptance criteria:
 
 ### 1.7a) Graphic Memory query plane (operator-facing graph interface)
 
-Status: **PARTIAL** (query-plane foundation + deterministic query CLI shipped; deeper provenance integration pending).
+Status: **DONE** (operator query plane shipped on stable main; closure revalidated with fresh query-plane receipts on 2026-03-31).
 
 - Problem: operators need a practical query layer over stable topology + runtime drift + provenance, but today those relationships are scattered across YAML, cron state, and receipts.
 - Decision: keep repo-backed topology as the source of truth; add a **derived query plane** under `openclaw-mem`.
@@ -185,7 +189,7 @@ Acceptance criteria:
 
 ### 1.5a) Self-optimizing memory loop (shadow/recommendation-first)
 
-Status: **PARTIAL** (v0.1 recommendation observer shipped; apply path still roadmap).
+Status: **DONE** (shadow-only review loop shipped on stable main; apply path remains explicit future work, not part of this slice).
 
 - Problem: the memory layer can capture and recall, but does not yet systematically learn from repeated misses, user corrections, low-value recalls, or strong evidence that certain memories should be promoted/demoted/merged.
 - Decision: add a conservative loop:
@@ -216,7 +220,7 @@ Acceptance criteria:
 
 ### 1) Importance grading rollout (MVP v1)
 
-Status: **PARTIAL** (baseline shipped; benchmark pass pending).
+Status: **DONE** (baseline shipped; operator-curated benchmark packet landed on 2026-03-31).
 
 - [x] Canonical `detail_json.importance` object + thresholds
 - [x] Deterministic `heuristic-v1` + unit tests

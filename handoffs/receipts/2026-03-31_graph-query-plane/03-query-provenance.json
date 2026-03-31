@@ -1,0 +1,48 @@
+{
+  "kind": "openclaw-mem.graph.query.v0",
+  "ts": "2026-03-31T05:01:40.940309+00:00",
+  "query_cmd": "provenance",
+  "result": {
+    "ok": true,
+    "query": "provenance",
+    "filters": {
+      "node_id": "artifact.openclaw-mem.sqlite",
+      "edge_type": null,
+      "source_path": null,
+      "source_path_prefix": null,
+      "min_edge_count": 1,
+      "group_by_source": false
+    },
+    "count": 1,
+    "total_distinct": 1,
+    "provenance_quality": {
+      "edge_count": 1,
+      "structured_edge_count": 0,
+      "kind_counts": {
+        "opaque": 1
+      }
+    },
+    "items": [
+      {
+        "provenance": "docs/deployment.md",
+        "provenance_ref": {
+          "raw": "docs/deployment.md",
+          "kind": "opaque",
+          "is_structured": false,
+          "path": null,
+          "line_start": null,
+          "line_end": null,
+          "anchor": null,
+          "url": null
+        },
+        "edge_count": 1,
+        "edge_types": [
+          {
+            "edge_type": "writes",
+            "edge_count": 1
+          }
+        ]
+      }
+    ]
+  }
+}

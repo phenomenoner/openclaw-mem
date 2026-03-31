@@ -21,7 +21,7 @@ def _iter_jsonl(path: Path):
 
 class TestHeuristicV1(unittest.TestCase):
     def test_heuristic_testcases_jsonl(self):
-        path = Path(__file__).resolve().parent / "data" / "HEURISTIC_TESTCASES.jsonl"
+        path = Path(__file__).resolve().parents[1] / "benchmarks" / "importance_grading_set.v1.jsonl"
         self.assertTrue(path.exists(), f"Missing testcases file: {path}")
 
         total = 0

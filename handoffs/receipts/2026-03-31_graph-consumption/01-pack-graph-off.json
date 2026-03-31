@@ -1,0 +1,190 @@
+{
+  "bundle_text": "- [obs:1] openclaw-mem roadmap dependency note and graph integration receipt",
+  "items": [
+    {
+      "recordRef": "obs:1",
+      "layer": "L1",
+      "id": 1,
+      "summary": "openclaw-mem roadmap dependency note and graph integration receipt",
+      "kind": "fact",
+      "lang": null
+    }
+  ],
+  "citations": [
+    {
+      "recordRef": "obs:1",
+      "url": null
+    }
+  ],
+  "trace": {
+    "kind": "openclaw-mem.pack.trace.v1",
+    "ts": "2026-03-31T06:42:16.119708+00:00",
+    "version": {
+      "openclaw_mem": "1.2.0",
+      "schema": "v1"
+    },
+    "query": {
+      "text": "where is roadmap",
+      "scope": null,
+      "intent": null
+    },
+    "budgets": {
+      "budgetTokens": 1200,
+      "maxItems": 12,
+      "maxL2Items": 0,
+      "niceCap": 100
+    },
+    "lanes": [
+      {
+        "name": "hot",
+        "source": "session/recent",
+        "searched": false,
+        "retrievers": []
+      },
+      {
+        "name": "warm",
+        "source": "sqlite-observations",
+        "searched": true,
+        "retrievers": [
+          {
+            "kind": "fts5",
+            "topK": 36,
+            "k": null
+          },
+          {
+            "kind": "vector",
+            "topK": 36,
+            "k": null
+          },
+          {
+            "kind": "rrf",
+            "topK": null,
+            "k": 60
+          }
+        ]
+      },
+      {
+        "name": "cold",
+        "source": "curated/durable",
+        "searched": false,
+        "retrievers": []
+      }
+    ],
+    "candidates": [
+      {
+        "id": "obs:1",
+        "layer": "L1",
+        "importance": "must_remember",
+        "trust": "trusted",
+        "scores": {
+          "rrf": 0.01639344262295082,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:1"
+        }
+      }
+    ],
+    "output": {
+      "includedCount": 1,
+      "excludedCount": 0,
+      "l2IncludedCount": 0,
+      "citationsCount": 1,
+      "refreshedRecordRefs": [
+        "obs:1"
+      ],
+      "coverage": {
+        "rationaleMissingCount": 0,
+        "citationMissingCount": 0,
+        "allIncludedHaveRationale": true,
+        "allIncludedHaveCitations": true
+      }
+    },
+    "timing": {
+      "durationMs": 10
+    },
+    "extensions": {
+      "lifecycle_shadow": {
+        "kind": "openclaw-mem.pack.lifecycle-shadow.v1",
+        "mode": "shadow_receipt_only",
+        "ts": "2026-03-31T06:42:16.109883+00:00",
+        "query": {
+          "hash": "sha256:9fe1e13bc4a4dc451880821e",
+          "chars": 16
+        },
+        "selection": {
+          "pack_selected_refs": [
+            "obs:1"
+          ],
+          "citation_record_refs": [
+            "obs:1"
+          ],
+          "trace_refreshed_record_refs": [
+            "obs:1"
+          ],
+          "selection_signature": "sha256:b61b29bc42ebb771d6649351"
+        },
+        "counts": {
+          "selected_total": 1,
+          "citation_total": 1,
+          "candidate_total": 1,
+          "excluded_total": 0,
+          "selected_by_trust": {
+            "trusted": 1
+          },
+          "selected_by_importance": {
+            "must_remember": 1
+          }
+        },
+        "reasons": {
+          "pack_included_reason_counts": {
+            "matched_fts": 1,
+            "within_budget": 1,
+            "within_item_limit": 1
+          },
+          "pack_excluded_reason_counts": {},
+          "trust_policy_reason_counts": {},
+          "graph_provenance_reason_counts": {}
+        },
+        "policies": {
+          "trust_policy_mode": "off",
+          "graph_provenance_policy_mode": "off"
+        },
+        "mutation": {
+          "memory_mutation": "none",
+          "auto_archive_applied": 0,
+          "auto_mutation_applied": 0,
+          "writes_observations": 0,
+          "writes_embeddings": 0,
+          "writes_lifecycle_state": 0,
+          "writes_shadow_log": 1
+        },
+        "storage": {
+          "table": "pack_lifecycle_shadow_log",
+          "append_only": true,
+          "max_rows": 2000,
+          "error_code": null
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,334 @@
+{
+  "kind": "openclaw-mem.optimize.consolidation-review.v0",
+  "ts": "2026-03-31T05:06:23.794986+00:00",
+  "version": {
+    "openclaw_mem": "1.2.0",
+    "schema": "v0"
+  },
+  "source": {
+    "table": "episodic_events",
+    "row_limit": 500,
+    "rows_scanned": 5,
+    "total_rows": 5,
+    "scope": null,
+    "session_id": null,
+    "coverage_pct": 100.0,
+    "sample_order": "id_desc_recent_window"
+  },
+  "policy": {
+    "mode": "recommendation-first",
+    "writes_performed": 0,
+    "memory_mutation": "none",
+    "query_only_enforced": true,
+    "canonical_rewrite": "forbidden"
+  },
+  "thresholds": {
+    "summary_min_group_size": 2,
+    "summary_min_shared_tokens": 2,
+    "archive_lookahead_days": 7,
+    "archive_min_signal_reasons": 2,
+    "link_min_shared_tokens": 2,
+    "link_lexical_backfill_max": 1,
+    "lifecycle_limit": 200,
+    "rare_token_max_freq": 4
+  },
+  "signals": {
+    "recent_use": {
+      "lifecycle_rows_scanned": 3,
+      "selection_events": 6,
+      "protected_archive_candidates": 0,
+      "linked_observation_rows": 0,
+      "items": []
+    },
+    "link_evidence": {
+      "lifecycle_rows_scanned": 3,
+      "mode": "receipt_first_with_bounded_lexical_backfill_when_lifecycle_exists",
+      "receipt_supported_pairs": 0,
+      "lexical_fallback_pairs": 0,
+      "lexical_backfill_pairs": 1,
+      "lexical_backfill_candidate_pairs": 3,
+      "lexical_backfill_suppressed_pairs": 2,
+      "hybrid_gate": {
+        "active": true,
+        "lexical_backfill_max": 1
+      },
+      "confidence_model": {
+        "name": "evidence_weighted_v0",
+        "modes": {
+          "receipt_co_selection": {
+            "base": 0.62,
+            "cap": 0.95,
+            "weights": {
+              "co_selection_events": 0.16,
+              "shared_selected_count": 0.12,
+              "co_selection_recency": 0.08,
+              "lexical_score": 0.07,
+              "shared_token_count": 0.05
+            }
+          },
+          "lexical_backfill_low_confidence": {
+            "base": 0.3,
+            "cap": 0.55,
+            "weights": {
+              "co_selection_events": 0.0,
+              "shared_selected_count": 0.0,
+              "co_selection_recency": 0.0,
+              "lexical_score": 0.18,
+              "shared_token_count": 0.1
+            }
+          },
+          "lexical_fallback": {
+            "base": 0.46,
+            "cap": 0.78,
+            "weights": {
+              "co_selection_events": 0.0,
+              "shared_selected_count": 0.0,
+              "co_selection_recency": 0.0,
+              "lexical_score": 0.2,
+              "shared_token_count": 0.11
+            }
+          }
+        },
+        "normalization": {
+          "co_selection_events_saturation": 3,
+          "shared_selected_count_saturation": 2,
+          "shared_token_count_saturation": 4,
+          "co_selection_recency_half_life_days": 30.0
+        }
+      }
+    }
+  },
+  "candidates": {
+    "summary": {
+      "groups": 1,
+      "items": [
+        {
+          "scope": "alpha",
+          "session_id": "s-1",
+          "count": 3,
+          "ids": [
+            1,
+            2,
+            3
+          ],
+          "event_ids": [
+            "ev-1",
+            "ev-2",
+            "ev-3"
+          ],
+          "shared_tokens": [
+            "lane",
+            "latency",
+            "memory",
+            "recall",
+            "spike"
+          ],
+          "type_counts": {
+            "conversation.user": 1,
+            "conversation.assistant": 1,
+            "tool.result": 1
+          },
+          "time_range": {
+            "start_ts_ms": 1774674363000,
+            "end_ts_ms": 1774847163000
+          },
+          "draft_summary": "3 episodic events in alpha/s-1 repeatedly touch lane, latency, memory; candidate consolidation over conversation.assistant:1 | conversation.user:1 | tool.result:1.",
+          "source_event_refs": [
+            {
+              "id": 1,
+              "event_id": "ev-1",
+              "type": "conversation.user",
+              "scope": "alpha",
+              "session_id": "s-1",
+              "ts_ms": 1774674363000,
+              "summary_preview": "Investigate latency spike in memory recall lane"
+            },
+            {
+              "id": 2,
+              "event_id": "ev-2",
+              "type": "conversation.assistant",
+              "scope": "alpha",
+              "session_id": "s-1",
+              "ts_ms": 1774760763000,
+              "summary_preview": "Memory recall latency spike still affects the debug lane"
+            },
+            {
+              "id": 3,
+              "event_id": "ev-3",
+              "type": "tool.result",
+              "scope": "alpha",
+              "session_id": "s-1",
+              "ts_ms": 1774847163000,
+              "summary_preview": "Recall lane latency metrics confirm spike in debug memory path"
+            }
+          ]
+        }
+      ]
+    },
+    "archive": {
+      "count": 1,
+      "protected_by_recent_use": 0,
+      "items": [
+        {
+          "id": 5,
+          "event_id": "ev-5",
+          "scope": "alpha",
+          "session_id": "s-old",
+          "type": "tool.result",
+          "age_days": 28,
+          "retention_days": 30,
+          "days_until_gc": 2,
+          "low_signal_reasons": [
+            "no_refs",
+            "low_token_count",
+            "short_summary",
+            "no_payload",
+            "redacted"
+          ],
+          "summary_preview": "ok temp note",
+          "source_event_ref": {
+            "id": 5,
+            "event_id": "ev-5",
+            "type": "tool.result",
+            "scope": "alpha",
+            "session_id": "s-old",
+            "ts_ms": 1772514363000,
+            "summary_preview": "ok temp note"
+          }
+        }
+      ]
+    },
+    "links": {
+      "pairs": 1,
+      "items": [
+        {
+          "scope": "alpha",
+          "shared_tokens": [
+            "latency",
+            "memory",
+            "recall"
+          ],
+          "shared_token_count": 3,
+          "score": 0.333,
+          "receipt_evidence": {
+            "shared_selected_refs": [],
+            "shared_selected_count": 0,
+            "co_selection_events": 0,
+            "co_selection_last_ts": null,
+            "co_selection_recency_days": null,
+            "co_selection_recency_score": 0.0,
+            "co_selected_pair_count": 0,
+            "co_selected_pairs": [],
+            "selection_signatures": []
+          },
+          "left": {
+            "id": 1,
+            "event_id": "ev-1",
+            "type": "conversation.user",
+            "scope": "alpha",
+            "session_id": "s-1",
+            "ts_ms": 1774674363000,
+            "summary_preview": "Investigate latency spike in memory recall lane"
+          },
+          "right": {
+            "id": 4,
+            "event_id": "ev-4",
+            "type": "conversation.user",
+            "scope": "alpha",
+            "session_id": "s-2",
+            "ts_ms": 1774847163000,
+            "summary_preview": "Need a rollback plan for memory recall latency"
+          },
+          "evidence_mode": "lexical_backfill_low_confidence",
+          "confidence": 0.435,
+          "confidence_components": {
+            "model": "evidence_weighted_v0",
+            "mode": "lexical_backfill_low_confidence",
+            "base": 0.3,
+            "inputs": {
+              "co_selection_events": 0,
+              "shared_selected_count": 0,
+              "co_selection_last_ts": null,
+              "co_selection_recency_days": null,
+              "co_selection_recency_score": 0.0,
+              "lexical_score": 0.333,
+              "shared_token_count": 3
+            },
+            "weights": {
+              "co_selection_events": 0.0,
+              "shared_selected_count": 0.0,
+              "co_selection_recency": 0.0,
+              "lexical_score": 0.18,
+              "shared_token_count": 0.1
+            },
+            "contributions": {
+              "co_selection_events": 0.0,
+              "shared_selected_count": 0.0,
+              "co_selection_recency": 0.0,
+              "lexical_score": 0.06,
+              "shared_token_count": 0.075
+            },
+            "raw": 0.435,
+            "cap": 0.55
+          }
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "recommendations": [
+    {
+      "type": "review_summary_candidates",
+      "priority": "medium",
+      "confidence": 0.79,
+      "why": "1 episodic clusters look compressible into summary candidates",
+      "evidence": {
+        "groups": 1,
+        "sample_event_ids": [
+          [
+            "ev-1",
+            "ev-2",
+            "ev-3"
+          ]
+        ]
+      },
+      "suggested_action": "Review draft summaries and decide whether to keep as proposals, archive sources, or discard.",
+      "safe_for_auto_apply": false
+    },
+    {
+      "type": "stage_archive_candidates",
+      "priority": "low",
+      "confidence": 0.72,
+      "why": "1 episodic rows are nearing retention horizon with low-signal traits",
+      "evidence": {
+        "count": 1,
+        "sample_ids": [
+          5
+        ]
+      },
+      "suggested_action": "Stage low-signal episodes for archive or deletion review before GC windows close.",
+      "safe_for_auto_apply": false
+    },
+    {
+      "type": "review_link_candidates",
+      "priority": "low",
+      "confidence": 0.68,
+      "why": "1 cross-session link candidates were found (receipt-derived when lifecycle evidence exists)",
+      "evidence": {
+        "pairs": 1,
+        "sample_shared_tokens": [
+          [
+            "latency",
+            "memory",
+            "recall"
+          ]
+        ],
+        "sample_evidence_mode": [
+          "lexical_backfill_low_confidence"
+        ]
+      },
+      "suggested_action": "Review whether repeated cross-session motifs deserve explicit graph or note linkage.",
+      "safe_for_auto_apply": false
+    }
+  ]
+}

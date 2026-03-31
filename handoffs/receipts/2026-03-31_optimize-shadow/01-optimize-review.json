@@ -1,0 +1,202 @@
+{
+  "kind": "openclaw-mem.optimize.review.v0",
+  "ts": "2026-03-31T05:06:23.658632+00:00",
+  "version": {
+    "openclaw_mem": "1.2.0",
+    "schema": "v0"
+  },
+  "source": {
+    "table": "observations",
+    "row_limit": 1000,
+    "rows_scanned": 11,
+    "total_rows": 11,
+    "scope": null,
+    "coverage_pct": 100.0,
+    "sample_order": "id_desc_recent_window"
+  },
+  "signals": {
+    "staleness": {
+      "count": 0,
+      "threshold_days": 60,
+      "excluded_must_remember": 0,
+      "protected_recent_use": 1,
+      "items": []
+    },
+    "recent_use": {
+      "rows_with_recent_use": 2,
+      "selection_events": 6,
+      "lifecycle_rows_scanned": 3,
+      "lifecycle_limit": 200,
+      "items": [
+        {
+          "id": 2,
+          "recent_use_count": 3,
+          "last_selected_ts": "2026-03-31T05:06:03Z",
+          "age_days": 2,
+          "summary_preview": "todo finalize weekly benchmark checklist"
+        },
+        {
+          "id": 1,
+          "recent_use_count": 3,
+          "last_selected_ts": "2026-03-31T05:06:03Z",
+          "age_days": 120,
+          "summary_preview": "legacy rollout detail that is likely stale"
+        }
+      ]
+    },
+    "duplication": {
+      "groups": 1,
+      "duplicate_rows": 1,
+      "min_count": 2,
+      "fingerprint_algo": "normalize_v1",
+      "scope_isolated": true,
+      "items": [
+        {
+          "scope": null,
+          "fingerprint": "todo finalize weekly benchmark checklist",
+          "count": 2,
+          "ids": [
+            2,
+            3
+          ],
+          "canonical_id": 2,
+          "latest_id": 3,
+          "sample_summary": "todo finalize weekly benchmark checklist"
+        }
+      ]
+    },
+    "bloat": {
+      "count": 1,
+      "summary_chars_threshold": 240,
+      "detail_bytes_threshold": 4096,
+      "items": [
+        {
+          "id": 4,
+          "summary_chars": 320,
+          "detail_bytes": 6015,
+          "kind": "tool",
+          "tool_name": "exec",
+          "summary_preview": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+        }
+      ]
+    },
+    "weakly_connected": {
+      "count": 2,
+      "orphan_min_tokens": 2,
+      "rare_token_max_freq": 2,
+      "items": [
+        {
+          "id": 5,
+          "token_count": 5,
+          "degree": 0,
+          "kind": "note",
+          "tool_name": "memory_store",
+          "summary_preview": "quasarflux nebula drift anomaly snapshot"
+        },
+        {
+          "id": 8,
+          "token_count": 2,
+          "degree": 0,
+          "kind": "note",
+          "tool_name": "memory_store",
+          "summary_preview": "no lancedb id yet"
+        }
+      ]
+    },
+    "repeated_misses": {
+      "groups": 1,
+      "miss_events": 2,
+      "min_count": 2,
+      "tool_name": "memory_recall",
+      "items": [
+        {
+          "scope": "alpha",
+          "query": "cache invalidation policy",
+          "count": 2,
+          "ids": [
+            10,
+            11
+          ],
+          "latest_id": 11,
+          "latest_ts": "2026-03-30T05:06:03Z"
+        }
+      ]
+    }
+  },
+  "policy": {
+    "mode": "recommendation-first",
+    "writes_performed": 0,
+    "memory_mutation": "none",
+    "query_only_enforced": true
+  },
+  "warnings": [],
+  "recommendations": [
+    {
+      "type": "merge_candidates",
+      "priority": "medium",
+      "confidence": 0.82,
+      "why": "1 duplicate clusters found",
+      "evidence": {
+        "groups": 1,
+        "duplicate_rows": 1,
+        "sample_groups": [
+          [
+            2,
+            3
+          ]
+        ]
+      },
+      "suggested_action": "Pick canonical rows and merge/alias duplicates manually.",
+      "safe_for_auto_apply": false
+    },
+    {
+      "type": "summarize_bloat_candidates",
+      "priority": "medium",
+      "confidence": 0.71,
+      "why": "1 rows exceed summary/detail size thresholds",
+      "evidence": {
+        "count": 1,
+        "summary_chars_threshold": 240,
+        "detail_bytes_threshold": 4096,
+        "sample_ids": [
+          4
+        ]
+      },
+      "suggested_action": "Create concise summaries and keep originals as cold references.",
+      "safe_for_auto_apply": false
+    },
+    {
+      "type": "strengthen_edge_candidates",
+      "priority": "low",
+      "confidence": 0.63,
+      "why": "2 rows have no lexical neighbors in the current sample",
+      "evidence": {
+        "count": 2,
+        "sample_ids": [
+          5,
+          8
+        ]
+      },
+      "suggested_action": "Link to nearby decisions/tasks or add scope tags for future recall.",
+      "safe_for_auto_apply": false
+    },
+    {
+      "type": "widen_scope_candidate",
+      "priority": "medium",
+      "confidence": 0.67,
+      "why": "1 repeated no-result memory_recall query patterns detected",
+      "evidence": {
+        "groups": 1,
+        "miss_events": 2,
+        "sample_queries": [
+          "cache invalidation policy"
+        ],
+        "sample_ids": [
+          11
+        ]
+      },
+      "suggested_action": "Review scope/query constraints and capture missing canonical memory for high-repeat misses.",
+      "safe_for_auto_apply": false
+    }
+  ]
+}

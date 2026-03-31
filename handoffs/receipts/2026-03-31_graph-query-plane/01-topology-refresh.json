@@ -1,0 +1,14 @@
+{
+  "kind": "openclaw-mem.graph.topology-refresh.v0",
+  "ts": "2026-03-31T05:01:40.684294+00:00",
+  "file": "docs/topology.json",
+  "result": {
+    "ok": true,
+    "db_path": "handoffs/receipts/2026-03-31_graph-query-plane/graph-query-plane-smoke.sqlite",
+    "source_path": "docs/topology.json",
+    "refreshed_at": "2026-03-31T05:01:40Z",
+    "node_count": 5,
+    "edge_count": 3,
+    "topology_digest": "af713d47a6cc2d6839bc5de9bd515872e42247a611c791c41afb803cea2391b9"
+  }
+}

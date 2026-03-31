@@ -1,0 +1,102 @@
+{
+  "kind": "openclaw-mem.importance-benchmark.v1",
+  "benchmark": {
+    "name": "importance_grading_mvp_v1",
+    "fixture_path": "benchmarks/importance_grading_set.v1.jsonl",
+    "fixture_sha256": "7c31380813b875ac3e167ccfe69d76839d0071c35e04bfabf2535fce26512d2e",
+    "total_cases": 34,
+    "before_operator_labels": {
+      "must_remember": 5,
+      "nice_to_have": 25,
+      "ignore": 4,
+      "unknown": 0
+    },
+    "after_heuristic_v1": {
+      "must_remember": 5,
+      "nice_to_have": 25,
+      "ignore": 4,
+      "unknown": 0
+    },
+    "label_agreement": 1.0,
+    "mismatch_count": 0,
+    "confusion_matrix": {
+      "must_remember": {
+        "must_remember": 5,
+        "nice_to_have": 0,
+        "ignore": 0,
+        "unknown": 0
+      },
+      "nice_to_have": {
+        "must_remember": 0,
+        "nice_to_have": 25,
+        "ignore": 0,
+        "unknown": 0
+      },
+      "ignore": {
+        "must_remember": 0,
+        "nice_to_have": 0,
+        "ignore": 4,
+        "unknown": 0
+      },
+      "unknown": {
+        "must_remember": 0,
+        "nice_to_have": 0,
+        "ignore": 0,
+        "unknown": 0
+      }
+    }
+  },
+  "metrics": {
+    "must_remember_precision": 1.0,
+    "must_remember_predicted": 5,
+    "must_remember_true_positive": 5,
+    "ignore_precision": 1.0,
+    "ignore_predicted": 4,
+    "ignore_true_positive": 4
+  },
+  "ignore_spot_check": {
+    "count": 4,
+    "items": [
+      {
+        "id": "tc06",
+        "expected_label": "ignore",
+        "predicted_label": "ignore",
+        "score": 0.1,
+        "summary_preview": "Pushed changes to origin.",
+        "notes": "Pure progress update; low reuse."
+      },
+      {
+        "id": "tc08",
+        "expected_label": "ignore",
+        "predicted_label": "ignore",
+        "score": 0.15,
+        "summary_preview": "Meeting at 3pm about the memory project.",
+        "notes": "Calendar-only note without lasting content."
+      },
+      {
+        "id": "tc09",
+        "expected_label": "ignore",
+        "predicted_label": "ignore",
+        "score": 0.05,
+        "summary_preview": "哈哈收到，謝謝。",
+        "notes": "Acknowledgement/chit-chat."
+      },
+      {
+        "id": "tc11",
+        "expected_label": "ignore",
+        "predicted_label": "ignore",
+        "score": 0.0,
+        "summary_preview": "BEGIN OPENSSH PRIVATE KEY (redacted)",
+        "notes": "Secret-like pattern should be down-ranked to avoid unsafe recall/injection."
+      }
+    ]
+  },
+  "mismatches": [],
+  "verdict": {
+    "ready_for_mvp_closure": true,
+    "notes": [
+      "This is a small operator-curated regression benchmark, not a broad external quality claim.",
+      "Before = operator-labeled fixture; after = current heuristic-v1 predictions."
+    ]
+  }
+}

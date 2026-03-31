@@ -1,0 +1,41 @@
+{
+  "kind": "openclaw-mem.graph.query.v0",
+  "ts": "2026-03-31T05:01:41.064073+00:00",
+  "query_cmd": "drift",
+  "result": {
+    "ok": true,
+    "query": "drift",
+    "live_json_path": "handoffs/receipts/2026-03-31_graph-query-plane/live-topology-missing-artifact.json",
+    "topology_node_count": 5,
+    "runtime_node_count": 4,
+    "status_counts": {
+      "unknown": 4
+    },
+    "missing_in_runtime": {
+      "count": 1,
+      "node_ids": [
+        "artifact.openclaw-mem.sqlite"
+      ],
+      "truncated": false
+    },
+    "runtime_only": {
+      "count": 0,
+      "node_ids": [],
+      "truncated": false
+    },
+    "non_ok_nodes": {
+      "count": 0,
+      "items": [],
+      "truncated": false,
+      "statuses": [
+        "error",
+        "missing",
+        "stale"
+      ]
+    },
+    "duplicate_runtime_ids": {
+      "count": 0,
+      "node_ids": []
+    }
+  }
+}
