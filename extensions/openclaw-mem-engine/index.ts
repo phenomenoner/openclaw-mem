@@ -20,7 +20,7 @@
  * - memory_forget({ memoryId: "<id from store>" })
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -1888,6 +1888,22 @@ function clampReceiptItems(count: number, cfg: ReceiptsConfig): number {
 function roundScore(raw: number): number {
   if (!Number.isFinite(raw)) return 0;
   return Number(raw.toFixed(6));
+}
+
+function buildWeiJiIntentId(input: {
+  scope: string;
+  category: MemoryCategory;
+  text: string;
+  importance?: number;
+}): string {
+  const serialized = JSON.stringify({
+    scope: input.scope,
+    category: input.category,
+    text: input.text,
+    importance: typeof input.importance === "number" ? Number(input.importance.toFixed(6)) : null,
+  });
+  const digest = createHash("sha1").update(serialized).digest("hex").slice(0, 20);
+  return `mem-intent-${digest}`;
 }
 
 function buildRankedHits(
@@ -4852,14 +4868,22 @@ const memoryPlugin = {
           const normalizedImportance = toImportanceRecord(importance);
           const normalizedLabel = importanceLabel(normalizedImportance);
           const id = randomUUID();
+          const weiJiIntentId = buildWeiJiIntentId({
+            scope,
+            category,
+            text,
+            importance: normalizedImportance,
+          });
           let weiJiMemoryPreflightReceipt: Record<string, unknown> | null = null;
 
           if (weijiMemoryPreflightResolved.enabled) {
             const preflight = await runWeiJiMemoryPreflight({
               intent: {
                 id,
+                intent_id: weiJiIntentId,
                 tool: "memory_store",
                 source: "openclaw-mem-engine.memory_store",
+                requester: "openclaw-mem-engine.memory_store",
                 scope,
                 category,
                 text,
