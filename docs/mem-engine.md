@@ -569,6 +569,8 @@ Definition of done:
 
 ### M1.5 — Sidecar writeback + policy-tiered recall defaults
 
+Status: **DONE** (proof-first closure slice landed on 2026-04-06; topology unchanged).
+
 Goal: close the loop between graded SQLite ledger artifacts and runtime recall behavior.
 
 Deliverables:
@@ -581,6 +583,7 @@ Deliverables:
   2. fallback `unknown`
   3. fallback `ignore`
 - Recall receipts include which policy tier was selected (e.g., `must+nice`, `must+nice+unknown`, `must+nice+unknown+ignore`).
+- Closure packet: `docs/2026-04-06_writeback-recall-policy-loop-closure.md`
 
 ### M2 — Ops hardening (index lifecycle + optimize + drift)
 

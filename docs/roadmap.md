@@ -173,7 +173,7 @@ Artifacts:
 
 ### 1.5) Writeback + recall policy loop (M1.5)
 
-Status: **PARTIAL**.
+Status: **DONE** (proof-first closure slice landed on 2026-04-06).
 
 - Add a bounded `openclaw-mem writeback-lancedb` path that pushes graded metadata from SQLite into LanceDB by row ID.
 - Default recall policy for `memory_recall` is fail-open:
@@ -181,6 +181,7 @@ Status: **PARTIAL**.
   2. +unknown
   3. +ignore
 - Receipt must expose `policyTier` used (`must+nice`, `must+nice+unknown`, `must+nice+unknown+ignore`) for diagnostics.
+- fresh closure packet: `docs/2026-04-06_writeback-recall-policy-loop-closure.md`
 
 Acceptance criteria:
 - A smoke writeback run updates `importance`, `importance_label`, `scope`, `trust_tier`, `category` only when missing.
