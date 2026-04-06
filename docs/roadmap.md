@@ -142,6 +142,10 @@ Artifacts:
 
 Status: **PARTIAL** (Stage A running; Stage B/C pending).
 
+Positioning:
+- rollout ladder for the shipped writeback / recall path
+- operational follow-through, not the default next standalone product blade
+
 - Stage A: background writeback cron (no slot switch)
 - Stage B: daily canary slot switch + golden-set recall check
 - Stage C: live switch with auto-downgrade guard
@@ -154,6 +158,10 @@ Acceptance criteria:
 ### 1.6a) Read-only lane enforcement ladder (sidecar-first deployments)
 
 Status: **ROADMAP**.
+
+Positioning:
+- platform / deployment guardrail, not the default next product-core blade
+- tracked partly in `openclaw-ops` because the end-state depends on runtime / host enforcement beyond openclaw-mem core ownership
 
 - Problem: in sidecar-only deployments, “read-only lanes” are still mostly a prompt/runner discipline; `exec` is the main escape hatch.
 - Goal: make read-only posture enforceable (tool surface + script-only exec + sandbox) so we can expand unattended coverage safely.
