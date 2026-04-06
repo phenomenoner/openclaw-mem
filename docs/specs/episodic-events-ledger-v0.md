@@ -98,6 +98,7 @@ Add a new command group:
 
 - `openclaw-mem episodes append ...` (or `episodic append`)
 - `openclaw-mem episodes query ...`
+- `openclaw-mem episodes search "<query>" ...` (groups matches by `session_id`)
 - `openclaw-mem episodes replay <session_id>` (returns a bounded, ordered timeline)
 - `openclaw-mem episodes redact --event-id <id> | --session-id <sid> ...`
 
@@ -125,6 +126,9 @@ openclaw-mem episodes query --scope openclaw-mem --session-id sess-001 --include
 
 # replay shorthand (ordered timeline)
 openclaw-mem episodes replay sess-001 --scope openclaw-mem --json
+
+# transcript recall search (grouped by session)
+openclaw-mem episodes search "graph readiness bridge" --scope openclaw-mem --limit 5 --per-session-limit 3 --json
 
 # redact payloads while preserving rows
 openclaw-mem episodes redact --session-id sess-001 --scope openclaw-mem --replacement placeholder --json
@@ -187,6 +191,7 @@ Introduce a simple retention policy (v0):
 - [x] DB migration: table + indexes created (idempotent).
 - [x] `episodes append` validates scope/type and enforces payload size caps.
 - [x] `episodes query` supports `scope/session_id/from/to/types/limit` and is deterministic.
+- [x] `episodes search` supports bounded FTS recall over `search_text` and groups results by `session_id`.
 - [x] Summary-only default confirmed by tests.
 - [x] Redaction command works (payload removed; redacted flag set).
 - [x] Retention GC produces an aggregate receipt.

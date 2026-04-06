@@ -75,9 +75,12 @@ Current pilot sequencing (2026-02):
 - Promotion (if any) must be explicit + reviewed + reversible.
 
 ### Graph semantic memory
-- Implemented as an operator-invoked **v0** slice.
+- Implemented as a bounded **v0** slice.
 - Shipped commands:
   - `openclaw-mem graph match "<idea/query>"` → candidate projects with explanation paths + provenance refs
   - `openclaw-mem graph health --stale-hours 24` → freshness/staleness summary for the current graph cache
-- Not yet auto-wired into the default agent loop; recommended daily-canary posture is `graph health` first, then bounded `graph match` only when the cache is healthy enough for the task.
-- Deeper typed schema/storage/autonomy decisions remain future work.
+  - `openclaw-mem graph readiness --stale-hours 24` → autonomous-ready verdict bridging freshness, topology-source drift, and match-support availability
+  - `openclaw-mem route auto "<query>"` → deterministic default routing: consult readiness, then prefer graph-semantic only when ready and returning candidates (otherwise fail open to transcript recall)
+- This is still not auto-wired into the OpenClaw default agent loop by default.
+  - For unattended use, the recommended posture is `graph readiness` first, then `route auto` as the single routing entrypoint.
+- Deeper typed schema/storage/autonomy enforcement remain future work.

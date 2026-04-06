@@ -108,7 +108,9 @@ If recall/docs results are weak, conflicting, or low-confidence:
 - **Docs search (L2):** `openclaw-mem docs search "…"`
 - **Docs ingest (L2):** `openclaw-mem docs ingest --path ./docs`
 - **Topology (L3):** repo inspection (`rg`, `tree`) + write a small topo note under `docs/topology/` (then ingest via docs)
-- **Graph match (L3):** `openclaw-mem graph match "…"` for idea → project / concept → project candidate routing; use `openclaw-mem graph health` first for unattended/canary use
+- **Graph match (L3):** `openclaw-mem graph match "…"` for idea → project / concept → project candidate routing.
+  - For unattended use, prefer `openclaw-mem graph readiness` (bridges freshness + topology-source drift + match-support availability).
+  - If you want a single deterministic router across graph-semantic and transcript recall, use `openclaw-mem route auto "<query>"` (fail-open).
 
 ---
 

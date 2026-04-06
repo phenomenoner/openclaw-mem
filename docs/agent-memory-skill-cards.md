@@ -53,7 +53,9 @@ Never store:
 - Docs search (L2): `memory_docs_search(query)`
 - Topology (L3): repo inspection + (if available) `openclaw-mem graph query ...`
   - prerequisite: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`)
-- Graph match (L3): `openclaw-mem graph match "…"` for idea → project candidate routing; for unattended use, check `openclaw-mem graph health` first
+- Graph match (L3): `openclaw-mem graph match "…"` for idea → project candidate routing
+  - unattended: prefer `openclaw-mem graph readiness` first
+  - single entrypoint router: `openclaw-mem route auto "<query>"` (fail-open)
 
 ## Output behavior
 Answer using the best lane with provenance. Store only after confirmation, and store **one fact per record**.

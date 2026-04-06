@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No unreleased changes yet.
 
+## [1.3.1] - 2026-04-06
+
+### Changed
+
+- Added `openclaw-mem graph readiness` as a bridge surface between graph cache freshness, topology-source drift, and graph-match support-plane availability.
+  - emits a machine-readable `green/yellow/red` verdict for unattended routing
+  - checks: freshness, non-empty cache, topology source presence, topology source drift tolerance, and recent graph-support observations
+- Added `openclaw-mem episodes search` to support transcript-style recall over episodic events.
+  - uses SQLite FTS5 over bounded `search_text`
+  - groups matched events by `session_id`
+  - returns a replay hint for each session
+- Added `openclaw-mem route auto` as a deterministic default router across graph-semantic matching and episodic transcript recall.
+  - consults `graph readiness` first
+  - prefers graph-semantic only when the graph is ready **and** returns candidates
+  - otherwise fails open to `episodes search`
+
+### Testing
+
+- Added `tests/test_autonomous_default_routing_cli.py` coverage for `episodes search`, `graph readiness`, and `route auto` selection behavior.
+
 ## [1.3.0] - 2026-04-06
 
 ### Changed

@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import signal
 import sqlite3
 import subprocess
@@ -1035,6 +1036,95 @@ def _init_db(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_scope_ts ON episodic_events(scope, ts_ms);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_session_ts ON episodic_events(session_id, ts_ms);")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_scope_type_ts ON episodic_events(scope, type, ts_ms);")
+
+    episodic_cols = {r[1] for r in conn.execute("PRAGMA table_info(episodic_events)").fetchall()}
+    if "search_text" not in episodic_cols:
+        conn.execute("ALTER TABLE episodic_events ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
+
+    conn.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS episodic_events_fts
+        USING fts5(summary, search_text, type, session_id, agent_id, content='episodic_events', content_rowid='id');
+        """
+    )
+
+    episodic_fts_cols = [r[1] for r in conn.execute("PRAGMA table_info(episodic_events_fts)").fetchall()]
+    if "search_text" not in episodic_fts_cols:
+        conn.execute("DROP TABLE IF EXISTS episodic_events_fts")
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE episodic_events_fts
+            USING fts5(summary, search_text, type, session_id, agent_id, content='episodic_events', content_rowid='id');
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO episodic_events_fts(rowid, summary, search_text, type, session_id, agent_id)
+            SELECT id, summary, search_text, type, session_id, agent_id
+            FROM episodic_events;
+            """
+        )
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS episodic_events_ai
+        AFTER INSERT ON episodic_events
+        BEGIN
+            INSERT INTO episodic_events_fts(rowid, summary, search_text, type, session_id, agent_id)
+            VALUES (new.id, new.summary, new.search_text, new.type, new.session_id, new.agent_id);
+        END;
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS episodic_events_ad
+        AFTER DELETE ON episodic_events
+        BEGIN
+            INSERT INTO episodic_events_fts(episodic_events_fts, rowid, summary, search_text, type, session_id, agent_id)
+            VALUES ('delete', old.id, old.summary, old.search_text, old.type, old.session_id, old.agent_id);
+        END;
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS episodic_events_au
+        AFTER UPDATE ON episodic_events
+        BEGIN
+            INSERT INTO episodic_events_fts(episodic_events_fts, rowid, summary, search_text, type, session_id, agent_id)
+            VALUES ('delete', old.id, old.summary, old.search_text, old.type, old.session_id, old.agent_id);
+            INSERT INTO episodic_events_fts(rowid, summary, search_text, type, session_id, agent_id)
+            VALUES (new.id, new.summary, new.search_text, new.type, new.session_id, new.agent_id);
+        END;
+        """
+    )
+
+    for row in conn.execute(
+        "SELECT id, summary, payload_json, refs_json FROM episodic_events WHERE COALESCE(search_text, '') = ''"
+    ).fetchall():
+        conn.execute(
+            "UPDATE episodic_events SET search_text = ? WHERE id = ?",
+            (
+                _episodic_build_search_text(
+                    summary=str(row[1] or ""),
+                    payload_json=row[2],
+                    refs_json=row[3],
+                ),
+                int(row[0]),
+            ),
+        )
+
+    try:
+        fts_any = conn.execute("SELECT rowid FROM episodic_events_fts LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        fts_any = True  # fail-open
+
+    if not fts_any:
+        total_row = conn.execute("SELECT COUNT(*) FROM episodic_events").fetchone()
+        total = int(total_row[0] or 0) if total_row else 0
+        if total > 0:
+            conn.execute("INSERT INTO episodic_events_fts(episodic_events_fts) VALUES('rebuild')")
 
     conn.execute(
         f"""
@@ -7697,6 +7787,286 @@ def cmd_graph_health(conn: sqlite3.Connection, args: argparse.Namespace) -> None
     )
 
 
+def _graph_parse_iso_or_none(raw: Any) -> Optional[datetime]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _graph_source_status(latest_receipt: Dict[str, Any]) -> Dict[str, Any]:
+    source_path = str(latest_receipt.get("source_path") or "").strip()
+    out: Dict[str, Any] = {
+        "source_path": source_path or None,
+        "exists": False,
+        "mtime": None,
+        "newer_than_refresh": None,
+    }
+    if not source_path:
+        return out
+
+    path = Path(source_path).expanduser()
+    if not path.exists():
+        return out
+
+    mtime_dt = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    refreshed_dt = _graph_parse_iso_or_none(latest_receipt.get("refreshed_at"))
+    out["exists"] = True
+    out["mtime"] = mtime_dt.isoformat().replace("+00:00", "Z")
+    out["newer_than_refresh"] = bool(refreshed_dt is not None and mtime_dt > (refreshed_dt + timedelta(seconds=1)))
+    return out
+
+
+def _graph_support_plane_status(conn: sqlite3.Connection, *, window_hours: float) -> Dict[str, Any]:
+    hours_value = max(0.001, float(window_hours))
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours_value)).isoformat().replace("+00:00", "Z")
+    tool_names = ("graph.capture-md", "graph.capture-git")
+    rows = conn.execute(
+        """
+        SELECT tool_name, COUNT(*) AS count, MAX(ts) AS latest_ts
+        FROM observations
+        WHERE tool_name IN (?, ?) AND ts >= ?
+        GROUP BY tool_name
+        ORDER BY tool_name ASC
+        """,
+        (tool_names[0], tool_names[1], cutoff),
+    ).fetchall()
+
+    by_tool = []
+    total_count = 0
+    latest_ts = None
+    for row in rows:
+        count = int(row["count"] or 0)
+        latest_tool_ts = str(row["latest_ts"] or "") or None
+        total_count += count
+        if latest_tool_ts and (latest_ts is None or latest_tool_ts > latest_ts):
+            latest_ts = latest_tool_ts
+        by_tool.append(
+            {
+                "tool_name": str(row["tool_name"] or ""),
+                "count": count,
+                "latest_ts": latest_tool_ts,
+            }
+        )
+
+    return {
+        "window_hours": hours_value,
+        "cutoff_ts": cutoff,
+        "total_count": total_count,
+        "latest_ts": latest_ts,
+        "by_tool": by_tool,
+    }
+
+
+def _graph_readiness_payload(
+    conn: sqlite3.Connection,
+    *,
+    db_path: str,
+    stale_hours: float,
+    support_window_hours: float,
+) -> Dict[str, Any]:
+    try:
+        health = query_graph_health(db_path=db_path, stale_hours=stale_hours)
+    except Exception as e:
+        health = {
+            "ok": False,
+            "query": "health",
+            "status": "error",
+            "stale": True,
+            "stale_hours": float(stale_hours),
+            "age_hours": None,
+            "node_count": 0,
+            "edge_count": 0,
+            "latest_receipt": None,
+            "meta": {},
+            "warnings": [f"graph_health_unavailable: {str(e)}"],
+        }
+    latest_receipt = health.get("latest_receipt") if isinstance(health.get("latest_receipt"), dict) else {}
+    source_status = _graph_source_status(latest_receipt or {})
+    support_plane = _graph_support_plane_status(conn, window_hours=support_window_hours)
+
+    blockers: List[str] = []
+    warnings: List[str] = list(health.get("warnings") or [])
+
+    if not bool(health.get("ok", True)):
+        blockers.append("graph_health_unavailable")
+    if not latest_receipt:
+        blockers.append("missing_refresh_receipt")
+    if bool(health.get("stale")):
+        blockers.append("graph_cache_stale")
+    if int(health.get("node_count") or 0) <= 0 or int(health.get("edge_count") or 0) <= 0:
+        blockers.append("graph_cache_empty")
+    if source_status.get("source_path") and not bool(source_status.get("exists")):
+        blockers.append("topology_source_missing")
+    if bool(source_status.get("newer_than_refresh")):
+        blockers.append("topology_source_changed_since_refresh")
+    if int(support_plane.get("total_count") or 0) <= 0:
+        warnings.append("graph_match_support_plane_empty")
+
+    ready_for_autonomous_match = not blockers and int(support_plane.get("total_count") or 0) > 0
+    verdict = "green" if ready_for_autonomous_match else "yellow" if not blockers else "red"
+
+    return {
+        "kind": "openclaw-mem.graph.readiness.v0",
+        "ts": _utcnow_iso(),
+        "result": {
+            "ok": True,
+            "verdict": verdict,
+            "ready_for_autonomous_match": ready_for_autonomous_match,
+            "checks": {
+                "fresh_graph_cache": not bool(health.get("stale")),
+                "non_empty_graph_cache": int(health.get("node_count") or 0) > 0 and int(health.get("edge_count") or 0) > 0,
+                "topology_source_present": bool(source_status.get("exists")) if source_status.get("source_path") else True,
+                "topology_source_unchanged_since_refresh": not bool(source_status.get("newer_than_refresh")) if source_status.get("source_path") else True,
+                "graph_match_support_present": int(support_plane.get("total_count") or 0) > 0,
+            },
+            "health": health,
+            "source_status": source_status,
+            "support_plane": support_plane,
+            "blockers": blockers,
+            "warnings": warnings,
+        },
+    }
+
+
+def cmd_graph_readiness(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        payload = _graph_readiness_payload(
+            conn,
+            db_path=str(getattr(args, "db", "") or "").strip(),
+            stale_hours=float(getattr(args, "stale_hours", 24.0) or 24.0),
+            support_window_hours=float(getattr(args, "support_window_hours", 168.0) or 168.0),
+        )
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    result = payload["result"]
+    print(
+        " ".join(
+            [
+                f"verdict={result.get('verdict')}",
+                f"ready={str(bool(result.get('ready_for_autonomous_match'))).lower()}",
+                f"graph_support={int(((result.get('support_plane') or {}).get('total_count') or 0))}",
+                f"blockers={len(list(result.get('blockers') or []))}",
+                f"warnings={len(list(result.get('warnings') or []))}",
+            ]
+        )
+    )
+
+
+def cmd_route_auto(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        query = str(getattr(args, "query", "") or "").strip()
+        if not query:
+            raise ValueError("query is required")
+        scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
+        graph_limit = max(1, min(20, int(getattr(args, "graph_limit", 5) or 5)))
+        graph_support_limit = max(1, min(10, int(getattr(args, "graph_support_limit", 3) or 3)))
+        graph_search_limit = max(1, min(200, int(getattr(args, "graph_search_limit", 40) or 40)))
+        episodes_limit = max(1, min(20, int(getattr(args, "episodes_limit", 5) or 5)))
+        episodes_per_session_limit = max(1, min(20, int(getattr(args, "episodes_per_session_limit", 3) or 3)))
+        episodes_search_limit = max(1, min(500, int(getattr(args, "episodes_search_limit", 40) or 40)))
+    except ValueError as e:
+        _emit({"kind": "openclaw-mem.route.auto.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(2)
+
+    readiness_payload = _graph_readiness_payload(
+        conn,
+        db_path=str(getattr(args, "db", "") or "").strip(),
+        stale_hours=float(getattr(args, "stale_hours", 24.0) or 24.0),
+        support_window_hours=float(getattr(args, "support_window_hours", 168.0) or 168.0),
+    )
+    readiness = readiness_payload["result"]
+
+    graph_payload: Optional[Dict[str, Any]] = None
+    graph_skipped_reason: Optional[str] = None
+    if bool(readiness.get("ready_for_autonomous_match")):
+        graph_payload = _graph_match_payload(
+            conn,
+            query=query,
+            scope=scope,
+            limit=graph_limit,
+            support_limit=graph_support_limit,
+            search_limit=graph_search_limit,
+        )
+    else:
+        graph_skipped_reason = "graph_not_ready"
+
+    episodes_payload = _episodes_search_payload(
+        conn,
+        scope=scope,
+        query=query,
+        limit=episodes_limit,
+        per_session_limit=episodes_per_session_limit,
+        search_limit=episodes_search_limit,
+        include_payload=bool(getattr(args, "include_payload", False)),
+    )
+
+    graph_count = int(((graph_payload or {}).get("result") or {}).get("count") or 0)
+    episode_count = int(((episodes_payload or {}).get("result") or {}).get("count") or 0)
+
+    if bool(readiness.get("ready_for_autonomous_match")) and graph_count > 0:
+        selection = {
+            "selected_lane": "graph_match",
+            "reason": "graph_ready_with_candidates",
+            "fail_open": False,
+        }
+    elif episode_count > 0:
+        selection = {
+            "selected_lane": "episodes_search",
+            "reason": "graph_unready_or_empty_and_transcript_hits_present",
+            "fail_open": True,
+        }
+    else:
+        selection = {
+            "selected_lane": "none",
+            "reason": "no_graph_candidate_or_transcript_hit",
+            "fail_open": True,
+        }
+
+    payload = {
+        "kind": "openclaw-mem.route.auto.v0",
+        "ts": _utcnow_iso(),
+        "query": {"text": query, "scope": scope},
+        "selection": selection,
+        "inputs": {
+            "graph_readiness": readiness_payload,
+            "graph_match": graph_payload,
+            "graph_match_skipped_reason": graph_skipped_reason,
+            "episodes_search": episodes_payload,
+        },
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    print(
+        " ".join(
+            [
+                f"lane={selection.get('selected_lane')}",
+                f"reason={selection.get('reason')}",
+                f"graph_ready={str(bool(readiness.get('ready_for_autonomous_match'))).lower()}",
+                f"graph_candidates={graph_count}",
+                f"episode_sessions={episode_count}",
+            ]
+        )
+    )
+
+
 def cmd_graph_topology_refresh(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Deterministically refresh the topology graph (nodes/edges) from a curated file.
 
@@ -8884,8 +9254,8 @@ def cmd_episodes_append(conn: sqlite3.Connection, args: argparse.Namespace) -> N
             """
             INSERT INTO episodic_events (
                 event_id, ts_ms, scope, session_id, agent_id, type, summary,
-                payload_json, refs_json, redacted, schema_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                payload_json, refs_json, redacted, schema_version, created_at, search_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
             """,
             (
                 event_id,
@@ -8899,6 +9269,11 @@ def cmd_episodes_append(conn: sqlite3.Connection, args: argparse.Namespace) -> N
                 refs_serialized,
                 EPISODIC_SCHEMA_VERSION,
                 created_at,
+                _episodic_build_search_text(
+                    summary=summary,
+                    payload_json=payload_serialized,
+                    refs_json=refs_serialized,
+                ),
             ),
         )
         conn.commit()
@@ -8944,6 +9319,222 @@ def cmd_episodes_append(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         },
     }
     _emit(out, args.json)
+
+
+def _episodic_collect_search_fragments(value: Any, out: List[str], *, max_fragments: int = 48) -> None:
+    if len(out) >= max_fragments or value is None:
+        return
+
+    if isinstance(value, str):
+        text = re.sub(r"\s+", " ", _sanitize_str_surrogates(value)).strip()
+        if text:
+            out.append(text[:400])
+        return
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        out.append(str(value))
+        return
+
+    if isinstance(value, dict):
+        for key in sorted(value.keys()):
+            _episodic_collect_search_fragments(value.get(key), out, max_fragments=max_fragments)
+            if len(out) >= max_fragments:
+                break
+        return
+
+    if isinstance(value, list):
+        for item in value:
+            _episodic_collect_search_fragments(item, out, max_fragments=max_fragments)
+            if len(out) >= max_fragments:
+                break
+
+
+def _episodic_text_fragments_from_json(raw: Any) -> List[str]:
+    if not isinstance(raw, str) or not raw.strip():
+        return []
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        text = re.sub(r"\s+", " ", _sanitize_str_surrogates(raw)).strip()
+        return [text[:400]] if text else []
+
+    out: List[str] = []
+    _episodic_collect_search_fragments(obj, out)
+    return out
+
+
+EPISODIC_SEARCH_TEXT_MAX_CHARS = 2400
+
+
+def _episodic_build_search_text(*, summary: str, payload_json: Any, refs_json: Any) -> str:
+    parts: List[str] = []
+    seen: set[str] = set()
+
+    for candidate in [summary, *_episodic_text_fragments_from_json(payload_json), *_episodic_text_fragments_from_json(refs_json)]:
+        text = re.sub(r"\s+", " ", _sanitize_str_surrogates(str(candidate or ""))).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        parts.append(text)
+
+    out = "\n".join(parts).strip()
+    if len(out) > EPISODIC_SEARCH_TEXT_MAX_CHARS:
+        out = out[:EPISODIC_SEARCH_TEXT_MAX_CHARS].rstrip()
+    return out
+
+
+def _episodes_search_match_rows(
+    conn: sqlite3.Connection,
+    *,
+    scope: str,
+    query: str,
+    search_limit: int,
+) -> List[sqlite3.Row]:
+    sql = (
+        "SELECT e.id, e.event_id, e.ts_ms, e.scope, e.session_id, e.agent_id, e.type, e.summary, "
+        "e.payload_json, e.refs_json, e.redacted, e.schema_version, e.created_at, "
+        "snippet(episodic_events_fts, 1, '[', ']', '…', 16) AS snippet, "
+        "bm25(episodic_events_fts) AS score "
+        "FROM episodic_events_fts "
+        "JOIN episodic_events e ON e.id = episodic_events_fts.rowid "
+        "WHERE episodic_events_fts MATCH ? AND e.scope = ? "
+        "ORDER BY bm25(episodic_events_fts) ASC, e.ts_ms DESC, e.id DESC "
+        "LIMIT ?"
+    )
+
+    rows: List[sqlite3.Row] = []
+    try:
+        rows = conn.execute(sql, (query, scope, int(search_limit))).fetchall()
+    except sqlite3.OperationalError:
+        sanitized = re.sub(r"[^\w\s]", " ", query, flags=re.UNICODE)
+        sanitized = " ".join(sanitized.split())
+        retry_query = sanitized if sanitized else query
+        if retry_query != query:
+            try:
+                rows = conn.execute(sql, (retry_query, scope, int(search_limit))).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
+
+    if rows:
+        return rows
+
+    tokens = [t for t in re.sub(r"[^\w\s]", " ", query, flags=re.UNICODE).split() if t]
+    if len(tokens) > 1:
+        or_query = " OR ".join(tokens)
+        try:
+            return conn.execute(sql, (or_query, scope, int(search_limit))).fetchall()
+        except sqlite3.OperationalError:
+            return []
+    return []
+
+
+def _episodes_search_payload(
+    conn: sqlite3.Connection,
+    *,
+    scope: str,
+    query: str,
+    limit: int,
+    per_session_limit: int,
+    search_limit: int,
+    include_payload: bool,
+) -> Dict[str, Any]:
+    rows = _episodes_search_match_rows(
+        conn,
+        scope=scope,
+        query=query,
+        search_limit=search_limit,
+    )
+
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        sid = str(row["session_id"] or "")
+        entry = grouped.setdefault(
+            sid,
+            {
+                "session_id": sid,
+                "hit_count": 0,
+                "best_match_score": None,
+                "latest_ts_ms": int(row["ts_ms"] or 0),
+                "agent_ids": set(),
+                "type_counts": {},
+                "matched_items": [],
+            },
+        )
+        entry["hit_count"] += 1
+        score = float(row["score"]) if row["score"] is not None else None
+        if score is not None and (entry["best_match_score"] is None or score < entry["best_match_score"]):
+            entry["best_match_score"] = score
+        entry["latest_ts_ms"] = max(int(entry["latest_ts_ms"]), int(row["ts_ms"] or 0))
+        entry["agent_ids"].add(str(row["agent_id"] or ""))
+        event_type = str(row["type"] or "unknown")
+        entry["type_counts"][event_type] = int(entry["type_counts"].get(event_type, 0)) + 1
+        item = _episodes_row_to_item(row, include_payload=include_payload)
+        snippet = re.sub(r"\s+", " ", str(row["snippet"] or "")).strip()
+        item["match"] = {
+            "score": score,
+            "snippet": snippet or item.get("summary"),
+        }
+        entry["matched_items"].append(item)
+
+    ranked = sorted(
+        grouped.values(),
+        key=lambda item: (
+            -int(item["hit_count"]),
+            float(item["best_match_score"]) if item["best_match_score"] is not None else float("inf"),
+            -int(item["latest_ts_ms"]),
+            str(item["session_id"]),
+        ),
+    )[: max(1, int(limit))]
+
+    sessions: List[Dict[str, Any]] = []
+    for rank, entry in enumerate(ranked, 1):
+        matched_items = list(entry["matched_items"])[: max(1, int(per_session_limit))]
+        summary_parts: List[str] = []
+        seen_summary: set[str] = set()
+        for item in matched_items:
+            summary = str(item.get("summary") or "").strip()
+            if not summary or summary in seen_summary:
+                continue
+            seen_summary.add(summary)
+            summary_parts.append(summary)
+        sessions.append(
+            {
+                "rank": rank,
+                "session_id": entry["session_id"],
+                "hit_count": int(entry["hit_count"]),
+                "best_match_score": entry["best_match_score"],
+                "latest_ts_ms": int(entry["latest_ts_ms"]),
+                "agent_ids": sorted(x for x in entry["agent_ids"] if x),
+                "type_counts": [
+                    {"type": k, "count": int(v)}
+                    for k, v in sorted(entry["type_counts"].items(), key=lambda kv: (-int(kv[1]), str(kv[0])))
+                ],
+                "summary": " | ".join(summary_parts)[:280],
+                "replay_hint": {
+                    "scope": scope,
+                    "session_id": entry["session_id"],
+                    "command": f"openclaw-mem episodes replay {shlex.quote(entry['session_id'])} --scope {shlex.quote(scope)} --json",
+                },
+                "matched_items": matched_items,
+            }
+        )
+
+    return {
+        "kind": "openclaw-mem.episodes.search.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "scope": scope,
+        "query": {"text": query},
+        "result": {
+            "count": len(sessions),
+            "session_limit": int(limit),
+            "per_session_limit": int(per_session_limit),
+            "search_limit": int(search_limit),
+            "include_payload": bool(include_payload),
+            "sessions": sessions,
+        },
+    }
 
 
 def _episodes_query_rows(
@@ -9041,6 +9632,39 @@ def cmd_episodes_query(conn: sqlite3.Connection, args: argparse.Namespace) -> No
         "items": items,
     }
     _emit(out, args.json)
+
+
+def cmd_episodes_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
+        query = str(getattr(args, "query", "") or "").strip()
+        if not query:
+            raise ValueError("query is required")
+        limit = max(1, min(EPISODIC_MAX_QUERY_LIMIT, int(getattr(args, "limit", 5) or 5)))
+        per_session_limit = max(1, min(20, int(getattr(args, "per_session_limit", 3) or 3)))
+        search_limit = max(1, min(500, int(getattr(args, "search_limit", 40) or 40)))
+        include_payload = bool(getattr(args, "include_payload", False))
+    except ValueError as e:
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.search.v0",
+                "ok": False,
+                "error": str(e),
+            },
+            True,
+        )
+        sys.exit(2)
+
+    payload = _episodes_search_payload(
+        conn,
+        scope=scope,
+        query=query,
+        limit=limit,
+        per_session_limit=per_session_limit,
+        search_limit=search_limit,
+        include_payload=include_payload,
+    )
+    _emit(payload, args.json)
 
 
 def cmd_episodes_replay(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -9516,8 +10140,8 @@ def _episodes_ingest_once(
                 """
                 INSERT INTO episodic_events (
                     event_id, ts_ms, scope, session_id, agent_id, type, summary,
-                    payload_json, refs_json, redacted, schema_version, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    payload_json, refs_json, redacted, schema_version, created_at, search_text
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event["event_id"],
@@ -9532,6 +10156,11 @@ def _episodes_ingest_once(
                     1 if bool(event.get("redacted")) else 0,
                     EPISODIC_SCHEMA_VERSION,
                     now_iso,
+                    _episodic_build_search_text(
+                        summary=str(event.get("summary") or ""),
+                        payload_json=event.get("payload_json"),
+                        refs_json=event.get("refs_json"),
+                    ),
                 ),
             )
             inserted += 1
@@ -10059,7 +10688,7 @@ def cmd_episodes_redact(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     try:
         if event_id:
             cur = conn.execute(
-                "UPDATE episodic_events SET payload_json = ?, refs_json = ?, redacted = 1 WHERE event_id = ?",
+                "UPDATE episodic_events SET payload_json = ?, refs_json = ?, redacted = 1, search_text = summary WHERE event_id = ?",
                 (payload_value, refs_value, event_id),
             )
             redacted_count = int(cur.rowcount)
@@ -10067,7 +10696,7 @@ def cmd_episodes_redact(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         else:
             scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
             cur = conn.execute(
-                "UPDATE episodic_events SET payload_json = ?, refs_json = ?, redacted = 1 WHERE session_id = ? AND scope = ?",
+                "UPDATE episodic_events SET payload_json = ?, refs_json = ?, redacted = 1, search_text = summary WHERE session_id = ? AND scope = ?",
                 (payload_value, refs_value, session_id, scope),
             )
             redacted_count = int(cur.rowcount)
@@ -10623,6 +11252,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--stale-hours", dest="stale_hours", type=float, default=24.0, help="Mark the graph stale when latest refresh is older than this many hours (default: 24)")
     g.set_defaults(func=cmd_graph_health)
 
+    g = gsub.add_parser("readiness", help="Bridge graph freshness, topology-source drift, and graph-match support readiness")
+    g.add_argument("--stale-hours", dest="stale_hours", type=float, default=24.0, help="Mark the graph stale when latest refresh is older than this many hours (default: 24)")
+    g.add_argument("--support-window-hours", dest="support_window_hours", type=float, default=168.0, help="Look back this many hours for graph support observations (default: 168)")
+    g.set_defaults(func=cmd_graph_readiness)
+
     g = gsub.add_parser("topology-refresh", help="Refresh topology graph (nodes/edges) from a curated file")
     g.add_argument("--file", required=True, help="Topology file path (.json; .yaml requires PyYAML)")
     g.set_defaults(func=cmd_graph_topology_refresh)
@@ -10874,6 +11508,17 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--include-payload", action="store_true", help="Include payload object in output")
     e.set_defaults(func=cmd_episodes_query)
 
+    e = esub.add_parser("search", help="Search episodic transcript/event history and group matches by session")
+    add_common(e)
+    e.add_argument("query", help="Search query")
+    e.add_argument("--scope", help="Scope token. Required unless --global")
+    e.add_argument("--global", dest="global_scope", action="store_true", help="Explicitly query global scope")
+    e.add_argument("--limit", type=int, default=5, help="Max grouped sessions to return (default: 5, max: 500)")
+    e.add_argument("--per-session-limit", type=int, default=3, help="Max matched items to keep per session (default: 3, max: 20)")
+    e.add_argument("--search-limit", type=int, default=40, help="Max raw event hits to consider before grouping (default: 40, max: 500)")
+    e.add_argument("--include-payload", action="store_true", help="Include payload object in matched items")
+    e.set_defaults(func=cmd_episodes_search)
+
     e = esub.add_parser("replay", help="Replay one session timeline")
     add_common(e)
     e.add_argument("session_id", help="Session id")
@@ -10899,6 +11544,25 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--now-ts-ms", type=int, help="Retention reference time in unix ms (default: now)")
     e.add_argument("--policy", action="append", help="Override retention policy TYPE=DAYS or TYPE=forever (repeatable)")
     e.set_defaults(func=cmd_episodes_gc)
+
+    sp = sub.add_parser("route", help="Deterministic route selection across graph-semantic and episodic transcript recall")
+    add_common(sp)
+    rsub = sp.add_subparsers(dest="route_cmd", required=True)
+
+    r = rsub.add_parser("auto", help="Pick the safest available route for a query and fail open")
+    r.add_argument("query", help="Idea, question, or recall query")
+    r.add_argument("--scope", help="Scope token. Required unless --global")
+    r.add_argument("--global", dest="global_scope", action="store_true", help="Explicitly query global scope")
+    r.add_argument("--stale-hours", dest="stale_hours", type=float, default=24.0, help="Mark graph data stale after this many hours (default: 24)")
+    r.add_argument("--support-window-hours", dest="support_window_hours", type=float, default=168.0, help="Look back this many hours for graph support observations (default: 168)")
+    r.add_argument("--graph-limit", type=int, default=5, help="Max graph candidates to keep if graph routing wins (default: 5)")
+    r.add_argument("--graph-support-limit", type=int, default=3, help="Max supporting graph records per candidate (default: 3)")
+    r.add_argument("--graph-search-limit", type=int, default=40, help="Max raw graph support hits before grouping (default: 40)")
+    r.add_argument("--episodes-limit", type=int, default=5, help="Max transcript session groups to keep (default: 5)")
+    r.add_argument("--episodes-per-session-limit", type=int, default=3, help="Max transcript hits to keep per session (default: 3)")
+    r.add_argument("--episodes-search-limit", type=int, default=40, help="Max raw transcript hits before grouping (default: 40)")
+    r.add_argument("--include-payload", action="store_true", help="Include payload objects in transcript matched items")
+    r.set_defaults(func=cmd_route_auto)
 
     sp = sub.add_parser("store", help="Proactively store a memory")
     add_common(sp)
