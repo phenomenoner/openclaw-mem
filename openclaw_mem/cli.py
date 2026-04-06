@@ -820,9 +820,14 @@ def _connect(db_path: str) -> sqlite3.Connection:
     if db_path not in (":memory:", "") and dir_:
         os.makedirs(dir_, exist_ok=True)
 
-    conn = sqlite3.connect(db_path)
+    # Concurrency hardening for the live sidecar DB:
+    # - WAL for concurrent readers/writers
+    # - non-zero connect timeout / busy_timeout so parallel cron/tool lanes
+    #   wait briefly instead of failing immediately under transient contention
+    conn = sqlite3.connect(db_path, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")
     _init_db(conn)
     return conn
 

@@ -180,8 +180,10 @@ def refresh_topology(topology: Dict[str, Any], *, db_path: str | Path, source_pa
     db = Path(db_path)
     db.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(db))
+    conn = sqlite3.connect(str(db), timeout=10.0)
     try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
         ensure_graph_schema(conn)
         with conn:
             conn.execute("DELETE FROM graph_edges")

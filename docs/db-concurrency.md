@@ -9,11 +9,12 @@ Multiple OpenClaw sessions, cron jobs, or heartbeat checks may access the SQLite
 Write-Ahead Logging allows concurrent readers while a writer is active.
 
 ```python
-conn = sqlite3.connect(db_path)
+conn = sqlite3.connect(db_path, timeout=10.0)
 conn.execute("PRAGMA journal_mode=WAL;")
+conn.execute("PRAGMA busy_timeout=5000;")
 ```
 
-**Already implemented in `openclaw_mem/cli.py`** ✅
+**Implemented in the main sidecar connection path (`openclaw_mem/cli.py`) and graph refresh write path** ✅
 
 ### 2. Short-Lived Connections
 Open → operate → close immediately. Avoid holding connections across operations.
