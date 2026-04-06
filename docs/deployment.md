@@ -31,7 +31,8 @@ This repo currently ships **two different plugin roles**:
 2. **`openclaw-mem-engine` memory-slot plugin**
    - optional memory backend / engine
    - owns read/write tool behavior when selected as the active memory slot
-   - its manifest is currently still marked **`0.0.1`** (treat as pre-release / controlled rollout)
+   - its manifest is currently marked **`0.0.2`** (treat as a controlled rollout)
+   - can optionally run a route-auto prompt hook before agent start to inject a compact graph/transcript routing hint block
 
 ### Read-only carve-out: which component actually enforces it?
 

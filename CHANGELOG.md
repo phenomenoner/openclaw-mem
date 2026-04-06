@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No unreleased changes yet.
 
+## [1.3.2] - 2026-04-06
+
+### Changed
+
+- Added an optional `openclaw-mem-engine` prompt hook under `autoRecall.routeAuto`.
+  - calls `openclaw-mem route auto` before agent start
+  - injects a bounded routing hint block into live turns when graph-semantic or transcript recall returns useful guidance
+  - remains fail-open on timeout/runtime failure
+- Promoted `openclaw-mem-engine` package metadata from `0.0.1` to `0.0.2` to reflect the new prompt-hook surface.
+
+### Testing
+
+- Added `extensions/openclaw-mem-engine/routeAuto.test.mjs` behavioral coverage for graph/transcript route rendering and fail-open subprocess failure.
+- Added `tests/test_mem_engine_route_auto_hook.py` schema + source marker coverage.
+
 ## [1.3.1] - 2026-04-06
 
 ### Changed

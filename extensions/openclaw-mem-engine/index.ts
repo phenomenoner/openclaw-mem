@@ -42,6 +42,7 @@ import {
   isTodoStale,
 } from "./todoGuardrails.js";
 import { docsIngestWithCli, docsSearchWithCli } from "./docsColdLane.js";
+import { runRouteAuto } from "./routeAuto.js";
 import { runTierFirstV1, selectTierQuotaV1 } from "./tierSelection.js";
 import { runWeiJiMemoryPreflight } from "./weiJiMemoryPreflight.js";
 
@@ -68,6 +69,17 @@ const MemoryCategorySchema = Type.Union([
   Type.Literal("other"),
 ]);
 
+type RouteAutoConfigInput = {
+  enabled?: boolean;
+  command?: string;
+  commandArgs?: string[];
+  dbPath?: string;
+  timeoutMs?: number;
+  maxChars?: number;
+  maxGraphCandidates?: number;
+  maxTranscriptSessions?: number;
+};
+
 type AutoRecallConfigInput = {
   enabled?: boolean;
   maxItems?: number;
@@ -77,6 +89,7 @@ type AutoRecallConfigInput = {
   tierSearchMultiplier?: number;
   selectionMode?: AutoRecallSelectionMode;
   quotas?: AutoRecallQuotasInput;
+  routeAuto?: RouteAutoConfigInput;
 };
 
 type AutoCaptureConfigInput = {
@@ -224,6 +237,17 @@ const DOCS_COLD_LANE_MAX_SEARCH_K = 100;
 const WORKING_SET_MAX_CHARS = 2800;
 const WORKING_SET_MAX_ITEMS_PER_SECTION = 5;
 
+type RouteAutoConfig = {
+  enabled: boolean;
+  command: string;
+  commandArgs: string[];
+  dbPath?: string;
+  timeoutMs: number;
+  maxChars: number;
+  maxGraphCandidates: number;
+  maxTranscriptSessions: number;
+};
+
 type AutoRecallConfig = {
   enabled: boolean;
   maxItems: number;
@@ -237,6 +261,7 @@ type AutoRecallConfig = {
     niceMin: number;
     unknownMax: number;
   };
+  routeAuto: RouteAutoConfig;
 };
 
 type AutoCaptureConfig = {
@@ -298,6 +323,17 @@ type WeiJiMemoryPreflightConfig = {
 
 type AutoCaptureCategory = "preference" | "decision" | "todo";
 
+const DEFAULT_ROUTE_AUTO_CONFIG: RouteAutoConfig = {
+  enabled: false,
+  command: "openclaw-mem",
+  commandArgs: [],
+  dbPath: undefined,
+  timeoutMs: 1800,
+  maxChars: 420,
+  maxGraphCandidates: 2,
+  maxTranscriptSessions: 2,
+};
+
 const DEFAULT_AUTO_RECALL_CONFIG: AutoRecallConfig = {
   enabled: true,
   maxItems: 4,
@@ -311,6 +347,7 @@ const DEFAULT_AUTO_RECALL_CONFIG: AutoRecallConfig = {
     niceMin: 2,
     unknownMax: 1,
   },
+  routeAuto: { ...DEFAULT_ROUTE_AUTO_CONFIG },
 };
 
 const DEFAULT_AUTO_CAPTURE_CONFIG: AutoCaptureConfig = {
@@ -613,6 +650,45 @@ function resolveAutoRecallConfig(input: PluginConfig["autoRecall"]): AutoRecallC
     }),
   };
 
+  const rawRouteAuto =
+    raw.routeAuto && typeof raw.routeAuto === "object" && !Array.isArray(raw.routeAuto)
+      ? raw.routeAuto
+      : ({} as RouteAutoConfigInput);
+  const routeAuto = {
+    enabled: normalizeBoolean(rawRouteAuto.enabled, defaults.routeAuto.enabled),
+    command:
+      typeof rawRouteAuto.command === "string" && rawRouteAuto.command.trim()
+        ? rawRouteAuto.command.trim()
+        : defaults.routeAuto.command,
+    commandArgs: Array.isArray(rawRouteAuto.commandArgs)
+      ? rawRouteAuto.commandArgs.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 64)
+      : defaults.routeAuto.commandArgs,
+    dbPath:
+      typeof rawRouteAuto.dbPath === "string" && rawRouteAuto.dbPath.trim().length > 0
+        ? rawRouteAuto.dbPath.trim()
+        : defaults.routeAuto.dbPath,
+    timeoutMs: normalizeNumberInRange(rawRouteAuto.timeoutMs, defaults.routeAuto.timeoutMs, {
+      min: 200,
+      max: 15_000,
+      integer: true,
+    }),
+    maxChars: normalizeNumberInRange(rawRouteAuto.maxChars, defaults.routeAuto.maxChars, {
+      min: 120,
+      max: 2400,
+      integer: true,
+    }),
+    maxGraphCandidates: normalizeNumberInRange(rawRouteAuto.maxGraphCandidates, defaults.routeAuto.maxGraphCandidates, {
+      min: 1,
+      max: 5,
+      integer: true,
+    }),
+    maxTranscriptSessions: normalizeNumberInRange(rawRouteAuto.maxTranscriptSessions, defaults.routeAuto.maxTranscriptSessions, {
+      min: 1,
+      max: 5,
+      integer: true,
+    }),
+  };
+
   return {
     enabled: normalizeBoolean(raw.enabled, defaults.enabled),
     maxItems: normalizeNumberInRange(raw.maxItems, defaults.maxItems, {
@@ -634,6 +710,7 @@ function resolveAutoRecallConfig(input: PluginConfig["autoRecall"]): AutoRecallC
     }),
     selectionMode,
     quotas,
+    routeAuto,
   };
 }
 
@@ -3245,6 +3322,7 @@ const memoryEngineConfigSchema = {
           "tierSearchMultiplier",
           "selectionMode",
           "quotas",
+          "routeAuto",
         ],
         "autoRecall config",
       );
@@ -3265,6 +3343,35 @@ const memoryEngineConfigSchema = {
         };
       }
 
+      let routeAuto: AutoRecallConfigInput["routeAuto"] | undefined;
+      if (obj.routeAuto != null) {
+        if (typeof obj.routeAuto !== "object" || Array.isArray(obj.routeAuto)) {
+          throw new Error("autoRecall.routeAuto must be an object");
+        }
+
+        const routeAutoObj = obj.routeAuto as Record<string, unknown>;
+        assertAllowedKeys(
+          routeAutoObj,
+          ["enabled", "command", "commandArgs", "dbPath", "timeoutMs", "maxChars", "maxGraphCandidates", "maxTranscriptSessions"],
+          "autoRecall.routeAuto config",
+        );
+
+        routeAuto = {
+          enabled: typeof routeAutoObj.enabled === "boolean" ? routeAutoObj.enabled : undefined,
+          command: typeof routeAutoObj.command === "string" ? routeAutoObj.command : undefined,
+          commandArgs: Array.isArray(routeAutoObj.commandArgs)
+            ? routeAutoObj.commandArgs.filter((item): item is string => typeof item === "string")
+            : undefined,
+          dbPath: typeof routeAutoObj.dbPath === "string" ? routeAutoObj.dbPath : undefined,
+          timeoutMs: typeof routeAutoObj.timeoutMs === "number" ? routeAutoObj.timeoutMs : undefined,
+          maxChars: typeof routeAutoObj.maxChars === "number" ? routeAutoObj.maxChars : undefined,
+          maxGraphCandidates:
+            typeof routeAutoObj.maxGraphCandidates === "number" ? routeAutoObj.maxGraphCandidates : undefined,
+          maxTranscriptSessions:
+            typeof routeAutoObj.maxTranscriptSessions === "number" ? routeAutoObj.maxTranscriptSessions : undefined,
+        };
+      }
+
       return {
         enabled: typeof obj.enabled === "boolean" ? obj.enabled : undefined,
         maxItems: typeof obj.maxItems === "number" ? obj.maxItems : undefined,
@@ -3279,6 +3386,7 @@ const memoryEngineConfigSchema = {
             ? obj.selectionMode
             : undefined,
         quotas,
+        routeAuto,
       };
     };
 
@@ -3568,6 +3676,31 @@ const memoryEngineConfigSchema = {
       label: "Auto Recall",
       help: "Inject a bounded, sanitized memory context before agent start",
     },
+    "autoRecall.routeAuto.enabled": {
+      label: "Route Auto Prompt Hook",
+      help: "Call openclaw-mem route auto before agent start and inject a compact routing hint block.",
+      advanced: true,
+    },
+    "autoRecall.routeAuto.timeoutMs": {
+      label: "Route Auto Timeout",
+      help: "Maximum subprocess runtime in milliseconds for the route auto hook.",
+      advanced: true,
+    },
+    "autoRecall.routeAuto.maxChars": {
+      label: "Route Auto Max Chars",
+      help: "Maximum characters preserved for the injected route hint block.",
+      advanced: true,
+    },
+    "autoRecall.routeAuto.maxGraphCandidates": {
+      label: "Route Auto Graph Candidates",
+      help: "Maximum graph-semantic candidates summarized into the route hint block.",
+      advanced: true,
+    },
+    "autoRecall.routeAuto.maxTranscriptSessions": {
+      label: "Route Auto Transcript Sessions",
+      help: "Maximum transcript session groups summarized into the route hint block.",
+      advanced: true,
+    },
     "autoRecall.selectionMode": {
       label: "Auto Recall Selection Mode",
       help: "tier_first_v1 (rollback/default) or tier_quota_v1 (quota mixed recall)",
@@ -3836,6 +3969,12 @@ const memoryPlugin = {
       sqlitePath: resolveStateRelativePath(api, docsColdLaneCfg.sqlitePath, docsColdLaneCfg.sqlitePath),
       sourceRoots: docsColdLaneCfg.sourceRoots.map((root) => resolveStateRelativePath(api, root, root)),
     };
+    const routeAutoResolved: RouteAutoConfig = {
+      ...autoRecallCfg.routeAuto,
+      dbPath: autoRecallCfg.routeAuto.dbPath
+        ? resolveStateRelativePath(api, autoRecallCfg.routeAuto.dbPath, autoRecallCfg.routeAuto.dbPath)
+        : docsColdLaneResolved.sqlitePath,
+    };
     const weijiMemoryPreflightResolved: WeiJiMemoryPreflightConfig = {
       ...weijiMemoryPreflightCfg,
       dbPath: weijiMemoryPreflightCfg.dbPath
@@ -3848,7 +3987,7 @@ const memoryPlugin = {
     const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model, embeddingClampCfg) : null;
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, weijiMemoryPreflight=${weijiMemoryPreflightResolved.enabled ? `${weijiMemoryPreflightResolved.failOnQueued || weijiMemoryPreflightResolved.failOnRejected ? "enforced" : "advisory"}|${weijiMemoryPreflightResolved.failMode}|cmd=${weijiMemoryPreflightResolved.command}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, routeAuto=${routeAutoResolved.enabled ? `on|timeout=${routeAutoResolved.timeoutMs}|chars=${routeAutoResolved.maxChars}|graph=${routeAutoResolved.maxGraphCandidates}|episodes=${routeAutoResolved.maxTranscriptSessions}|db=${routeAutoResolved.dbPath}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, weijiMemoryPreflight=${weijiMemoryPreflightResolved.enabled ? `${weijiMemoryPreflightResolved.failOnQueued || weijiMemoryPreflightResolved.failOnRejected ? "enforced" : "advisory"}|${weijiMemoryPreflightResolved.failMode}|cmd=${weijiMemoryPreflightResolved.command}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
     );
 
     const resolveAdminFilters = (input: {
@@ -5495,8 +5634,8 @@ const memoryPlugin = {
     // Lifecycle hooks (M1)
     // ----------------------------------------------------------------------
 
-    if (autoRecallCfg.enabled) {
-      if (!embeddings) {
+    if (autoRecallCfg.enabled || routeAutoResolved.enabled) {
+      if (autoRecallCfg.enabled && !embeddings) {
         api.logger.warn("openclaw-mem-engine: autoRecall enabled but embeddings are unavailable (FTS/docs fail-open)");
       }
 
@@ -5521,7 +5660,7 @@ const memoryPlugin = {
             coldLane?: RecallColdLaneReceipt;
             workingSet?: RecallWorkingSetReceipt;
           }) => {
-            if (!receiptsCfg.enabled) return undefined;
+            if (!receiptsCfg.enabled || !autoRecallCfg.enabled) return undefined;
             return buildRecallLifecycleReceipt({
               cfg: receiptsCfg,
               skipped: input.skipped,
@@ -5568,6 +5707,38 @@ const memoryPlugin = {
           }
 
           try {
+            let routeAutoSlot: PackedMemorySlot | null = null;
+            if (routeAutoResolved.enabled) {
+              const routeAutoResult = await runRouteAuto({
+                query: trimmedPrompt,
+                scope: scopeInfo.scope,
+                config: routeAutoResolved,
+              });
+              api.logger.info(`openclaw-mem-engine:routeAuto.receipt ${JSON.stringify(routeAutoResult.receipt)}`);
+
+              if (routeAutoResult.text) {
+                routeAutoSlot = {
+                  id: `route-auto:${randomUUID()}`,
+                  createdAt: Date.now() + 1_000,
+                  category: "other",
+                  importanceLabel: "must_remember",
+                  text: routeAutoResult.text,
+                };
+              }
+            }
+
+            if (!autoRecallCfg.enabled) {
+              if (!routeAutoSlot) {
+                return;
+              }
+              const routedBudget = applyPrependContextBudget({
+                slots: [routeAutoSlot],
+                receiptComment: "",
+                cfg: budgetCfg,
+              });
+              return { prependContext: routedBudget.prependContext };
+            }
+
             const limit = Math.max(1, Math.min(AUTO_RECALL_MAX_ITEMS, autoRecallCfg.maxItems));
             const searchLimit = Math.max(
               limit,
@@ -5789,9 +5960,10 @@ const memoryPlugin = {
               importanceLabel: "unknown",
             }));
 
+            const routedSlots = routeAutoSlot ? [routeAutoSlot] : [];
             const slots: PackedMemorySlot[] = workingSetSlot
-              ? [workingSetSlot, ...memorySlots, ...docsSlots]
-              : [...memorySlots, ...docsSlots];
+              ? [...routedSlots, workingSetSlot, ...memorySlots, ...docsSlots]
+              : [...routedSlots, ...memorySlots, ...docsSlots];
 
             if (slots.length === 0) {
               const receipt = emitAutoRecallReceipt({

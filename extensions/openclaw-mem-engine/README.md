@@ -6,6 +6,7 @@ What it does:
 - becomes the active OpenClaw memory backend when selected in `plugins.slots.memory`
 - provides hybrid recall controls (FTS + vector) with scope-aware policies
 - exposes bounded autoRecall / autoCapture controls and lifecycle receipts
+- can optionally call `openclaw-mem route auto` before agent start and inject a compact routing hint block into live turns
 - hosts the docs cold-lane ingest/search surfaces for operator-authored markdown
 - can optionally auto-run **Wei Ji memory preflight** before `memory_store` writes
 
@@ -55,6 +56,46 @@ openclaw plugins install @phenomenoner/openclaw-mem-engine
   }
 }
 ```
+
+## Route-auto prompt hook (optional)
+
+If you want live turns to consult the graph/transcript router before normal memory recall, enable `autoRecall.routeAuto`.
+
+Example host config:
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem-engine": {
+        "enabled": true,
+        "config": {
+          "autoRecall": {
+            "enabled": false,
+            "routeAuto": {
+              "enabled": true,
+              "timeoutMs": 1800,
+              "maxChars": 420,
+              "maxGraphCandidates": 2,
+              "maxTranscriptSessions": 2
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Behavior:
+- shells out to `openclaw-mem route auto "<prompt>"`
+- if graph-semantic is ready and returns candidates, injects a compact graph-routing hint block
+- otherwise fails open to a compact transcript-recall hint block
+- runtime failures/timeouts remain fail-open (the turn continues without the route block)
+
+Rollback:
+- set `plugins.entries.openclaw-mem-engine.config.autoRecall.routeAuto.enabled = false`
+- restart the gateway
 
 ## Wei Ji memory preflight (optional)
 

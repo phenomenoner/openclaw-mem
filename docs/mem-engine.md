@@ -79,6 +79,8 @@ Key stance: **sidecar governs; engine serves**.
 - Hook: `before_agent_start`
 - Default: **on** (but gated by heuristics)
 - Behavior:
+  - optional `autoRecall.routeAuto` hook can call `openclaw-mem route auto` before normal recall and inject a compact routing hint block
+  - route hook is recommendation-only and fail-open (timeout/runtime failure does not block the turn)
   - skip trivial prompts (greetings/ack/emojis/HEARTBEAT/slash commands)
     - robust to trailing emoji/punctuation (e.g. `好的👌`, `ok👍`, `hi～`, `收到!!`)
     - punctuation-only prompts also skip (e.g. `？`, `…`)

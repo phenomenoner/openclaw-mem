@@ -111,6 +111,7 @@ If recall/docs results are weak, conflicting, or low-confidence:
 - **Graph match (L3):** `openclaw-mem graph match "…"` for idea → project / concept → project candidate routing.
   - For unattended use, prefer `openclaw-mem graph readiness` (bridges freshness + topology-source drift + match-support availability).
   - If you want a single deterministic router across graph-semantic and transcript recall, use `openclaw-mem route auto "<query>"` (fail-open).
+  - If `openclaw-mem-engine` is your active memory slot, you can also enable `autoRecall.routeAuto` so live turns consult that router automatically before agent start.
 
 ---
 
