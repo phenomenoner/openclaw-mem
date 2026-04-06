@@ -436,7 +436,7 @@ Acceptance criteria:
 
 ### 6) Graph semantic memory (idea → project matching)
 
-Status: **PARTIAL** (v0 graph surfaces exist; idea→project matching policy not yet shipped).
+Status: **PARTIAL** (v0 idea→project slice shipped via `graph match` + `graph health`; deeper typed graph/schema work remains roadmap).
 
 Goal: represent projects/decisions/concepts as typed entities + edges so we can recommend work with **path justification**.
 
@@ -450,7 +450,9 @@ Deliverables:
   - [x] `graph capture-git` (commit capture)
   - [x] `graph capture-md` (index-only markdown capture)
   - [x] `graph auto-status` and env toggles (`OPENCLAW_MEM_GRAPH_AUTO_RECALL`, `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE`, `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD`)
-- Query path (target):
+  - [x] `graph match` (bounded `idea/query → top projects → explanation path`)
+  - [x] `graph health` (freshness / staleness / node-count summary for canary use)
+- Query path (current v0):
   - `idea/query → top projects → explanation path`
 - Storage evaluation:
   - Start with a local typed graph option (Kuzu candidate) but keep the store behind an interface to mitigate longevity risk.

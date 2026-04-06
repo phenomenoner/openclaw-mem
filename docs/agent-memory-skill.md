@@ -1,9 +1,9 @@
-# Agent memory skill (SOP) — trust-aware routing for Recall / Store / Docs / Topology
+# Agent memory skill (SOP) — trust-aware routing for Recall / Store / Docs / Topology / Graph Match
 
 Status: **usable SOP** (v0).  
 Source: derived from `docs/specs/agent-memory-skill-v0.md` (blueprint).
 
-This is an operator/agent-facing **operating contract**: when you should recall, store, search docs, consult topology, or do nothing — without collapsing trust or stuffing raw artifacts into durable memory.
+This is an operator/agent-facing **operating contract**: when you should recall, store, search docs, consult topology, run graph-semantic matching, or do nothing — without collapsing trust or stuffing raw artifacts into durable memory.
 
 ## The one rule that prevents 80% of memory failures
 
@@ -43,6 +43,7 @@ Use for:
 - **Recall / L1** = preference / decision / continuity / standing rule
 - **Docs / L2** = contract / policy / how it should work / canonical wording
 - **Topology / L3** = where it lives / entrypoint / dependency / ownership / impact if touched
+- **Graph match / L3** = idea → project / concept → project candidate routing with explanation paths + provenance
 
 ---
 
@@ -51,21 +52,24 @@ Use for:
 ### Tie-break order (when ambiguous)
 1. **Docs search** (contracts, authored guidance)
 2. **Topology search** (where/impact/navigation)
-3. **Recall** (preferences/decisions/continuity)
-4. **Store** (only after confirmed durable)
-5. **Do nothing** (session-local)
+3. **Graph match** (idea → project / concept → project candidate routing)
+4. **Recall** (preferences/decisions/continuity)
+5. **Store** (only after confirmed durable)
+6. **Do nothing** (session-local)
 
 If the request asks for **exact policy/contract wording**, use **docs search** even when recall contains a summary.
+If the request asks **“what existing project/work is this idea most related to?”**, use **graph match** before generic recall.
 
 ### One-screen flow
 - Prior preference/decision/standing rule? → **Recall**
 - Documented system behavior / authored guidance? → **Docs search**
 - Repo/path/entrypoint/impact navigation? → **Topology search**
+- Idea → project / concept → project association? → **Graph match**
 - Did this turn produce a stable, confirmed fact worth keeping? → **Store**
 - Otherwise → **Do nothing**
 
 ### Practical loop
-1. **Recall / docs / topology first** depending on the question.
+1. **Recall / docs / topology / graph match first** depending on the question.
 2. Answer from the best lane with provenance.
 3. **Store only if** this turn created a *newly confirmed durable fact*.
 
@@ -96,7 +100,7 @@ If recall/docs results are weak, conflicting, or low-confidence:
 - **Store (L1):** `memory_store(text, category, importance, scope)`
 - **Docs search (L2):** `memory_docs_search(query)`
 - **Docs ingest (L2, operator-authored only):** `memory_docs_ingest(...)`
-- **Topology (L3):** direct repo inspection tools (read/rg/tree) + curated topo note in L2
+- **Topology / Graph match (L3):** direct repo inspection tools (read/rg/tree) + curated topo note in L2 + (when available) `openclaw-mem graph query ...` / `openclaw-mem graph match ...`
 
 ### If you are using `openclaw-mem` directly (CLI)
 - **Recall (L1):** `openclaw-mem search "…"` (FTS) or `openclaw-mem hybrid "…"` (if embeddings)
@@ -104,6 +108,7 @@ If recall/docs results are weak, conflicting, or low-confidence:
 - **Docs search (L2):** `openclaw-mem docs search "…"`
 - **Docs ingest (L2):** `openclaw-mem docs ingest --path ./docs`
 - **Topology (L3):** repo inspection (`rg`, `tree`) + write a small topo note under `docs/topology/` (then ingest via docs)
+- **Graph match (L3):** `openclaw-mem graph match "…"` for idea → project / concept → project candidate routing; use `openclaw-mem graph health` first for unattended/canary use
 
 ---
 

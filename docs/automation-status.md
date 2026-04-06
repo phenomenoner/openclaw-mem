@@ -75,5 +75,9 @@ Current pilot sequencing (2026-02):
 - Promotion (if any) must be explicit + reviewed + reversible.
 
 ### Graph semantic memory
-- Not implemented.
-- Needs schema/storage/benchmark decisions first.
+- Implemented as an operator-invoked **v0** slice.
+- Shipped commands:
+  - `openclaw-mem graph match "<idea/query>"` → candidate projects with explanation paths + provenance refs
+  - `openclaw-mem graph health --stale-hours 24` → freshness/staleness summary for the current graph cache
+- Not yet auto-wired into the default agent loop; recommended daily-canary posture is `graph health` first, then bounded `graph match` only when the cache is healthy enough for the task.
+- Deeper typed schema/storage/autonomy decisions remain future work.

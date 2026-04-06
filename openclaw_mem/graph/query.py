@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -687,6 +688,96 @@ def query_refresh_receipts(
         "count": len(receipts),
         "total_count": total_count,
         "receipts": receipts,
+    }
+
+
+def _parse_refresh_iso(raw: str) -> Optional[datetime]:
+    text = str(raw or '').strip()
+    if not text:
+        return None
+    try:
+        if text.endswith('Z'):
+            text = text[:-1] + '+00:00'
+        dt = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def query_graph_health(
+    *,
+    db_path: str | Path,
+    stale_hours: float = 24.0,
+) -> Dict[str, Any]:
+    stale_hours_value = float(stale_hours)
+    if stale_hours_value <= 0:
+        raise ValueError('stale_hours must be > 0')
+
+    conn = connect_graph_db_for_query(db_path)
+    try:
+        meta_rows = conn.execute(
+            "SELECT key, value FROM graph_meta WHERE key IN (?, ?, ?, ?, ?)",
+            ('schema_version', 'last_refresh_ts', 'last_source_path', 'topology_digest', 'node_count'),
+        ).fetchall()
+        edge_row = conn.execute(
+            "SELECT value FROM graph_meta WHERE key = ?",
+            ('edge_count',),
+        ).fetchone()
+        latest = _latest_refresh_receipt(conn)
+    finally:
+        conn.close()
+
+    meta = {str(row[0]): str(row[1]) for row in meta_rows}
+    if edge_row and edge_row[0] is not None:
+        meta['edge_count'] = str(edge_row[0])
+
+    age_hours = None
+    stale = True
+    status = 'empty'
+    warnings: List[str] = []
+
+    refreshed_at = None
+    if latest is not None:
+        refreshed_at = str(latest.get('refreshed_at') or '')
+        parsed = _parse_refresh_iso(refreshed_at)
+        if parsed is None:
+            warnings.append('refresh timestamp could not be parsed')
+            status = 'warning'
+        else:
+            age_hours = round(max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds() / 3600.0), 3)
+            stale = age_hours > stale_hours_value
+            status = 'stale' if stale else 'ok'
+    else:
+        warnings.append('graph has no refresh receipt yet')
+
+    if latest is None:
+        node_count = int(meta.get('node_count') or 0) if str(meta.get('node_count') or '').strip() else 0
+        edge_count = int(meta.get('edge_count') or 0) if str(meta.get('edge_count') or '').strip() else 0
+    else:
+        node_count = int(latest.get('node_count') or 0)
+        edge_count = int(latest.get('edge_count') or 0)
+
+    return {
+        'ok': True,
+        'query': 'health',
+        'status': status,
+        'stale': bool(stale),
+        'stale_hours': stale_hours_value,
+        'age_hours': age_hours,
+        'node_count': node_count,
+        'edge_count': edge_count,
+        'latest_receipt': latest,
+        'meta': {
+            'schema_version': meta.get('schema_version'),
+            'last_refresh_ts': meta.get('last_refresh_ts'),
+            'last_source_path': meta.get('last_source_path'),
+            'topology_digest': meta.get('topology_digest'),
+            'node_count': meta.get('node_count'),
+            'edge_count': meta.get('edge_count'),
+        },
+        'warnings': warnings,
     }
 
 

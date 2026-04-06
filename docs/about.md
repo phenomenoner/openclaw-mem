@@ -39,14 +39,15 @@ Most agent-memory stories sound fine until a long-running system starts doing on
 
 `openclaw-mem` exists to make memory admission and recall more transparent, bounded, and inspectable.
 
-## What operators can do today (v1.2.0)
+## What operators can do today (v1.3.0)
 
 - run deterministic local recall (`search → timeline → get`) against SQLite
 - build compact packs with `pack`
 - emit redaction-safe pack receipts with `--trace`
 - apply `--pack-trust-policy exclude_quarantined_fail_open` to drop quarantined rows while keeping unknown trust explicit
 - inspect `policy_surface` and `lifecycle_shadow` to see what was selected, excluded, and logged
-- inspect topology relationships and drift via `graph query ...` and `graph query drift`
+- inspect topology relationships and drift via `graph query ...`, `graph query drift`, and `graph health`
+- run bounded idea → project matching with `graph match "<idea/query>"`, which returns candidate projects with explanation paths + provenance refs
 - gate graph-derived candidates with graph provenance policy surfaces
 - run recommendation-only hygiene checks with `optimize review` (recent-use-aware decay protection) and dream-style episodic candidate review with `optimize consolidation-review` (zero write path)
 - capture/ingest episodic events with redaction-first defaults

@@ -11,6 +11,7 @@ from openclaw_mem.graph.query import (
     query_downstream_topology,
     query_filter_nodes,
     query_filter_nodes_topology,
+    query_graph_health,
     query_lineage,
     query_subgraph,
     query_provenance,
@@ -24,6 +25,47 @@ from openclaw_mem.graph.refresh import refresh_topology
 
 
 class TestGraphQuery(unittest.TestCase):
+    def test_query_graph_health_reports_ok_and_stale_status(self) -> None:
+        topology = {
+            "nodes": [
+                {"id": "project.finlife", "type": "project"},
+                {"id": "artifact.receipt", "type": "artifact"},
+            ],
+            "edges": [
+                {
+                    "src": "project.finlife",
+                    "dst": "artifact.receipt",
+                    "type": "writes",
+                    "provenance": "docs/topology.yaml#L10",
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "graph.db"
+            refresh_topology(topology, db_path=db_path, source_path="docs/topology.yaml")
+
+            health = query_graph_health(db_path=db_path, stale_hours=24)
+            self.assertTrue(health["ok"])
+            self.assertEqual(health["status"], "ok")
+            self.assertFalse(health["stale"])
+            self.assertEqual(health["node_count"], 2)
+            self.assertEqual(health["edge_count"], 1)
+            self.assertIsNotNone(health["latest_receipt"])
+
+            conn = sqlite3.connect(str(db_path))
+            try:
+                with conn:
+                    conn.execute("UPDATE graph_refresh_receipts SET refreshed_at = ?", ("2020-01-01T00:00:00Z",))
+                    conn.execute("UPDATE graph_meta SET value = ? WHERE key = ?", ("2020-01-01T00:00:00Z", "last_refresh_ts"))
+            finally:
+                conn.close()
+
+            stale = query_graph_health(db_path=db_path, stale_hours=1)
+            self.assertEqual(stale["status"], "stale")
+            self.assertTrue(stale["stale"])
+            self.assertGreater(stale["age_hours"], 1)
+
     def test_upstream_downstream_and_writers_queries(self) -> None:
         topology = {
             "nodes": [

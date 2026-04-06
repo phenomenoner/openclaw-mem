@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- No unreleased changes yet.
+
+## [1.3.0] - 2026-04-06
+
 ### Changed
 
+- Added `openclaw-mem graph match` as a bounded local-first graph-semantic v0 surface for idea → project routing.
+  - groups local graph evidence into 3–10 candidate projects
+  - returns explanation paths + provenance refs for each candidate
+  - stays fail-open so baseline recall/pack remain usable when graph-semantic data is weak or absent
+- Added `openclaw-mem graph health` to summarize graph cache freshness, node/edge counts, last refresh timestamp, and staleness for daily canary / autonomous-readiness checks.
+- Recut public roadmap/docs truth for graph-semantic v0 and rollout/deployment guardrail positioning, including the `1.6` rollout ladder vs `1.6a` platform/deployment guardrail split.
+- Updated the agent-memory operating skill surfaces to route idea → project requests through `graph match` and to recommend `graph health` before unattended graph-semantic use.
 - Added `openclaw-mem optimize consolidation-review` as a recommendation-only episodic maintenance observer for dream-style candidate generation without canonical rewrite.
   - scans `episodic_events` under strict zero-write/query-only posture
   - emits three bounded candidate families: summary compression groups, archive-review rows near GC horizon, and cross-session link proposals
@@ -35,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 
+- Added graph query regression coverage for `query_graph_health` plus CLI coverage for `graph match` candidate grouping / explanation-path receipts.
 - Added `tests/test_optimize_consolidation_review.py` coverage for parser wiring, zero-write JSON contract, summary/archive/link candidate detection, recent-use archive protection, and scope/session filtering.
 - Expanded `tests/test_optimize_consolidation_review.py` coverage for evidence-weighted link confidence receipts (`confidence_components`) and stronger co-selection → higher confidence ordering.
 - Added targeted recency-weighting coverage in `tests/test_optimize_consolidation_review.py` to verify equal-count receipt pairs score higher when lifecycle co-selection is newer.
@@ -44,7 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.0] - 2026-03-25
 
 ### Changed
-
 - `openclaw-mem docs search` now supports `--scope-repos <repo> [<repo> ...]` for exact repo-allowlist candidate pushdown in both FTS and vector docs retrieval paths.
 - `openclaw-mem-engine` docs cold lane now pushes resolved repo allowlists into the CLI for scoped queries, and cold-lane receipts/logs carry `pushdownRepos` + `pushdownApplied` alongside candidate counters.
 - Recorded the follow-up posture explicitly in docs truth: reducing scoped overfetch is deferred to a later optimization phase after the broader development line stabilizes.
@@ -143,6 +154,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 
+- Added graph query regression coverage for `query_graph_health` plus CLI coverage for `graph match` candidate grouping / explanation-path receipts.
 - Hardened mem-engine TODO guardrail schema contract tests to derive defaults and max bounds directly from `index.ts` runtime constants/object defaults (`DEFAULT_AUTO_CAPTURE_CONFIG`, `AUTO_CAPTURE_MAX_*`), reducing plugin-schema drift risk at the integration boundary.
 - Added heuristic regression coverage for shared task-marker contract parity (`TODO: ...`, compact wrapper chains like `●[x]TODO ...`, and tool-prefixed marker summaries).
 - Added heuristic fixture coverage for French guillemet task marker form (angle quote wrapper TODO marker) in tests/data/HEURISTIC_TESTCASES.jsonl (tc33) to keep task-marker parity with parser and docs wrapper support.

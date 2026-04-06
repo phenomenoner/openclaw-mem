@@ -86,7 +86,8 @@ Expected:
 - Embeddings + vector search (`embed`, `vsearch`) — requires an API key
 - Hybrid retrieval (`hybrid`) + optional rerank providers — requires network/provider; still being evaluated
 - AI compression (`summarize`) — requires an API key
-- Graph query plane (`graph topology-refresh`, `graph query ...`, drift/provenance checks) — shipped foundation; deeper integrations still evolving
+- Graph query plane (`graph topology-refresh`, `graph query ...`, `graph health`, drift/provenance checks) — shipped foundation; deeper integrations still evolving
+- Graph semantic match v0 (`graph match "<idea/query>"`) — shipped local-first idea → project slice with explanation paths; deeper typed graph automation still evolving
 - Recommendation-only optimization observers (`optimize review`, `optimize consolidation-review`) — shipped in the current release scope; now include recent-use-aware decay protection while still proposing only and never mutating stored memories
 - Dual-language fields (`--text-en`, EN embedding table) — shipped, still evolving
 - Episodic event capture/ingest/query lane — shipped foundation; operator flows still evolving
@@ -100,6 +101,5 @@ Expected:
 ### Near-term roadmap — **ROADMAP**
 
 - Package/distribution ergonomics so `openclaw-mem` install/run flow is cleaner across `uv sync` / pip contexts
-- Graph roadmap depth: richer provenance wiring + higher-level operator queries on top of the shipped query plane
+- Graph roadmap depth: richer typed-entity wiring + deeper operator queries/autonomy on top of the shipped query plane
 - Topology seed automation (`topology-seed`) so curated graph truth is easier to bootstrap and maintain
- Topology seed automation (`topology-seed`) so curated graph truth is easier to bootstrap and maintain

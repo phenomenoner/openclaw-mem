@@ -63,6 +63,7 @@ from openclaw_mem.graph.query import (
     query_downstream_topology,
     query_filter_nodes,
     query_filter_nodes_topology,
+    query_graph_health,
     query_lineage,
     query_provenance,
     query_refresh_receipts,
@@ -7103,6 +7104,286 @@ def cmd_graph_index(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     print(payload["index_text"], end="")
 
 
+def _graph_match_path_project_name(path_like: str) -> Optional[str]:
+    raw = str(path_like or '').strip()
+    if not raw:
+        return None
+    parts = [p for p in Path(raw).parts if p not in ('/', '')]
+    for i, token in enumerate(parts[:-1]):
+        if token == 'projects' and i + 1 < len(parts):
+            nxt = str(parts[i + 1]).strip()
+            if nxt:
+                return nxt
+    return None
+
+
+def _graph_match_find_repo_root(path_like: str, cache: Dict[str, Optional[Path]]) -> Optional[Path]:
+    raw = str(path_like or '').strip()
+    if not raw:
+        return None
+    start = Path(raw).expanduser()
+    cur = start if start.suffix == '' else start.parent
+    try:
+        cur = cur.resolve()
+    except Exception:
+        cur = cur.absolute()
+
+    visited: List[Path] = []
+    while True:
+        key = str(cur)
+        if key in cache:
+            found = cache[key]
+            for item in visited:
+                cache[str(item)] = found
+            return found
+        visited.append(cur)
+        if (cur / '.git').exists():
+            for item in visited:
+                cache[str(item)] = cur
+            return cur
+        if cur.parent == cur:
+            for item in visited:
+                cache[str(item)] = None
+            return None
+        cur = cur.parent
+
+
+def _graph_match_entity_type(summary: str, detail: Dict[str, Any]) -> str:
+    heading = str(detail.get('heading') or '').strip().lower()
+    rel_path = str(detail.get('rel_path') or detail.get('source_path') or '').strip().lower()
+    summary_l = str(summary or '').strip().lower()
+    text = ' '.join([heading, rel_path, summary_l])
+    if '/decisions/' in rel_path or rel_path.startswith('decisions/') or 'decision' in heading:
+        return 'decision'
+    if any(token in text for token in ['todo', 'task', 'blade', 'sprint', 'milestone', 'roadmap', 'next step', 'rollout']):
+        return 'task_or_slice'
+    if '/docs/specs/' in rel_path or any(token in text for token in ['architecture', 'concept', 'spec', 'design', 'goal', 'problem']):
+        return 'concept'
+    return 'note'
+
+
+def _graph_match_provenance_ref(detail: Dict[str, Any]) -> Dict[str, Any]:
+    source_path = str(detail.get('source_path') or '').strip()
+    start_line = detail.get('start_line')
+    end_line = detail.get('end_line')
+    if source_path and isinstance(start_line, int) and start_line > 0:
+        return {
+            'kind': 'file_line',
+            'path': source_path,
+            'line_start': int(start_line),
+            'line_end': int(end_line) if isinstance(end_line, int) and int(end_line) >= int(start_line) else int(start_line),
+            'anchor': None,
+            'url': None,
+        }
+    if source_path:
+        return {
+            'kind': 'file',
+            'path': source_path,
+            'line_start': None,
+            'line_end': None,
+            'anchor': None,
+            'url': None,
+        }
+    repo = str(detail.get('repo') or '').strip()
+    if repo:
+        return {
+            'kind': 'repo',
+            'path': repo,
+            'line_start': None,
+            'line_end': None,
+            'anchor': None,
+            'url': None,
+        }
+    return {
+        'kind': 'none',
+        'path': None,
+        'line_start': None,
+        'line_end': None,
+        'anchor': None,
+        'url': None,
+    }
+
+
+def _graph_match_candidate(detail: Dict[str, Any], repo_cache: Dict[str, Optional[Path]]) -> Optional[Dict[str, Any]]:
+    scope = str(detail.get('scope') or '').strip()
+    if scope:
+        scope_norm = _normalize_scope_token(scope) or scope
+        return {
+            'candidate_ref': f'project:{scope_norm}',
+            'project': scope_norm,
+            'path': None,
+            'locator_kind': 'scope',
+        }
+
+    rel_path = str(detail.get('rel_path') or '').strip()
+    source_path = str(detail.get('source_path') or '').strip()
+    repo = str(detail.get('repo') or '').strip()
+
+    for raw in [rel_path, source_path, repo]:
+        project_name = _graph_match_path_project_name(raw)
+        if project_name:
+            return {
+                'candidate_ref': f'project:{project_name}',
+                'project': project_name,
+                'path': source_path or repo or None,
+                'locator_kind': 'projects_subdir',
+            }
+
+    for raw in [repo, source_path]:
+        root = _graph_match_find_repo_root(raw, repo_cache)
+        if root is not None:
+            return {
+                'candidate_ref': f'project:{root.name}',
+                'project': root.name,
+                'path': str(root),
+                'locator_kind': 'repo_root',
+            }
+
+    return None
+
+
+def _graph_match_payload(
+    conn: sqlite3.Connection,
+    *,
+    query: str,
+    scope: Optional[str],
+    limit: int,
+    support_limit: int,
+    search_limit: int,
+) -> Dict[str, Any]:
+    rows = _graph_search_rows(conn, query, max(1, int(search_limit)), scope=scope)
+    repo_cache: Dict[str, Optional[Path]] = {}
+    grouped: Dict[str, Dict[str, Any]] = {}
+
+    for r in rows:
+        detail = _pack_parse_detail_json(r['detail_json'])
+        candidate = _graph_match_candidate(detail, repo_cache)
+        if candidate is None:
+            continue
+
+        ref = str(candidate['candidate_ref'])
+        entry = grouped.setdefault(
+            ref,
+            {
+                'candidateRef': ref,
+                'type': 'project',
+                'title': str(candidate['project']),
+                'path': candidate.get('path'),
+                'locator_kind': candidate.get('locator_kind'),
+                'support_count': 0,
+                'best_match_score': None,
+                'supporting_records': [],
+            },
+        )
+
+        score = float(r['score']) if r['score'] is not None else None
+        if score is not None:
+            if entry['best_match_score'] is None or score < entry['best_match_score']:
+                entry['best_match_score'] = score
+
+        record = {
+            'recordRef': _graph_record_ref(int(r['id'])),
+            'id': int(r['id']),
+            'ts': r['ts'],
+            'kind': r['kind'],
+            'tool_name': r['tool_name'],
+            'title': _graph_row_title(r),
+            'entity_type': _graph_match_entity_type(_graph_row_title(r), detail),
+            'why_relevant': 'fts_match',
+            'provenance_ref': _graph_match_provenance_ref(detail),
+            'detail': {
+                'heading': detail.get('heading'),
+                'rel_path': detail.get('rel_path'),
+                'repo': detail.get('repo'),
+                'source_path': detail.get('source_path'),
+            },
+        }
+        entry['support_count'] += 1
+        entry['supporting_records'].append(record)
+
+    ranked = sorted(
+        grouped.values(),
+        key=lambda item: (-int(item['support_count']), float(item['best_match_score']) if item['best_match_score'] is not None else float('inf'), str(item['title']).lower()),
+    )[: max(1, int(limit))]
+
+    candidates: List[Dict[str, Any]] = []
+    for rank, item in enumerate(ranked, 1):
+        supports = list(item['supporting_records'])[: max(1, int(support_limit))]
+        related_items = []
+        seen_related: set[tuple[str, str]] = set()
+        for support in supports:
+            entity_type = str(support.get('entity_type') or 'note')
+            title = str(support.get('title') or '')
+            key = (entity_type, title)
+            if key in seen_related:
+                continue
+            seen_related.add(key)
+            related_items.append({
+                'type': entity_type,
+                'title': title,
+                'recordRef': support.get('recordRef'),
+                'provenance_ref': support.get('provenance_ref'),
+            })
+        path_records = ', '.join(str(s.get('recordRef')) for s in supports[:3])
+        candidates.append(
+            {
+                'rank': rank,
+                'candidateRef': item['candidateRef'],
+                'type': item['type'],
+                'title': item['title'],
+                'path': item.get('path'),
+                'locator_kind': item.get('locator_kind'),
+                'support_count': int(item['support_count']),
+                'best_match_score': item['best_match_score'],
+                'why_relevant': f"{int(item['support_count'])} supporting record(s) matched the query",
+                'explanation_path': f"query:{query} -> {path_records or 'no-support'} -> project:{item['title']}",
+                'supporting_records': supports,
+                'related_items': related_items,
+            }
+        )
+
+    return {
+        'kind': 'openclaw-mem.graph.match.v0',
+        'ts': _utcnow_iso(),
+        'query': {'text': query, 'scope': scope},
+        'result': {
+            'ok': True,
+            'count': len(candidates),
+            'candidate_limit': int(limit),
+            'support_limit': int(support_limit),
+            'candidates': candidates,
+        },
+    }
+
+
+def cmd_graph_match(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    query = (args.query or '').strip()
+    if not query:
+        _emit({'error': 'empty query'}, True)
+        sys.exit(2)
+
+    payload = _graph_match_payload(
+        conn,
+        query=query,
+        scope=(getattr(args, 'scope', None) or '').strip() or None,
+        limit=max(1, int(getattr(args, 'limit', 5))),
+        support_limit=max(1, int(getattr(args, 'support_limit', 3))),
+        search_limit=max(1, int(getattr(args, 'search_limit', 40))),
+    )
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    result = payload['result']
+    print(f"count={int(result.get('count', 0))}")
+    for cand in list(result.get('candidates') or []):
+        print(
+            f"{cand.get('rank')}) {cand.get('title')} support={cand.get('support_count')} best_score={cand.get('best_match_score')}"
+        )
+        print(f"   path: {cand.get('explanation_path')}")
+
+
 def _graph_pack_payload(
     conn: sqlite3.Connection,
     *,
@@ -7376,6 +7657,44 @@ def cmd_graph_auto_status(conn: sqlite3.Connection, args: argparse.Namespace) ->
             f"{name}: enabled={str(bool(st.get('enabled'))).lower()} "
             f"valid={str(bool(st.get('valid'))).lower()} raw={raw_show}"
         )
+
+
+def cmd_graph_health(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+
+    try:
+        result = query_graph_health(
+            db_path=str(getattr(args, "db", "") or "").strip(),
+            stale_hours=float(getattr(args, "stale_hours", 24.0) or 24.0),
+        )
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    payload = {
+        "kind": "openclaw-mem.graph.health.v0",
+        "ts": _utcnow_iso(),
+        "result": result,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    latest = result.get("latest_receipt") or {}
+    age_text = "n/a" if result.get("age_hours") is None else str(result.get("age_hours"))
+    print(
+        " ".join(
+            [
+                f"status={result.get('status')}",
+                f"stale={str(bool(result.get('stale'))).lower()}",
+                f"age_hours={age_text}",
+                f"nodes={int(result.get('node_count') or 0)}",
+                f"edges={int(result.get('edge_count') or 0)}",
+                f"last_refresh={latest.get('refreshed_at') or result.get('meta', {}).get('last_refresh_ts') or 'n/a'}",
+            ]
+        )
+    )
 
 
 def cmd_graph_topology_refresh(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -10289,8 +10608,20 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle_text (default: 1200)")
     g.set_defaults(func=cmd_graph_preflight, json=False)
 
+    g = gsub.add_parser("match", help="Recommend candidate projects with explanation paths from local graph evidence")
+    g.add_argument("query", help="Idea or query text")
+    g.add_argument("--scope", help="Optional scope filter token (matches detail.scope after normalization)")
+    g.add_argument("--limit", type=int, default=5, help="Max project candidates to return (default: 5)")
+    g.add_argument("--support-limit", dest="support_limit", type=int, default=3, help="Max supporting records to keep per candidate (default: 3)")
+    g.add_argument("--search-limit", dest="search_limit", type=int, default=40, help="Max raw observation hits to consider before grouping (default: 40)")
+    g.set_defaults(func=cmd_graph_match)
+
     g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
     g.set_defaults(func=cmd_graph_auto_status)
+
+    g = gsub.add_parser("health", help="Summarize graph cache freshness and latest refresh receipt")
+    g.add_argument("--stale-hours", dest="stale_hours", type=float, default=24.0, help="Mark the graph stale when latest refresh is older than this many hours (default: 24)")
+    g.set_defaults(func=cmd_graph_health)
 
     g = gsub.add_parser("topology-refresh", help="Refresh topology graph (nodes/edges) from a curated file")
     g.add_argument("--file", required=True, help="Topology file path (.json; .yaml requires PyYAML)")

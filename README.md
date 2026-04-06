@@ -45,7 +45,7 @@ It operates across two planes:
 - **Receipts beat guesswork.** JSON outputs, pack traces, policy surfaces, and lifecycle shadow logs make memory behavior visible.
 - **Sidecar-first keeps the risk low.** Test locally before touching your OpenClaw memory slot.
 
-## What ships today in v1.2.0
+## What ships today in v1.3.0
 
 - **Local operator diagnostics:** `status`, `doctor`, and `backend` provide a compact health/readiness surface before deeper debugging.
 - **Local recall loop:** `search → timeline → get` keeps routine lookups fast and inspectable.
@@ -57,11 +57,26 @@ It operates across two planes:
 - `doctor` = **doctor surface** (`kind` + `ts` + `ok` + `summary` + `checks`). Read this for compact health/readiness.
 - `backend` = config/backend posture helper when you need the memory slot/fallback read directly.
 - Family compare card: `openclaw-async-coding-playbook/projects/openclaw-ops/docs/operator-surface-contract-family.v0.md`
-- **Graph/provenance surfaces:** `graph topology-refresh`, `graph query ...`, drift checks, graph provenance gating for graph-derived pack candidates, and `pack --use-graph=off|auto|on` for deterministic graph-preflight consumption.
+- **Graph/provenance surfaces:** `graph topology-refresh`, `graph query ...`, `graph health`, drift checks, graph provenance gating for graph-derived pack candidates, and `pack --use-graph=off|auto|on` for deterministic graph-preflight consumption.
+- **Graph semantic match (v0):** `graph match "<idea/query>"` groups local graph evidence into 3–10 candidate projects with explanation paths + provenance, so idea → project routing stays inspectable and fail-open.
 - **Review-gated action plane (recommendation-only):** `optimize review`, `optimize consolidation-review`, and `optimize policy-loop` emit review queues for hygiene, recent-use-aware decay protection, dream-style candidate consolidation, and rollout readiness (no silent writeback).
 - **Policy-driven safety:** trust policies, graph provenance, and lifecycle logging (`--pack-trust-policy`, `--graph-provenance-policy`, `--graph-query-db`, `--pack-lifecycle-shadow`) keep memory grounded, auditable, and safer for automation.
 - **Episodic event lane:** append/extract/ingest/query/replay with redaction-first defaults.
 - **Optional Mem Engine upgrades:** hybrid recall controls, TODO guardrails, docs cold-lane ingest/search.
+
+## Graph semantic memory v0 (new in v1.3.0)
+
+This release adds a bounded **idea → project matching** surface without turning the graph layer into a hard dependency.
+
+What ships in the v0 slice:
+- `graph match "<idea/query>"` returns candidate projects with explanation paths + provenance refs
+- `graph health` reports freshness, node/edge counts, last-refresh timestamp, and staleness
+- the feature remains **fail-open**: baseline recall / pack still work when graph-semantic data is missing or stale
+
+Use it when you need to answer questions like:
+- “which project is this idea most likely related to?”
+- “what existing work already points at this concept?”
+- “what should I inspect next, and why?”
 
 ## Who it's for
 

@@ -2,6 +2,7 @@ from .drift import query_drift
 from .query import (
     query_downstream,
     query_filter_nodes,
+    query_graph_health,
     query_lineage,
     query_provenance,
     query_refresh_receipts,
@@ -20,6 +21,7 @@ __all__ = [
     "query_drift",
     "query_downstream",
     "query_filter_nodes",
+    "query_graph_health",
     "query_lineage",
     "query_provenance",
     "query_refresh_receipts",

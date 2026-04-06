@@ -45,7 +45,7 @@ Two-plane framing:
 
 `openclaw-mem` is intentionally split into two layers:
 
-- **Sidecar (default)** — capture, ingest, local recall, pack receipts, graph query/drift checks, hygiene review
+- **Sidecar (default)** — capture, ingest, local recall, pack receipts, graph query/drift checks, graph semantic match, hygiene review
 - **Mem Engine (optional)** — memory-slot backend for hybrid recall and bounded automation
 
 Start with the inspectable sidecar, then add the engine only when you need it.
@@ -64,6 +64,7 @@ Start with the inspectable sidecar, then add the engine only when you need it.
 - [Importance grading](importance-grading.md)
 - [Agent memory skill (SOP)](agent-memory-skill.md)
 - [Automation status](automation-status.md)
+- [Graph semantic memory (idea → project match)](roadmap.md)
 - [Roadmap](roadmap.md)
 
 ## Releases
