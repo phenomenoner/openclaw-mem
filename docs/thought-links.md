@@ -18,6 +18,9 @@ Additional trusted references (for lifecycle/decay):
 - 2026-03-04 — Context Budget Sidecar (tool output offload + soft compaction continuity)
   - `docs/archive/thought-links/2026-03-04_context-budget-sidecar-openclaw-token-cost.md`
   - Spec: `docs/specs/context-budget-sidecar-v0.md`
+- 2026-04-07 — Compiled synthesis layer (wiki-maintainer pattern without the wiki dependency)
+  - `docs/archive/thought-links/2026-04-07_compiled-synthesis-layer-wiki-pattern.md`
+  - Spec: `docs/specs/graphic-memory-compiled-synthesis-v0.md`
 
 ## 1) Observational Memory → design constraints we adopt
 
@@ -144,7 +147,31 @@ A “context database” for agents that models **resources + memory + skills** 
 **Scope note (CK decision):**
 - Treat OpenViking as **thought-link only** for now (we are not committing to it as a backend/adapter arm yet).
 
-## 8) Reference-based decay ("forgetting curve") → lifecycle governance hook
+## 8) Compiled synthesis layer (wiki-maintainer pattern) → reuse before re-derivation
+
+Source (external; untrusted inspiration / field note only):
+- Karpathy gist — `llm-wiki`: <https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>
+
+**What we take:**
+- Some high-value cross-source conclusions should become a small, maintained, provenance-carrying **compiled synthesis artifact** rather than being re-derived on every query.
+- The value is the **maintenance loop** (compile → stale check → lint), not a UI or a "wiki for everything" posture.
+
+**How it maps to openclaw-mem:**
+- reuse existing capture + preflight/index/pack surfaces as the selection layer
+- add a derived **synthesis-card** layer (not L1 durable memory by default)
+- add `stale` + `lint` checks so the graph can be maintained instead of only queried
+
+**What we explicitly reject:**
+- Obsidian/UI dependency
+- graph DB detour
+- autonomous long-form wiki generation from every capture event
+- collapsing topology/docs/memory/graph artifacts into one authority class
+
+**Concrete pointer:**
+- `docs/specs/graphic-memory-compiled-synthesis-v0.md`
+- `docs/archive/thought-links/2026-04-07_compiled-synthesis-layer-wiki-pattern.md`
+
+## 9) Reference-based decay ("forgetting curve") → lifecycle governance hook
 
 Key takeaway:
 - Retention should be governed by **use** (recency/frequency), not a fixed “delete after N days since write” rule.
@@ -161,7 +188,7 @@ Trusted references:
 Untrusted inspiration (idea source; treat as a field note):
 - X thread (xiyu): <https://x.com/ohxiyu/status/2022924956594806821>
 
-## 9) MCP Tool Search (Claude Code) → dynamic discovery + “Skill Card / Manual” split
+## 10) MCP Tool Search (Claude Code) → dynamic discovery + “Skill Card / Manual” split
 
 Source (external; concept clarity high):
 - 好豪：*MCP Tool Search：Claude Code 如何終結 Token 消耗大爆炸* <https://haosquare.com/mcp-tool-search-claude-code/>
@@ -185,7 +212,7 @@ Source (external; concept clarity high):
   - explicit `outputs` + receipt rules
 - Provide a small helper surface (CLI or adapter) that returns top-N card matches as JSON, then fetches the chosen manual on demand.
 
-## 10) Trait / interface-first (systems kernel mindset) → contracts over vibes
+## 11) Trait / interface-first (systems kernel mindset) → contracts over vibes
 
 Source (external; concept clarity high):
 - `theonlyhennygod/zeroclaw`: <https://github.com/theonlyhennygod/zeroclaw>
@@ -199,7 +226,7 @@ Source (external; concept clarity high):
 - “Memory governance” is our control-plane; backends remain swappable behind adapters.
 - Roadmap candidates: strict config (`additionalProperties:false`), stable JSON schemas for receipts, and a `profile`/stats surface.
 
-## 11) PAI (continuous learning + self-upgrade loop) → "learning records" as a first-class memory type
+## 12) PAI (continuous learning + self-upgrade loop) → "learning records" as a first-class memory type
 
 Source (external; concept clarity high):
 - Daniel Miessler — *Personal AI Infrastructure (PAI)*: <https://github.com/danielmiessler/Personal_AI_Infrastructure>
@@ -226,7 +253,7 @@ Source (external; concept clarity high):
 - Infinite self-ingest loops (context blocks re-captured as learnings).
   - Mitigate with explicit injected-context markers + ignore-lists (see SuperMemory takeaways above).
 
-## 12) Lossless Context Management (LCM) / lossless-claw → fresh-tail protection + provenance + “expand” tooling reference
+## 13) Lossless Context Management (LCM) / lossless-claw → fresh-tail protection + provenance + “expand” tooling reference
 
 Source (external; concept clarity high):
 - `martian-engineering/lossless-claw`: <https://github.com/martian-engineering/lossless-claw>

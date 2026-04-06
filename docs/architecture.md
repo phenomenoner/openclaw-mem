@@ -176,10 +176,10 @@ Key requirements:
 - typed edges + traversal
 - path justification in outputs (why a recommendation was made)
 
-Storage options (behind an interface):
-- **Kuzu** (fast + typed graph; evaluate longevity risk)
-- SQLite adjacency lists (simpler; less expressive)
-- other graph stores (future)
+Storage posture (today):
+- prefer portable / derived graph artifacts first
+- SQLite adjacency / receipts / optional Markdown materialization are enough for v0/v1
+- defer dedicated graph-store evaluation until compiled synthesis + query quality prove the need
 
 The graph is optional: the Context Packer should degrade gracefully without it.
 
@@ -201,6 +201,6 @@ OpenClaw’s memory backend (e.g. `memory-lancedb`) and `openclaw-mem` solve dif
 
 ## Research tracks (delegate to GitHub scouting)
 
-- Graph store choice & longevity (Kuzu and alternatives)
+- Compiled synthesis card lifecycle (selection / stale detection / lint thresholds)
 - Extraction strategies for entities/edges (heuristic first; LLM optional)
 - Prompt cleanliness patterns: relevance filtering, bounded summaries, citations

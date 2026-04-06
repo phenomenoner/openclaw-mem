@@ -69,6 +69,7 @@ nav:
       - Graphic memory auto-capture / auto-recall: specs/graphic-memory-auto-capture-auto-recall.md
       - Graphic memory preflight trigger policy: specs/graphic-memory-preflight-trigger-policy.md
       - Graphic memory query plane (v0): specs/graphic-memory-query-plane-v0.md
+      - Graphic memory compiled synthesis layer (v0): specs/graphic-memory-compiled-synthesis-v0.md
       - Mem-engine versioning safety net: specs/mem-engine-versioning-safety-net-v0.md
       - Topology auto-extract (v0): specs/topology-auto-extract-v0.md
       - Self-optimizing memory loop (v0): specs/self-optimizing-memory-loop-v0.md
