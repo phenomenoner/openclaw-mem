@@ -94,3 +94,10 @@ Expected:
 - Package the project so `openclaw-mem` console scripts work directly via `uv sync` / pip
 - Context Packer (`pack`) for bounded, cited context bundles
 - Graph semantic memory (typed entities/edges)
+
+### Graphic Memory compiled synthesis — **PARTIAL**
+
+- `graph synth compile` — compile a reusable synthesis card from explicit refs or query-preflight selection
+- `graph synth stale` — deterministic stale check (source digest + query-selection drift)
+- `graph lint` — deterministic health checks for stale cards / missing source metadata / unreferenced capture rows
+- Optional Markdown materialization during compile (`--write-md`)

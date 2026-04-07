@@ -1,7 +1,8 @@
 # Spec — Graphic Memory compiled synthesis layer v0
 
 ## Status
-- Stage: spec-ready
+- Stage: **partial implementation shipped**
+- Shipped v0.1 slice: `graph synth compile`, `graph synth stale`, deterministic `graph lint`, optional Markdown materialization
 - Scope: `openclaw-mem` Graphic Memory surfaces only
 - Recommendation: **add as a derived layer inside `openclaw-mem`**
 - Delivery posture: **provenance-first, fail-open, no graph DB, no UI dependency**

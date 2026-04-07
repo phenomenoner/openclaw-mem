@@ -4,7 +4,7 @@ import sys
 import unittest
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
+from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export, cmd_graph_synth, cmd_graph_lint
 
 
 class TestCliM0(unittest.TestCase):
@@ -4173,6 +4173,98 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+
+class TestGraphSynthesisCli(unittest.TestCase):
+    def test_graph_synth_compile_explicit_refs_stores_card(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {"scope": "proj.a"}})
+        _insert_observation(conn, {"kind": "note", "summary": "beta source", "tool_name": "memory_store", "detail": {"scope": "proj.a"}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Merged finding",
+            "--summary", "Merged finding summary",
+            "--why-it-matters", "Use this later"
+        ])
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.compile.v0")
+        self.assertEqual(out["result"]["sourceRefs"], ["obs:1", "obs:2"])
+        self.assertEqual(out["result"]["title"], "Merged finding")
+
+        card_id = int(out["cardRef"].split(":", 1)[1])
+        row = conn.execute("SELECT summary, tool_name, detail_json FROM observations WHERE id = ?", (card_id,)).fetchone()
+        self.assertEqual(row["summary"], "Merged finding summary")
+        self.assertEqual(row["tool_name"], "graph.synth-compile")
+        detail = json.loads(row["detail_json"] or "{}")
+        synth = detail["graph_synthesis"]
+        self.assertEqual(synth["source_refs"], ["obs:1", "obs:2"])
+        self.assertEqual(synth["status"], "fresh")
+        conn.close()
+
+    def test_graph_synth_stale_detects_query_selection_drift(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis"
+        ])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+        compiled = json.loads(buf.getvalue())
+        card_ref = compiled["cardRef"]
+
+        _insert_observation(conn, {"kind": "note", "summary": "alpha newer source", "tool_name": "memory_store", "detail": {}})
+
+        stale_args = build_parser().parse_args(["graph", "--json", "synth", "stale", card_ref])
+        stale_buf = io.StringIO()
+        with redirect_stdout(stale_buf):
+            stale_args.func(conn, stale_args)
+
+        out = json.loads(stale_buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.stale.v0")
+        self.assertEqual(out["count"], 1)
+        self.assertEqual(out["items"][0]["status"], "stale")
+        self.assertIn("selection_drift", out["items"][0]["reasons"])
+        conn.close()
+
+    def test_graph_lint_reports_stale_and_unreferenced_capture_rows(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha captured", "tool_name": "graph.capture-md", "detail": {}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis"
+        ])
+        with redirect_stdout(io.StringIO()):
+            args.func(conn, args)
+
+        _insert_observation(conn, {"kind": "note", "summary": "alpha new capture", "tool_name": "graph.capture-git", "detail": {}})
+
+        lint_args = build_parser().parse_args(["graph", "--json", "lint"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            lint_args.func(conn, lint_args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.lint.v0")
+        self.assertEqual(out["counts"]["synthesisCards"], 1)
+        self.assertEqual(out["counts"]["staleCards"], 1)
+        self.assertGreaterEqual(out["counts"]["unreferencedCaptureRows"], 1)
+        self.assertTrue(any(item["recordRef"] == "obs:3" for item in out["samples"]["unreferencedCaptureRows"]))
+        conn.close()
 
 
 if __name__ == "__main__":

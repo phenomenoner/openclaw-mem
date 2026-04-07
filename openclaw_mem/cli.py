@@ -5778,6 +5778,479 @@ def cmd_graph_preflight(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     print(pack_payload.get("bundle_text", ""), end="")
 
 
+def _graph_collect_ref_tokens(raw_refs: Optional[List[str]]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in list(raw_refs or []):
+        token = str(raw or "").strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+    return out
+
+
+def _graph_fetch_rows_by_ids(conn: sqlite3.Connection, ids: List[int]) -> Dict[int, sqlite3.Row]:
+    uniq: List[int] = []
+    seen: set[int] = set()
+    for item in ids:
+        oid = int(item)
+        if oid in seen:
+            continue
+        seen.add(oid)
+        uniq.append(oid)
+    if not uniq:
+        return {}
+    rows = conn.execute(
+        f"SELECT id, ts, kind, tool_name, summary, detail_json FROM observations WHERE id IN ({','.join(['?']*len(uniq))})",
+        uniq,
+    ).fetchall()
+    return {int(r['id']): r for r in rows}
+
+
+def _graph_source_snapshot(row: sqlite3.Row) -> Dict[str, Any]:
+    oid = int(row['id'])
+    detail = _pack_parse_detail_json(row['detail_json'])
+    return {
+        'recordRef': _graph_record_ref(oid),
+        'id': oid,
+        'ts': row['ts'],
+        'kind': row['kind'],
+        'tool_name': row['tool_name'],
+        'summary': (row['summary'] or '').replace('\n', ' ').strip(),
+        'scope': _normalize_scope_token(detail.get('scope')) or None,
+    }
+
+
+def _graph_source_digest_from_snapshots(items: List[Dict[str, Any]]) -> str:
+    payload = [
+        {
+            'recordRef': str(it.get('recordRef') or ''),
+            'ts': str(it.get('ts') or ''),
+            'kind': str(it.get('kind') or ''),
+            'tool_name': str(it.get('tool_name') or ''),
+            'summary': str(it.get('summary') or ''),
+            'scope': str(it.get('scope') or ''),
+        }
+        for it in items
+    ]
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+def _graph_build_synth_markdown(
+    *,
+    title: str,
+    summary_text: str,
+    why_it_matters: Optional[str],
+    scope: Optional[str],
+    source_refs: List[str],
+    source_digest: str,
+    compiled_at: str,
+    selection: Dict[str, Any],
+) -> str:
+    lines: List[str] = ['---']
+    lines.append('kind: synthesis_card')
+    lines.append(f'title: {json.dumps(title, ensure_ascii=False)}')
+    if summary_text:
+        lines.append(f'summary: {json.dumps(summary_text, ensure_ascii=False)}')
+    if scope:
+        lines.append(f'scope: {json.dumps(scope, ensure_ascii=False)}')
+    lines.append(f'compiled_at: {json.dumps(compiled_at, ensure_ascii=False)}')
+    lines.append(f'source_digest: {json.dumps(source_digest, ensure_ascii=False)}')
+    lines.append('source_refs:')
+    for ref in source_refs:
+        lines.append(f'  - {json.dumps(ref, ensure_ascii=False)}')
+    lines.append(f'selection: {json.dumps(selection, ensure_ascii=False, sort_keys=True)}')
+    lines.append('---')
+    lines.append('')
+    lines.append(f'# {title}')
+    lines.append('')
+    if summary_text:
+        lines.append(summary_text)
+        lines.append('')
+    if why_it_matters:
+        lines.append('## Why it matters')
+        lines.append('')
+        lines.append(why_it_matters)
+        lines.append('')
+    lines.append('## Source refs')
+    lines.append('')
+    for ref in source_refs:
+        lines.append(f'- {ref}')
+    lines.append('')
+    lines.append('## Notes')
+    lines.append('')
+    lines.append('<!-- Add the durable synthesis here. Keep it bounded and provenance-first. -->')
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def _graph_compile_selection(
+    conn: sqlite3.Connection,
+    *,
+    explicit_refs: List[str],
+    query_text: Optional[str],
+    scope: Optional[str],
+    limit: int,
+    window: int,
+    suggest_limit: int,
+    take: int,
+    budget_tokens: int,
+) -> Tuple[List[str], Dict[str, Any]]:
+    refs = _graph_collect_ref_tokens(explicit_refs)
+    query_value = (query_text or '').strip()
+    if refs and query_value:
+        raise ValueError('choose explicit refs or --query, not both')
+    if not refs and not query_value:
+        raise ValueError('missing source refs or --query')
+
+    if refs:
+        return refs, {
+            'mode': 'explicit_refs',
+            'recordRefs': refs,
+        }
+
+    index_payload = _graph_index_payload(
+        conn,
+        query=query_value,
+        scope=scope,
+        limit=limit,
+        window=window,
+        suggest_limit=suggest_limit,
+        budget_tokens=budget_tokens,
+    )
+    selected_refs = _graph_preflight_selection(index_payload, take=take)
+    return selected_refs, {
+        'mode': 'query_preflight',
+        'query': {
+            'text': query_value,
+            'scope': scope,
+            'limit': int(limit),
+            'window': int(window),
+            'suggestLimit': int(suggest_limit),
+            'take': int(take),
+            'budgetTokens': int(budget_tokens),
+        },
+        'index': {
+            'topCandidates': len(index_payload.get('top_candidates') or []),
+            'suggestedNextExpansions': len(index_payload.get('suggested_next_expansions') or []),
+        },
+        'recordRefs': selected_refs,
+    }
+
+
+def _graph_eval_synthesis_card(conn: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
+    detail = _pack_parse_detail_json(row['detail_json'])
+    synth = detail.get('graph_synthesis') if isinstance(detail.get('graph_synthesis'), dict) else {}
+    record_ref = _graph_record_ref(int(row['id']))
+    source_refs_raw = list(synth.get('source_refs') or [])
+    source_refs = _graph_collect_ref_tokens(source_refs_raw)
+    source_ids: List[int] = []
+    for ref in source_refs:
+        try:
+            source_ids.append(_graph_parse_record_ref(ref))
+        except Exception:
+            continue
+    source_rows = _graph_fetch_rows_by_ids(conn, source_ids)
+    snapshots = [_graph_source_snapshot(source_rows[oid]) for oid in source_ids if oid in source_rows]
+    current_digest = _graph_source_digest_from_snapshots(snapshots) if snapshots else ''
+
+    reasons: List[str] = []
+    missing_refs = [ref for ref in source_refs if _graph_parse_record_ref(ref) not in source_rows] if source_refs else []
+    if not source_refs:
+        reasons.append('missing_source_refs')
+    if synth.get('source_digest') and current_digest and current_digest != str(synth.get('source_digest')):
+        reasons.append('source_digest_mismatch')
+    if missing_refs:
+        reasons.append('missing_source_rows')
+
+    selection = synth.get('selection') if isinstance(synth.get('selection'), dict) else {}
+    selection_mode = str(selection.get('mode') or '').strip()
+    current_selection: List[str] = []
+    if selection_mode == 'query_preflight':
+        query_meta = selection.get('query') if isinstance(selection.get('query'), dict) else {}
+        query_text = str(query_meta.get('text') or '').strip()
+        if query_text:
+            index_payload = _graph_index_payload(
+                conn,
+                query=query_text,
+                scope=(query_meta.get('scope') or None),
+                limit=max(1, int(query_meta.get('limit') or 12)),
+                window=max(0, int(query_meta.get('window') or 2)),
+                suggest_limit=max(0, int(query_meta.get('suggestLimit') or 6)),
+                budget_tokens=max(1, int(query_meta.get('budgetTokens') or 1200)),
+            )
+            current_selection = _graph_preflight_selection(index_payload, take=max(1, int(query_meta.get('take') or 12)))
+            if current_selection != source_refs:
+                reasons.append('selection_drift')
+
+    status = 'fresh' if not reasons else 'stale'
+    return {
+        'ok': True,
+        'recordRef': record_ref,
+        'title': str(synth.get('title') or row['summary'] or record_ref),
+        'status': status,
+        'reasonCount': len(reasons),
+        'reasons': reasons,
+        'compiledAt': synth.get('compiled_at') or row['ts'],
+        'sourceRefs': source_refs,
+        'sourceCount': len(source_refs),
+        'missingSourceRefs': missing_refs,
+        'storedSourceDigest': synth.get('source_digest') or None,
+        'currentSourceDigest': current_digest or None,
+        'selectionMode': selection_mode or None,
+        'currentSelection': current_selection,
+        'scope': synth.get('scope') or detail.get('scope') or None,
+    }
+
+
+def cmd_graph_synth(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    synth_cmd = str(getattr(args, 'graph_synth_cmd', '') or '').strip().lower()
+
+    if synth_cmd == 'compile':
+        explicit_refs = _graph_collect_ref_tokens(getattr(args, 'record_ref', None))
+        query_text = (getattr(args, 'query', None) or '').strip() or None
+        scope = (getattr(args, 'scope', None) or '').strip() or None
+        limit = max(1, int(getattr(args, 'limit', 12) or 12))
+        window = max(0, int(getattr(args, 'window', 2) or 2))
+        suggest_limit = max(0, int(getattr(args, 'suggest_limit', 6) or 6))
+        take = max(1, int(getattr(args, 'take', 12) or 12))
+        budget_tokens = max(1, int(getattr(args, 'budget_tokens', 1200) or 1200))
+
+        try:
+            selected_refs, selection = _graph_compile_selection(
+                conn,
+                explicit_refs=explicit_refs,
+                query_text=query_text,
+                scope=scope,
+                limit=limit,
+                window=window,
+                suggest_limit=suggest_limit,
+                take=take,
+                budget_tokens=budget_tokens,
+            )
+        except ValueError as e:
+            _emit({'error': str(e)}, True)
+            sys.exit(2)
+
+        source_ids = [_graph_parse_record_ref(ref) for ref in selected_refs]
+        source_rows = _graph_fetch_rows_by_ids(conn, source_ids)
+        missing = [ref for ref in selected_refs if _graph_parse_record_ref(ref) not in source_rows]
+        if missing:
+            _emit({'error': 'missing source refs', 'missing': missing}, True)
+            sys.exit(2)
+
+        snapshots = [_graph_source_snapshot(source_rows[oid]) for oid in source_ids if oid in source_rows]
+        source_digest = _graph_source_digest_from_snapshots(snapshots)
+        compiled_at = _utcnow_iso()
+
+        title = (getattr(args, 'title', None) or '').strip()
+        if not title:
+            if query_text:
+                title = f'Graph synthesis: {query_text}'
+            elif len(selected_refs) == 1:
+                title = f'Graph synthesis: {selected_refs[0]}'
+            else:
+                title = f'Graph synthesis ({len(selected_refs)} refs)'
+
+        summary_text = (getattr(args, 'summary_text', None) or '').strip() or title
+        why_it_matters = (getattr(args, 'why_it_matters', None) or '').strip() or None
+
+        detail = {
+            'scope': scope,
+            'graph_synthesis': {
+                'version': 'v0',
+                'title': title,
+                'summary': summary_text,
+                'why_it_matters': why_it_matters,
+                'source_refs': selected_refs,
+                'source_count': len(selected_refs),
+                'source_digest': source_digest,
+                'compiled_at': compiled_at,
+                'selection': selection,
+                'status': 'fresh',
+                'trust_tier': 'derived',
+            },
+        }
+
+        obs = {
+            'ts': compiled_at,
+            'kind': 'note',
+            'summary': summary_text,
+            'tool_name': 'graph.synth-compile',
+            'detail': detail,
+        }
+        rowid = _insert_observation(conn, obs)
+        card_ref = _graph_record_ref(rowid)
+
+        markdown_path = (getattr(args, 'write_md', None) or '').strip()
+        markdown_written = None
+        markdown_text = _graph_build_synth_markdown(
+            title=title,
+            summary_text=summary_text,
+            why_it_matters=why_it_matters,
+            scope=scope,
+            source_refs=selected_refs,
+            source_digest=source_digest,
+            compiled_at=compiled_at,
+            selection=selection,
+        )
+        if markdown_path:
+            md_path = Path(markdown_path)
+            md_path.parent.mkdir(parents=True, exist_ok=True)
+            md_path.write_text(markdown_text, encoding='utf-8')
+            markdown_written = str(md_path)
+
+        payload = {
+            'kind': 'openclaw-mem.graph.synth.compile.v0',
+            'ts': compiled_at,
+            'cardRef': card_ref,
+            'selection': selection,
+            'result': {
+                'ok': True,
+                'recordRef': card_ref,
+                'title': title,
+                'summary': summary_text,
+                'whyItMatters': why_it_matters,
+                'sourceRefs': selected_refs,
+                'sourceCount': len(selected_refs),
+                'sourceDigest': source_digest,
+                'markdownPath': markdown_written,
+            },
+            'bundle_text': markdown_text,
+        }
+
+        if bool(args.json):
+            _emit(payload, True)
+            return
+        print(markdown_text, end='')
+        return
+
+    if synth_cmd == 'stale':
+        refs = _graph_collect_ref_tokens(getattr(args, 'record_ref', None))
+        if not refs:
+            _emit({'error': 'missing record refs'}, True)
+            sys.exit(2)
+
+        ids = [_graph_parse_record_ref(ref) for ref in refs]
+        row_map = _graph_fetch_rows_by_ids(conn, ids)
+        items: List[Dict[str, Any]] = []
+        missing_cards: List[str] = []
+        for ref in refs:
+            oid = _graph_parse_record_ref(ref)
+            row = row_map.get(oid)
+            if row is None:
+                missing_cards.append(ref)
+                continue
+            items.append(_graph_eval_synthesis_card(conn, row))
+
+        payload = {
+            'kind': 'openclaw-mem.graph.synth.stale.v0',
+            'ts': _utcnow_iso(),
+            'count': len(items),
+            'missing': missing_cards,
+            'items': items,
+        }
+        if bool(args.json):
+            _emit(payload, True)
+            return
+        for item in items:
+            print(
+                ' '.join(
+                    [
+                        f"recordRef={item.get('recordRef')}",
+                        f"status={item.get('status')}",
+                        f"reasons={','.join(item.get('reasons') or []) or '-'}",
+                    ]
+                )
+            )
+        for ref in missing_cards:
+            print(f'recordRef={ref} status=missing reasons=missing_card')
+        return
+
+    _emit({'error': f'unknown graph synth command: {synth_cmd}'}, True)
+    sys.exit(2)
+
+
+def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = args
+    synth_rows = conn.execute(
+        "SELECT id, ts, kind, tool_name, summary, detail_json FROM observations WHERE tool_name = 'graph.synth-compile' ORDER BY id"
+    ).fetchall()
+    capture_rows = conn.execute(
+        "SELECT id, ts, tool_name, summary FROM observations WHERE tool_name IN ('graph.capture-git', 'graph.capture-md') ORDER BY id"
+    ).fetchall()
+
+    synth_items: List[Dict[str, Any]] = []
+    referenced_sources: set[str] = set()
+    stale_items: List[Dict[str, Any]] = []
+    missing_source_ref_items: List[Dict[str, Any]] = []
+    missing_digest_items: List[Dict[str, Any]] = []
+
+    for row in synth_rows:
+        item = _graph_eval_synthesis_card(conn, row)
+        synth_items.append(item)
+        for ref in list(item.get('sourceRefs') or []):
+            referenced_sources.add(str(ref))
+        if item.get('status') == 'stale':
+            stale_items.append(item)
+        if not item.get('sourceRefs'):
+            missing_source_ref_items.append(item)
+        if not item.get('storedSourceDigest'):
+            missing_digest_items.append(item)
+
+    unreferenced_capture: List[Dict[str, Any]] = []
+    for row in capture_rows:
+        ref = _graph_record_ref(int(row['id']))
+        if ref in referenced_sources:
+            continue
+        unreferenced_capture.append(
+            {
+                'recordRef': ref,
+                'ts': row['ts'],
+                'tool_name': row['tool_name'],
+                'summary': (row['summary'] or '').replace('\n', ' ').strip(),
+            }
+        )
+
+    payload = {
+        'kind': 'openclaw-mem.graph.lint.v0',
+        'ts': _utcnow_iso(),
+        'counts': {
+            'synthesisCards': len(synth_items),
+            'staleCards': len(stale_items),
+            'cardsMissingSourceRefs': len(missing_source_ref_items),
+            'cardsMissingSourceDigest': len(missing_digest_items),
+            'captureRows': len(capture_rows),
+            'unreferencedCaptureRows': len(unreferenced_capture),
+        },
+        'samples': {
+            'staleCards': stale_items[:10],
+            'cardsMissingSourceRefs': missing_source_ref_items[:10],
+            'cardsMissingSourceDigest': missing_digest_items[:10],
+            'unreferencedCaptureRows': unreferenced_capture[:10],
+        },
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    counts = payload['counts']
+    print(
+        ' '.join(
+            [
+                f"synthesis_cards={int(counts.get('synthesisCards') or 0)}",
+                f"stale_cards={int(counts.get('staleCards') or 0)}",
+                f"missing_source_refs={int(counts.get('cardsMissingSourceRefs') or 0)}",
+                f"missing_source_digest={int(counts.get('cardsMissingSourceDigest') or 0)}",
+                f"unreferenced_capture_rows={int(counts.get('unreferencedCaptureRows') or 0)}",
+            ]
+        )
+    )
+
+
 def _graph_env_bool_status(name: str, *, default: bool = False) -> Dict[str, Any]:
     raw = os.getenv(name)
     if raw is None:
@@ -8648,6 +9121,31 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--take", type=int, default=12, help="Max selected refs to pack (default: 12)")
     g.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle_text (default: 1200)")
     g.set_defaults(func=cmd_graph_preflight, json=False)
+
+    g = gsub.add_parser("synth", help="Compile / check derived Graphic Memory synthesis cards")
+    ssub = g.add_subparsers(dest="graph_synth_cmd", required=True)
+
+    s = ssub.add_parser("compile", help="Compile a synthesis card from explicit refs or a query preflight")
+    s.add_argument("--record-ref", dest="record_ref", action="append", default=None, help="Source record ref (repeatable, e.g. obs:123)")
+    s.add_argument("--query", help="Optional query text; uses graph preflight selection when set")
+    s.add_argument("--scope", help="Optional scope filter token when using --query")
+    s.add_argument("--limit", type=int, default=12, help="Max candidate hits to consider for query mode (default: 12)")
+    s.add_argument("--window", type=int, default=2, help="Timeline window for query mode (default: 2)")
+    s.add_argument("--suggest-limit", dest="suggest_limit", type=int, default=6, help="Max suggested expansions for query mode (default: 6)")
+    s.add_argument("--take", type=int, default=12, help="Max selected refs for query mode (default: 12)")
+    s.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for query-mode selection (default: 1200)")
+    s.add_argument("--title", help="Optional synthesis title")
+    s.add_argument("--summary", dest="summary_text", help="Stored synthesis summary text (defaults to title)")
+    s.add_argument("--why-it-matters", dest="why_it_matters", help="Optional why-it-matters note")
+    s.add_argument("--write-md", dest="write_md", help="Optional Markdown materialization path")
+    s.set_defaults(func=cmd_graph_synth)
+
+    s = ssub.add_parser("stale", help="Check whether synthesis cards are stale")
+    s.add_argument("record_ref", nargs='+', help="Synthesis card refs (e.g. obs:123)")
+    s.set_defaults(func=cmd_graph_synth)
+
+    g = gsub.add_parser("lint", help="Run deterministic health checks for synthesis-card coverage / staleness")
+    g.set_defaults(func=cmd_graph_lint)
 
     g = gsub.add_parser("auto-status", help="Show effective Graphic Memory automation env toggles")
     g.set_defaults(func=cmd_graph_auto_status)

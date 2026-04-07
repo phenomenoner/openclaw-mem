@@ -125,7 +125,7 @@ Artifacts:
 
 ### 1.7c) Compiled synthesis layer (selected refs → maintained synthesis cards)
 
-Status: **ROADMAP**.
+Status: **PARTIAL** (`graph synth compile` / `graph synth stale` / deterministic `graph lint` shipped; pack preference + richer maintenance pending).
 
 - Problem: Graphic Memory can capture refs and build bounded preflight/query bundles, but it still has to re-derive many high-value cross-source conclusions from scratch.
 - Goal: add a small, provenance-carrying **compiled synthesis layer** that turns selected refs into reusable synthesis cards with a stale/lint loop.
