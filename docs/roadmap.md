@@ -125,7 +125,7 @@ Artifacts:
 
 ### 1.7c) Compiled synthesis layer (selected refs → maintained synthesis cards)
 
-Status: **PARTIAL** (`graph synth compile` / `graph synth stale` / deterministic `graph lint` shipped; graph preflight now prefers fresh synthesis cards; richer maintenance still pending).
+Status: **PARTIAL** (`graph synth compile` / `graph synth stale` / deterministic `graph lint` shipped; graph preflight and graph pack now prefer fresh synthesis cards; deterministic review/contradiction signals now surface in stale/lint; richer maintenance still pending).
 
 - Problem: Graphic Memory can capture refs and build bounded preflight/query bundles, but it still has to re-derive many high-value cross-source conclusions from scratch.
 - Goal: add a small, provenance-carrying **compiled synthesis layer** that turns selected refs into reusable synthesis cards with a stale/lint loop.
@@ -136,7 +136,8 @@ Plan (v0):
 2) Add `graph synth compile` to emit a bounded synthesis-card receipt (+ optional Markdown materialization).
 3) Add `graph synth stale` and deterministic `graph lint` checks.
 4) Shipped in the graph-preflight lane: prefer fresh synthesis cards before replaying many covered raw refs.
-5) Later, extend that preference more broadly in pack/retrieval lanes where it remains truthful.
+5) Shipped in the graph-pack lane: when explicit refs are covered by a fresh synthesis card, prefer the card and surface the preference receipt.
+6) Later, extend that preference more broadly in other pack/retrieval lanes where it remains truthful.
 
 Acceptance criteria:
 - A user can compile a reusable synthesis card from bounded refs with provenance.

@@ -5581,6 +5581,7 @@ def _graph_pack_payload(
     budget_tokens: int,
     max_items: int,
     allow_empty: bool = False,
+    prefer_synthesis: bool = True,
 ) -> Dict[str, Any]:
     if not raw_ids:
         if allow_empty:
@@ -5591,13 +5592,33 @@ def _graph_pack_payload(
                     "budgetTokens": budget_tokens,
                     "estimatedTokens": 0,
                 },
+                "selection": {
+                    "inputRecordRefs": [],
+                    "recordRefs": [],
+                    "selectedCount": 0,
+                    "preferredCardRefs": [],
+                    "coveredRawRefs": [],
+                },
                 "items": [],
                 "bundle_text": "",
             }
         raise ValueError("no ids")
 
+    input_refs = _graph_collect_ref_tokens(raw_ids)
+    selected_refs = list(input_refs)
+    synth_preference = {
+        "preferredCardRefs": [],
+        "coveredRawRefs": [],
+    }
+    if prefer_synthesis:
+        selected_refs, synth_preference = _graph_preflight_prefer_synthesis_cards(
+            conn,
+            selected_refs=input_refs,
+            scope=None,
+        )
+
     ids: List[int] = []
-    for t in raw_ids:
+    for t in selected_refs:
         try:
             ids.append(_graph_parse_record_ref(t))
         except Exception as e:
@@ -5686,6 +5707,13 @@ def _graph_pack_payload(
         "budget": {
             "budgetTokens": budget_tokens,
             "estimatedTokens": _estimate_tokens(bundle_text),
+        },
+        "selection": {
+            "inputRecordRefs": input_refs,
+            "recordRefs": [_graph_record_ref(x) for x in uniq],
+            "selectedCount": len(uniq),
+            "preferredCardRefs": list(synth_preference.get("preferredCardRefs") or []),
+            "coveredRawRefs": list(synth_preference.get("coveredRawRefs") or []),
         },
         "items": included_items,
         "bundle_text": bundle_text,
@@ -5870,6 +5898,43 @@ def _graph_source_digest_from_snapshots(items: List[Dict[str, Any]]) -> str:
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
+_GRAPH_CONTRADICTION_KEYWORDS: Tuple[str, ...] = (
+    'contradict', 'contradiction', 'conflict', 'mismatch', 'incompatible', '矛盾', '衝突',
+)
+
+_GRAPH_REVIEW_KEYWORDS: Tuple[str, ...] = (
+    'deprecated', 'deprecate', 'obsolete', 'outdated', 'stale', 'supersede', 'superseded',
+    'replace', 'replaced', 'rename', 'renamed', 'rollback', 'rolled back', 'revert', 'reverted',
+    '棄用', '過時', '取代', '改名', '回滾',
+)
+
+
+def _graph_review_signals_from_rows(rows: List[sqlite3.Row]) -> List[Dict[str, Any]]:
+    signals: List[Dict[str, Any]] = []
+    for row in rows:
+        summary = str(row['summary'] or '').replace('\n', ' ').strip()
+        hay = summary.lower()
+        kinds: List[Tuple[str, str]] = []
+        for kw in _GRAPH_CONTRADICTION_KEYWORDS:
+            if kw in hay or kw in summary:
+                kinds.append(('contradiction_keyword', kw))
+                break
+        for kw in _GRAPH_REVIEW_KEYWORDS:
+            if kw in hay or kw in summary:
+                kinds.append(('review_keyword', kw))
+                break
+        for kind, keyword in kinds:
+            signals.append(
+                {
+                    'kind': kind,
+                    'keyword': keyword,
+                    'recordRef': _graph_record_ref(int(row['id'])),
+                    'summary': summary,
+                }
+            )
+    return signals
+
+
 def _graph_build_synth_markdown(
     *,
     title: str,
@@ -6017,7 +6082,24 @@ def _graph_eval_synthesis_card(conn: sqlite3.Connection, row: sqlite3.Row) -> Di
             if current_selection != source_refs:
                 reasons.append('selection_drift')
 
-    status = 'fresh' if not reasons else 'stale'
+    new_selection_refs = [ref for ref in current_selection if ref not in set(source_refs)]
+    new_selection_ids: List[int] = []
+    for ref in new_selection_refs:
+        try:
+            new_selection_ids.append(_graph_parse_record_ref(ref))
+        except Exception:
+            continue
+    new_selection_rows_map = _graph_fetch_rows_by_ids(conn, new_selection_ids)
+    new_selection_rows = [new_selection_rows_map[oid] for oid in new_selection_ids if oid in new_selection_rows_map]
+    review_signals = _graph_review_signals_from_rows(new_selection_rows)
+    contradiction_signals = [sig for sig in review_signals if sig.get('kind') == 'contradiction_keyword']
+
+    if reasons:
+        status = 'stale'
+    elif review_signals:
+        status = 'review'
+    else:
+        status = 'fresh'
     return {
         'ok': True,
         'recordRef': record_ref,
@@ -6033,6 +6115,10 @@ def _graph_eval_synthesis_card(conn: sqlite3.Connection, row: sqlite3.Row) -> Di
         'currentSourceDigest': current_digest or None,
         'selectionMode': selection_mode or None,
         'currentSelection': current_selection,
+        'newSelectionRefs': new_selection_refs,
+        'reviewSignals': review_signals,
+        'reviewSignalCount': len(review_signals),
+        'contradictionSignalCount': len(contradiction_signals),
         'scope': synth.get('scope') or detail.get('scope') or None,
     }
 
@@ -6278,6 +6364,8 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     synth_items: List[Dict[str, Any]] = []
     referenced_sources: set[str] = set()
     stale_items: List[Dict[str, Any]] = []
+    review_items: List[Dict[str, Any]] = []
+    contradiction_items: List[Dict[str, Any]] = []
     missing_source_ref_items: List[Dict[str, Any]] = []
     missing_digest_items: List[Dict[str, Any]] = []
 
@@ -6288,6 +6376,10 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             referenced_sources.add(str(ref))
         if item.get('status') == 'stale':
             stale_items.append(item)
+        if item.get('reviewSignalCount'):
+            review_items.append(item)
+        if int(item.get('contradictionSignalCount') or 0) > 0:
+            contradiction_items.append(item)
         if not item.get('sourceRefs'):
             missing_source_ref_items.append(item)
         if not item.get('storedSourceDigest'):
@@ -6313,6 +6405,8 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         'counts': {
             'synthesisCards': len(synth_items),
             'staleCards': len(stale_items),
+            'reviewCards': len(review_items),
+            'contradictionSignalCards': len(contradiction_items),
             'cardsMissingSourceRefs': len(missing_source_ref_items),
             'cardsMissingSourceDigest': len(missing_digest_items),
             'captureRows': len(capture_rows),
@@ -6320,6 +6414,8 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         },
         'samples': {
             'staleCards': stale_items[:10],
+            'reviewCards': review_items[:10],
+            'contradictionSignalCards': contradiction_items[:10],
             'cardsMissingSourceRefs': missing_source_ref_items[:10],
             'cardsMissingSourceDigest': missing_digest_items[:10],
             'unreferencedCaptureRows': unreferenced_capture[:10],
@@ -6336,6 +6432,8 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             [
                 f"synthesis_cards={int(counts.get('synthesisCards') or 0)}",
                 f"stale_cards={int(counts.get('staleCards') or 0)}",
+                f"review_cards={int(counts.get('reviewCards') or 0)}",
+                f"contradiction_signal_cards={int(counts.get('contradictionSignalCards') or 0)}",
                 f"missing_source_refs={int(counts.get('cardsMissingSourceRefs') or 0)}",
                 f"missing_source_digest={int(counts.get('cardsMissingSourceDigest') or 0)}",
                 f"unreferenced_capture_rows={int(counts.get('unreferencedCaptureRows') or 0)}",

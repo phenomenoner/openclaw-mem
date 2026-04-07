@@ -430,6 +430,7 @@ class TestCliM0(unittest.TestCase):
             cmd_graph_pack(conn, args)
         out = json.loads(buf.getvalue())
         self.assertEqual(out["kind"], "openclaw-mem.graph.pack.v0")
+        self.assertIn("selection", out)
         self.assertIn("bundle_text", out)
         self.assertIn("obs:1", out["bundle_text"])
 
@@ -602,6 +603,46 @@ class TestCliM0(unittest.TestCase):
         self.assertNotIn("obs:2", selected_refs)
         self.assertNotIn("obs:2", preflight_out["bundle_text"])
 
+        conn.close()
+
+    def test_graph_pack_prefers_fresh_synthesis_cards_over_raw_refs(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source one", "tool_name": "read", "detail": {}})
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source two", "tool_name": "exec", "detail": {}})
+
+        compile_args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Merged insight",
+            "--summary", "Merged insight",
+            "--why-it-matters", "Prefer the synthesis card",
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_args.func(conn, compile_args)
+
+        args = type(
+            "Args",
+            (),
+            {
+                "ids": ["obs:1", "obs:2"],
+                "max_items": 20,
+                "budget_tokens": 120,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_pack(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["selection"]["recordRefs"], ["obs:3"])
+        self.assertEqual(out["selection"]["preferredCardRefs"], ["obs:3"])
+        self.assertIn("obs:1", out["selection"]["coveredRawRefs"])
+        self.assertIn("obs:2", out["selection"]["coveredRawRefs"])
+        self.assertIn("sources=2", out["bundle_text"])
+        self.assertIn("why=Prefer the synthesis card", out["bundle_text"])
         conn.close()
 
     def test_graph_preflight_prefers_fresh_synthesis_cards_over_raw_refs(self):
@@ -4282,6 +4323,36 @@ class TestGraphSynthesisCli(unittest.TestCase):
         self.assertIn("selection_drift", out["items"][0]["reasons"])
         conn.close()
 
+    def test_graph_synth_stale_surfaces_review_and_contradiction_signals(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis",
+        ])
+        with redirect_stdout(io.StringIO()) as _:
+            args.func(conn, args)
+        card_ref = json.loads(_.getvalue())["cardRef"]
+
+        _insert_observation(conn, {"kind": "note", "summary": "alpha contradiction: replaced old flow", "tool_name": "memory_store", "detail": {}})
+
+        stale_args = build_parser().parse_args(["graph", "--json", "synth", "stale", card_ref])
+        stale_buf = io.StringIO()
+        with redirect_stdout(stale_buf):
+            stale_args.func(conn, stale_args)
+
+        out = json.loads(stale_buf.getvalue())
+        item = out["items"][0]
+        self.assertEqual(item["status"], "stale")
+        self.assertIn("selection_drift", item["reasons"])
+        self.assertGreaterEqual(item["reviewSignalCount"], 1)
+        self.assertGreaterEqual(item["contradictionSignalCount"], 1)
+        self.assertTrue(any(sig["kind"] == "contradiction_keyword" for sig in item["reviewSignals"]))
+        conn.close()
+
     def test_graph_lint_reports_stale_and_unreferenced_capture_rows(self):
         conn = _connect(":memory:")
         _insert_observation(conn, {"kind": "note", "summary": "alpha captured", "tool_name": "graph.capture-md", "detail": {}})
@@ -4306,6 +4377,8 @@ class TestGraphSynthesisCli(unittest.TestCase):
         self.assertEqual(out["kind"], "openclaw-mem.graph.lint.v0")
         self.assertEqual(out["counts"]["synthesisCards"], 1)
         self.assertEqual(out["counts"]["staleCards"], 1)
+        self.assertGreaterEqual(out["counts"]["reviewCards"], 0)
+        self.assertGreaterEqual(out["counts"]["contradictionSignalCards"], 0)
         self.assertGreaterEqual(out["counts"]["unreferencedCaptureRows"], 1)
         self.assertTrue(any(item["recordRef"] == "obs:3" for item in out["samples"]["unreferencedCaptureRows"]))
         conn.close()

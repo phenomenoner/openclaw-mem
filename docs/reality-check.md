@@ -101,4 +101,6 @@ Expected:
 - `graph synth stale` — deterministic stale check (source digest + query-selection drift)
 - `graph lint` — deterministic health checks for stale cards / missing source metadata / unreferenced capture rows
 - Graph preflight preference for fresh synthesis cards when they cover multiple selected raw refs
+- Graph pack preference for fresh synthesis cards when explicit refs are covered by a fresh synthesis card
+- `graph synth stale` / `graph lint` now surface deterministic review + contradiction-keyword signals from newly selected refs
 - Optional Markdown materialization during compile (`--write-md`)
