@@ -3009,6 +3009,73 @@ def _hybrid_retrieve(
     }
 
 
+def _hybrid_prefer_synthesis_cards(
+    conn: sqlite3.Connection,
+    *,
+    ordered_ids: List[int],
+    limit: int,
+    obs_map: Dict[int, Dict[str, Any]],
+    rrf_scores: Dict[int, float],
+) -> Tuple[List[int], Dict[str, Any]]:
+    input_refs = [_graph_record_ref(rid) for rid in ordered_ids[: max(1, int(limit))]]
+    preferred_refs, synth_pref = _graph_preflight_prefer_synthesis_cards(
+        conn,
+        selected_refs=input_refs,
+        scope=None,
+    )
+
+    final_ids: List[int] = []
+    for ref in preferred_refs:
+        try:
+            final_ids.append(_graph_parse_record_ref(ref))
+        except Exception:
+            continue
+
+    missing_ids = [rid for rid in final_ids if rid not in obs_map]
+    if missing_ids:
+        q = f"SELECT id, ts, kind, tool_name, summary, summary_en, lang FROM observations WHERE id IN ({','.join(['?']*len(missing_ids))})"
+        rows = conn.execute(q, missing_ids).fetchall()
+        for row in rows:
+            obs_map[int(row['id'])] = {
+                'id': int(row['id']),
+                'ts': row['ts'],
+                'kind': row['kind'],
+                'tool_name': row['tool_name'],
+                'summary': row['summary'],
+                'summary_en': row['summary_en'],
+                'lang': row['lang'],
+            }
+
+    coverage_map: Dict[int, List[int]] = {}
+    preferred_card_refs = _graph_collect_ref_tokens(synth_pref.get('preferredCardRefs') or [])
+    ordered_input_set = set(input_refs)
+    if preferred_card_refs:
+        synth_rows = conn.execute(
+            "SELECT id, detail_json FROM observations WHERE tool_name = 'graph.synth-compile' AND id IN ({})".format(','.join(['?']*len(preferred_card_refs))),
+            [_graph_parse_record_ref(ref) for ref in preferred_card_refs],
+        ).fetchall()
+        for row in synth_rows:
+            detail = _pack_parse_detail_json(row['detail_json'])
+            synth = detail.get('graph_synthesis') if isinstance(detail.get('graph_synthesis'), dict) else {}
+            source_refs = _graph_collect_ref_tokens(synth.get('source_refs') or [])
+            coverage_map[int(row['id'])] = [
+                _graph_parse_record_ref(ref)
+                for ref in source_refs
+                if ref in ordered_input_set
+            ]
+
+    return final_ids[: max(1, int(limit))], {
+        'inputRecordRefs': input_refs,
+        'recordRefs': [_graph_record_ref(rid) for rid in final_ids[: max(1, int(limit))]],
+        'preferredCardRefs': preferred_card_refs,
+        'coveredRawRefs': _graph_collect_ref_tokens(synth_pref.get('coveredRawRefs') or []),
+        'coverageMap': {
+            _graph_record_ref(k): [_graph_record_ref(x) for x in v]
+            for k, v in coverage_map.items()
+        },
+    }
+
+
 def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Hybrid search (FTS + Vector) using RRF.
 
@@ -3029,12 +3096,24 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         _emit([], args.json)
         return
 
+    selected_ids, synthesis_pref = _hybrid_prefer_synthesis_cards(
+        conn,
+        ordered_ids=ordered_ids,
+        limit=limit,
+        obs_map=state["obs_map"],
+        rrf_scores=state["rrf_scores"],
+    )
+
+    covered_raw_ref_set = set(_graph_collect_ref_tokens(synthesis_pref.get("coveredRawRefs") or []))
+    coverage_map = synthesis_pref.get("coverageMap") or {}
+
     out = []
-    for rid in ordered_ids[:limit]:
-        r = state["obs_map"].get(rid)
+    for rid in selected_ids:
+        r = dict(state["obs_map"].get(rid) or {})
         if not r:
             continue
 
+        record_ref = _graph_record_ref(rid)
         r["rrf_score"] = float(state["rrf_scores"].get(rid, 0.0))
         r["match"] = []
         if rid in state["fts_ids"]:
@@ -3043,6 +3122,22 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             r["match"].append("vector")
         if rid in state["vec_en_ids"]:
             r["match"].append("vector_en")
+        if r.get("tool_name") == "graph.synth-compile":
+            r["match"].append("graph_synthesis")
+            covered = list(coverage_map.get(record_ref) or [])
+            best_rrf = max([
+                float(state["rrf_scores"].get(_graph_parse_record_ref(ref), 0.0))
+                for ref in covered
+            ] or [0.0])
+            r["rrf_score"] = max(float(r.get("rrf_score") or 0.0), best_rrf)
+            r["graph_consumption"] = {
+                "preferred": True,
+                "coveredRawRefs": covered,
+            }
+        elif record_ref in covered_raw_ref_set:
+            r["graph_consumption"] = {
+                "coveredByPreferredSynthesis": True,
+            }
 
         if state["rerank_enabled"]:
             r["rerank_provider"] = state["rerank_provider"]

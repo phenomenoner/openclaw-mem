@@ -3257,6 +3257,72 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out[0].get("rank_stage"), "rerank")
         conn.close()
 
+    def test_hybrid_prefers_fresh_synthesis_cards_in_results(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "fact", "summary": "alpha source one", "summary_en": "alpha source one", "tool_name": "memory_store", "detail": {}})
+        _insert_observation(conn, {"kind": "fact", "summary": "alpha source two", "summary_en": "alpha source two", "tool_name": "memory_store", "detail": {}})
+
+        compile_args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Merged insight",
+            "--summary", "Merged insight",
+            "--why-it-matters", "Prefer the synthesis card",
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_args.func(conn, compile_args)
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "alpha",
+                "query_en": None,
+                "model": "test-model",
+                "limit": 5,
+                "k": 60,
+                "base_url": "https://example.com/v1",
+                "rerank_provider": "none",
+                "rerank_model": None,
+                "rerank_topn": 5,
+                "rerank_api_key": None,
+                "rerank_base_url": None,
+                "rerank_timeout_sec": 5,
+                "json": True,
+            },
+        )()
+
+        state = {
+            "ordered_ids": [1, 2],
+            "fts_ids": {1, 2},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.9, 2: 0.8},
+            "obs_map": {
+                1: {"id": 1, "summary": "alpha source one", "summary_en": "alpha source one", "kind": "fact", "lang": "en", "tool_name": "memory_store"},
+                2: {"id": 2, "summary": "alpha source two", "summary_en": "alpha source two", "kind": "fact", "lang": "en", "tool_name": "memory_store"},
+            },
+            "rerank_scores": {},
+            "rerank_applied": False,
+            "rerank_provider": "none",
+            "rerank_enabled": False,
+            "candidate_limit": 12,
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=state):
+            with redirect_stdout(buf):
+                cmd_hybrid(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out[0]["tool_name"], "graph.synth-compile")
+        self.assertIn("graph_synthesis", out[0]["match"])
+        self.assertEqual(out[0]["graph_consumption"]["coveredRawRefs"], ["obs:1", "obs:2"])
+        conn.close()
+
     def test_hybrid_rerank_fail_open_keeps_rrf_order(self):
         conn = _connect(":memory:")
 

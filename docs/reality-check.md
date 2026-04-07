@@ -103,5 +103,6 @@ Expected:
 - Graph preflight preference for fresh synthesis cards when they cover multiple selected raw refs
 - Graph pack preference for fresh synthesis cards when explicit refs are covered by a fresh synthesis card
 - Main `pack --use-graph` now records graph-consumption receipts and elides raw L1 lines already covered by preferred synthesis cards in the combined graph-aware bundle
+- `cmd_hybrid` now prefers fresh synthesis cards in top results when they cover multiple high-ranked raw hits, and emits graph-consumption receipts on the synthetic result
 - `graph synth stale` / `graph lint` now surface deterministic review + contradiction-keyword signals from newly selected refs
 - Optional Markdown materialization during compile (`--write-md`)
