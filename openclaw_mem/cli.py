@@ -1556,6 +1556,59 @@ def _search_cjk_fallback(
     return conn.execute(sql, params).fetchall()
 
 
+def _search_prefer_synthesis_rows(
+    conn: sqlite3.Connection,
+    *,
+    rows: List[sqlite3.Row],
+    limit: int,
+) -> List[Dict[str, Any]]:
+    ordered_ids = [int(r['id']) for r in rows]
+    if not ordered_ids:
+        return []
+
+    obs_map: Dict[int, Dict[str, Any]] = {int(r['id']): dict(r) for r in rows}
+    selected_ids, synthesis_pref = _hybrid_prefer_synthesis_cards(
+        conn,
+        ordered_ids=ordered_ids,
+        limit=limit,
+        obs_map=obs_map,
+        rrf_scores={},
+    )
+
+    coverage_map = synthesis_pref.get('coverageMap') or {}
+    rank_map = {rid: idx + 1 for idx, rid in enumerate(ordered_ids)}
+    score_map = {int(r['id']): float(r['score']) for r in rows if r['score'] is not None}
+
+    out: List[Dict[str, Any]] = []
+    for rid in selected_ids:
+        item = dict(obs_map.get(rid) or {})
+        if not item:
+            continue
+        record_ref = _graph_record_ref(rid)
+        item['snippet'] = item.get('snippet') or item.get('summary') or ''
+        item['snippet_en'] = item.get('snippet_en') or item.get('summary_en') or ''
+        if item.get('tool_name') == 'graph.synth-compile':
+            covered_refs = list(coverage_map.get(record_ref) or [])
+            covered_ids: List[int] = []
+            for ref in covered_refs:
+                try:
+                    covered_ids.append(_graph_parse_record_ref(ref))
+                except Exception:
+                    continue
+            covered_ranks = [int(rank_map[x]) for x in covered_ids if x in rank_map]
+            covered_scores = [float(score_map[x]) for x in covered_ids if x in score_map]
+            if covered_scores:
+                item['score'] = min(covered_scores)
+            item['graph_consumption'] = {
+                'preferred': True,
+                'coveredRawRefs': covered_refs,
+                'coveredRanks': covered_ranks,
+            }
+            item['match'] = ['graph_synthesis']
+        out.append(item)
+    return out
+
+
 def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     q = args.query.strip()
     if not q:
@@ -1581,7 +1634,7 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if not rows and _has_cjk(q):
         rows = _search_cjk_fallback(conn, q, args.limit)
 
-    out = [dict(r) for r in rows]
+    out = _search_prefer_synthesis_rows(conn, rows=rows, limit=max(1, int(args.limit)))
     _emit(out, args.json)
 
 
@@ -6714,6 +6767,39 @@ def cmd_graph_synth(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     sys.exit(2)
 
 
+def _graph_cluster_terms(text: str) -> List[str]:
+    import re
+
+    raw = str(text or '').strip().lower()
+    if not raw:
+        return []
+
+    stopwords = {
+        'the', 'and', 'with', 'from', 'that', 'this', 'into', 'after', 'before', 'will', 'would', 'could',
+        'should', 'have', 'has', 'had', 'for', 'not', 'are', 'was', 'were', 'been', 'then', 'than', 'when',
+        'where', 'what', 'which', 'while', 'alpha', 'beta', 'source', 'sources', 'note', 'notes', 'graph',
+        'synthesis', 'compile', 'captured', 'capture', 'memory', 'store', 'tool', 'tools', 'flow', 'update',
+        'updated', 'change', 'changed', 'newer', 'old', 'daily', 'runner', 'data', 'info', 'summary',
+    }
+
+    terms: List[str] = []
+    seen: set[str] = set()
+    for tok in re.findall(r"[a-z][a-z0-9_/-]{2,}", raw):
+        if tok in stopwords:
+            continue
+        if tok in seen:
+            continue
+        seen.add(tok)
+        terms.append(tok)
+    for tok in re.findall(r"[㐀-鿿]{2,}", str(text or '')):
+        if tok in seen:
+            continue
+        seen.add(tok)
+        terms.append(tok)
+    return terms[:12]
+
+
+
 def _graph_candidate_card_suggestions(
     conn: sqlite3.Connection,
     *,
@@ -6749,6 +6835,7 @@ def _graph_candidate_card_suggestions(
                 'ts': row['ts'],
                 'tool_name': row['tool_name'],
                 'summary': (row['summary'] or '').replace('\n', ' ').strip(),
+                'clusterTerms': _graph_cluster_terms(row['summary'] or ''),
             }
         )
 
@@ -6756,11 +6843,50 @@ def _graph_candidate_card_suggestions(
     for scope, items in groups.items():
         if len(items) < 2:
             continue
+
+        term_map: Dict[str, List[Dict[str, Any]]] = {}
+        for item in items:
+            for term in list(item.get('clusterTerms') or []):
+                term_map.setdefault(str(term), []).append(item)
+
+        scope_suggestions: List[Dict[str, Any]] = []
+        seen_ref_sets: set[Tuple[str, ...]] = set()
+        for term, term_items in sorted(term_map.items(), key=lambda kv: (-len(kv[1]), -len(kv[0]), kv[0])):
+            if len(term_items) < 2:
+                continue
+            ref_tuple = tuple(sorted(str(it.get('recordRef') or '') for it in term_items))
+            if ref_tuple in seen_ref_sets:
+                continue
+            seen_ref_sets.add(ref_tuple)
+            tool_names = sorted({str(it.get('tool_name') or '') for it in term_items if str(it.get('tool_name') or '')})
+            scope_suggestions.append(
+                {
+                    'scope': scope,
+                    'reason': 'uncovered_scope_term_cluster',
+                    'clusterType': 'scope_term',
+                    'clusterKey': term,
+                    'sharedTerms': [term],
+                    'uncoveredSourceCount': len(term_items),
+                    'recordRefs': [str(it.get('recordRef') or '') for it in term_items[:8]],
+                    'toolNames': tool_names[:8],
+                    'sampleSummaries': [str(it.get('summary') or '') for it in term_items[:3]],
+                }
+            )
+            if len(scope_suggestions) >= 3:
+                break
+
+        if scope_suggestions:
+            suggestions.extend(scope_suggestions)
+            continue
+
         tool_names = sorted({str(it.get('tool_name') or '') for it in items if str(it.get('tool_name') or '')})
         suggestions.append(
             {
                 'scope': scope,
                 'reason': 'uncovered_scope_cluster',
+                'clusterType': 'scope',
+                'clusterKey': scope,
+                'sharedTerms': [],
                 'uncoveredSourceCount': len(items),
                 'recordRefs': [str(it.get('recordRef') or '') for it in items[:8]],
                 'toolNames': tool_names[:8],
@@ -6771,8 +6897,10 @@ def _graph_candidate_card_suggestions(
     suggestions.sort(
         key=lambda x: (
             -int(x.get('uncoveredSourceCount') or 0),
+            str(x.get('reason') or ''),
             -len(x.get('toolNames') or []),
             str(x.get('scope') or ''),
+            str(x.get('clusterKey') or ''),
         )
     )
     return {

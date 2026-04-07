@@ -2,7 +2,7 @@
 
 ## Status
 - Stage: **partial implementation shipped**
-- Shipped v0.1 slice: `graph synth compile`, `graph synth stale`, `graph synth refresh`, deterministic `graph lint`, optional Markdown materialization, graph-preflight preference for fresh synthesis cards, graph-pack preference for fresh synthesis cards, deterministic review/contradiction-keyword signals in stale/lint, lifecycle receipts for superseded cards, and coverage-pressure candidate suggestions for uncovered scope clusters
+- Shipped v0.1 slice: `graph synth compile`, `graph synth stale`, `graph synth refresh`, deterministic `graph lint`, optional Markdown materialization, graph-preflight preference for fresh synthesis cards, graph-pack preference for fresh synthesis cards, `search` preference for fresh synthesis cards when multiple matched raw hits are covered by the same card, deterministic review/contradiction-keyword signals in stale/lint, lifecycle receipts for superseded cards, and coverage-pressure candidate suggestions using scope + repeated-keyword clusters
 - Scope: `openclaw-mem` Graphic Memory surfaces only
 - Recommendation: **add as a derived layer inside `openclaw-mem`**
 - Delivery posture: **provenance-first, fail-open, no graph DB, no UI dependency**

@@ -1134,6 +1134,35 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_search_prefers_fresh_synthesis_cards_in_results(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha rollout note", "tool_name": "memory_store", "detail": {}})
+        _insert_observation(conn, {"kind": "note", "summary": "alpha rollback note", "tool_name": "memory_store", "detail": {}})
+
+        compile_args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Merged insight",
+            "--summary", "Merged insight",
+            "--why-it-matters", "Prefer the synthesis card"
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_args.func(conn, compile_args)
+
+        args = type("Args", (), {"query": "alpha", "limit": 10, "json": True})()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_search(conn, args)
+
+        hits = json.loads(buf.getvalue())
+        self.assertGreaterEqual(len(hits), 1)
+        self.assertEqual(hits[0]["tool_name"], "graph.synth-compile")
+        self.assertEqual(hits[0]["graph_consumption"]["coveredRawRefs"], ["obs:1", "obs:2"])
+        self.assertEqual(hits[0]["graph_consumption"]["coveredRanks"], [1, 2])
+        self.assertEqual(hits[0]["match"], ["graph_synthesis"])
+        conn.close()
+
     def test_cjk_search_fallback_when_fts_misses(self):
         conn = _connect(":memory:")
 
@@ -4591,10 +4620,10 @@ class TestGraphSynthesisCli(unittest.TestCase):
 
     def test_graph_lint_suggests_candidate_cards_for_uncovered_scope_clusters(self):
         conn = _connect(":memory:")
-        _insert_observation(conn, {"kind": "note", "summary": "alpha source one", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
-        _insert_observation(conn, {"kind": "note", "summary": "alpha source two", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
-        _insert_observation(conn, {"kind": "note", "summary": "alpha source three", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
-        _insert_observation(conn, {"kind": "note", "summary": "beta singleton", "tool_name": "memory_store", "detail": {"scope": "proj.beta"}})
+        _insert_observation(conn, {"kind": "note", "summary": "rollout checkpoint ready", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        _insert_observation(conn, {"kind": "note", "summary": "rollout checkpoint blocked", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        _insert_observation(conn, {"kind": "note", "summary": "rollback guard pending", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        _insert_observation(conn, {"kind": "note", "summary": "rollback guard approved", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
 
         lint_args = build_parser().parse_args(["graph", "--json", "lint"])
         buf = io.StringIO()
@@ -4602,14 +4631,34 @@ class TestGraphSynthesisCli(unittest.TestCase):
             lint_args.func(conn, lint_args)
 
         out = json.loads(buf.getvalue())
-        self.assertEqual(out["counts"]["candidateCardSuggestions"], 1)
+        self.assertEqual(out["counts"]["candidateCardSuggestions"], 2)
         self.assertEqual(out["counts"]["scopedSourceRows"], 4)
         self.assertEqual(out["counts"]["uncoveredScopedSourceRows"], 4)
+        suggestions = out["samples"]["candidateCardSuggestions"]
+        self.assertEqual(suggestions[0]["scope"], "proj.alpha")
+        self.assertEqual(suggestions[0]["reason"], "uncovered_scope_term_cluster")
+        self.assertEqual(suggestions[0]["sharedTerms"], ["checkpoint"])
+        self.assertEqual(suggestions[0]["recordRefs"], ["obs:1", "obs:2"])
+        self.assertEqual(suggestions[1]["sharedTerms"], ["rollback"])
+        self.assertEqual(suggestions[1]["recordRefs"], ["obs:3", "obs:4"])
+        conn.close()
+
+    def test_graph_lint_prefers_keyword_clusters_before_scope_fallback(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "pricing migration ready", "tool_name": "memory_store", "detail": {"scope": "proj.gamma"}})
+        _insert_observation(conn, {"kind": "note", "summary": "pricing migration blocked", "tool_name": "memory_store", "detail": {"scope": "proj.gamma"}})
+        _insert_observation(conn, {"kind": "note", "summary": "audit followup", "tool_name": "memory_store", "detail": {"scope": "proj.gamma"}})
+
+        lint_args = build_parser().parse_args(["graph", "--json", "lint"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            lint_args.func(conn, lint_args)
+
+        out = json.loads(buf.getvalue())
         suggestion = out["samples"]["candidateCardSuggestions"][0]
-        self.assertEqual(suggestion["scope"], "proj.alpha")
-        self.assertEqual(suggestion["reason"], "uncovered_scope_cluster")
-        self.assertEqual(suggestion["uncoveredSourceCount"], 3)
-        self.assertEqual(suggestion["recordRefs"], ["obs:1", "obs:2", "obs:3"])
+        self.assertEqual(suggestion["reason"], "uncovered_scope_term_cluster")
+        self.assertEqual(suggestion["sharedTerms"], ["migration"])
+        self.assertEqual(suggestion["recordRefs"], ["obs:1", "obs:2"])
         conn.close()
 
 

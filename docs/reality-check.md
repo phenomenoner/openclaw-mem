@@ -104,7 +104,8 @@ Expected:
 - Graph pack preference for fresh synthesis cards when explicit refs are covered by a fresh synthesis card
 - Main `pack --use-graph` now records graph-consumption receipts and elides raw L1 lines already covered by preferred synthesis cards in the combined graph-aware bundle
 - `cmd_hybrid` now prefers fresh synthesis cards in top results when they cover multiple high-ranked raw hits, and emits graph-consumption receipts on the synthetic result
+- `search` now prefers fresh synthesis cards in top results when multiple matched raw hits are covered by the same card, with graph-consumption receipts on the synthetic result
 - `graph synth refresh` now replays the old card’s selection, emits a fresh replacement card, and marks the old card as `superseded` with a `superseded_by` receipt
-- `graph lint` now reports deterministic coverage pressure / `candidateCardSuggestions` for uncovered scope clusters not yet covered by active synthesis cards
+- `graph lint` now reports deterministic coverage pressure / `candidateCardSuggestions` using scope + repeated-keyword clusters, not just scope-only grouping
 - `graph synth stale` / `graph lint` now surface deterministic review + contradiction-keyword signals from newly selected refs
 - Optional Markdown materialization during compile (`--write-md`)
