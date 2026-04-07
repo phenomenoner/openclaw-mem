@@ -3499,6 +3499,7 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
         return {}
 
     pre = graph_state.get("payload") or {}
+    consumption = graph_state.get("consumption") or {}
     return {
         "triggered": bool(graph_state.get("triggered")),
         "trigger_reason": graph_state.get("trigger_reason"),
@@ -3513,6 +3514,12 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
         "fail_open": bool(graph_state.get("fail_open")),
         "error_first_line": graph_state.get("error_first_line"),
         "preflight_kind": pre.get("kind"),
+        "consumption": {
+            "preferred_card_refs": list(consumption.get("preferredCardRefs") or []),
+            "covered_raw_refs": list(consumption.get("coveredRawRefs") or []),
+            "elided_l1_refs": list(consumption.get("elidedL1Refs") or []),
+            "elided_l1_count": int(consumption.get("elidedL1Count") or 0),
+        },
     }
 
 
@@ -3651,6 +3658,18 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     # Optional graph output (kept separate for safety; consumer may choose to inject).
     if (graph_state or {}).get("use_graph") != "off":
+        graph_pack = (((graph_state.get("payload") or {}).get("pack") or {}) if isinstance((graph_state.get("payload") or {}).get("pack"), dict) else {})
+        graph_selection = (graph_pack.get("selection") or {}) if isinstance(graph_pack, dict) else {}
+        preferred_card_refs = _graph_collect_ref_tokens(graph_selection.get("preferredCardRefs") or [])
+        covered_raw_refs = _graph_collect_ref_tokens(graph_selection.get("coveredRawRefs") or [])
+        covered_raw_set = set(covered_raw_refs)
+        elided_l1_refs = [item["recordRef"] for item in selected_items if item.get("recordRef") in covered_raw_set]
+        graph_state["consumption"] = {
+            "preferredCardRefs": preferred_card_refs,
+            "coveredRawRefs": covered_raw_refs,
+            "elidedL1Refs": elided_l1_refs,
+            "elidedL1Count": len(elided_l1_refs),
+        }
         payload["graph"] = {
             "use_graph": graph_state.get("use_graph"),
             "triggered": bool(graph_state.get("triggered")),
@@ -3666,15 +3685,22 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "take": int(graph_state.get("take") or 0),
             "scope": graph_state.get("scope"),
             "preflight": graph_state.get("payload"),
+            "consumption": graph_state.get("consumption"),
         }
 
         graph_bundle = ((graph_state.get("payload") or {}).get("bundle_text") or "").strip()
         if graph_bundle:
-            combined = (graph_bundle + "\n" + bundle_text).strip() + "\n"
+            l1_for_combined = [line for item, line in zip(selected_items, bundle_lines) if item.get("recordRef") not in covered_raw_set]
+            l1_combined_text = "\n".join(l1_for_combined).strip()
+            parts = [graph_bundle]
+            if l1_combined_text:
+                parts.append(l1_combined_text)
+            combined = "\n".join(parts).strip() + "\n"
             max_chars = max(0, int(budget_tokens + int(graph_state.get("budget_tokens") or 0)) * 4 - 3)
             if max_chars and len(combined) > max_chars:
                 combined = combined[:max_chars].rstrip() + "\n"
             payload["bundle_text_with_graph"] = combined
+
 
     if bool(args.trace):
         duration_ms = int((time.perf_counter() - started) * 1000)

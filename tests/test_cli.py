@@ -3504,6 +3504,72 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_pack_use_graph_on_elides_l1_items_covered_by_preferred_cards(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "plain summary",
+                    "summary_en": "plain summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "something", "--json", "--trace", "--use-graph", "on"])
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [{"recordRef": "obs:1", "id": 1, "ts": "2026-02-04T13:00:00Z", "kind": "fact", "tool_name": "memory_store", "score": -9.0, "title": "stub", "why_relevant": "fts_match"}],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\n",
+        }
+
+        fake_graph_pack_payload = {
+            "kind": "openclaw-mem.graph.pack.v0",
+            "ts": "2026-02-04T13:00:00Z",
+            "budget": {"budgetTokens": 1200, "estimatedTokens": 20},
+            "selection": {
+                "inputRecordRefs": ["obs:1", "obs:2"],
+                "recordRefs": ["obs:99"],
+                "selectedCount": 1,
+                "preferredCardRefs": ["obs:99"],
+                "coveredRawRefs": ["obs:1"],
+            },
+            "items": [{"recordRef": "obs:99", "id": 99, "ts": "2026-02-04T13:00:00Z", "kind": "note", "tool_name": "graph.synth-compile", "summary": "graph synthesis"}],
+            "bundle_text": "[GRAPH_CONTEXT v0]\nItems: 1\n\n1) obs:99 ts=2026-02-04T13:00:00Z [note] graph.synth-compile :: graph synthesis\n",
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
+        ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertIn("graph", out)
+        self.assertEqual(out["graph"]["consumption"]["preferredCardRefs"], ["obs:99"])
+        self.assertEqual(out["graph"]["consumption"]["coveredRawRefs"], ["obs:1"])
+        self.assertEqual(out["graph"]["consumption"]["elidedL1Refs"], ["obs:1"])
+        self.assertEqual(out["graph"]["consumption"]["elidedL1Count"], 1)
+        self.assertIn("obs:99", out["bundle_text_with_graph"])
+        self.assertNotIn("- [obs:1] plain summary", out["bundle_text_with_graph"])
+        self.assertEqual(out["trace"]["extensions"]["graph"]["consumption"]["elided_l1_count"], 1)
+
+        conn.close()
+
     def test_pack_budget_tokens_clamped_to_minimum_one(self):
         conn = _connect(":memory:")
 
