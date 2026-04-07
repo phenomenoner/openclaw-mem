@@ -370,6 +370,17 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --json graph query subgr
 Use the `--topology` queries for the Stage-1 read-only helper slice when you want one-hop answers directly from structured topology truth, before building the derived SQLite cache for deeper graph/drift debugging.
 
 
+Optional one-hop probes:
+
+```bash
+# One-hop operator probes against the refreshed local topology DB:
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph query upstream artifact.daily-mission --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph query downstream project.openclaw-mem --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph query writers artifact.daily-mission --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem graph query filter --tag background --not-tag human_facing --node-type cron_job --json
+```
+
+
 ## Step 8.6: Topology extract + diff smoke test (optional, dev)
 
 Generate a deterministic seed from your workspace, then compare it with curated topology (suggest-only):

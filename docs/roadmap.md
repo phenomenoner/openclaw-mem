@@ -138,6 +138,35 @@ Acceptance criteria:
 Artifacts:
 - Spec: `docs/specs/topology-auto-extract-v0.md`
 
+### 1.7c) Compiled synthesis layer (selected refs → maintained synthesis cards)
+
+Status: **PARTIAL** (`graph synth compile` / `graph synth stale` / deterministic `graph lint` shipped; graph preflight and graph pack now prefer fresh synthesis cards; deterministic review/contradiction signals now surface in stale/lint; richer maintenance still pending).
+
+- Problem: Graphic Memory can capture refs and build bounded preflight/query bundles, but it still has to re-derive many high-value cross-source conclusions from scratch.
+- Goal: add a small, provenance-carrying **compiled synthesis layer** that turns selected refs into reusable synthesis cards with a stale/lint loop.
+- Non-goals: no graph DB, no UI/Obsidian dependency, no automatic wiki-writing loop, and no topology-source-of-truth changes.
+
+Plan (v0):
+1) Reuse existing selection surfaces (`graph index` / `graph preflight` / explicit record refs) as inputs.
+2) Add `graph synth compile` to emit a bounded synthesis-card receipt (+ optional Markdown materialization).
+3) Add `graph synth stale` and deterministic `graph lint` checks.
+4) Shipped in the graph-preflight lane: prefer fresh synthesis cards before replaying many covered raw refs.
+5) Shipped in the graph-pack lane: when explicit refs are covered by a fresh synthesis card, prefer the card and surface the preference receipt.
+6) Shipped in main `pack --use-graph`: record graph-consumption receipts and elide raw L1 lines already covered by preferred synthesis cards in the combined graph-aware bundle.
+7) Shipped in `cmd_hybrid`: prefer fresh synthesis cards in top results when they cover multiple high-ranked raw hits, with explicit graph-consumption receipts.
+8) Shipped in `graph synth refresh`: replay the old card selection, emit a fresh replacement card, and mark the old card as superseded with lifecycle receipts.
+9) Shipped in `graph lint`: coverage pressure / `candidateCardSuggestions` using scope + repeated-keyword clusters for uncovered areas not yet covered by active synthesis cards.
+10) Shipped in `search`: prefer fresh synthesis cards in top results when multiple matched raw hits are covered by the same card, with graph-consumption receipts.
+11) Later, extend synthesis-card preference more broadly in other pack/retrieval lanes where it remains truthful.
+
+Acceptance criteria:
+- A user can compile a reusable synthesis card from bounded refs with provenance.
+- Staleness is detectable without an LLM.
+- Graph failures remain fail-open and do not break baseline preflight/pack flows.
+
+Artifacts:
+- Spec: `docs/specs/graphic-memory-compiled-synthesis-v0.md`
+
 ### 1.6) Sunrise rollout (Stage A→B→C)
 
 Status: **PARTIAL** (Stage A running; Stage B/C pending).
@@ -452,13 +481,18 @@ Deliverables:
   - [x] `graph auto-status` and env toggles (`OPENCLAW_MEM_GRAPH_AUTO_RECALL`, `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE`, `OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD`)
   - [x] `graph match` (bounded `idea/query → top projects → explanation path`)
   - [x] `graph health` (freshness / staleness / node-count summary for canary use)
-- Query path (current v0):
+- Next-value layer:
+  - compiled synthesis cards + stale/lint loop over selected refs
+  - Spec: `docs/specs/graphic-memory-compiled-synthesis-v0.md`
+- Query path (current/target):
   - `idea/query → top projects → explanation path`
-- Storage evaluation:
-  - Start with a local typed graph option (Kuzu candidate) but keep the store behind an interface to mitigate longevity risk.
+- Storage posture:
+  - stay with portable / derived graph artifacts first (SQLite + receipts + optional Markdown materialization)
+  - defer dedicated graph-store evaluation until compiled synthesis and query quality prove the need
 
 Acceptance criteria:
 - Given an idea, we can point to 3–10 candidate projects/tasks with a human-readable justification path.
+- High-value repeated cross-source conclusions can be reused as fresh synthesis cards instead of being re-derived every time.
 
 ### 7) User/System separation (upgrade-safe operator state)
 

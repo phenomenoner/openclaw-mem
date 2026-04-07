@@ -58,6 +58,11 @@ Never store:
   - single entrypoint router: `openclaw-mem route auto "<query>"` (fail-open)
   - mem-engine auto-hook: enable `autoRecall.routeAuto` when you want live turns to consult that router before agent start
 
+## Graphic Memory compiled synthesis note
+- Fresh synthesis cards are **derived graph artifacts**, not L1 durable-memory facts by default.
+- Retrieval surfaces may prefer one synthesis card over many covered raw refs when it reduces truthful repetition.
+- Keep the provenance / covered-ref receipt attached; do not promote the card itself into durable memory by default.
+
 ## Output behavior
 Answer using the best lane with provenance. Store only after confirmation, and store **one fact per record**.
 ```

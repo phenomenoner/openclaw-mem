@@ -41,6 +41,10 @@ If asked to “remember” routine logs/OK checks:
 - Graph match: `openclaw-mem graph match "…"` for bounded idea → project candidate routing; for unattended use, check `openclaw-mem graph health` first
 - Store: **disabled by default** in this lane
 
+## Graphic Memory compiled synthesis note
+- Read-only lanes may inspect synthesis cards as **derived graph artifacts**.
+- Do not promote a synthesis card itself into durable memory by default; use it as a provenance-carrying reference surface.
+
 ## Runtime enforcement (recommended)
 This card is a *prompt-layer contract*. When possible, also enforce it at runtime:
 

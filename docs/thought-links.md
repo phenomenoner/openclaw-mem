@@ -26,6 +26,9 @@ Additional trusted references (for lifecycle/decay):
   - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_export-canonical-writer_landed.md`
   - `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-03-30_canonical-operator-packet_and_slowdiff_landed.md`
   - Product doc: `portable-pack-capsules.md`
+- 2026-04-07 — Compiled synthesis layer (wiki-maintainer pattern without the wiki dependency)
+  - `docs/archive/thought-links/2026-04-07_compiled-synthesis-layer-wiki-pattern.md`
+  - Spec: `docs/specs/graphic-memory-compiled-synthesis-v0.md`
 
 ## 1) memvid / portable capsule pattern → what we take and what we refuse
 
@@ -171,6 +174,30 @@ A “context database” for agents that models **resources + memory + skills** 
 
 **Scope note (CK decision):**
 - Treat OpenViking as **thought-link only** for now (we are not committing to it as a backend/adapter arm yet).
+
+## 8) Compiled synthesis layer (wiki-maintainer pattern) → reuse before re-derivation
+
+Source (external; untrusted inspiration / field note only):
+- Karpathy gist — `llm-wiki`: <https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>
+
+**What we take:**
+- Some high-value cross-source conclusions should become a small, maintained, provenance-carrying **compiled synthesis artifact** rather than being re-derived on every query.
+- The value is the **maintenance loop** (compile → stale check → lint), not a UI or a "wiki for everything" posture.
+
+**How it maps to openclaw-mem:**
+- reuse existing capture + preflight/index/pack surfaces as the selection layer
+- add a derived **synthesis-card** layer (not L1 durable memory by default)
+- add `stale` + `lint` checks so the graph can be maintained instead of only queried
+
+**What we explicitly reject:**
+- Obsidian/UI dependency
+- graph DB detour
+- autonomous long-form wiki generation from every capture event
+- collapsing topology/docs/memory/graph artifacts into one authority class
+
+**Concrete pointer:**
+- `docs/specs/graphic-memory-compiled-synthesis-v0.md`
+- `docs/archive/thought-links/2026-04-07_compiled-synthesis-layer-wiki-pattern.md`
 
 ## 9) Reference-based decay ("forgetting curve") → lifecycle governance hook
 

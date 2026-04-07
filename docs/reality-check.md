@@ -103,3 +103,18 @@ Expected:
 - Package/distribution ergonomics so `openclaw-mem` install/run flow is cleaner across `uv sync` / pip contexts
 - Graph roadmap depth: richer typed-entity wiring + deeper operator queries/autonomy on top of the shipped query plane
 - Topology seed automation (`topology-seed`) so curated graph truth is easier to bootstrap and maintain
+
+### Graphic Memory compiled synthesis — **PARTIAL**
+
+- `graph synth compile` — compile a reusable synthesis card from explicit refs or query-preflight selection
+- `graph synth stale` — deterministic stale check (source digest + query-selection drift)
+- `graph lint` — deterministic health checks for stale cards / missing source metadata / unreferenced capture rows
+- Graph preflight preference for fresh synthesis cards when they cover multiple selected raw refs
+- Graph pack preference for fresh synthesis cards when explicit refs are covered by a fresh synthesis card
+- Main `pack --use-graph` now records graph-consumption receipts and elides raw L1 lines already covered by preferred synthesis cards in the combined graph-aware bundle
+- `cmd_hybrid` now prefers fresh synthesis cards in top results when they cover multiple high-ranked raw hits, and emits graph-consumption receipts on the synthetic result
+- `search` now prefers fresh synthesis cards in top results when multiple matched raw hits are covered by the same card, with graph-consumption receipts on the synthetic result
+- `graph synth refresh` now replays the old card’s selection, emits a fresh replacement card, and marks the old card as `superseded` with a `superseded_by` receipt
+- `graph lint` now reports deterministic coverage pressure / `candidateCardSuggestions` using scope + repeated-keyword clusters, not just scope-only grouping
+- `graph synth stale` / `graph lint` now surface deterministic review + contradiction-keyword signals from newly selected refs
+- Optional Markdown materialization during compile (`--write-md`)

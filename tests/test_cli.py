@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export
+from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export, cmd_graph_synth, cmd_graph_lint
 
 
 class TestCliM0(unittest.TestCase):
@@ -507,6 +507,7 @@ class TestCliM0(unittest.TestCase):
             cmd_graph_pack(conn, args)
         out = json.loads(buf.getvalue())
         self.assertEqual(out["kind"], "openclaw-mem.graph.pack.v0")
+        self.assertIn("selection", out)
         self.assertIn("bundle_text", out)
         self.assertIn("obs:1", out["bundle_text"])
 
@@ -679,6 +680,90 @@ class TestCliM0(unittest.TestCase):
         self.assertNotIn("obs:2", selected_refs)
         self.assertNotIn("obs:2", preflight_out["bundle_text"])
 
+        conn.close()
+
+    def test_graph_pack_prefers_fresh_synthesis_cards_over_raw_refs(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source one", "tool_name": "read", "detail": {}})
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source two", "tool_name": "exec", "detail": {}})
+
+        compile_args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Merged insight",
+            "--summary", "Merged insight",
+            "--why-it-matters", "Prefer the synthesis card",
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_args.func(conn, compile_args)
+
+        args = type(
+            "Args",
+            (),
+            {
+                "ids": ["obs:1", "obs:2"],
+                "max_items": 20,
+                "budget_tokens": 120,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_pack(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["selection"]["recordRefs"], ["obs:3"])
+        self.assertEqual(out["selection"]["preferredCardRefs"], ["obs:3"])
+        self.assertIn("obs:1", out["selection"]["coveredRawRefs"])
+        self.assertIn("obs:2", out["selection"]["coveredRawRefs"])
+        self.assertIn("sources=2", out["bundle_text"])
+        self.assertIn("why=Prefer the synthesis card", out["bundle_text"])
+        conn.close()
+
+    def test_graph_preflight_prefers_fresh_synthesis_cards_over_raw_refs(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source one", "tool_name": "read", "detail": {}})
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source two", "tool_name": "exec", "detail": {}})
+
+        compile_args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Merged insight",
+            "--summary", "Merged insight",
+            "--why-it-matters", "Prefer the synthesis card",
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_args.func(conn, compile_args)
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "alpha",
+                "scope": None,
+                "limit": 8,
+                "window": 1,
+                "suggest_limit": 3,
+                "budget_tokens": 120,
+                "take": 12,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_preflight(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertIn("obs:3", out["selection"]["recordRefs"])
+        self.assertIn("obs:3", out["selection"]["preferredCardRefs"])
+        self.assertIn("obs:1", out["selection"]["coveredRawRefs"])
+        self.assertIn("obs:2", out["selection"]["coveredRawRefs"])
+        self.assertIn("sources=2", out["bundle_text"])
+        self.assertIn("why=Prefer the synthesis card", out["bundle_text"])
         conn.close()
 
     def test_graph_auto_status_reports_flags_and_invalid_values(self):
@@ -1199,6 +1284,35 @@ class TestCliM0(unittest.TestCase):
         rows = json.loads(buf.getvalue())
         self.assertEqual([r["id"] for r in rows], [1, 2])
 
+        conn.close()
+
+    def test_search_prefers_fresh_synthesis_cards_in_results(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha rollout note", "tool_name": "memory_store", "detail": {}})
+        _insert_observation(conn, {"kind": "note", "summary": "alpha rollback note", "tool_name": "memory_store", "detail": {}})
+
+        compile_args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Merged insight",
+            "--summary", "Merged insight",
+            "--why-it-matters", "Prefer the synthesis card"
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_args.func(conn, compile_args)
+
+        args = type("Args", (), {"query": "alpha", "limit": 10, "json": True})()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_search(conn, args)
+
+        hits = json.loads(buf.getvalue())
+        self.assertGreaterEqual(len(hits), 1)
+        self.assertEqual(hits[0]["tool_name"], "graph.synth-compile")
+        self.assertEqual(hits[0]["graph_consumption"]["coveredRawRefs"], ["obs:1", "obs:2"])
+        self.assertEqual(hits[0]["graph_consumption"]["coveredRanks"], [1, 2])
+        self.assertEqual(hits[0]["match"], ["graph_synthesis"])
         conn.close()
 
     def test_cjk_search_fallback_when_fts_misses(self):
@@ -3324,6 +3438,72 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out[0].get("rank_stage"), "rerank")
         conn.close()
 
+    def test_hybrid_prefers_fresh_synthesis_cards_in_results(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "fact", "summary": "alpha source one", "summary_en": "alpha source one", "tool_name": "memory_store", "detail": {}})
+        _insert_observation(conn, {"kind": "fact", "summary": "alpha source two", "summary_en": "alpha source two", "tool_name": "memory_store", "detail": {}})
+
+        compile_args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Merged insight",
+            "--summary", "Merged insight",
+            "--why-it-matters", "Prefer the synthesis card",
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_args.func(conn, compile_args)
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "alpha",
+                "query_en": None,
+                "model": "test-model",
+                "limit": 5,
+                "k": 60,
+                "base_url": "https://example.com/v1",
+                "rerank_provider": "none",
+                "rerank_model": None,
+                "rerank_topn": 5,
+                "rerank_api_key": None,
+                "rerank_base_url": None,
+                "rerank_timeout_sec": 5,
+                "json": True,
+            },
+        )()
+
+        state = {
+            "ordered_ids": [1, 2],
+            "fts_ids": {1, 2},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.9, 2: 0.8},
+            "obs_map": {
+                1: {"id": 1, "summary": "alpha source one", "summary_en": "alpha source one", "kind": "fact", "lang": "en", "tool_name": "memory_store"},
+                2: {"id": 2, "summary": "alpha source two", "summary_en": "alpha source two", "kind": "fact", "lang": "en", "tool_name": "memory_store"},
+            },
+            "rerank_scores": {},
+            "rerank_applied": False,
+            "rerank_provider": "none",
+            "rerank_enabled": False,
+            "candidate_limit": 12,
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=state):
+            with redirect_stdout(buf):
+                cmd_hybrid(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out[0]["tool_name"], "graph.synth-compile")
+        self.assertIn("graph_synthesis", out[0]["match"])
+        self.assertEqual(out[0]["graph_consumption"]["coveredRawRefs"], ["obs:1", "obs:2"])
+        conn.close()
+
     def test_hybrid_rerank_fail_open_keeps_rrf_order(self):
         conn = _connect(":memory:")
 
@@ -4404,6 +4584,72 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(row_count, 0)
         conn.close()
 
+    def test_pack_use_graph_on_elides_l1_items_covered_by_preferred_cards(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "plain summary",
+                    "summary_en": "plain summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "something", "--json", "--trace", "--use-graph", "on"])
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [{"recordRef": "obs:1", "id": 1, "ts": "2026-02-04T13:00:00Z", "kind": "fact", "tool_name": "memory_store", "score": -9.0, "title": "stub", "why_relevant": "fts_match"}],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\n",
+        }
+
+        fake_graph_pack_payload = {
+            "kind": "openclaw-mem.graph.pack.v0",
+            "ts": "2026-02-04T13:00:00Z",
+            "budget": {"budgetTokens": 1200, "estimatedTokens": 20},
+            "selection": {
+                "inputRecordRefs": ["obs:1", "obs:2"],
+                "recordRefs": ["obs:99"],
+                "selectedCount": 1,
+                "preferredCardRefs": ["obs:99"],
+                "coveredRawRefs": ["obs:1"],
+            },
+            "items": [{"recordRef": "obs:99", "id": 99, "ts": "2026-02-04T13:00:00Z", "kind": "note", "tool_name": "graph.synth-compile", "summary": "graph synthesis"}],
+            "bundle_text": "[GRAPH_CONTEXT v0]\nItems: 1\n\n1) obs:99 ts=2026-02-04T13:00:00Z [note] graph.synth-compile :: graph synthesis\n",
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
+        ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertIn("graph", out)
+        self.assertEqual(out["graph"]["consumption"]["preferredCardRefs"], ["obs:99"])
+        self.assertEqual(out["graph"]["consumption"]["coveredRawRefs"], ["obs:1"])
+        self.assertEqual(out["graph"]["consumption"]["elidedL1Refs"], ["obs:1"])
+        self.assertEqual(out["graph"]["consumption"]["elidedL1Count"], 1)
+        self.assertIn("obs:99", out["bundle_text_with_graph"])
+        self.assertNotIn("- [obs:1] plain summary", out["bundle_text_with_graph"])
+        self.assertEqual(out["trace"]["extensions"]["graph"]["consumption"]["elided_l1_count"], 1)
+
+        conn.close()
+
     def test_pack_budget_tokens_clamped_to_minimum_one(self):
         conn = _connect(":memory:")
 
@@ -5158,6 +5404,247 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+
+class TestGraphSynthesisCli(unittest.TestCase):
+    def test_graph_synth_compile_explicit_refs_stores_card(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {"scope": "proj.a"}})
+        _insert_observation(conn, {"kind": "note", "summary": "beta source", "tool_name": "memory_store", "detail": {"scope": "proj.a"}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Merged finding",
+            "--summary", "Merged finding summary",
+            "--why-it-matters", "Use this later"
+        ])
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.compile.v0")
+        self.assertEqual(out["result"]["sourceRefs"], ["obs:1", "obs:2"])
+        self.assertEqual(out["result"]["title"], "Merged finding")
+
+        card_id = int(out["cardRef"].split(":", 1)[1])
+        row = conn.execute("SELECT summary, tool_name, detail_json FROM observations WHERE id = ?", (card_id,)).fetchone()
+        self.assertEqual(row["summary"], "Merged finding summary")
+        self.assertEqual(row["tool_name"], "graph.synth-compile")
+        detail = json.loads(row["detail_json"] or "{}")
+        synth = detail["graph_synthesis"]
+        self.assertEqual(synth["source_refs"], ["obs:1", "obs:2"])
+        self.assertEqual(synth["status"], "fresh")
+        conn.close()
+
+    def test_graph_synth_stale_detects_query_selection_drift(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis"
+        ])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+        compiled = json.loads(buf.getvalue())
+        card_ref = compiled["cardRef"]
+
+        _insert_observation(conn, {"kind": "note", "summary": "alpha newer source", "tool_name": "memory_store", "detail": {}})
+
+        stale_args = build_parser().parse_args(["graph", "--json", "synth", "stale", card_ref])
+        stale_buf = io.StringIO()
+        with redirect_stdout(stale_buf):
+            stale_args.func(conn, stale_args)
+
+        out = json.loads(stale_buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.stale.v0")
+        self.assertEqual(out["count"], 1)
+        self.assertEqual(out["items"][0]["status"], "stale")
+        self.assertIn("selection_drift", out["items"][0]["reasons"])
+        conn.close()
+
+    def test_graph_synth_refresh_supersedes_stale_card(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis",
+        ])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+        card_ref = json.loads(buf.getvalue())["cardRef"]
+
+        _insert_observation(conn, {"kind": "note", "summary": "alpha newer source", "tool_name": "memory_store", "detail": {}})
+
+        refresh_args = build_parser().parse_args(["graph", "--json", "synth", "refresh", card_ref])
+        refresh_buf = io.StringIO()
+        with redirect_stdout(refresh_buf):
+            refresh_args.func(conn, refresh_args)
+
+        out = json.loads(refresh_buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.refresh.v0")
+        self.assertTrue(out["result"]["refreshed"])
+        self.assertEqual(out["result"]["supersededCardRef"], card_ref)
+        self.assertNotEqual(out["result"]["recordRef"], card_ref)
+        self.assertIn("obs:3", out["result"]["sourceRefs"])
+
+        old_id = int(card_ref.split(":", 1)[1])
+        old_row = conn.execute("SELECT detail_json FROM observations WHERE id = ?", (old_id,)).fetchone()
+        old_detail = json.loads(old_row["detail_json"] or "{}")
+        old_synth = old_detail["graph_synthesis"]
+        self.assertEqual(old_synth["status"], "superseded")
+        self.assertEqual(old_synth["superseded_by"], out["result"]["recordRef"])
+
+        stale_args = build_parser().parse_args(["graph", "--json", "synth", "stale", card_ref])
+        stale_buf = io.StringIO()
+        with redirect_stdout(stale_buf):
+            stale_args.func(conn, stale_args)
+        stale_out = json.loads(stale_buf.getvalue())
+        self.assertEqual(stale_out["items"][0]["status"], "superseded")
+        self.assertEqual(stale_out["items"][0]["supersededBy"], out["result"]["recordRef"])
+        conn.close()
+
+    def test_graph_synth_refresh_fresh_card_is_noop_without_force(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis",
+        ])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+        card_ref = json.loads(buf.getvalue())["cardRef"]
+
+        refresh_args = build_parser().parse_args(["graph", "--json", "synth", "refresh", card_ref])
+        refresh_buf = io.StringIO()
+        with redirect_stdout(refresh_buf):
+            refresh_args.func(conn, refresh_args)
+
+        out = json.loads(refresh_buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.refresh.v0")
+        self.assertFalse(out["result"]["refreshed"])
+        self.assertEqual(out["result"]["reason"], "already_fresh")
+
+        count = conn.execute("SELECT COUNT(*) AS n FROM observations WHERE tool_name = 'graph.synth-compile'").fetchone()["n"]
+        self.assertEqual(count, 1)
+        conn.close()
+
+    def test_graph_synth_stale_surfaces_review_and_contradiction_signals(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis",
+        ])
+        with redirect_stdout(io.StringIO()) as _:
+            args.func(conn, args)
+        card_ref = json.loads(_.getvalue())["cardRef"]
+
+        _insert_observation(conn, {"kind": "note", "summary": "alpha contradiction: replaced old flow", "tool_name": "memory_store", "detail": {}})
+
+        stale_args = build_parser().parse_args(["graph", "--json", "synth", "stale", card_ref])
+        stale_buf = io.StringIO()
+        with redirect_stdout(stale_buf):
+            stale_args.func(conn, stale_args)
+
+        out = json.loads(stale_buf.getvalue())
+        item = out["items"][0]
+        self.assertEqual(item["status"], "stale")
+        self.assertIn("selection_drift", item["reasons"])
+        self.assertGreaterEqual(item["reviewSignalCount"], 1)
+        self.assertGreaterEqual(item["contradictionSignalCount"], 1)
+        self.assertTrue(any(sig["kind"] == "contradiction_keyword" for sig in item["reviewSignals"]))
+        conn.close()
+
+    def test_graph_lint_reports_stale_and_unreferenced_capture_rows(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha captured", "tool_name": "graph.capture-md", "detail": {}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis"
+        ])
+        with redirect_stdout(io.StringIO()):
+            args.func(conn, args)
+
+        _insert_observation(conn, {"kind": "note", "summary": "alpha new capture", "tool_name": "graph.capture-git", "detail": {}})
+
+        lint_args = build_parser().parse_args(["graph", "--json", "lint"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            lint_args.func(conn, lint_args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.lint.v0")
+        self.assertEqual(out["counts"]["synthesisCards"], 1)
+        self.assertEqual(out["counts"]["staleCards"], 1)
+        self.assertGreaterEqual(out["counts"]["reviewCards"], 0)
+        self.assertGreaterEqual(out["counts"]["contradictionSignalCards"], 0)
+        self.assertGreaterEqual(out["counts"]["unreferencedCaptureRows"], 1)
+        self.assertTrue(any(item["recordRef"] == "obs:3" for item in out["samples"]["unreferencedCaptureRows"]))
+        conn.close()
+
+    def test_graph_lint_suggests_candidate_cards_for_uncovered_scope_clusters(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "rollout checkpoint ready", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        _insert_observation(conn, {"kind": "note", "summary": "rollout checkpoint blocked", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        _insert_observation(conn, {"kind": "note", "summary": "rollback guard pending", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        _insert_observation(conn, {"kind": "note", "summary": "rollback guard approved", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+
+        lint_args = build_parser().parse_args(["graph", "--json", "lint"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            lint_args.func(conn, lint_args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["counts"]["candidateCardSuggestions"], 2)
+        self.assertEqual(out["counts"]["scopedSourceRows"], 4)
+        self.assertEqual(out["counts"]["uncoveredScopedSourceRows"], 4)
+        suggestions = out["samples"]["candidateCardSuggestions"]
+        self.assertEqual(suggestions[0]["scope"], "proj.alpha")
+        self.assertEqual(suggestions[0]["reason"], "uncovered_scope_term_cluster")
+        self.assertEqual(suggestions[0]["sharedTerms"], ["checkpoint"])
+        self.assertEqual(suggestions[0]["recordRefs"], ["obs:1", "obs:2"])
+        self.assertEqual(suggestions[1]["sharedTerms"], ["rollback"])
+        self.assertEqual(suggestions[1]["recordRefs"], ["obs:3", "obs:4"])
+        conn.close()
+
+    def test_graph_lint_prefers_keyword_clusters_before_scope_fallback(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "pricing migration ready", "tool_name": "memory_store", "detail": {"scope": "proj.gamma"}})
+        _insert_observation(conn, {"kind": "note", "summary": "pricing migration blocked", "tool_name": "memory_store", "detail": {"scope": "proj.gamma"}})
+        _insert_observation(conn, {"kind": "note", "summary": "audit followup", "tool_name": "memory_store", "detail": {"scope": "proj.gamma"}})
+
+        lint_args = build_parser().parse_args(["graph", "--json", "lint"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            lint_args.func(conn, lint_args)
+
+        out = json.loads(buf.getvalue())
+        suggestion = out["samples"]["candidateCardSuggestions"][0]
+        self.assertEqual(suggestion["reason"], "uncovered_scope_term_cluster")
+        self.assertEqual(suggestion["sharedTerms"], ["migration"])
+        self.assertEqual(suggestion["recordRefs"], ["obs:1", "obs:2"])
+        conn.close()
 
 
 if __name__ == "__main__":

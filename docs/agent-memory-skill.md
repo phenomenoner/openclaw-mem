@@ -108,6 +108,19 @@ If recall/docs results are weak, conflicting, or low-confidence:
 - **Docs search (L2):** `openclaw-mem docs search "…"`
 - **Docs ingest (L2):** `openclaw-mem docs ingest --path ./docs`
 - **Topology (L3):** repo inspection (`rg`, `tree`) + write a small topo note under `docs/topology/` (then ingest via docs)
+
+### Graphic Memory compiled synthesis (derived graph artifact, not L1)
+When multiple raw graph hits are already well-covered by a fresh synthesis card, retrieval surfaces may prefer the card instead of replaying every raw row.
+
+Current compiled-synthesis surfaces:
+- `openclaw-mem graph synth compile|stale|refresh`
+- `openclaw-mem graph lint` (staleness + coverage pressure / candidate-card suggestions)
+- Graph-aware consumption in `graph preflight`, `graph pack`, `pack --use-graph`, `search`, and `hybrid`
+
+Rule:
+- treat synthesis cards as **derived graph artifacts with provenance**, not as durable memory facts by default
+- prefer them when they reduce truthful repetition
+- keep raw refs reachable via receipts / citations / covered-refs metadata
 - **Graph match (L3):** `openclaw-mem graph match "…"` for idea → project / concept → project candidate routing.
   - For unattended use, prefer `openclaw-mem graph readiness` (bridges freshness + topology-source drift + match-support availability).
   - If you want a single deterministic router across graph-semantic and transcript recall, use `openclaw-mem route auto "<query>"` (fail-open).
