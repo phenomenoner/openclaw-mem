@@ -5614,7 +5614,7 @@ def _graph_pack_payload(
     uniq = uniq[:max_items]
 
     rows = conn.execute(
-        f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(uniq))})",
+        f"SELECT id, ts, kind, tool_name, summary, detail_json FROM observations WHERE id IN ({','.join(['?']*len(uniq))})",
         uniq,
     ).fetchall()
 
@@ -5624,6 +5624,8 @@ def _graph_pack_payload(
         r = row_map.get(int(oid))
         if r is None:
             continue
+        detail = _pack_parse_detail_json(r["detail_json"])
+        synth = detail.get("graph_synthesis") if isinstance(detail.get("graph_synthesis"), dict) else None
         items.append(
             {
                 "recordRef": _graph_record_ref(oid),
@@ -5632,6 +5634,12 @@ def _graph_pack_payload(
                 "kind": r["kind"],
                 "tool_name": r["tool_name"],
                 "summary": (r["summary"] or "").replace("\n", " ").strip(),
+                "synthesis": {
+                    "title": synth.get("title"),
+                    "why_it_matters": synth.get("why_it_matters"),
+                    "source_count": synth.get("source_count"),
+                    "status": synth.get("status"),
+                } if synth else None,
             }
         )
 
@@ -5642,7 +5650,23 @@ def _graph_pack_payload(
 
     included_items: List[Dict[str, Any]] = []
     for idx, it in enumerate(items, 1):
-        line = f"{idx}) {it['recordRef']} ts={it.get('ts')} [{it.get('kind')}] {it.get('tool_name') or ''} :: {it.get('summary') or ''}".strip()
+        extra = ""
+        synth = it.get("synthesis") if isinstance(it.get("synthesis"), dict) else None
+        if synth:
+            parts = []
+            if synth.get("status"):
+                parts.append(f"status={synth.get('status')}")
+            if synth.get("source_count") is not None:
+                parts.append(f"sources={int(synth.get('source_count') or 0)}")
+            if synth.get("why_it_matters"):
+                why = str(synth.get("why_it_matters") or "").replace("\n", " ").strip()
+                if len(why) > 120:
+                    why = why[:117] + "…"
+                if why:
+                    parts.append(f"why={why}")
+            if parts:
+                extra = " [" + ", ".join(parts) + "]"
+        line = f"{idx}) {it['recordRef']} ts={it.get('ts')} [{it.get('kind')}] {it.get('tool_name') or ''} :: {it.get('summary') or ''}{extra}".strip()
         new_est = _estimate_tokens("\n".join(lines + [line]))
         if new_est > budget_tokens and included_items:
             break
@@ -5739,10 +5763,15 @@ def cmd_graph_preflight(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     )
 
     selected_refs = _graph_preflight_selection(index_payload, take=take)
+    preferred_refs, synth_preference = _graph_preflight_prefer_synthesis_cards(
+        conn,
+        selected_refs=selected_refs,
+        scope=scope,
+    )
 
     pack_payload = _graph_pack_payload(
         conn,
-        raw_ids=selected_refs,
+        raw_ids=preferred_refs,
         budget_tokens=budget_tokens,
         max_items=max(1, take),
         allow_empty=True,
@@ -5754,8 +5783,11 @@ def cmd_graph_preflight(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         "query": {"text": query, "scope": scope},
         "selection": {
             "take": take,
-            "recordRefs": selected_refs,
-            "selectedCount": len(selected_refs),
+            "recordRefs": preferred_refs,
+            "selectedCount": len(preferred_refs),
+            "rawRecordRefs": selected_refs,
+            "preferredCardRefs": synth_preference.get("preferredCardRefs", []),
+            "coveredRawRefs": synth_preference.get("coveredRawRefs", []),
         },
         "budget": {
             "budgetTokens": budget_tokens,
@@ -6002,6 +6034,67 @@ def _graph_eval_synthesis_card(conn: sqlite3.Connection, row: sqlite3.Row) -> Di
         'selectionMode': selection_mode or None,
         'currentSelection': current_selection,
         'scope': synth.get('scope') or detail.get('scope') or None,
+    }
+
+
+def _graph_preflight_prefer_synthesis_cards(
+    conn: sqlite3.Connection,
+    *,
+    selected_refs: List[str],
+    scope: Optional[str],
+) -> Tuple[List[str], Dict[str, Any]]:
+    refs = _graph_collect_ref_tokens(selected_refs)
+    if not refs:
+        return refs, {
+            'enabled': True,
+            'preferredCardRefs': [],
+            'coveredRawRefs': [],
+        }
+
+    synth_rows = conn.execute(
+        "SELECT id, ts, kind, tool_name, summary, detail_json FROM observations WHERE tool_name = 'graph.synth-compile' ORDER BY id DESC"
+    ).fetchall()
+
+    scope_norm = _normalize_scope_token(scope)
+    candidates: List[Dict[str, Any]] = []
+    for row in synth_rows:
+        item = _graph_eval_synthesis_card(conn, row)
+        if item.get('status') != 'fresh':
+            continue
+        item_scope = _normalize_scope_token(item.get('scope'))
+        if scope_norm and item_scope and item_scope != scope_norm:
+            continue
+        source_refs = _graph_collect_ref_tokens(item.get('sourceRefs') or [])
+        covered = [ref for ref in refs if ref in set(source_refs)]
+        if len(covered) < 2:
+            continue
+        candidates.append(
+            {
+                'recordRef': item.get('recordRef'),
+                'covered': covered,
+                'coveredCount': len(covered),
+                'sourceCount': len(source_refs),
+            }
+        )
+
+    candidates.sort(key=lambda x: (-int(x.get('coveredCount') or 0), int(x.get('sourceCount') or 0), str(x.get('recordRef') or '')))
+
+    remaining = list(refs)
+    preferred_card_refs: List[str] = []
+    covered_raw_refs: List[str] = []
+    for cand in candidates:
+        covered_now = [ref for ref in remaining if ref in set(cand.get('covered') or [])]
+        if len(covered_now) < 2:
+            continue
+        preferred_card_refs.append(str(cand.get('recordRef') or ''))
+        covered_raw_refs.extend(covered_now)
+        remaining = [ref for ref in remaining if ref not in set(covered_now)]
+
+    final_refs = _graph_collect_ref_tokens(preferred_card_refs + remaining)
+    return final_refs, {
+        'enabled': True,
+        'preferredCardRefs': preferred_card_refs,
+        'coveredRawRefs': covered_raw_refs,
     }
 
 

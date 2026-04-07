@@ -100,4 +100,5 @@ Expected:
 - `graph synth compile` — compile a reusable synthesis card from explicit refs or query-preflight selection
 - `graph synth stale` — deterministic stale check (source digest + query-selection drift)
 - `graph lint` — deterministic health checks for stale cards / missing source metadata / unreferenced capture rows
+- Graph preflight preference for fresh synthesis cards when they cover multiple selected raw refs
 - Optional Markdown materialization during compile (`--write-md`)

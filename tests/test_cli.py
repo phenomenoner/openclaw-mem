@@ -604,6 +604,50 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_graph_preflight_prefers_fresh_synthesis_cards_over_raw_refs(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source one", "tool_name": "read", "detail": {}})
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source two", "tool_name": "exec", "detail": {}})
+
+        compile_args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Merged insight",
+            "--summary", "Merged insight",
+            "--why-it-matters", "Prefer the synthesis card",
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_args.func(conn, compile_args)
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "alpha",
+                "scope": None,
+                "limit": 8,
+                "window": 1,
+                "suggest_limit": 3,
+                "budget_tokens": 120,
+                "take": 12,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_preflight(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertIn("obs:3", out["selection"]["recordRefs"])
+        self.assertIn("obs:3", out["selection"]["preferredCardRefs"])
+        self.assertIn("obs:1", out["selection"]["coveredRawRefs"])
+        self.assertIn("obs:2", out["selection"]["coveredRawRefs"])
+        self.assertIn("sources=2", out["bundle_text"])
+        self.assertIn("why=Prefer the synthesis card", out["bundle_text"])
+        conn.close()
+
     def test_graph_auto_status_reports_flags_and_invalid_values(self):
         from unittest.mock import patch
 
