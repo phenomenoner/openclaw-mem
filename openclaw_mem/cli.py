@@ -6158,9 +6158,84 @@ def _graph_compile_selection(
     }
 
 
+def _graph_update_observation_detail(
+    conn: sqlite3.Connection,
+    *,
+    rowid: int,
+    detail: Dict[str, Any],
+    summary: Optional[str] = None,
+) -> None:
+    row = conn.execute(
+        "SELECT summary, summary_en, tool_name FROM observations WHERE id = ?",
+        (int(rowid),),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f'missing observation id: {rowid}')
+    summary_value = str(summary if summary is not None else (row['summary'] or ''))
+    summary_en = str(row['summary_en'] or '')
+    tool_name = str(row['tool_name'] or '')
+    detail_json = json.dumps(detail, ensure_ascii=False)
+    conn.execute(
+        "UPDATE observations SET summary = ?, detail_json = ? WHERE id = ?",
+        (summary_value, detail_json, int(rowid)),
+    )
+    conn.execute("DELETE FROM observations_fts WHERE rowid = ?", (int(rowid),))
+    conn.execute(
+        "INSERT INTO observations_fts (rowid, summary, summary_en, tool_name, detail_json) VALUES (?, ?, ?, ?, ?)",
+        (int(rowid), summary_value, summary_en, tool_name, detail_json),
+    )
+
+
+
+def _graph_refresh_compile_selection(
+    conn: sqlite3.Connection,
+    *,
+    synth: Dict[str, Any],
+    exclude_refs: Optional[List[str]] = None,
+) -> Tuple[List[str], Dict[str, Any]]:
+    selection = synth.get('selection') if isinstance(synth.get('selection'), dict) else {}
+    selection_mode = str(selection.get('mode') or '').strip()
+    if selection_mode == 'query_preflight':
+        query_meta = selection.get('query') if isinstance(selection.get('query'), dict) else {}
+        selected_refs, selection = _graph_compile_selection(
+            conn,
+            explicit_refs=[],
+            query_text=(query_meta.get('text') or None),
+            scope=(query_meta.get('scope') or None),
+            limit=max(1, int(query_meta.get('limit') or 12)),
+            window=max(0, int(query_meta.get('window') or 2)),
+            suggest_limit=max(0, int(query_meta.get('suggestLimit') or 6)),
+            take=max(1, int(query_meta.get('take') or 12)),
+            budget_tokens=max(1, int(query_meta.get('budgetTokens') or 1200)),
+        )
+        excluded = set(_graph_collect_ref_tokens(exclude_refs or []))
+        selected_refs = [ref for ref in selected_refs if ref not in excluded]
+        selection = dict(selection)
+        selection['recordRefs'] = list(selected_refs)
+        return selected_refs, selection
+    selected_refs, selection = _graph_compile_selection(
+        conn,
+        explicit_refs=_graph_collect_ref_tokens(synth.get('source_refs') or []),
+        query_text=None,
+        scope=(synth.get('scope') or None),
+        limit=12,
+        window=2,
+        suggest_limit=6,
+        take=max(1, int(synth.get('source_count') or len(_graph_collect_ref_tokens(synth.get('source_refs') or [])) or 1)),
+        budget_tokens=1200,
+    )
+    excluded = set(_graph_collect_ref_tokens(exclude_refs or []))
+    selected_refs = [ref for ref in selected_refs if ref not in excluded]
+    selection = dict(selection)
+    selection['recordRefs'] = list(selected_refs)
+    return selected_refs, selection
+
+
+
 def _graph_eval_synthesis_card(conn: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
     detail = _pack_parse_detail_json(row['detail_json'])
     synth = detail.get('graph_synthesis') if isinstance(detail.get('graph_synthesis'), dict) else {}
+    lifecycle = synth.get('lifecycle') if isinstance(synth.get('lifecycle'), dict) else {}
     record_ref = _graph_record_ref(int(row['id']))
     source_refs_raw = list(synth.get('source_refs') or [])
     source_refs = _graph_collect_ref_tokens(source_refs_raw)
@@ -6200,6 +6275,7 @@ def _graph_eval_synthesis_card(conn: sqlite3.Connection, row: sqlite3.Row) -> Di
                 budget_tokens=max(1, int(query_meta.get('budgetTokens') or 1200)),
             )
             current_selection = _graph_preflight_selection(index_payload, take=max(1, int(query_meta.get('take') or 12)))
+            current_selection = [ref for ref in current_selection if ref != record_ref]
             if current_selection != source_refs:
                 reasons.append('selection_drift')
 
@@ -6215,7 +6291,16 @@ def _graph_eval_synthesis_card(conn: sqlite3.Connection, row: sqlite3.Row) -> Di
     review_signals = _graph_review_signals_from_rows(new_selection_rows)
     contradiction_signals = [sig for sig in review_signals if sig.get('kind') == 'contradiction_keyword']
 
-    if reasons:
+    superseded_by = (
+        synth.get('superseded_by')
+        or lifecycle.get('superseded_by')
+        or lifecycle.get('supersededBy')
+    )
+    refresh_of = lifecycle.get('refresh_of') or lifecycle.get('refreshOf')
+    if superseded_by or str(synth.get('status') or '').strip().lower() == 'superseded':
+        status = 'superseded'
+        reasons = ['superseded'] + [r for r in reasons if r != 'superseded']
+    elif reasons:
         status = 'stale'
     elif review_signals:
         status = 'review'
@@ -6241,6 +6326,8 @@ def _graph_eval_synthesis_card(conn: sqlite3.Connection, row: sqlite3.Row) -> Di
         'reviewSignalCount': len(review_signals),
         'contradictionSignalCount': len(contradiction_signals),
         'scope': synth.get('scope') or detail.get('scope') or None,
+        'supersededBy': superseded_by or None,
+        'refreshOf': refresh_of or None,
     }
 
 
@@ -6469,6 +6556,160 @@ def cmd_graph_synth(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             print(f'recordRef={ref} status=missing reasons=missing_card')
         return
 
+    if synth_cmd == 'refresh':
+        refs = _graph_collect_ref_tokens(getattr(args, 'record_ref', None))
+        if len(refs) != 1:
+            _emit({'error': 'refresh requires exactly one synthesis card ref'}, True)
+            sys.exit(2)
+        ref = refs[0]
+        oid = _graph_parse_record_ref(ref)
+        row = _graph_fetch_rows_by_ids(conn, [oid]).get(oid)
+        if row is None:
+            _emit({'error': 'missing synthesis card', 'recordRef': ref}, True)
+            sys.exit(2)
+
+        detail = _pack_parse_detail_json(row['detail_json'])
+        synth = detail.get('graph_synthesis') if isinstance(detail.get('graph_synthesis'), dict) else {}
+        if not synth:
+            _emit({'error': 'record is not a synthesis card', 'recordRef': ref}, True)
+            sys.exit(2)
+
+        current_item = _graph_eval_synthesis_card(conn, row)
+        force = bool(getattr(args, 'force', False))
+        if current_item.get('status') == 'fresh' and not force:
+            payload = {
+                'kind': 'openclaw-mem.graph.synth.refresh.v0',
+                'ts': _utcnow_iso(),
+                'sourceCardRef': ref,
+                'result': {
+                    'ok': True,
+                    'refreshed': False,
+                    'reason': 'already_fresh',
+                    'recordRef': ref,
+                    'status': current_item.get('status'),
+                },
+                'staleCheck': current_item,
+            }
+            if bool(args.json):
+                _emit(payload, True)
+                return
+            print(f"recordRef={ref} refreshed=0 reason=already_fresh status=fresh")
+            return
+
+        try:
+            selected_refs, selection = _graph_refresh_compile_selection(conn, synth=synth, exclude_refs=[ref])
+        except ValueError as e:
+            _emit({'error': str(e), 'recordRef': ref}, True)
+            sys.exit(2)
+
+        source_ids = [_graph_parse_record_ref(x) for x in selected_refs]
+        source_rows = _graph_fetch_rows_by_ids(conn, source_ids)
+        missing = [x for x in selected_refs if _graph_parse_record_ref(x) not in source_rows]
+        if missing:
+            _emit({'error': 'missing source refs', 'recordRef': ref, 'missing': missing}, True)
+            sys.exit(2)
+
+        snapshots = [_graph_source_snapshot(source_rows[x]) for x in source_ids if x in source_rows]
+        source_digest = _graph_source_digest_from_snapshots(snapshots)
+        compiled_at = _utcnow_iso()
+        title = (getattr(args, 'title', None) or '').strip() or str(synth.get('title') or row['summary'] or ref)
+        summary_text = (getattr(args, 'summary_text', None) or '').strip() or str(synth.get('summary') or row['summary'] or title)
+        why_it_matters = (getattr(args, 'why_it_matters', None) or '').strip() or (synth.get('why_it_matters') or None)
+        scope = _normalize_scope_token((synth.get('scope') or detail.get('scope') or None))
+
+        new_detail = {
+            'scope': scope,
+            'graph_synthesis': {
+                'version': 'v0',
+                'title': title,
+                'summary': summary_text,
+                'why_it_matters': why_it_matters,
+                'source_refs': selected_refs,
+                'source_count': len(selected_refs),
+                'source_digest': source_digest,
+                'compiled_at': compiled_at,
+                'selection': selection,
+                'status': 'fresh',
+                'trust_tier': 'derived',
+                'lifecycle': {
+                    'refresh_of': ref,
+                    'refresh_reasons': list(current_item.get('reasons') or []),
+                    'previous_status': current_item.get('status'),
+                },
+            },
+        }
+
+        obs = {
+            'ts': compiled_at,
+            'kind': 'note',
+            'summary': summary_text,
+            'tool_name': 'graph.synth-compile',
+            'detail': new_detail,
+        }
+        rowid = _insert_observation(conn, obs)
+        new_ref = _graph_record_ref(rowid)
+
+        old_detail = dict(detail)
+        old_synth = dict(synth)
+        old_lifecycle = old_synth.get('lifecycle') if isinstance(old_synth.get('lifecycle'), dict) else {}
+        old_synth['status'] = 'superseded'
+        old_synth['superseded_by'] = new_ref
+        old_synth['superseded_at'] = compiled_at
+        old_synth['lifecycle'] = {
+            **old_lifecycle,
+            'superseded_by': new_ref,
+            'superseded_at': compiled_at,
+            'supersede_reasons': list(current_item.get('reasons') or []),
+        }
+        old_detail['graph_synthesis'] = old_synth
+        _graph_update_observation_detail(conn, rowid=oid, detail=old_detail, summary=str(row['summary'] or ''))
+
+        markdown_path = (getattr(args, 'write_md', None) or '').strip()
+        markdown_written = None
+        markdown_text = _graph_build_synth_markdown(
+            title=title,
+            summary_text=summary_text,
+            why_it_matters=why_it_matters,
+            scope=scope,
+            source_refs=selected_refs,
+            source_digest=source_digest,
+            compiled_at=compiled_at,
+            selection=selection,
+        )
+        if markdown_path:
+            md_path = Path(markdown_path)
+            md_path.parent.mkdir(parents=True, exist_ok=True)
+            md_path.write_text(markdown_text, encoding='utf-8')
+            markdown_written = str(md_path)
+
+        payload = {
+            'kind': 'openclaw-mem.graph.synth.refresh.v0',
+            'ts': compiled_at,
+            'sourceCardRef': ref,
+            'selection': selection,
+            'result': {
+                'ok': True,
+                'refreshed': True,
+                'recordRef': new_ref,
+                'title': title,
+                'summary': summary_text,
+                'whyItMatters': why_it_matters,
+                'sourceRefs': selected_refs,
+                'sourceCount': len(selected_refs),
+                'sourceDigest': source_digest,
+                'markdownPath': markdown_written,
+                'refreshOf': ref,
+                'supersededCardRef': ref,
+            },
+            'staleCheck': current_item,
+            'bundle_text': markdown_text,
+        }
+        if bool(args.json):
+            _emit(payload, True)
+            return
+        print(markdown_text, end='')
+        return
+
     _emit({'error': f'unknown graph synth command: {synth_cmd}'}, True)
     sys.exit(2)
 
@@ -6489,6 +6730,7 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     contradiction_items: List[Dict[str, Any]] = []
     missing_source_ref_items: List[Dict[str, Any]] = []
     missing_digest_items: List[Dict[str, Any]] = []
+    superseded_items: List[Dict[str, Any]] = []
 
     for row in synth_rows:
         item = _graph_eval_synthesis_card(conn, row)
@@ -6497,6 +6739,8 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             referenced_sources.add(str(ref))
         if item.get('status') == 'stale':
             stale_items.append(item)
+        if item.get('status') == 'superseded':
+            superseded_items.append(item)
         if item.get('reviewSignalCount'):
             review_items.append(item)
         if int(item.get('contradictionSignalCount') or 0) > 0:
@@ -6526,6 +6770,7 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         'counts': {
             'synthesisCards': len(synth_items),
             'staleCards': len(stale_items),
+            'supersededCards': len(superseded_items),
             'reviewCards': len(review_items),
             'contradictionSignalCards': len(contradiction_items),
             'cardsMissingSourceRefs': len(missing_source_ref_items),
@@ -6535,6 +6780,7 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         },
         'samples': {
             'staleCards': stale_items[:10],
+            'supersededCards': superseded_items[:10],
             'reviewCards': review_items[:10],
             'contradictionSignalCards': contradiction_items[:10],
             'cardsMissingSourceRefs': missing_source_ref_items[:10],
@@ -6553,6 +6799,7 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             [
                 f"synthesis_cards={int(counts.get('synthesisCards') or 0)}",
                 f"stale_cards={int(counts.get('staleCards') or 0)}",
+                f"superseded_cards={int(counts.get('supersededCards') or 0)}",
                 f"review_cards={int(counts.get('reviewCards') or 0)}",
                 f"contradiction_signal_cards={int(counts.get('contradictionSignalCards') or 0)}",
                 f"missing_source_refs={int(counts.get('cardsMissingSourceRefs') or 0)}",
@@ -9454,6 +9701,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = ssub.add_parser("stale", help="Check whether synthesis cards are stale")
     s.add_argument("record_ref", nargs='+', help="Synthesis card refs (e.g. obs:123)")
+    s.set_defaults(func=cmd_graph_synth)
+
+    s = ssub.add_parser("refresh", help="Refresh a synthesis card and supersede the old card when needed")
+    s.add_argument("record_ref", nargs='+', help="Single synthesis card ref (e.g. obs:123)")
+    s.add_argument("--title", help="Optional replacement synthesis title")
+    s.add_argument("--summary", dest="summary_text", help="Optional replacement synthesis summary text")
+    s.add_argument("--why-it-matters", dest="why_it_matters", help="Optional replacement why-it-matters note")
+    s.add_argument("--write-md", dest="write_md", help="Optional Markdown materialization path")
+    s.add_argument("--force", action="store_true", help="Force a refresh even if the card currently evaluates as fresh")
     s.set_defaults(func=cmd_graph_synth)
 
     g = gsub.add_parser("lint", help="Run deterministic health checks for synthesis-card coverage / staleness")

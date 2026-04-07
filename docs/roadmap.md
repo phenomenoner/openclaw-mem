@@ -139,7 +139,8 @@ Plan (v0):
 5) Shipped in the graph-pack lane: when explicit refs are covered by a fresh synthesis card, prefer the card and surface the preference receipt.
 6) Shipped in main `pack --use-graph`: record graph-consumption receipts and elide raw L1 lines already covered by preferred synthesis cards in the combined graph-aware bundle.
 7) Shipped in `cmd_hybrid`: prefer fresh synthesis cards in top results when they cover multiple high-ranked raw hits, with explicit graph-consumption receipts.
-8) Later, extend that preference more broadly in other pack/retrieval lanes where it remains truthful.
+8) Shipped in `graph synth refresh`: replay the old card selection, emit a fresh replacement card, and mark the old card as superseded with lifecycle receipts.
+9) Later, extend that preference more broadly in other pack/retrieval lanes where it remains truthful.
 
 Acceptance criteria:
 - A user can compile a reusable synthesis card from bounded refs with provenance.

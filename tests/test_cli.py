@@ -4455,6 +4455,80 @@ class TestGraphSynthesisCli(unittest.TestCase):
         self.assertIn("selection_drift", out["items"][0]["reasons"])
         conn.close()
 
+    def test_graph_synth_refresh_supersedes_stale_card(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis",
+        ])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+        card_ref = json.loads(buf.getvalue())["cardRef"]
+
+        _insert_observation(conn, {"kind": "note", "summary": "alpha newer source", "tool_name": "memory_store", "detail": {}})
+
+        refresh_args = build_parser().parse_args(["graph", "--json", "synth", "refresh", card_ref])
+        refresh_buf = io.StringIO()
+        with redirect_stdout(refresh_buf):
+            refresh_args.func(conn, refresh_args)
+
+        out = json.loads(refresh_buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.refresh.v0")
+        self.assertTrue(out["result"]["refreshed"])
+        self.assertEqual(out["result"]["supersededCardRef"], card_ref)
+        self.assertNotEqual(out["result"]["recordRef"], card_ref)
+        self.assertIn("obs:3", out["result"]["sourceRefs"])
+
+        old_id = int(card_ref.split(":", 1)[1])
+        old_row = conn.execute("SELECT detail_json FROM observations WHERE id = ?", (old_id,)).fetchone()
+        old_detail = json.loads(old_row["detail_json"] or "{}")
+        old_synth = old_detail["graph_synthesis"]
+        self.assertEqual(old_synth["status"], "superseded")
+        self.assertEqual(old_synth["superseded_by"], out["result"]["recordRef"])
+
+        stale_args = build_parser().parse_args(["graph", "--json", "synth", "stale", card_ref])
+        stale_buf = io.StringIO()
+        with redirect_stdout(stale_buf):
+            stale_args.func(conn, stale_args)
+        stale_out = json.loads(stale_buf.getvalue())
+        self.assertEqual(stale_out["items"][0]["status"], "superseded")
+        self.assertEqual(stale_out["items"][0]["supersededBy"], out["result"]["recordRef"])
+        conn.close()
+
+    def test_graph_synth_refresh_fresh_card_is_noop_without_force(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+
+        args = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis",
+        ])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+        card_ref = json.loads(buf.getvalue())["cardRef"]
+
+        refresh_args = build_parser().parse_args(["graph", "--json", "synth", "refresh", card_ref])
+        refresh_buf = io.StringIO()
+        with redirect_stdout(refresh_buf):
+            refresh_args.func(conn, refresh_args)
+
+        out = json.loads(refresh_buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.refresh.v0")
+        self.assertFalse(out["result"]["refreshed"])
+        self.assertEqual(out["result"]["reason"], "already_fresh")
+
+        count = conn.execute("SELECT COUNT(*) AS n FROM observations WHERE tool_name = 'graph.synth-compile'").fetchone()["n"]
+        self.assertEqual(count, 1)
+        conn.close()
+
     def test_graph_synth_stale_surfaces_review_and_contradiction_signals(self):
         conn = _connect(":memory:")
         _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
