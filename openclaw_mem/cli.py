@@ -6714,6 +6714,76 @@ def cmd_graph_synth(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     sys.exit(2)
 
 
+def _graph_candidate_card_suggestions(
+    conn: sqlite3.Connection,
+    *,
+    synth_items: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    active_covered_refs: set[str] = set()
+    for item in synth_items:
+        if str(item.get('status') or '') == 'superseded':
+            continue
+        for ref in list(item.get('sourceRefs') or []):
+            active_covered_refs.add(str(ref))
+
+    raw_rows = conn.execute(
+        "SELECT id, ts, kind, tool_name, summary, detail_json FROM observations WHERE tool_name != 'graph.synth-compile' ORDER BY id"
+    ).fetchall()
+
+    scoped_row_count = 0
+    uncovered_scoped_count = 0
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for row in raw_rows:
+        ref = _graph_record_ref(int(row['id']))
+        detail = _pack_parse_detail_json(row['detail_json'])
+        scope = _normalize_scope_token(detail.get('scope'))
+        if not scope:
+            continue
+        scoped_row_count += 1
+        if ref in active_covered_refs:
+            continue
+        uncovered_scoped_count += 1
+        groups.setdefault(scope, []).append(
+            {
+                'recordRef': ref,
+                'ts': row['ts'],
+                'tool_name': row['tool_name'],
+                'summary': (row['summary'] or '').replace('\n', ' ').strip(),
+            }
+        )
+
+    suggestions: List[Dict[str, Any]] = []
+    for scope, items in groups.items():
+        if len(items) < 2:
+            continue
+        tool_names = sorted({str(it.get('tool_name') or '') for it in items if str(it.get('tool_name') or '')})
+        suggestions.append(
+            {
+                'scope': scope,
+                'reason': 'uncovered_scope_cluster',
+                'uncoveredSourceCount': len(items),
+                'recordRefs': [str(it.get('recordRef') or '') for it in items[:8]],
+                'toolNames': tool_names[:8],
+                'sampleSummaries': [str(it.get('summary') or '') for it in items[:3]],
+            }
+        )
+
+    suggestions.sort(
+        key=lambda x: (
+            -int(x.get('uncoveredSourceCount') or 0),
+            -len(x.get('toolNames') or []),
+            str(x.get('scope') or ''),
+        )
+    )
+    return {
+        'activeCoveredSourceRefs': len(active_covered_refs),
+        'scopedSourceRows': scoped_row_count,
+        'uncoveredScopedSourceRows': uncovered_scoped_count,
+        'candidateCardSuggestions': suggestions,
+    }
+
+
+
 def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _ = args
     synth_rows = conn.execute(
@@ -6764,6 +6834,9 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             }
         )
 
+    coverage_pressure = _graph_candidate_card_suggestions(conn, synth_items=synth_items)
+    candidate_suggestions = list(coverage_pressure.get('candidateCardSuggestions') or [])
+
     payload = {
         'kind': 'openclaw-mem.graph.lint.v0',
         'ts': _utcnow_iso(),
@@ -6777,6 +6850,10 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             'cardsMissingSourceDigest': len(missing_digest_items),
             'captureRows': len(capture_rows),
             'unreferencedCaptureRows': len(unreferenced_capture),
+            'activeCoveredSourceRefs': int(coverage_pressure.get('activeCoveredSourceRefs') or 0),
+            'scopedSourceRows': int(coverage_pressure.get('scopedSourceRows') or 0),
+            'uncoveredScopedSourceRows': int(coverage_pressure.get('uncoveredScopedSourceRows') or 0),
+            'candidateCardSuggestions': len(candidate_suggestions),
         },
         'samples': {
             'staleCards': stale_items[:10],
@@ -6786,6 +6863,7 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             'cardsMissingSourceRefs': missing_source_ref_items[:10],
             'cardsMissingSourceDigest': missing_digest_items[:10],
             'unreferencedCaptureRows': unreferenced_capture[:10],
+            'candidateCardSuggestions': candidate_suggestions[:10],
         },
     }
 
@@ -6805,6 +6883,7 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 f"missing_source_refs={int(counts.get('cardsMissingSourceRefs') or 0)}",
                 f"missing_source_digest={int(counts.get('cardsMissingSourceDigest') or 0)}",
                 f"unreferenced_capture_rows={int(counts.get('unreferencedCaptureRows') or 0)}",
+                f"candidate_card_suggestions={int(counts.get('candidateCardSuggestions') or 0)}",
             ]
         )
     )

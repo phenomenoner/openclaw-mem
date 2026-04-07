@@ -4589,6 +4589,29 @@ class TestGraphSynthesisCli(unittest.TestCase):
         self.assertTrue(any(item["recordRef"] == "obs:3" for item in out["samples"]["unreferencedCaptureRows"]))
         conn.close()
 
+    def test_graph_lint_suggests_candidate_cards_for_uncovered_scope_clusters(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source one", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source two", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source three", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        _insert_observation(conn, {"kind": "note", "summary": "beta singleton", "tool_name": "memory_store", "detail": {"scope": "proj.beta"}})
+
+        lint_args = build_parser().parse_args(["graph", "--json", "lint"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            lint_args.func(conn, lint_args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["counts"]["candidateCardSuggestions"], 1)
+        self.assertEqual(out["counts"]["scopedSourceRows"], 4)
+        self.assertEqual(out["counts"]["uncoveredScopedSourceRows"], 4)
+        suggestion = out["samples"]["candidateCardSuggestions"][0]
+        self.assertEqual(suggestion["scope"], "proj.alpha")
+        self.assertEqual(suggestion["reason"], "uncovered_scope_cluster")
+        self.assertEqual(suggestion["uncoveredSourceCount"], 3)
+        self.assertEqual(suggestion["recordRefs"], ["obs:1", "obs:2", "obs:3"])
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()
