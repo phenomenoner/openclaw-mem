@@ -91,6 +91,7 @@ Expected:
 - Recommendation-only optimization observers (`optimize review`, `optimize consolidation-review`) — shipped in the current release scope; now include recent-use-aware decay protection while still proposing only and never mutating stored memories
 - Dual-language fields (`--text-en`, EN embedding table) — shipped, still evolving
 - Episodic event capture/ingest/query lane — shipped foundation; operator flows still evolving
+- Episodic verbatim semantic lane (`episodes embed`, `episodes search --mode hybrid|vector`) — shipped first production slice; still operator-driven and read-only
 
 ### OpenClaw integration — **PARTIAL**
 

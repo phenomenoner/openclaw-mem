@@ -1132,6 +1132,24 @@ def _init_db(conn: sqlite3.Connection) -> None:
             conn.execute("INSERT INTO episodic_events_fts(episodic_events_fts) VALUES('rebuild')")
 
     conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS episodic_event_embeddings (
+            event_row_id INTEGER PRIMARY KEY,
+            model TEXT NOT NULL,
+            dim INTEGER NOT NULL,
+            vector BLOB NOT NULL,
+            norm REAL NOT NULL,
+            search_text_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(event_row_id) REFERENCES episodic_events(id) ON DELETE CASCADE
+        );
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_episodic_event_embeddings_model ON episodic_event_embeddings(model);"
+    )
+
+    conn.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {_PACK_LIFECYCLE_SHADOW_TABLE} (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -10671,6 +10689,109 @@ def _episodes_search_match_rows(
     return []
 
 
+def _episodic_search_text_hash(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+
+def _episodes_vector_rankings(
+    conn: sqlite3.Connection,
+    *,
+    scope: str,
+    query: str,
+    query_en: Optional[str],
+    model: str,
+    candidate_limit: int,
+    base_url: Optional[str],
+) -> Dict[str, Any]:
+    rows = conn.execute(
+        """
+        SELECT emb.event_row_id, emb.vector, emb.norm
+        FROM episodic_event_embeddings emb
+        JOIN episodic_events e ON e.id = emb.event_row_id
+        WHERE emb.model = ? AND e.scope = ?
+        ORDER BY emb.event_row_id ASC
+        """,
+        (model, scope),
+    ).fetchall()
+    if not rows:
+        return {
+            "vector_status": "missing_embeddings",
+            "vec_ids": [],
+            "vec_scores": {},
+            "vec_en_ids": [],
+            "vec_en_scores": {},
+        }
+
+    api_key = _get_api_key()
+    if not api_key:
+        return {
+            "vector_status": "missing_api_key",
+            "vec_ids": [],
+            "vec_scores": {},
+            "vec_en_ids": [],
+            "vec_en_scores": {},
+        }
+
+    try:
+        client = OpenAIEmbeddingsClient(api_key=api_key, base_url=base_url or defaults.openai_base_url())
+        embed_inputs = [query] + ([query_en] if query_en else [])
+        embed_vecs = client.embed(embed_inputs, model=model)
+        query_vec = embed_vecs[0]
+        query_en_vec = embed_vecs[1] if query_en and len(embed_vecs) > 1 else None
+    except Exception as e:
+        return {
+            "vector_status": str(e),
+            "vec_ids": [],
+            "vec_scores": {},
+            "vec_en_ids": [],
+            "vec_en_scores": {},
+        }
+
+    vec_ranked = rank_cosine(
+        query_vec=query_vec,
+        items=((int(r[0]), r[1], float(r[2])) for r in rows),
+        limit=max(1, int(candidate_limit)),
+    )
+    vec_ids = [rid for rid, _ in vec_ranked]
+    vec_scores = {int(rid): float(score) for rid, score in vec_ranked}
+
+    vec_en_ranked: List[Tuple[int, float]] = []
+    if query_en_vec is not None:
+        vec_en_ranked = rank_cosine(
+            query_vec=query_en_vec,
+            items=((int(r[0]), r[1], float(r[2])) for r in rows),
+            limit=max(1, int(candidate_limit)),
+        )
+    vec_en_ids = [rid for rid, _ in vec_en_ranked]
+    vec_en_scores = {int(rid): float(score) for rid, score in vec_en_ranked}
+
+    return {
+        "vector_status": "ok",
+        "vec_ids": vec_ids,
+        "vec_scores": vec_scores,
+        "vec_en_ids": vec_en_ids,
+        "vec_en_scores": vec_en_scores,
+    }
+
+
+
+def _episodes_fetch_rows_by_ids(
+    conn: sqlite3.Connection,
+    *,
+    ids: List[int],
+) -> Dict[int, Dict[str, Any]]:
+    if not ids:
+        return {}
+    q = (
+        "SELECT id, event_id, ts_ms, scope, session_id, agent_id, type, summary, payload_json, refs_json, redacted, schema_version, created_at "
+        f"FROM episodic_events WHERE id IN ({','.join(['?'] * len(ids))})"
+    )
+    rows = conn.execute(q, ids).fetchall()
+    return {int(r["id"]): dict(r) for r in rows}
+
+
+
 def _episodes_search_payload(
     conn: sqlite3.Connection,
     *,
@@ -10680,16 +10801,91 @@ def _episodes_search_payload(
     per_session_limit: int,
     search_limit: int,
     include_payload: bool,
+    mode: str = "lexical",
+    query_en: Optional[str] = None,
+    trace: bool = False,
+    model: Optional[str] = None,
+    k: int = 60,
+    base_url: Optional[str] = None,
 ) -> Dict[str, Any]:
-    rows = _episodes_search_match_rows(
-        conn,
-        scope=scope,
-        query=query,
-        search_limit=search_limit,
-    )
+    retrieval_mode = str(mode or "lexical").strip().lower() or "lexical"
+    if retrieval_mode not in {"lexical", "hybrid", "vector"}:
+        raise ValueError("mode must be one of: lexical, hybrid, vector")
+
+    model_name = str(model or defaults.embed_model())
+    fts_rows: List[sqlite3.Row] = []
+    if retrieval_mode in {"lexical", "hybrid"}:
+        fts_rows = _episodes_search_match_rows(
+            conn,
+            scope=scope,
+            query=query,
+            search_limit=search_limit,
+        )
+    fts_ids = [int(r["id"]) for r in fts_rows]
+    fts_score_map = {
+        int(r["id"]): float(r["score"])
+        for r in fts_rows
+        if r["score"] is not None
+    }
+    snippet_map = {
+        int(r["id"]): re.sub(r"\s+", " ", str(r["snippet"] or "")).strip()
+        for r in fts_rows
+    }
+
+    vec_state = {
+        "vector_status": None,
+        "vec_ids": [],
+        "vec_scores": {},
+        "vec_en_ids": [],
+        "vec_en_scores": {},
+    }
+    if retrieval_mode in {"hybrid", "vector"}:
+        vec_state = _episodes_vector_rankings(
+            conn,
+            scope=scope,
+            query=query,
+            query_en=query_en,
+            model=model_name,
+            candidate_limit=search_limit,
+            base_url=base_url,
+        )
+
+    vec_ids = list(vec_state.get("vec_ids") or [])
+    vec_scores = dict(vec_state.get("vec_scores") or {})
+    vec_en_ids = list(vec_state.get("vec_en_ids") or [])
+    vec_en_scores = dict(vec_state.get("vec_en_scores") or {})
+    vector_status = vec_state.get("vector_status")
+
+    ranked_lists: List[List[int]] = []
+    if retrieval_mode in {"lexical", "hybrid"} and fts_ids:
+        ranked_lists.append(fts_ids)
+    if retrieval_mode in {"hybrid", "vector"} and vec_ids:
+        ranked_lists.append(vec_ids)
+    if retrieval_mode in {"hybrid", "vector"} and vec_en_ids:
+        ranked_lists.append(vec_en_ids)
+
+    if retrieval_mode == "vector" and not ranked_lists:
+        ordered = []
+    elif retrieval_mode == "hybrid" and not ranked_lists:
+        ordered = [(rid, 1.0 / (k + idx + 1)) for idx, rid in enumerate(fts_ids)]
+    elif retrieval_mode == "lexical":
+        ordered = [(rid, 1.0 / (k + idx + 1)) for idx, rid in enumerate(fts_ids)]
+    else:
+        ordered = rank_rrf(ranked_lists, k=max(1, int(k)), limit=max(1, int(search_limit)))
+
+    ordered_ids = [int(rid) for rid, _ in ordered]
+    rrf_scores = {int(rid): float(score) for rid, score in ordered}
+    row_map = _episodes_fetch_rows_by_ids(conn, ids=ordered_ids)
+
+    fts_id_set = set(fts_ids)
+    vec_id_set = set(vec_ids)
+    vec_en_id_set = set(vec_en_ids)
 
     grouped: Dict[str, Dict[str, Any]] = {}
-    for row in rows:
+    for rank_index, rid in enumerate(ordered_ids, 1):
+        row = row_map.get(rid)
+        if row is None:
+            continue
         sid = str(row["session_id"] or "")
         entry = grouped.setdefault(
             sid,
@@ -10697,6 +10893,8 @@ def _episodes_search_payload(
                 "session_id": sid,
                 "hit_count": 0,
                 "best_match_score": None,
+                "best_match_rank": None,
+                "best_rrf_score": None,
                 "latest_ts_ms": int(row["ts_ms"] or 0),
                 "agent_ids": set(),
                 "type_counts": {},
@@ -10704,33 +10902,56 @@ def _episodes_search_payload(
             },
         )
         entry["hit_count"] += 1
-        score = float(row["score"]) if row["score"] is not None else None
-        if score is not None and (entry["best_match_score"] is None or score < entry["best_match_score"]):
-            entry["best_match_score"] = score
         entry["latest_ts_ms"] = max(int(entry["latest_ts_ms"]), int(row["ts_ms"] or 0))
         entry["agent_ids"].add(str(row["agent_id"] or ""))
         event_type = str(row["type"] or "unknown")
         entry["type_counts"][event_type] = int(entry["type_counts"].get(event_type, 0)) + 1
+        if entry["best_match_rank"] is None or rank_index < entry["best_match_rank"]:
+            entry["best_match_rank"] = rank_index
+        rrf_score = float(rrf_scores.get(rid, 0.0))
+        if entry["best_rrf_score"] is None or rrf_score > entry["best_rrf_score"]:
+            entry["best_rrf_score"] = rrf_score
+        if retrieval_mode == "lexical":
+            fts_score = fts_score_map.get(rid)
+            if fts_score is not None and (
+                entry["best_match_score"] is None or fts_score < entry["best_match_score"]
+            ):
+                entry["best_match_score"] = fts_score
+
         item = _episodes_row_to_item(row, include_payload=include_payload)
-        snippet = re.sub(r"\s+", " ", str(row["snippet"] or "")).strip()
+        lanes: List[str] = []
+        if rid in fts_id_set:
+            lanes.append("fts")
+        if rid in vec_id_set:
+            lanes.append("vector")
+        if rid in vec_en_id_set:
+            lanes.append("vector_query_en")
         item["match"] = {
-            "score": score,
-            "snippet": snippet or item.get("summary"),
+            "lanes": lanes,
+            "rank": rank_index,
+            "rrf_score": rrf_score,
+            "snippet": snippet_map.get(rid) or item.get("summary"),
         }
+        if rid in fts_score_map:
+            item["match"]["fts_score"] = float(fts_score_map[rid])
+        if rid in vec_scores:
+            item["match"]["vector_score"] = float(vec_scores[rid])
+        if rid in vec_en_scores:
+            item["match"]["vector_query_en_score"] = float(vec_en_scores[rid])
         entry["matched_items"].append(item)
 
-    ranked = sorted(
+    ranked_sessions = sorted(
         grouped.values(),
         key=lambda item: (
             -int(item["hit_count"]),
-            float(item["best_match_score"]) if item["best_match_score"] is not None else float("inf"),
+            int(item["best_match_rank"]) if item["best_match_rank"] is not None else 10**9,
             -int(item["latest_ts_ms"]),
             str(item["session_id"]),
         ),
     )[: max(1, int(limit))]
 
     sessions: List[Dict[str, Any]] = []
-    for rank, entry in enumerate(ranked, 1):
+    for rank, entry in enumerate(ranked_sessions, 1):
         matched_items = list(entry["matched_items"])[: max(1, int(per_session_limit))]
         summary_parts: List[str] = []
         seen_summary: set[str] = set()
@@ -10745,7 +10966,9 @@ def _episodes_search_payload(
                 "rank": rank,
                 "session_id": entry["session_id"],
                 "hit_count": int(entry["hit_count"]),
+                "best_match_rank": entry["best_match_rank"],
                 "best_match_score": entry["best_match_score"],
+                "best_rrf_score": entry["best_rrf_score"],
                 "latest_ts_ms": int(entry["latest_ts_ms"]),
                 "agent_ids": sorted(x for x in entry["agent_ids"] if x),
                 "type_counts": [
@@ -10762,22 +10985,79 @@ def _episodes_search_payload(
             }
         )
 
-    return {
+    payload: Dict[str, Any] = {
         "kind": "openclaw-mem.episodes.search.v0",
         "ts": _utcnow_iso(),
         "version": {"openclaw_mem": __version__, "schema": "v0"},
         "ok": True,
         "scope": scope,
-        "query": {"text": query},
+        "query": {"text": query, "text_en": query_en or None},
         "result": {
             "count": len(sessions),
             "session_limit": int(limit),
             "per_session_limit": int(per_session_limit),
             "search_limit": int(search_limit),
             "include_payload": bool(include_payload),
+            "mode": retrieval_mode,
             "sessions": sessions,
         },
     }
+
+    if vector_status and retrieval_mode in {"hybrid", "vector"}:
+        payload["vector_status"] = vector_status
+
+    if trace:
+        payload["trace"] = {
+            "mode": retrieval_mode,
+            "model": model_name,
+            "query": {"text": query, "text_en": query_en or None},
+            "fts_top_k": [
+                {
+                    "id": int(r["id"]),
+                    "event_id": str(r["event_id"] or ""),
+                    "session_id": str(r["session_id"] or ""),
+                    "score": float(r["score"] or 0.0),
+                    "snippet": snippet_map.get(int(r["id"])) or "",
+                }
+                for r in fts_rows[: max(1, int(search_limit))]
+            ],
+            "vec_top_k": [
+                {
+                    "id": int(rid),
+                    "score": float(vec_scores.get(int(rid), 0.0)),
+                    "session_id": str((row_map.get(int(rid)) or {}).get("session_id") or ""),
+                }
+                for rid in vec_ids[: max(1, int(search_limit))]
+            ],
+            "vec_query_en_top_k": [
+                {
+                    "id": int(rid),
+                    "score": float(vec_en_scores.get(int(rid), 0.0)),
+                    "session_id": str((row_map.get(int(rid)) or {}).get("session_id") or ""),
+                }
+                for rid in vec_en_ids[: max(1, int(search_limit))]
+            ],
+            "fused_ranking": [
+                {
+                    "id": int(rid),
+                    "event_id": str((row_map.get(int(rid)) or {}).get("event_id") or ""),
+                    "session_id": str((row_map.get(int(rid)) or {}).get("session_id") or ""),
+                    "rrf_score": float(rrf_scores.get(int(rid), 0.0)),
+                    "lanes": [
+                        lane
+                        for lane, present in [
+                            ("fts", int(rid) in fts_id_set),
+                            ("vector", int(rid) in vec_id_set),
+                            ("vector_query_en", int(rid) in vec_en_id_set),
+                        ]
+                        if present
+                    ],
+                }
+                for rid in ordered_ids[: max(1, int(search_limit))]
+            ],
+        }
+
+    return payload
 
 
 def _episodes_query_rows(
@@ -10877,6 +11157,111 @@ def cmd_episodes_query(conn: sqlite3.Connection, args: argparse.Namespace) -> No
     _emit(out, args.json)
 
 
+def cmd_episodes_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    api_key = _get_api_key()
+    if not api_key:
+        _emit({"kind": "openclaw-mem.episodes.embed.v0", "ok": False, "error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json"}, True)
+        sys.exit(1)
+
+    model = str(getattr(args, "model", defaults.embed_model()) or defaults.embed_model())
+    limit = max(1, int(getattr(args, "limit", 200) or 200))
+    batch = max(1, int(getattr(args, "batch", 32) or 32))
+    base_url = getattr(args, "base_url", defaults.openai_base_url())
+    raw_scope = str(getattr(args, "scope", "") or "").strip()
+    explicit_global = bool(getattr(args, "global_scope", False))
+
+    if explicit_global and raw_scope:
+        _emit({"kind": "openclaw-mem.episodes.embed.v0", "ok": False, "error": "--global cannot be combined with --scope"}, True)
+        sys.exit(2)
+
+    filters = []
+    params: List[Any] = []
+    if explicit_global:
+        filters.append("e.scope = ?")
+        params.append("global")
+    elif raw_scope:
+        filters.append("e.scope = ?")
+        params.append(_normalize_episodic_scope(raw_scope))
+
+    where_sql = f"WHERE {' AND '.join(filters)}" if filters else ""
+    rows = conn.execute(
+        f"""
+        SELECT e.id, e.scope, e.search_text, emb.search_text_hash
+        FROM episodic_events e
+        LEFT JOIN episodic_event_embeddings emb
+          ON emb.event_row_id = e.id AND emb.model = ?
+        {where_sql}
+        ORDER BY e.id ASC
+        """,
+        [model, *params],
+    ).fetchall()
+
+    todo: List[Dict[str, Any]] = []
+    for row in rows:
+        text_value = str(row["search_text"] or "").strip()
+        if not text_value:
+            continue
+        text_hash = _episodic_search_text_hash(text_value)
+        if str(row["search_text_hash"] or "") == text_hash:
+            continue
+        todo.append(
+            {
+                "id": int(row["id"]),
+                "scope": str(row["scope"] or ""),
+                "text": text_value,
+                "search_text_hash": text_hash,
+            }
+        )
+        if len(todo) >= limit:
+            break
+
+    client = OpenAIEmbeddingsClient(api_key=api_key, base_url=base_url)
+    now = _utcnow_iso()
+    embedded_ids: List[int] = []
+    per_scope: Dict[str, int] = {}
+
+    for i in range(0, len(todo), batch):
+        chunk = todo[i : i + batch]
+        vecs = client.embed([str(it["text"]) for it in chunk], model=model)
+        for item, vec in zip(chunk, vecs):
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO episodic_event_embeddings
+                (event_row_id, model, dim, vector, norm, search_text_hash, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(item["id"]),
+                    model,
+                    len(vec),
+                    pack_f32(vec),
+                    l2_norm(vec),
+                    str(item["search_text_hash"]),
+                    now,
+                ),
+            )
+            embedded_ids.append(int(item["id"]))
+            scope_key = str(item["scope"] or "")
+            per_scope[scope_key] = int(per_scope.get(scope_key, 0)) + 1
+        conn.commit()
+
+    payload = {
+        "kind": "openclaw-mem.episodes.embed.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "model": model,
+        "scope_filter": "global" if explicit_global else (raw_scope or None),
+        "limit": limit,
+        "batch": batch,
+        "embedded": len(embedded_ids),
+        "ids": embedded_ids[:50],
+        "per_scope": [{"scope": k, "count": int(v)} for k, v in sorted(per_scope.items())],
+    }
+    _emit(payload, bool(args.json))
+
+
+
 def cmd_episodes_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
         scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
@@ -10887,6 +11272,13 @@ def cmd_episodes_search(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         per_session_limit = max(1, min(20, int(getattr(args, "per_session_limit", 3) or 3)))
         search_limit = max(1, min(500, int(getattr(args, "search_limit", 40) or 40)))
         include_payload = bool(getattr(args, "include_payload", False))
+        mode = str(getattr(args, "mode", "lexical") or "lexical").strip().lower()
+        if mode not in {"lexical", "hybrid", "vector"}:
+            raise ValueError("mode must be one of: lexical, hybrid, vector")
+        query_en = str(getattr(args, "query_en", "") or "").strip() or None
+        trace = bool(getattr(args, "trace", False))
+        model = str(getattr(args, "model", defaults.embed_model()) or defaults.embed_model())
+        rrf_k = max(1, int(getattr(args, "k", 60) or 60))
     except ValueError as e:
         _emit(
             {
@@ -10906,6 +11298,12 @@ def cmd_episodes_search(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         per_session_limit=per_session_limit,
         search_limit=search_limit,
         include_payload=include_payload,
+        mode=mode,
+        query_en=query_en,
+        trace=trace,
+        model=model,
+        k=rrf_k,
+        base_url=getattr(args, "base_url", defaults.openai_base_url()),
     )
     _emit(payload, args.json)
 
@@ -12074,6 +12472,8 @@ def build_parser() -> argparse.ArgumentParser:
         "  openclaw-mem episodes extract-sessions --sessions-root ~/.openclaw/sessions --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-extract-state.json --json\n"
         "  openclaw-mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --json\n"
         "  openclaw-mem episodes ingest --file ~/.openclaw/memory/openclaw-mem-episodes.jsonl --state ~/.openclaw/memory/openclaw-mem/episodes-ingest-state.json --follow --poll-interval-ms 1000 --json\n"
+        "  openclaw-mem episodes embed --scope openclaw-mem --limit 200 --json\n"
+        "  openclaw-mem episodes search \"semantic recall\" --scope openclaw-mem --mode hybrid --trace --json\n"
         "  openclaw-mem episodes query --scope openclaw-mem --session-id s1 --limit 50 --json\n"
         "\n"
         "  # AI compression (requires API key via env or ~/.openclaw/openclaw.json)\n"
@@ -12785,6 +13185,16 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--include-payload", action="store_true", help="Include payload object in output")
     e.set_defaults(func=cmd_episodes_query)
 
+    e = esub.add_parser("embed", help="Build/search-refresh episodic verbatim embeddings from redacted search_text")
+    add_common(e)
+    e.add_argument("--scope", help="Optional scope token filter")
+    e.add_argument("--global", dest="global_scope", action="store_true", help="Explicitly embed only global scope")
+    e.add_argument("--limit", type=int, default=200, help="Max rows to embed per run (default: 200)")
+    e.add_argument("--batch", type=int, default=32, help="Embedding batch size (default: 32)")
+    e.add_argument("--model", default=defaults.embed_model(), help=f"Embedding model (default: {defaults.embed_model()})")
+    e.add_argument("--base-url", default=defaults.openai_base_url(), help=f"Embeddings API base URL (default: {defaults.openai_base_url()})")
+    e.set_defaults(func=cmd_episodes_embed)
+
     e = esub.add_parser("search", help="Search episodic transcript/event history and group matches by session")
     add_common(e)
     e.add_argument("query", help="Search query")
@@ -12794,6 +13204,12 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--per-session-limit", type=int, default=3, help="Max matched items to keep per session (default: 3, max: 20)")
     e.add_argument("--search-limit", type=int, default=40, help="Max raw event hits to consider before grouping (default: 40, max: 500)")
     e.add_argument("--include-payload", action="store_true", help="Include payload object in matched items")
+    e.add_argument("--mode", choices=["lexical", "hybrid", "vector"], default="lexical", help="Retrieval mode (default: lexical)")
+    e.add_argument("--query-en", help="Optional English assist query for multilingual embedding lookup")
+    e.add_argument("--trace", action="store_true", help="Include retrieval-lane trace (fts/vector/fused)")
+    e.add_argument("--model", default=defaults.embed_model(), help=f"Embedding model for hybrid/vector modes (default: {defaults.embed_model()})")
+    e.add_argument("--base-url", default=defaults.openai_base_url(), help=f"Embeddings API base URL (default: {defaults.openai_base_url()})")
+    e.add_argument("-k", type=int, default=60, help="RRF k constant for hybrid/vector fusion (default: 60)")
     e.set_defaults(func=cmd_episodes_search)
 
     e = esub.add_parser("replay", help="Replay one session timeline")

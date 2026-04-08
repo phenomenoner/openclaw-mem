@@ -60,8 +60,7 @@ Never store:
 
 ## Graphic Memory compiled synthesis note
 - Fresh synthesis cards are **derived graph artifacts**, not L1 durable-memory facts by default.
-- Retrieval surfaces may prefer one synthesis card over many covered raw refs when it reduces truthful repetition.
-- Keep the provenance / covered-ref receipt attached; do not promote the card itself into durable memory by default.
+- If a retrieval surface prefers one synthesis card over many covered raw refs, keep the provenance / covered-ref receipt with it.
 
 ## Output behavior
 Answer using the best lane with provenance. Store only after confirmation, and store **one fact per record**.
@@ -112,6 +111,10 @@ If asked to “remember” routine logs/OK checks:
   - prerequisite: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`)
 - Graph match: `openclaw-mem graph match "…"` for bounded idea → project candidate routing; for unattended use, check `openclaw-mem graph health` first
 - Store: **disabled by default** in this lane
+
+## Graphic Memory compiled synthesis note
+- Read-only lanes may inspect synthesis cards as **derived graph artifacts**.
+- Do not promote a synthesis card itself into durable memory by default; use it as a provenance-carrying reference surface.
 
 ## Runtime enforcement (recommended)
 This card is a *prompt-layer contract*. When possible, also enforce it at runtime:

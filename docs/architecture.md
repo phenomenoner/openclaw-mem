@@ -139,6 +139,23 @@ Fresh-tail protection (design hook):
 - Treat older packed items/summaries as an evictable prefix under strict budgets.
 - This assembly policy is inspired by LCM-style context engines, but can be applied even when `openclaw-mem` stays a sidecar.
 
+### Verbatim semantic lane (episodic evidence) — **DONE (first production slice)**
+
+A bounded verbatim semantic lane now exists for **episodic** recall.
+
+It is deliberately narrow:
+- corpus = `episodic_events.search_text` (redacted/bounded)
+- read path = `episodes search --mode lexical|hybrid|vector`
+- maintenance path = `episodes embed`
+- role = retrieve raw evidence without changing durable-memory truth
+
+Key boundary: this is a **retrieval lane**, not a new memory type.
+
+That means:
+- durable memory may cite it as evidence, but should not auto-promote hits into truth
+- working set may later consume it, but should not become its source corpus
+- docs cold lane remains a separate substrate with its own retrieval behavior
+
 ### Retrieval trajectory receipts (trace) — non-negotiable for ops
 
 Packing must be observable. Every `pack` run should be able to emit a trace that answers:

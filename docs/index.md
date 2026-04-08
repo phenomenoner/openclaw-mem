@@ -56,6 +56,7 @@ Start with the inspectable sidecar, then add the engine only when you need it.
 - [Deployment guide](deployment.md)
 - [Auto-capture plugin](auto-capture.md)
 - [Mem Engine reference](mem-engine.md)
+- [Verbatim semantic lane](verbatim-semantic-lane.md)
 
 ## Deeper reference
 

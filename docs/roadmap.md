@@ -138,6 +138,30 @@ Acceptance criteria:
 Artifacts:
 - Spec: `docs/specs/topology-auto-extract-v0.md`
 
+### 1.7bb) Verbatim semantic lane (episodic evidence recall)
+
+Status: **DONE** (v1.4.0 first production slice).
+
+- Problem: `openclaw-mem` had strong governance/pack posture, but weaker raw semantic recall over episodic evidence than purpose-built memory products.
+- Shipped slice:
+  - `openclaw-mem episodes embed` to build/search-refresh embeddings over redacted `episodic_events.search_text`
+  - `openclaw-mem episodes search --mode lexical|hybrid|vector` for bounded episodic evidence recall
+  - optional `--trace` receipts showing FTS/vector/fused rankings
+  - query-side `--query-en` assist without introducing a second canonical episodic text plane
+- Non-goals preserved:
+  - no durable-memory auto-promotion
+  - no Working Set source-corpus inversion
+  - no route-auto default behavior change in this slice
+
+Artifacts:
+- Reference: `docs/verbatim-semantic-lane.md`
+- Spec: `docs/specs/verbatim-semantic-lane-v0.md`
+
+Acceptance criteria:
+- episodic hybrid recall is additive, read-only, scope-aware, and redaction-safe
+- embedding refresh is deterministic via `search_text_hash`
+- lexical fallback remains usable when vector lane is unavailable
+
 ### 1.7c) Compiled synthesis layer (selected refs → maintained synthesis cards)
 
 Status: **PARTIAL** (`graph synth compile` / `graph synth stale` / deterministic `graph lint` shipped; graph preflight and graph pack now prefer fresh synthesis cards; deterministic review/contradiction signals now surface in stale/lint; richer maintenance still pending).

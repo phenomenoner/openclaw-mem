@@ -45,7 +45,7 @@ It operates across two planes:
 - **Receipts beat guesswork.** JSON outputs, pack traces, policy surfaces, and lifecycle shadow logs make memory behavior visible.
 - **Sidecar-first keeps the risk low.** Test locally before touching your OpenClaw memory slot.
 
-## What ships today in v1.3.2
+## What ships today in v1.4.0
 
 - **Local operator diagnostics:** `status`, `doctor`, and `backend` provide a compact health/readiness surface before deeper debugging.
 - **Local recall loop:** `search → timeline → get` keeps routine lookups fast and inspectable.
@@ -63,6 +63,7 @@ It operates across two planes:
 - **Review-gated action plane (recommendation-only):** `optimize review`, `optimize consolidation-review`, and `optimize policy-loop` emit review queues for hygiene, recent-use-aware decay protection, dream-style candidate consolidation, and rollout readiness (no silent writeback).
 - **Policy-driven safety:** trust policies, graph provenance, and lifecycle logging (`--pack-trust-policy`, `--graph-provenance-policy`, `--graph-query-db`, `--pack-lifecycle-shadow`) keep memory grounded, auditable, and safer for automation.
 - **Episodic event lane:** append/extract/ingest/query/replay/search with redaction-first defaults.
+- **Episodic verbatim semantic lane:** `episodes embed` + `episodes search --mode lexical|hybrid|vector` for bounded raw-evidence recall over redacted episodic `search_text`.
 - **Optional Mem Engine upgrades:** hybrid recall controls, TODO guardrails, docs cold-lane ingest/search, and an optional `autoRecall.routeAuto` prompt hook for live routing hints.
 
 ## Graph semantic memory v0 (1.3.x)

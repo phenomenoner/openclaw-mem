@@ -71,6 +71,8 @@ Owned by `openclaw-mem-engine`:
 
 Key stance: **sidecar governs; engine serves**.
 
+Related boundary: the shipped **verbatim semantic lane** remains a **sidecar retrieval surface** over episodic evidence (`episodes embed` / `episodes search --mode ...`). It is not a new slot-backend memory type and does not change durable-memory write discipline.
+
 ---
 
 ## M1 automation (what is safe to ship now)

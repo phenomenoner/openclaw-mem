@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No unreleased changes yet.
 
+## [1.4.0] - 2026-04-08
+
+### Changed
+
+- Added a first production-safe **verbatim semantic lane** for episodic evidence recall.
+  - new `openclaw-mem episodes embed` command builds/search-refreshes embeddings over redacted `episodic_events.search_text`
+  - `openclaw-mem episodes search` now supports `--mode lexical|hybrid|vector`, optional `--query-en`, and `--trace` receipts for FTS/vector/fused rankings
+  - hybrid/vector episodic retrieval stays additive, scope-aware, read-only, and fail-open when the vector lane is unavailable
+  - new `episodic_event_embeddings` table stores deterministic `search_text_hash` receipts so embedding refreshes can detect substrate changes without mutating episodic truth
+- Added focused docs and operator guidance for the new lane in `docs/verbatim-semantic-lane.md`, `docs/specs/verbatim-semantic-lane-v0.md`, and `skills/verbatim-semantic-lane.ops.md`.
+- Reconciled docs truth across README / QUICKSTART / architecture / mem-engine / dual-language / roadmap / MkDocs navigation so the new lane is described consistently as a retrieval tactic rather than a new memory type.
+
+### Testing
+
+- Added episodic CLI regression coverage for `episodes embed`, hybrid/vector parser flags, vector-backed session grouping, and hybrid fail-open fallback when embeddings are unavailable.
+- Re-ran focused episodic/router coverage (`tests/test_episodes.py`, `tests/test_autonomous_default_routing_cli.py`) plus broader CLI/docs-memory regression coverage (`tests/test_cli.py`, `tests/test_docs_memory.py`).
+
 ## [1.3.2] - 2026-04-06
 
 ### Changed

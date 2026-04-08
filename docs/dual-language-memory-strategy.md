@@ -163,3 +163,19 @@ Suggested initial targets (first rollout window):
 - empty-result rate reduction vs single-language baseline: > 15%
 
 Adjust thresholds after collecting 1–2 weeks of production traces.
+
+---
+
+## Relation to the verbatim semantic lane
+
+The dual-language feature and the verbatim semantic lane solve different problems:
+
+- **dual-language** improves cross-language retrieval when query/document language does not line up
+- **verbatim semantic lane** improves retrieval over raw episodic evidence
+
+Current positioning inside `openclaw-mem`:
+- durable/docs retrieval may use explicit `text_en` / `query_en` companion fields
+- episodic verbatim search keeps the canonical substrate as redacted `search_text`
+- episodic `--query-en` is an assistive query-side booster, not a second canonical storage plane
+
+So the dual-language strategy is a **retrieval booster**, while the verbatim semantic lane is a **retrieval family / substrate choice**.

@@ -198,6 +198,24 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem hybrid "<original query>
 
 See: `docs/dual-language-memory-strategy.md`.
 
+## Step 4.6: Verbatim semantic lane for episodic evidence (optional)
+
+Use this when you need the raw conversation/session trail rather than only durable summaries.
+
+```bash
+DB=/tmp/openclaw-mem-proof.sqlite
+
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json episodes embed --scope global --limit 200
+uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json episodes search "routing fallback" --scope global --mode hybrid --trace
+```
+
+What this proves:
+- episodic recall can stay read-only and scope-aware
+- lexical and vector lanes can be inspected separately via `--trace`
+- raw evidence retrieval remains separate from durable memory writes
+
+See: `docs/verbatim-semantic-lane.md`.
+
 ---
 
 ## Step 5: Enable the OpenClaw plugin (optional)

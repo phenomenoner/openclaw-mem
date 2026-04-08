@@ -50,6 +50,7 @@ nav:
       - Deployment: deployment.md
       - Auto-capture (sidecar plugin): auto-capture.md
       - Mem Engine (slot backend): mem-engine.md
+      - Verbatim semantic lane: verbatim-semantic-lane.md
       - Engine admin ops: mem-engine-admin-ops.md
       - Architecture: architecture.md
       - Context pack: context-pack.md
@@ -74,6 +75,7 @@ nav:
       - Context budget sidecar (v0): specs/context-budget-sidecar-v0.md
       - Episodic events ledger (v0): specs/episodic-events-ledger-v0.md
       - Episodic auto-capture (v0): specs/episodic-auto-capture-v0.md
+      - Verbatim semantic lane (v0): specs/verbatim-semantic-lane-v0.md
       - Graphic memory (GraphRAG-lite PRD): specs/graphic-memory-graphrag-lite-prd.md
       - Graphic memory auto-capture / auto-recall: specs/graphic-memory-auto-capture-auto-recall.md
       - Graphic memory preflight trigger policy: specs/graphic-memory-preflight-trigger-policy.md

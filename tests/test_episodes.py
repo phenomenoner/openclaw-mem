@@ -2,6 +2,7 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout
+from unittest.mock import patch
 
 from openclaw_mem.cli import _connect, build_parser
 
@@ -28,6 +29,7 @@ class TestEpisodesCli(unittest.TestCase):
             for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
         }
         self.assertIn("episodic_events", tables)
+        self.assertIn("episodic_event_embeddings", tables)
 
         idx = {
             r["name"]
@@ -439,6 +441,153 @@ class TestEpisodesCli(unittest.TestCase):
         )
         self.assertEqual([x["event_id"] for x in post["items"]], ["old-assistant"])
         conn.close()
+
+    def test_episodes_embed_and_hybrid_search_vector_lane(self):
+        conn = _connect(":memory:")
+
+        self._run(
+            conn,
+            [
+                "episodes",
+                "append",
+                "--scope",
+                "proj-sem",
+                "--session-id",
+                "sess-hermes",
+                "--agent-id",
+                "lyria",
+                "--type",
+                "conversation.user",
+                "--summary",
+                "Hermes retrieval lane review",
+                "--payload-json",
+                json.dumps({"note": "compare recall posture"}, ensure_ascii=False),
+                "--json",
+            ],
+        )
+        self._run(
+            conn,
+            [
+                "episodes",
+                "append",
+                "--scope",
+                "proj-sem",
+                "--session-id",
+                "sess-weather",
+                "--agent-id",
+                "lyria",
+                "--type",
+                "conversation.user",
+                "--summary",
+                "Weather notes only",
+                "--payload-json",
+                json.dumps({"note": "sunny"}, ensure_ascii=False),
+                "--json",
+            ],
+        )
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                out = []
+                for text in texts:
+                    t = str(text).lower()
+                    if any(tok in t for tok in ["hermes", "semantic", "recall"]):
+                        out.append([1.0, 0.0])
+                    else:
+                        out.append([0.0, 1.0])
+                return out
+
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            embed_out = self._run(
+                conn,
+                ["episodes", "embed", "--scope", "proj-sem", "--limit", "20", "--json"],
+            )
+            self.assertEqual(embed_out["embedded"], 2)
+
+            out = self._run(
+                conn,
+                [
+                    "episodes",
+                    "search",
+                    "semantic evidence",
+                    "--scope",
+                    "proj-sem",
+                    "--mode",
+                    "hybrid",
+                    "--trace",
+                    "--json",
+                ],
+            )
+
+        self.assertGreaterEqual(out["result"]["count"], 1)
+        self.assertEqual(out["result"]["mode"], "hybrid")
+        self.assertEqual(out["vector_status"], "ok")
+        session = out["result"]["sessions"][0]
+        self.assertEqual(session["session_id"], "sess-hermes")
+        self.assertIn("vector", session["matched_items"][0]["match"]["lanes"])
+        self.assertIn("trace", out)
+        self.assertGreaterEqual(len(out["trace"]["vec_top_k"]), 1)
+        conn.close()
+
+    def test_episodes_search_hybrid_fails_open_to_lexical_when_vector_unavailable(self):
+        conn = _connect(":memory:")
+
+        self._run(
+            conn,
+            [
+                "episodes",
+                "append",
+                "--scope",
+                "proj-fallback",
+                "--session-id",
+                "sess-1",
+                "--agent-id",
+                "lyria",
+                "--type",
+                "conversation.user",
+                "--summary",
+                "graph readiness fallback",
+                "--payload-json",
+                json.dumps({"note": "episodes search fallback"}, ensure_ascii=False),
+                "--json",
+            ],
+        )
+
+        out = self._run(
+            conn,
+            [
+                "episodes",
+                "search",
+                "fallback",
+                "--scope",
+                "proj-fallback",
+                "--mode",
+                "hybrid",
+                "--json",
+            ],
+        )
+        self.assertEqual(out["result"]["count"], 1)
+        self.assertEqual(out["vector_status"], "missing_embeddings")
+        self.assertEqual(out["result"]["sessions"][0]["session_id"], "sess-1")
+        conn.close()
+
+    def test_episodes_parser_accepts_embed_and_hybrid_flags(self):
+        args = build_parser().parse_args(["episodes", "embed", "--scope", "proj-a", "--limit", "10", "--json"])
+        self.assertEqual(args.cmd, "episodes")
+        self.assertEqual(args.episodes_cmd, "embed")
+        self.assertEqual(args.scope, "proj-a")
+        self.assertEqual(args.limit, 10)
+        self.assertTrue(args.json)
+
+        args = build_parser().parse_args(["episodes", "search", "memory lane", "--scope", "proj-a", "--mode", "hybrid", "--query-en", "memory lane", "--trace", "--json"])
+        self.assertEqual(args.episodes_cmd, "search")
+        self.assertEqual(args.mode, "hybrid")
+        self.assertEqual(args.query_en, "memory lane")
+        self.assertTrue(args.trace)
+        self.assertTrue(args.json)
 
 
 if __name__ == "__main__":
