@@ -29,6 +29,9 @@ Additional trusted references (for lifecycle/decay):
 - 2026-04-07 — Compiled synthesis layer (wiki-maintainer pattern without the wiki dependency)
   - `docs/archive/thought-links/2026-04-07_compiled-synthesis-layer-wiki-pattern.md`
   - Spec: `docs/specs/graphic-memory-compiled-synthesis-v0.md`
+- 2026-04-10 — graphify absorption cut lands in route-auto synthesis propagation (whole-product continuation, not graph-as-truth)
+  - `docs/archive/thought-links/2026-04-10_graphify-route-auto-synthesis-propagation.md`
+  - Playbook tech note: `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-04-10_route-auto-synthesis-propagation_and_graphify-absorption.md`
 
 ## 1) memvid / portable capsule pattern → what we take and what we refuse
 

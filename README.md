@@ -114,7 +114,7 @@ Use this when you want `openclaw-mem` to own the memory slot.
 
 - switch to `openclaw-mem-engine` only after a sidecar smoke test
 - get hybrid recall, bounded automation, and operator-tunable policies
-- optionally enable the `autoRecall.routeAuto` hook to consult `openclaw-mem route auto` before agent start and inject a compact routing hint block into live turns
+- optionally enable the `autoRecall.routeAuto` hook to consult `openclaw-mem route auto` before agent start and inject a compact synthesis-aware routing hint block into live turns
 - keep rollback to native backends as a one-line slot change
 
 ## 5-minute local proof (no OpenClaw required)
@@ -273,3 +273,6 @@ Dual-licensed: **MIT OR Apache-2.0**, at your option.
 
 - MIT terms: `LICENSE` (root canonical text for GitHub/license-scanner detection)
 - Apache 2.0 terms: `LICENSE-APACHE`
+oot canonical text for GitHub/license-scanner detection)
+- Apache 2.0 terms: `LICENSE-APACHE`
+E`

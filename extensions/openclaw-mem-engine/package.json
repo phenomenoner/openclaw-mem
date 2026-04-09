@@ -1,6 +1,6 @@
 {
   "name": "openclaw-mem-engine",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "description": "Optional OpenClaw memory-slot backend with hybrid recall, docs cold-lane search, and bounded autoRecall/autoCapture controls.",
   "license": "MIT",

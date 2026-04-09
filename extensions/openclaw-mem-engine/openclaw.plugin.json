@@ -3,7 +3,7 @@
   "name": "OpenClaw Mem Engine",
   "description": "Optional memory slot backend (LanceDB + OpenAI embeddings)",
   "kind": "memory",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "uiHints": {
     "embedding.apiKey": {
       "label": "OpenAI API Key",
@@ -284,7 +284,7 @@
     },
     "autoRecall.routeAuto.enabled": {
       "label": "Route Auto Prompt Hook",
-      "help": "Call openclaw-mem route auto before agent start and inject a compact routing hint block.",
+      "help": "Call openclaw-mem route auto before agent start and inject a compact synthesis-aware routing hint block.",
       "advanced": true
     },
     "autoRecall.routeAuto.timeoutMs": {

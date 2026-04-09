@@ -129,6 +129,23 @@ function buildArgs({ query, scope, base }) {
   return args;
 }
 
+function buildGraphConsumptionSuffix(candidate) {
+  const consumption = candidate?.graph_consumption;
+  const preferredRefs = toStringArray(consumption?.preferredCardRefs);
+  const coveredRefs = toStringArray(consumption?.coveredRawRefs);
+  const cards = Array.isArray(consumption?.cards) ? consumption.cards : [];
+  if (preferredRefs.length === 0 || coveredRefs.length === 0) return "";
+
+  const card = cards[0] || {};
+  const cardLabel = compactText(card?.title || card?.recordRef || preferredRefs[0] || "synthesis card", 72);
+  const why = compactText(card?.whyItMatters || "", 100);
+  const coveredCount = coveredRefs.length;
+  const coveredLabel = `${coveredCount} covered raw ref${coveredCount === 1 ? "" : "s"}`;
+  return why
+    ? `prefer synthesis ${cardLabel} over ${coveredLabel} (${why})`
+    : `prefer synthesis ${cardLabel} over ${coveredLabel}`;
+}
+
 function buildGraphText(payload, base) {
   const candidates = payload?.inputs?.graph_match?.result?.candidates;
   if (!Array.isArray(candidates) || candidates.length === 0) return "";
@@ -140,7 +157,8 @@ function buildGraphText(payload, base) {
   for (const candidate of candidates.slice(0, base.maxGraphCandidates)) {
     const title = compactText(candidate?.title || candidate?.candidateRef || "candidate", 72);
     const why = compactText(candidate?.why_relevant || candidate?.explanation_path || "matched graph evidence", 140);
-    lines.push(`- ${title}: ${why}`);
+    const consumptionSuffix = buildGraphConsumptionSuffix(candidate);
+    lines.push(`- ${title}: ${why}${consumptionSuffix ? ` | ${consumptionSuffix}` : ""}`);
   }
 
   return lines.join("\n");
@@ -231,6 +249,8 @@ export async function runRouteAuto({ query, scope, config, runner = defaultRunne
   const transcriptSessions = Array.isArray(payload?.inputs?.episodes_search?.result?.sessions)
     ? payload.inputs.episodes_search.result.sessions.length
     : 0;
+  const preferredCardRefs = toStringArray(payload?.selection?.graph_consumption?.preferredCardRefs);
+  const coveredRawRefs = toStringArray(payload?.selection?.graph_consumption?.coveredRawRefs);
   const text = payload ? renderRouteAutoText(payload, base) : "";
 
   return {
@@ -243,6 +263,10 @@ export async function runRouteAuto({ query, scope, config, runner = defaultRunne
       selectedLane,
       graphCandidates,
       transcriptSessions,
+      preferredCardRefs,
+      coveredRawRefs,
+      preferredCardCount: preferredCardRefs.length,
+      coveredRawRefCount: coveredRawRefs.length,
       injected: Boolean(text),
       reason: payload?.selection?.reason ? compactText(payload.selection.reason, 120) : null,
       errorCode: result.errorCode,

@@ -6,12 +6,24 @@ import { renderRouteAutoText, runRouteAuto } from "./routeAuto.js";
 test("renderRouteAutoText summarizes graph route candidates", () => {
   const text = renderRouteAutoText(
     {
-      selection: { selected_lane: "graph_match", reason: "graph_ready_with_candidates" },
+      selection: {
+        selected_lane: "graph_match",
+        reason: "graph_ready_with_candidates",
+        graph_consumption: { preferredCardRefs: ["obs:99"], coveredRawRefs: ["obs:1", "obs:2"] },
+      },
       inputs: {
         graph_match: {
           result: {
             candidates: [
-              { title: "openclaw-mem", why_relevant: "matched graph evidence for autonomous routing" },
+              {
+                title: "openclaw-mem",
+                why_relevant: "matched graph evidence for autonomous routing",
+                graph_consumption: {
+                  preferredCardRefs: ["obs:99"],
+                  coveredRawRefs: ["obs:1", "obs:2"],
+                  cards: [{ recordRef: "obs:99", title: "Route auto synthesis card", whyItMatters: "Prefer one maintained synthesis card." }],
+                },
+              },
               { title: "openclaw-ops", why_relevant: "secondary candidate" },
             ],
           },
@@ -23,6 +35,7 @@ test("renderRouteAutoText summarizes graph route candidates", () => {
 
   assert.match(text, /graph-semantic/);
   assert.match(text, /openclaw-mem/);
+  assert.match(text, /prefer synthesis Route auto synthesis card over 2 covered raw refs/i);
   assert.doesNotMatch(text, /openclaw-ops/);
 });
 
@@ -61,6 +74,49 @@ test("runRouteAuto builds transcript hint block from fake runner", async () => {
   assert.equal(result.receipt.injected, true);
   assert.match(result.text, /transcript recall/);
   assert.match(result.text, /sess-1234567890abc/);
+});
+
+test("runRouteAuto receipt carries synthesis coverage counts", async () => {
+  const payload = {
+    selection: {
+      selected_lane: "graph_match",
+      reason: "graph_ready_with_candidates",
+      graph_consumption: {
+        preferredCardRefs: ["obs:99"],
+        coveredRawRefs: ["obs:1", "obs:2"],
+      },
+    },
+    inputs: {
+      graph_match: {
+        result: {
+          candidates: [
+            {
+              title: "openclaw-mem",
+              why_relevant: "matched graph evidence",
+              graph_consumption: {
+                preferredCardRefs: ["obs:99"],
+                coveredRawRefs: ["obs:1", "obs:2"],
+                cards: [{ recordRef: "obs:99", title: "Route auto synthesis card" }],
+              },
+            },
+          ],
+        },
+      },
+    },
+  };
+
+  const result = await runRouteAuto({
+    query: "graph semantic memory",
+    scope: "global",
+    config: { enabled: true, timeoutMs: 400, maxChars: 320 },
+    runner: async () => ({ ok: true, exitCode: 0, stdout: JSON.stringify(payload), stderr: "", errorCode: null, errorMessage: null }),
+  });
+
+  assert.equal(result.receipt.selectedLane, "graph_match");
+  assert.equal(result.receipt.preferredCardCount, 1);
+  assert.equal(result.receipt.coveredRawRefCount, 2);
+  assert.deepEqual(result.receipt.preferredCardRefs, ["obs:99"]);
+  assert.match(result.text, /prefer synthesis Route auto synthesis card/i);
 });
 
 test("runRouteAuto fails open on runner error", async () => {

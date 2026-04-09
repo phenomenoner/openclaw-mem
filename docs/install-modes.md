@@ -112,6 +112,7 @@ Read:
 - [Ecosystem fit](ecosystem-fit.md)
 - [Deployment guide](deployment.md)
 - [Agent memory skill (SOP)](agent-memory-skill.md) (recommended agent prompt contract)
+- `python tools/route_auto_synthesis_smoke.py` (deterministic route-auto synthesis smoke)
 
 ### Rollback
 

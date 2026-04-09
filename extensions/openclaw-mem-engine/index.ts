@@ -3678,7 +3678,7 @@ const memoryEngineConfigSchema = {
     },
     "autoRecall.routeAuto.enabled": {
       label: "Route Auto Prompt Hook",
-      help: "Call openclaw-mem route auto before agent start and inject a compact routing hint block.",
+      help: "Call openclaw-mem route auto before agent start and inject a compact synthesis-aware routing hint block.",
       advanced: true,
     },
     "autoRecall.routeAuto.timeoutMs": {

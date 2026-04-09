@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No unreleased changes yet.
 
+## [1.4.1] - 2026-04-09
+
+### Changed
+
+- `openclaw-mem route auto` now propagates **synthesis-aware coverage receipts** when a fresh synthesis card truthfully covers multiple matched raw refs.
+  - graph-route selections now expose `preferredCardRefs` + `coveredRawRefs` in the route-auto JSON path
+  - candidate rows now include additive `graph_consumption` metadata instead of forcing graph-as-truth behavior
+  - route-auto remains fail-open when graph-synthesis enrichment is unavailable or errors
+- `openclaw-mem-engine` `autoRecall.routeAuto` now renders the same synthesis-aware preference in its injected routing hint block and receipt counters.
+- Added a deterministic repo-level smoke script: `tools/route_auto_synthesis_smoke.py`.
+- Added a dedicated operator card for this lane: `skills/route-auto-synthesis.ops.md`.
+- Reconciled docs/install/operator surfaces so route-auto, the mem-engine hook, and the skill cards all describe the same synthesis-aware contract.
+
+### Testing
+
+- Expanded `tests/test_autonomous_default_routing_cli.py` to cover synthesis-aware route-auto receipts and fail-open enrichment errors.
+- Expanded `extensions/openclaw-mem-engine/routeAuto.test.mjs` to cover synthesis-aware rendering + receipt counters.
+- Re-ran targeted hook-contract coverage with `tests/test_mem_engine_route_auto_hook.py` and the deterministic smoke `tools/route_auto_synthesis_smoke.py`.
+
 ## [1.4.0] - 2026-04-08
 
 ### Changed

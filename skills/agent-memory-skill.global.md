@@ -44,7 +44,8 @@ Never store:
 - Graph match (L3): `openclaw-mem graph match "…"` for idea → project candidate routing
   - unattended: prefer `openclaw-mem graph readiness` first
   - single entrypoint router: `openclaw-mem route auto "<query>"` (fail-open)
-  - mem-engine auto-hook: enable `autoRecall.routeAuto` when you want live turns to consult that router before agent start
+    - when graph candidates are truthfully covered by a fresh synthesis card, prefer the synthesis card but keep `preferredCardRefs` / `coveredRawRefs` receipts
+  - mem-engine auto-hook: enable `autoRecall.routeAuto` when you want live turns to consult that router before agent start and inject the same synthesis-aware hint
 
 ## Graphic Memory compiled synthesis note
 - Fresh synthesis cards are **derived graph artifacts**, not L1 durable-memory facts by default.

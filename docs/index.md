@@ -66,6 +66,7 @@ Start with the inspectable sidecar, then add the engine only when you need it.
 - [Agent memory skill (SOP)](agent-memory-skill.md)
 - [Automation status](automation-status.md)
 - [Graph semantic memory (idea → project match)](roadmap.md)
+- Route-auto synthesis ops skill: `skills/route-auto-synthesis.ops.md`
 - [Roadmap](roadmap.md)
 
 ## Releases

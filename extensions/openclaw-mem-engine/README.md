@@ -90,6 +90,7 @@ Example host config:
 Behavior:
 - shells out to `openclaw-mem route auto "<prompt>"`
 - if graph-semantic is ready and returns candidates, injects a compact graph-routing hint block
+- when route-auto reports `preferredCardRefs` / `coveredRawRefs`, the hint prefers the fresh synthesis card while preserving the covered-raw receipt
 - otherwise fails open to a compact transcript-recall hint block
 - runtime failures/timeouts remain fail-open (the turn continues without the route block)
 

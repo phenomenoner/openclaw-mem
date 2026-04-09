@@ -9228,6 +9228,122 @@ def cmd_graph_readiness(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     )
 
 
+def _route_auto_graph_consumption_for_candidate(
+    conn: sqlite3.Connection,
+    *,
+    candidate: Dict[str, Any],
+    scope: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    support_refs = _graph_collect_ref_tokens(
+        [
+            (item or {}).get("recordRef")
+            for item in list(candidate.get("supporting_records") or [])
+            if isinstance(item, dict)
+        ]
+    )
+    if len(support_refs) < 2:
+        return None
+
+    try:
+        _, synth_pref = _graph_preflight_prefer_synthesis_cards(
+            conn,
+            selected_refs=support_refs,
+            scope=scope,
+        )
+    except Exception:
+        return None
+
+    preferred_card_refs = _graph_collect_ref_tokens(synth_pref.get("preferredCardRefs") or [])
+    covered_raw_refs = _graph_collect_ref_tokens(synth_pref.get("coveredRawRefs") or [])
+    if not preferred_card_refs:
+        return None
+
+    rows = _graph_fetch_rows_by_ids(conn, [_graph_parse_record_ref(ref) for ref in preferred_card_refs])
+    cards: List[Dict[str, Any]] = []
+    coverage_map: Dict[str, List[str]] = {}
+    covered_set = set(covered_raw_refs)
+    for ref in preferred_card_refs:
+        oid = _graph_parse_record_ref(ref)
+        row = rows.get(oid)
+        detail = _pack_parse_detail_json(row["detail_json"]) if row is not None else {}
+        synth = detail.get("graph_synthesis") if isinstance(detail.get("graph_synthesis"), dict) else {}
+        source_refs = _graph_collect_ref_tokens(synth.get("source_refs") or [])
+        covered_here = [raw_ref for raw_ref in source_refs if raw_ref in covered_set]
+        title = str(synth.get("title") or (row["summary"] if row is not None else ref) or ref).replace("\\n", " ").strip()
+        summary = str((row["summary"] if row is not None else title) or title).replace("\\n", " ").strip()
+        why_it_matters = str(synth.get("why_it_matters") or "").replace("\\n", " ").strip() or None
+        cards.append(
+            {
+                "recordRef": ref,
+                "title": title,
+                "summary": summary,
+                "whyItMatters": why_it_matters,
+                "sourceCount": len(source_refs),
+                "coveredRawRefs": covered_here,
+            }
+        )
+        coverage_map[ref] = covered_here
+
+    return {
+        "preferred": True,
+        "preferredCardRefs": preferred_card_refs,
+        "coveredRawRefs": covered_raw_refs,
+        "cards": cards,
+        "coverageMap": coverage_map,
+    }
+
+
+
+def _route_auto_enrich_graph_match_payload(
+    conn: sqlite3.Connection,
+    *,
+    graph_payload: Dict[str, Any],
+    scope: Optional[str],
+) -> Dict[str, Any]:
+    payload = dict(graph_payload or {})
+    result = dict(payload.get("result") or {})
+    candidates = list(result.get("candidates") or [])
+    if not candidates:
+        return graph_payload
+
+    enriched_candidates: List[Dict[str, Any]] = []
+    preferred_refs: List[str] = []
+    covered_refs: List[str] = []
+    cards_by_ref: Dict[str, Dict[str, Any]] = {}
+    coverage_map: Dict[str, List[str]] = {}
+
+    for candidate in candidates:
+        item = dict(candidate or {})
+        consumption = _route_auto_graph_consumption_for_candidate(conn, candidate=item, scope=scope)
+        if consumption:
+            item["graph_consumption"] = consumption
+            preferred_refs.extend(_graph_collect_ref_tokens(consumption.get("preferredCardRefs") or []))
+            covered_refs.extend(_graph_collect_ref_tokens(consumption.get("coveredRawRefs") or []))
+            for card in list(consumption.get("cards") or []):
+                ref = str((card or {}).get("recordRef") or "").strip()
+                if ref and ref not in cards_by_ref:
+                    cards_by_ref[ref] = card
+            for ref, covered in dict(consumption.get("coverageMap") or {}).items():
+                ref_norm = str(ref or "").strip()
+                if not ref_norm or ref_norm in coverage_map:
+                    continue
+                coverage_map[ref_norm] = _graph_collect_ref_tokens(covered)
+        enriched_candidates.append(item)
+
+    result["candidates"] = enriched_candidates
+    if preferred_refs or covered_refs:
+        result["graph_consumption"] = {
+            "preferredCardRefs": _graph_collect_ref_tokens(preferred_refs),
+            "coveredRawRefs": _graph_collect_ref_tokens(covered_refs),
+            "cards": list(cards_by_ref.values()),
+            "coverageMap": coverage_map,
+        }
+
+    payload["result"] = result
+    return payload
+
+
+
 def cmd_route_auto(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
         query = str(getattr(args, "query", "") or "").strip()
@@ -9263,6 +9379,10 @@ def cmd_route_auto(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             support_limit=graph_support_limit,
             search_limit=graph_search_limit,
         )
+        try:
+            graph_payload = _route_auto_enrich_graph_match_payload(conn, graph_payload=graph_payload, scope=scope)
+        except Exception:
+            pass
     else:
         graph_skipped_reason = "graph_not_ready"
 
@@ -9276,7 +9396,9 @@ def cmd_route_auto(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         include_payload=bool(getattr(args, "include_payload", False)),
     )
 
-    graph_count = int(((graph_payload or {}).get("result") or {}).get("count") or 0)
+    graph_result = (graph_payload or {}).get("result") or {}
+    graph_count = int(graph_result.get("count") or 0)
+    graph_consumption = graph_result.get("graph_consumption") if isinstance(graph_result.get("graph_consumption"), dict) else None
     episode_count = int(((episodes_payload or {}).get("result") or {}).get("count") or 0)
 
     if bool(readiness.get("ready_for_autonomous_match")) and graph_count > 0:
@@ -9285,6 +9407,8 @@ def cmd_route_auto(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "reason": "graph_ready_with_candidates",
             "fail_open": False,
         }
+        if graph_consumption:
+            selection["graph_consumption"] = graph_consumption
     elif episode_count > 0:
         selection = {
             "selected_lane": "episodes_search",
@@ -9315,17 +9439,21 @@ def cmd_route_auto(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         _emit(payload, True)
         return
 
-    print(
-        " ".join(
-            [
-                f"lane={selection.get('selected_lane')}",
-                f"reason={selection.get('reason')}",
-                f"graph_ready={str(bool(readiness.get('ready_for_autonomous_match'))).lower()}",
-                f"graph_candidates={graph_count}",
-                f"episode_sessions={episode_count}",
-            ]
+    summary_parts = [
+        f"lane={selection.get('selected_lane')}",
+        f"reason={selection.get('reason')}",
+        f"graph_ready={str(bool(readiness.get('ready_for_autonomous_match'))).lower()}",
+        f"graph_candidates={graph_count}",
+        f"episode_sessions={episode_count}",
+    ]
+    if graph_consumption:
+        summary_parts.append(
+            f"preferred_cards={len(list(graph_consumption.get('preferredCardRefs') or []))}"
         )
-    )
+        summary_parts.append(
+            f"covered_raw_refs={len(list(graph_consumption.get('coveredRawRefs') or []))}"
+        )
+    print(" ".join(summary_parts))
 
 
 def cmd_graph_topology_refresh(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
