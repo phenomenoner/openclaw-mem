@@ -1,6 +1,9 @@
 import io
 import json
+import os
+import sqlite3
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 from contextlib import redirect_stdout
@@ -5438,6 +5441,86 @@ class TestGraphSynthesisCli(unittest.TestCase):
         self.assertEqual(synth["source_refs"], ["obs:1", "obs:2"])
         self.assertEqual(synth["status"], "fresh")
         conn.close()
+
+    def test_graph_synth_compile_persists_card_on_file_backed_db(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "mem.sqlite")
+            conn = _connect(db_path)
+            _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {"scope": "proj.a"}})
+            _insert_observation(conn, {"kind": "note", "summary": "beta source", "tool_name": "memory_store", "detail": {"scope": "proj.a"}})
+
+            args = build_parser().parse_args([
+                "--db", db_path,
+                "graph", "--json", "synth", "compile",
+                "--record-ref", "obs:1",
+                "--record-ref", "obs:2",
+                "--title", "Persisted finding",
+                "--summary", "Persisted finding summary",
+            ])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            card_ref = json.loads(buf.getvalue())["cardRef"]
+            conn.close()
+
+            check = sqlite3.connect(db_path)
+            check.row_factory = sqlite3.Row
+            try:
+                row = check.execute(
+                    "SELECT summary, tool_name FROM observations WHERE id = ?",
+                    (int(card_ref.split(":", 1)[1]),),
+                ).fetchone()
+                self.assertIsNotNone(row)
+                self.assertEqual(row["summary"], "Persisted finding summary")
+                self.assertEqual(row["tool_name"], "graph.synth-compile")
+            finally:
+                check.close()
+
+    def test_graph_synth_refresh_persists_new_card_and_superseded_status_on_file_backed_db(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = os.path.join(td, "mem.sqlite")
+            conn = _connect(db_path)
+            _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+
+            compile_args = build_parser().parse_args([
+                "--db", db_path,
+                "graph", "--json", "synth", "compile",
+                "--query", "alpha",
+                "--title", "Alpha synthesis",
+                "--summary", "Alpha synthesis",
+            ])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                compile_args.func(conn, compile_args)
+            card_ref = json.loads(buf.getvalue())["cardRef"]
+            _insert_observation(conn, {"kind": "note", "summary": "alpha newer source", "tool_name": "memory_store", "detail": {}})
+
+            refresh_args = build_parser().parse_args(["--db", db_path, "graph", "--json", "synth", "refresh", card_ref])
+            refresh_buf = io.StringIO()
+            with redirect_stdout(refresh_buf):
+                refresh_args.func(conn, refresh_args)
+            new_ref = json.loads(refresh_buf.getvalue())["result"]["recordRef"]
+            conn.close()
+
+            check = sqlite3.connect(db_path)
+            check.row_factory = sqlite3.Row
+            try:
+                new_row = check.execute(
+                    "SELECT tool_name FROM observations WHERE id = ?",
+                    (int(new_ref.split(":", 1)[1]),),
+                ).fetchone()
+                self.assertIsNotNone(new_row)
+                self.assertEqual(new_row["tool_name"], "graph.synth-compile")
+                old_row = check.execute(
+                    "SELECT detail_json FROM observations WHERE id = ?",
+                    (int(card_ref.split(":", 1)[1]),),
+                ).fetchone()
+                self.assertIsNotNone(old_row)
+                old_detail = json.loads(old_row["detail_json"] or "{}")
+                self.assertEqual(old_detail["graph_synthesis"]["status"], "superseded")
+                self.assertEqual(old_detail["graph_synthesis"]["superseded_by"], new_ref)
+            finally:
+                check.close()
 
     def test_graph_synth_stale_detects_query_selection_drift(self):
         conn = _connect(":memory:")

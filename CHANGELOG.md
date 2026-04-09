@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No unreleased changes yet.
 
+## [1.4.2] - 2026-04-09
+
+### Fixed
+
+- `graph match` now applies scope filtering more truthfully for file/repo-backed capture rows: if a row lacks explicit `detail.scope`, the filter falls back to project inference from the candidate/repo-root path instead of discarding the row before candidate grouping. This unblocks production `graph match` / `route auto` on real host capture data.
+- `graph synth compile` now commits its newly written synthesis card before returning, so file-backed / production DB invocations no longer report a `cardRef` that vanishes on reconnect.
+- `graph synth refresh` now commits the new card + superseded-card update before returning, keeping refresh lifecycle state durable on file-backed / production DBs.
+
+### Testing
+
+- Added regression coverage in `tests/test_graph_match_cli.py` for scope-filter fallback via repo-root inference when `detail.scope` is missing.
+- Added file-backed persistence coverage in `tests/test_cli.py` for `graph synth compile` and `graph synth refresh`.
+- Re-ran `python3 -m unittest tests/test_graph_match_cli.py tests/test_autonomous_default_routing_cli.py tests/test_cli.py`.
+- Re-ran host-local proof against `/root/.openclaw/memory/openclaw-mem.sqlite`; `graph match` and `route auto` now surface `graph_match`, and host-local patched proof shows `preferredCardRefs` / `coveredRawRefs`.
+
 ## [1.4.1] - 2026-04-09
 
 ### Changed

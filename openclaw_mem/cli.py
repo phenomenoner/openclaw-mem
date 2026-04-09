@@ -7175,6 +7175,7 @@ def _graph_search_rows(
     limit_n = max(1, int(limit))
     scope_norm = _normalize_scope_token(scope)
     fetch_limit = limit_n if not scope_norm else max(limit_n, limit_n * 8, limit_n + 40)
+    repo_cache: Dict[str, Optional[Path]] = {}
 
     def _run(match_q: str, fetch_n: int) -> List[sqlite3.Row]:
         return conn.execute(
@@ -7201,6 +7202,10 @@ def _graph_search_rows(
         for r in rows_in:
             detail = _pack_parse_detail_json(r["detail_json"])
             row_scope = _normalize_scope_token(detail.get("scope"))
+            if row_scope != scope_norm and not row_scope:
+                candidate = _graph_match_candidate(detail, repo_cache)
+                candidate_scope = _normalize_scope_token((candidate or {}).get("project"))
+                row_scope = candidate_scope or row_scope
             if row_scope == scope_norm:
                 out.append(r)
             if len(out) >= limit_n:
@@ -8483,6 +8488,7 @@ def cmd_graph_synth(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             'bundle_text': markdown_text,
         }
 
+        conn.commit()
         if bool(args.json):
             _emit(payload, True)
             return
@@ -8679,6 +8685,7 @@ def cmd_graph_synth(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             'staleCheck': current_item,
             'bundle_text': markdown_text,
         }
+        conn.commit()
         if bool(args.json):
             _emit(payload, True)
             return
