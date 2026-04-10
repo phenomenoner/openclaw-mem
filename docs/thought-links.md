@@ -2,7 +2,7 @@
 
 This page connects two design/benchmark references to concrete constraints in `openclaw-mem`.
 
-Sources (trusted by CK):
+Sources (project-trusted references):
 - Mastra — *Announcing Observational Memory*: <https://mastra.ai/blog/observational-memory>
 - LongMemEval (ICLR 2025): <https://github.com/xiaowu0162/LongMemEval>
 
@@ -175,7 +175,7 @@ A “context database” for agents that models **resources + memory + skills** 
 - `openclaw-mem` remains the **governance/control-plane** (importance, trust tiers, redaction, receipts, packing policy).
 - OpenViking is a strong reference for how to make context **structured, layered, and observable**.
 
-**Scope note (CK decision):**
+**Project scope note:**
 - Treat OpenViking as **thought-link only** for now (we are not committing to it as a backend/adapter arm yet).
 
 ## 8) Compiled synthesis layer (wiki-maintainer pattern) → reuse before re-derivation
@@ -306,7 +306,4 @@ A pluggable context engine for OpenClaw that stores all session messages in SQLi
 See also:
 - `docs/context-pack.md` (ContextPack v1 direction)
 - `docs/architecture.md` (Context Packer)
-
-
-
 

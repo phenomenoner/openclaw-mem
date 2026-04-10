@@ -15,7 +15,7 @@ This spec is intentionally *LLM-minimal*: **no local query-expansion models** an
 
 We frequently “do the right thing” operationally (write decisions, commit & push), but recall still fails:
 
-- The agent’s memory backend often can’t retrieve a decision unless CK supplies a specific keyword.
+- The agent’s memory backend often can’t retrieve a decision unless the user supplies a specific keyword.
 - Pushing to git does **not** automatically mean it becomes searchable to the agent.
 - Vector-only recall is brittle on:
   - dates / commit SHAs / paths

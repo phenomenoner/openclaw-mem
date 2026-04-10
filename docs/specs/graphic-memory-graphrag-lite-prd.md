@@ -37,7 +37,7 @@ Today, `openclaw-mem` has strong **progressive disclosure** on *rows* (`search â
 
 ## 5) Users / personas
 - Primary: **OpenClaw agent runtime / packer** (needs a deterministic, bounded context pack).
-- Secondary: **Operator (CK / engineers)** (needs observability, debugging, and governance controls).
+- Secondary: **Operators / engineers** (need observability, debugging, and governance controls).
 
 ## 6) User stories (priority order)
 1) As an agent/runtime, I want to request a **Graph IndexPack (L0)** so I can decide whether deeper context is needed.

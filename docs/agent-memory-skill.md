@@ -161,7 +161,7 @@ Store **one fact per record**, with a retrievable phrasing.
 Example text body (keep short):
 
 ```
-[preference] CK prefers: for long Telegram work, do one heads-up + one final result (no mid-flight chatter).
+[preference] The user prefers: for long Telegram work, do one heads-up + one final result (no mid-flight chatter).
 source: user-confirmed
 receipt: telegram thread link / date
 trust: trusted

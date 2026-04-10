@@ -50,7 +50,7 @@ Use for:
 - ongoing working state that is likely to matter across sessions
 
 Examples:
-- “CK prefers one heads-up + one final result for long Telegram work.”
+- “The user prefers one heads-up + one final result for long Telegram work.”
 - “Project wedge: trust-aware context packing.”
 - “This repo uses `uv` + Python 3.13 by default.”
 
@@ -178,7 +178,7 @@ Bad memory behavior often starts with bad queries.
 - Prefer searching for **decision / preference / policy / due item / repo map** rather than vague “what happened before?”
 
 ### Good recall queries
-- `CK preference telegram heads-up long task`
+- `user preference telegram heads-up long task`
 - `openclaw-mem wedge trust-aware context packing`
 - `decision docs topology memory layer separation`
 
@@ -282,11 +282,11 @@ If recall returns weak, conflicting, or low-confidence results:
 
 | Situation | Correct action | Why |
 |---|---|---|
-| “What does CK prefer for long Telegram tasks?” | recall | preference continuity |
+| “What does the user prefer for long Telegram tasks?” | recall | preference continuity |
 | “What does OpenClaw docs say about context packing?” | docs search | documented system behavior |
 | “Where is the graph query plane spec?” | topology search | repo/path lookup |
 | “This run produced lots of pip install chatter.” | do nothing | transient noise |
-| “CK confirmed the wedge is trust-aware context packing.” | store | explicit durable decision |
+| “The user confirmed the wedge is trust-aware context packing.” | store | explicit durable decision |
 | “Here is a long copied README section.” | do nothing / docs lane only | not durable memory material |
 | “What changed after we decided to split docs/topology from durable memory?” | recall + docs search | decision continuity + spec details |
 | “Which module will likely be touched if we alter provenance handling?” | topology search | impact mapping |

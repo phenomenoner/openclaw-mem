@@ -51,7 +51,7 @@ My current view:
    - episodic lanes already have retention defaults by event type
 
 ## What I want from you
-Please act as a sharp second-brain reviewer.
+Please act as a sharp critical reviewer.
 Give me:
 1. what is strongest or weakest in the thesis above
 2. what important angle is missing

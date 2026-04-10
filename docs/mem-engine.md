@@ -30,7 +30,7 @@ Observed gap:
   - index lifecycle/optimize,
   - version tags / easy rollback.
 
-Operator goal (what CK cares about):
+Operator goal (what most users care about):
 
 - **“Concept/goal → the right decisions/preferences/projects”** should be reliably retrievable.
 - Retrieval must be **controllable** (scope, importance, recency) and **explainable** (why these results).

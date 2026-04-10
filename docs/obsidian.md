@@ -16,7 +16,7 @@ Think of it as:
 
 ## What you get (why bother)
 
-### 1) A “second brain” UI for your agent’s memory
+### 1) A local knowledge-base UI for your agent’s memory
 
 - Browse exported memories as normal notes.
 - Cross-link them into projects/themes.
