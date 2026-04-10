@@ -272,7 +272,4 @@ The split keeps install and rollback boundaries clean.
 Dual-licensed: **MIT OR Apache-2.0**, at your option.
 
 - MIT terms: `LICENSE` (root canonical text for GitHub/license-scanner detection)
-- Apache 2.0 terms: `LICENSE-APACHE`
-oot canonical text for GitHub/license-scanner detection)
-- Apache 2.0 terms: `LICENSE-APACHE`
-E`
+- Apache 2.0 terms: `LICENSE-APACHE` (root canonical text for GitHub/license-scanner detection)
