@@ -50,6 +50,52 @@ class TestRouteAIndex(unittest.TestCase):
 
         conn.close()
 
+    def test_search_cjk_fallback_scope_can_infer_repo_root_when_detail_scope_is_missing(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            mem_repo = root / "openclaw-mem"
+            mem_repo.mkdir()
+            (mem_repo / ".git").mkdir()
+            skill_doc = mem_repo / "skills" / "route-auto-synthesis.ops.md"
+            skill_doc.parent.mkdir(parents=True)
+            skill_doc.write_text("# route auto synthesis\n", encoding="utf-8")
+
+            other_repo = root / "steamer"
+            other_repo.mkdir()
+            (other_repo / ".git").mkdir()
+            other_doc = other_repo / "docs" / "台北路線.md"
+            other_doc.parent.mkdir(parents=True)
+            other_doc.write_text("# 台北路線\n", encoding="utf-8")
+
+            conn.execute(
+                "INSERT INTO observations (ts, kind, summary, tool_name, detail_json) VALUES (?,?,?,?,?)",
+                (
+                    "2026-02-06T00:00:00Z",
+                    "note",
+                    "台北 路由 合成",
+                    "graph.capture-md",
+                    '{"source_path": "%s", "rel_path": "skills/route-auto-synthesis.ops.md"}' % str(skill_doc).replace('\\', '\\\\'),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO observations (ts, kind, summary, tool_name, detail_json) VALUES (?,?,?,?,?)",
+                (
+                    "2026-02-06T00:01:00Z",
+                    "note",
+                    "台北 路線",
+                    "graph.capture-md",
+                    '{"source_path": "%s", "rel_path": "docs/台北路線.md"}' % str(other_doc).replace('\\', '\\\\'),
+                ),
+            )
+            conn.commit()
+
+            rows = _search_cjk_fallback(conn, "台北", limit=5, scope="openclaw-mem")
+            self.assertEqual(len(rows), 1)
+            self.assertIn("route-auto-synthesis", rows[0]["detail_json"])
+
+        conn.close()
+
     def test_build_index_writes_file(self):
         conn = _connect(":memory:")
         # Insert minimal observations

@@ -2280,15 +2280,7 @@ def _search_cjk_fallback(
     where_expr = " OR ".join(["o.summary LIKE ?" for _ in like_vals])
 
     scope_norm = _normalize_scope_token(scope)
-    scope_clause = ""
     params: List[Any] = [*like_vals, *like_vals]
-    if scope_norm:
-        scope_clause = (
-            " AND lower(json_extract("
-            "CASE WHEN json_valid(o.detail_json) THEN o.detail_json ELSE '{}' END, '$.scope')) = ?"
-        )
-        params.append(scope_norm)
-
     sql = f"""
         SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
                o.summary AS snippet,
@@ -2296,13 +2288,29 @@ def _search_cjk_fallback(
                -1.0 * ({score_expr}) AS score,
                o.detail_json AS detail_json
         FROM observations o
-        WHERE ({where_expr}){scope_clause}
+        WHERE ({where_expr})
         ORDER BY score ASC, o.id DESC
         LIMIT ?;
     """
 
     params.append(int(limit))
-    return conn.execute(sql, params).fetchall()
+    rows = conn.execute(sql, params).fetchall()
+    if not scope_norm:
+        return rows
+
+    repo_cache: Dict[str, Optional[Path]] = {}
+    out: List[sqlite3.Row] = []
+    for r in rows:
+        detail = _pack_parse_detail_json(r["detail_json"])
+        row_scope = _normalize_scope_token(detail.get("scope"))
+        if not row_scope:
+            candidate = _graph_match_candidate(detail, repo_cache)
+            row_scope = _normalize_scope_token((candidate or {}).get("project")) or row_scope
+        if row_scope == scope_norm:
+            out.append(r)
+        if len(out) >= int(limit):
+            break
+    return out
 
 
 def _search_prefer_synthesis_rows(

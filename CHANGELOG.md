@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No unreleased changes yet.
 
+## [1.4.3] - 2026-04-09
+
+### Fixed
+
+- The CJK fallback search path now uses the same scope-inference fallback as the main FTS route: scoped CJK queries no longer drop valid file/repo-backed capture rows just because `detail.scope` is missing.
+
+### Testing
+
+- Added CJK-scope regression coverage in `tests/test_route_a.py` for repo-root inference when `detail.scope` is absent.
+- Re-ran `python3 -m unittest tests/test_route_a.py tests/test_graph_match_cli.py tests/test_autonomous_default_routing_cli.py tests/test_cli.py`.
+
 ## [1.4.2] - 2026-04-09
 
 ### Fixed
