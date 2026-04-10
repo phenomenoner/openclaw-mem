@@ -1,6 +1,6 @@
 # Quickstart
 
-This is the **fastest local proof** for the `openclaw-mem` wedge.
+This is the **fastest local proof** for `openclaw-mem`.
 
 Goal: show that the same query can produce a **smaller, safer, cited** pack once trust policy is enabled.
 
@@ -32,7 +32,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem ingest \
 
 What this gives you:
 - six synthetic rows with trust tiers, importance labels, and provenance refs
-- no private/user data
+- no private or user data
 - a reproducible basis for pack before/after comparison
 
 ## 3) Build the pack without trust gating
@@ -82,7 +82,7 @@ What changes:
 ### If the local proof was enough
 
 - move to [Deployment guide](deployment.md)
-- enable the sidecar on your existing OpenClaw install
+- add the sidecar to your existing OpenClaw install
 
 ### If you are integrating with OpenClaw agents
 

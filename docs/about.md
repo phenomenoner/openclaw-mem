@@ -1,149 +1,76 @@
 # About openclaw-mem
 
-`openclaw-mem` is a **trust-aware context packing layer for OpenClaw**.
+`openclaw-mem` is a memory layer for OpenClaw.
 
-It helps operators recover the right durable facts, keep prompt packs small, and avoid letting stale, untrusted, or hostile content quietly become durable memory or pollute future context.
+Its job is simple to describe and hard to do well: help an agent recover the right memory later **without** dragging stale, untrusted, or oversized context into every prompt.
 
-In practical terms, it helps answer four questions:
-- **what changed**
-- **why it changed**
-- **what should still be trusted**
-- **what should stay out of the pack**
+## What problem it solves
 
-## What this product is built for
+Long-running agents usually fail in one of these ways:
 
-- trustworthy memory behavior under long-running pressure,
-- trust-aware context packing (query-plane first, action-plane optional),
-- reproducible proof that policy changes pack selection with receipts,
-- and a sidecar-first rollout with optional mem-engine promotion and explicit rollback.
+- old notes still match the query even when they are no longer useful
+- untrusted or hostile content retrieves well and quietly shapes the answer
+- prompts bloat into giant memory dumps instead of a small cited bundle
+- when something goes wrong, there is no clear receipt showing why a memory was included
 
-## Start with proof, not adjectives
+`openclaw-mem` exists to make that behavior more transparent, bounded, and inspectable.
 
-If you want the core value in one artifact first:
+## What it does today
 
-- [Canonical trust-aware pack proof](showcase/trust-aware-context-pack-proof.md)
-- [Before/after metrics JSON](showcase/artifacts/trust-aware-context-pack.metrics.json)
-- [Synthetic fixture + receipts](showcase/artifacts/index.md)
+- local recall with `search → timeline → get`
+- compact memory packs with `pack`
+- trace receipts that show what was included or excluded
+- trust-policy controls for pack selection
+- sidecar capture on top of an existing OpenClaw install
+- optional promotion to `openclaw-mem-engine` later for hybrid recall and stronger policy controls
 
-The proof is intentionally **synthetic** so it is safe to run publicly and easy to inspect.
+## How the product is split
 
-## The problem it solves
-
-Most agent-memory stories sound fine until a long-running system starts doing one of these:
-
-- injecting stale notes because they still match the query text
-- packing untrusted or hostile content because it retrieved well
-- bloating prompts with giant memory dumps instead of a small cited pack
-- losing the ability to explain *why* a given memory entered context
-- making rollback harder because the memory layer behaves like a black box
-
-`openclaw-mem` exists to make memory admission and recall more transparent, bounded, and inspectable.
-
-## What operators can do today (v1.3.0)
-
-- run deterministic local recall (`search → timeline → get`) against SQLite
-- build compact packs with `pack`
-- emit redaction-safe pack receipts with `--trace`
-- apply `--pack-trust-policy exclude_quarantined_fail_open` to drop quarantined rows while keeping unknown trust explicit
-- inspect `policy_surface` and `lifecycle_shadow` to see what was selected, excluded, and logged
-- inspect topology relationships and drift via `graph query ...`, `graph query drift`, and `graph health`
-- run bounded idea → project matching with `graph match "<idea/query>"`, which returns candidate projects with explanation paths + provenance refs
-- gate graph-derived candidates with graph provenance policy surfaces
-- run recommendation-only hygiene checks with `optimize review` (recent-use-aware decay protection) and dream-style episodic candidate review with `optimize consolidation-review` (zero write path)
-- capture/ingest episodic events with redaction-first defaults
-- optionally promote to `openclaw-mem-engine` for hybrid recall, docs cold-lane ingest/search, and policy controls
-
-## Query plane vs action plane
-
-`openclaw-mem` is designed to stay safe and inspectable as it grows.
-
-- **Query plane (default):** recall + trust-aware context packing with citations and receipts.
-- **Action plane (optional):** recommendation-only hygiene and maintenance review queues (no silent writeback to durable memory).
-
-If you adopt action-plane features, treat them as **suggestion-first and write-gated**: you review and apply changes explicitly.
-
-## Product shape
-
-`openclaw-mem` is one product family, but it ships in two operator roles and therefore two plugin install units when packaged for a marketplace.
-
-Marketplace/install mapping:
-- `@phenomenoner/openclaw-mem` → sidecar role
-- `@phenomenoner/openclaw-mem-engine` → engine role
-
-That split preserves clean install and rollback boundaries.
+There are two roles in this project:
 
 ### Sidecar (default)
 
 This is the normal starting point.
 
-`openclaw-mem` captures observations into JSONL, ingests them into SQLite, and gives you a local recall / packing loop you can inspect:
+- captures observations into JSONL
+- ingests them into SQLite
+- gives you a local recall and pack loop you can inspect
+- does **not** replace your active OpenClaw memory backend
 
-`search → timeline → get → pack`
+### Memory engine (optional)
 
-What you get:
+This is the controlled next step when sidecar mode already proved useful.
 
-- local SQLite ledger with FTS
-- deterministic CLI and JSON receipts
-- trust-aware pack surfaces and lifecycle logs
-- optional ingest / triage / packaging flows
-- no forced change to your active OpenClaw memory slot
+- can become the active OpenClaw memory backend
+- adds hybrid recall and tighter policy controls
+- keeps rollback explicit and configuration-driven
 
-### Mem Engine (optional)
+## Query mode vs maintenance mode
 
-When you want `openclaw-mem` to do more than sidecar work, the optional **openclaw-mem-engine** can become the active OpenClaw memory backend.
+The repo uses a simple internal split:
 
-What it adds:
+- **Query mode** = recall and context packing with citations and trace receipts
+- **Maintenance mode** = read-only suggestions and review flows; no silent writeback to memory
 
-- hybrid recall (FTS + vector)
-- scoped / policy-aware retrieval
-- bounded autoRecall / autoCapture behavior
-- explicit receipts and rollbackable config knobs
+Most users can ignore that distinction at first. Start with the proof and the sidecar path.
 
-## Why local-first matters
+## Who it is for
 
-A memory system gets harder to trust when it gets harder to inspect.
-
-`openclaw-mem` keeps the base layer simple:
-
-- JSONL for append-only capture
-- SQLite for local search, timeline inspection, and pack generation
-- exportable artifacts you can diff, back up, and reason about
-- recordRef citations and trace receipts for packed context
-
-That means you can start small, prove value, and only add semantic layers where they genuinely help.
-
-## Who it’s for
-
-### OpenClaw operators
-You want durable capture, smaller safer prompt packs, and a cleaner incident trail.
-
-### Builders experimenting with agent memory
-You want something more useful than a toy demo, but less fragile than a giant hosted stack.
-
-### Teams that need memory with receipts
-You care about decisions, preferences, specs, notes, and operational breadcrumbs being retrievable later — with enough evidence to inspect them.
+- **OpenClaw operators** who want smaller, more inspectable memory packs
+- **Agent builders** who want a practical memory layer without jumping straight to a hosted stack
+- **Teams with decisions, notes, and specs to remember** who care about evidence and rollback, not just retrieval scores
 
 ## What it is not
 
-- **Not** a hosted SaaS memory product.
-- **Not** a mandate to capture everything forever.
-- **Not** a promise that retrieval quality comes from embeddings alone.
-- **Not** a requirement to replace OpenClaw native memory on day one.
+- not a hosted SaaS memory product
+- not a requirement to capture everything forever
+- not a promise that embeddings alone solve retrieval quality
+- not a requirement to replace OpenClaw native memory on day one
 
-Start with the sidecar, prove the pack works, then expand.
+## Recommended reading path
 
-## Recommended way to adopt it
-
-1. **Start with the trust-aware proof** — run the synthetic fixture and compare pack receipts before/after trust policy.
-2. **Add the sidecar** — wire capture + harvest into your existing OpenClaw install.
-3. **Promote the engine only if needed** — switch slot ownership when hybrid recall and policy controls justify it.
-
-## Read next
-
-- [Home / docs index](index.md)
-- [Choose an install path](install-modes.md)
-- [Quickstart](quickstart.md)
-- [Portable pack capsules](portable-pack-capsules.md)
-- [Reality check & status](reality-check.md)
-- [Context pack](context-pack.md)
-- [Mem Engine reference](mem-engine.md)
+1. [Quickstart](quickstart.md)
+2. [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md)
+3. [Choose an install path](install-modes.md)
+4. [Reality check & status](reality-check.md)
+5. [Deployment guide](deployment.md)

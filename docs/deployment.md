@@ -1,46 +1,47 @@
 # Deployment Guide
 
-Production deployment guide for openclaw-mem.
+This guide is for people who want to run `openclaw-mem` on a real OpenClaw install, not just try the local proof.
 
 ## Overview
 
-For production use, you'll want:
-1. **Auto-capture plugin** — Captures tool results automatically
-2. **Periodic ingestion** — Imports captured observations into SQLite
-3. **Log rotation** — Prevents JSONL files from growing unbounded
-4. **AI compression** — Periodic compression of daily notes (optional)
-5. **Monitoring** — Health checks and error alerts
+A normal production setup has five parts:
+1. **Auto-capture plugin** — captures tool results automatically
+2. **Periodic ingestion** — imports captured observations into SQLite
+3. **Log rotation** — keeps JSONL files from growing without bound
+4. **AI compression** — optional summarization of daily notes
+5. **Monitoring** — health checks and error alerts
 
-## Memory ecosystem fit (recommended topologies)
+## Pick your starting role
 
-- **Stable baseline**: slot=`memory-core` + `openclaw-mem` sidecar.
-- **Semantic-first**: slot=`memory-lancedb` + `openclaw-mem` sidecar + `memory-core` kept enabled for rollback.
-- **Controlled migration**: keep both entries enabled, switch only `plugins.slots.memory`, smoke test, rollback with one slot flip if needed.
+In most deployments, `openclaw-mem` starts as a **sidecar**.
+That means it adds capture, local recall, and receipts **without** replacing your active OpenClaw memory backend.
 
-`openclaw-mem` does not own the memory slot; it adds durable capture, local recall, and observability across both native backends.
+Common starting points:
 
-### Two different components in this repo (important)
+- **Stable baseline**: `memory-core` + `openclaw-mem` sidecar
+- **Semantic-first**: `memory-lancedb` + `openclaw-mem` sidecar
+- **Controlled migration**: keep both available, switch the active memory backend only after smoke tests
 
-This repo currently ships **two different plugin roles**:
+## Two install roles in this repo
+
+This repo ships two different plugin roles:
 
 1. **`openclaw-mem` sidecar plugin**
-   - captures/harvests durable observations
-   - does **not** own the OpenClaw memory slot
-   - is the default deployment path in this guide
+   - captures and harvests observations
+   - does **not** own the OpenClaw memory backend
+   - is the default path in this guide
 
-2. **`openclaw-mem-engine` memory-slot plugin**
-   - optional memory backend / engine
-   - owns read/write tool behavior when selected as the active memory slot
-   - its manifest is currently marked **`0.0.2`** (treat as a controlled rollout)
-   - can optionally run a route-auto prompt hook before agent start to inject a compact graph/transcript routing hint block
+2. **`openclaw-mem-engine` memory engine**
+   - optional active memory backend
+   - owns memory read/write behavior when selected
+   - should be treated as a controlled upgrade, not the default first install
 
-### Read-only carve-out: which component actually enforces it?
+## Read-only behavior
 
-- If you are using only the **sidecar** plugin, read-only is mostly a **prompt / runner-tooling discipline**.
-- If you are using **`openclaw-mem-engine`** as the active memory slot, set `readOnly: true` (or `OPENCLAW_MEM_ENGINE_READONLY=1`) to get **runtime-enforced** rejection of write-path operations.
+- If you are using only the **sidecar**, read-only behavior is mostly enforced by your prompt/runner setup.
+- If you are using **`openclaw-mem-engine`** as the active memory backend, set `readOnly: true` (or `OPENCLAW_MEM_ENGINE_READONLY=1`) to reject write-path operations at runtime.
 
-Detailed ownership boundaries and rollout patterns:
-- `docs/ecosystem-fit.md`
+For deeper ownership and migration notes, see [ecosystem fit](ecosystem-fit.md).
 
 ## 1. Plugin Installation
 

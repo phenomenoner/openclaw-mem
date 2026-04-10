@@ -1,7 +1,7 @@
 # Choose an install path
 
-There are **three sane ways** to adopt `openclaw-mem`.
-Pick the lightest one that solves your problem.
+There are three practical ways to adopt `openclaw-mem`.
+Start with the lightest path that solves your problem.
 
 ## Quick-start decision guide
 
@@ -61,10 +61,10 @@ Delete the test DB or the repo checkout. No OpenClaw state changed.
 ### What you get
 
 - tool-result capture
-- SQLite recall surface
+- SQLite recall layer
 - backend-aware observability
 - deterministic triage / ops workflows
-- no slot ownership change
+- no active memory-backend change
 
 ### First step
 
@@ -81,12 +81,12 @@ Disable the plugin, stop harvest jobs, remove the symlink if you added one. Your
 
 ---
 
-## Path 3 — Optional Mem Engine as slot owner
+## Path 3 — Optional Mem Engine as active memory backend
 
 ### Choose this when
 
 - sidecar mode already proved useful
-- you want hybrid recall, policies, and bounded automation in the active memory slot
+- you want hybrid recall, policies, and bounded automation in the active memory backend
 - you are comfortable doing a controlled switch with smoke tests and rollback
 
 ### What changes

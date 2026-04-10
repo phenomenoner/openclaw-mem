@@ -1,6 +1,6 @@
 # Reality check & status
 
-This page is intentionally factual.
+This page answers one question: **what is actually shipped, and how quickly can you verify it yourself?**
 
 **Legend**
 
@@ -10,7 +10,7 @@ This page is intentionally factual.
 
 ---
 
-## Reality check (verifiable in ~60s)
+## Quick reality check (verifiable in ~60s)
 
 ### 1) Install deps (from a fresh clone)
 
