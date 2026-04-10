@@ -2,6 +2,13 @@
 
 A memory layer for [OpenClaw](https://github.com/openclaw/openclaw) that keeps agent context small, cited, and less likely to be polluted by stale or untrusted content.
 
+## What you get
+
+- compact memory packs with citations and trace receipts
+- trust-policy controls for excluding quarantined content
+- sidecar deployment on an existing OpenClaw install
+- optional promotion to `openclaw-mem-engine` later for hybrid recall and tighter policy controls
+
 ## Why this exists
 
 Long-running agents do not just forget. They also accumulate memory that quietly degrades:
@@ -49,39 +56,16 @@ Full proof path:
 - [Synthetic fixture + receipts](docs/showcase/artifacts/index.md)
 - [Inside-out demo](docs/showcase/inside-out-demo.md)
 
-## What you get
-
-- compact memory packs with citations and trace receipts
-- trust-policy controls for excluding quarantined content
-- sidecar deployment on an existing OpenClaw install
-- optional promotion to `openclaw-mem-engine` later for hybrid recall and tighter policy controls
-- bounded idea → project matching and routing helpers when you want graph-backed guidance
-
 ## Install paths
 
 Three paths: local proof, sidecar plugin, or full memory engine.
 Read the guide: [Choose an install path](docs/install-modes.md)
 
-## Read next
+## Start here
 
 - [Quickstart](docs/quickstart.md)
-- [Docs home](docs/index.md)
-- [About the project](docs/about.md)
-- [Deployment guide](docs/deployment.md)
 - [Reality check & status](docs/reality-check.md)
-- [Portable pack capsules](docs/portable-pack-capsules.md)
-- [GitHub releases](https://github.com/phenomenoner/openclaw-mem/releases)
-
-## Install roles
-
-`openclaw-mem` ships in two install roles:
-
-- **Sidecar (default)** — capture, ingest, local recall, and pack receipts without replacing the active OpenClaw memory backend
-- **Mem Engine (optional)** — active memory backend with hybrid recall and tighter policy controls
-
-Marketplace/package mapping:
-- `@phenomenoner/openclaw-mem` = sidecar package
-- `@phenomenoner/openclaw-mem-engine` = engine package
+- [Deployment guide](docs/deployment.md)
 
 ## License
 
