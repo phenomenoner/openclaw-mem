@@ -13,12 +13,12 @@ labels:
 
 scenarios:
   - id: S01
-    prompt: "What does CK prefer for long Telegram tasks?"
+    prompt: "What does the user prefer for long Telegram tasks?"
     expect: recall
     why: "User preference continuity; should already be in durable memory if confirmed."
 
   - id: S02
-    prompt: "CK just confirmed: 'Only ping me when watchdog finds anomalies.' Please remember that."
+    prompt: "The user just confirmed: 'Only ping me when watchdog finds anomalies.' Please remember that."
     expect: store
     why: "Explicit new standing preference; durable across sessions."
 
@@ -108,7 +108,7 @@ scenarios:
     why: "Short-lived scratch; avoid polluting durable memory."
 
   - id: S20
-    prompt: "CK confirmed the product wedge is trust-aware context packing."
+    prompt: "The user confirmed the product wedge is trust-aware context packing."
     expect: store
     why: "Explicit durable product direction; store as a compact decision fact with provenance."
 
@@ -123,7 +123,7 @@ scenarios:
     why: "Watchdog/healthcheck lanes are read-only by default; avoid high-volume, low-signal writes to durable memory."
 
   - id: S23
-    prompt: "(watchdog lane) An anomaly happened. CK says: 'From now on, alert when observation count < 10.' Please remember that."
+    prompt: "(watchdog lane) An anomaly happened. The user says: 'From now on, alert when observation count < 10.' Please remember that."
     expect: store
     why: "Explicit new standing rule triggered by an incident; store as a compact preference/decision (not raw logs)."
 
@@ -133,6 +133,6 @@ scenarios:
     why: "Asks for canonical wording/policy; use operator-authored docs/SOPs."
 
   - id: S25
-    prompt: "(smoke lane / read-only) What does CK prefer for watchdog notifications?"
+    prompt: "(smoke lane / read-only) What does the user prefer for watchdog notifications?"
     expect: recall
     why: "Preference continuity is still recallable in read-only lanes; read-only forbids storing, not recalling."

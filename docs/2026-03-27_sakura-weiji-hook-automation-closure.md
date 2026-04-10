@@ -6,7 +6,7 @@ Companion repo: `delirium-to-weiji`
 ## Verdict
 Wei Ji is now wired into the highest-ROI OpenClaw lane: **`memory_store` can auto-run Wei Ji preflight before memory is written**.
 
-This slice lands the real automation wedge CK asked for:
+This slice lands the core automation wedge for this line:
 - the operator does **not** need to remember a wrapper command for the explicit memory-write moment,
 - the flow can ask Wei Ji automatically,
 - the posture stays advisory-first + rollbackable.

@@ -32,7 +32,7 @@ OpenClaw already ships with a **native memory search subsystem** (SQLite + sqlit
 | Progressive disclosure search (3-layer) | **Adopt** | Token-efficiency is non‑negotiable; proven pattern. | Implement `search → timeline → get_observations` in CLI and plugin API. |
 | Session lifecycle hooks | **Adapt** | OpenClaw has command hooks now; session:start/end are “future events.” | Use `command:new`, `command:reset`, `command:stop`, `agent:bootstrap` until session events land. |
 | Worker service (HTTP API) | **Skip (v1)** | Overkill for CLI-first. Can add later if UI is built. | Keep as local library + CLI commands. |
-| Viewer UI | **Skip (v1)** | Nice-to-have; not required by CK. | Defer; maybe a simple `openclaw-mem tail` later. |
+| Viewer UI | **Skip (v1)** | Nice-to-have; not required for the initial release. | Defer; maybe a simple `openclaw-mem tail` later. |
 | mem-search skill | **Adapt** | OpenClaw skill system is markdown-based; for CLI-based search, use plugin CLI. | Provide a skill wrapper that calls `openclaw-mem search`. |
 
 ---

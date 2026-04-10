@@ -23,4 +23,4 @@
 ## Remaining optional polish
 - [ ] cut a shorter first-release edition if publishing as a single launch post
 - [ ] derive X thread / newsletter / blog variants from the same spine
-- [ ] add final publication target/channel metadata once CK chooses the surface
+- [ ] add final publication target/channel metadata once the publication surface is chosen
