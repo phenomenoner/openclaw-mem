@@ -50,6 +50,8 @@ Never store:
 ## Graphic Memory compiled synthesis note
 - Fresh synthesis cards are **derived graph artifacts**, not L1 durable-memory facts by default.
 - If a retrieval surface prefers one synthesis card over many covered raw refs, keep the provenance / covered-ref receipt with it.
+- For maintenance, prefer `openclaw-mem graph synth recommend` as the zero-write Dream Lite surface before any explicit `graph synth refresh` or new compile action.
+- Recommendation judgment and any later autonomous-write authority belong to **Lyria**, not lighter scout/helper lanes.
 
 ## Output behavior
 Answer using the best lane with provenance. Store only after confirmation, and store **one fact per record**.

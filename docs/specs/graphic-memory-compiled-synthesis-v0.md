@@ -117,45 +117,66 @@ This enables cheap stale detection when the supporting set changes.
 ## Minimal command surface
 
 ### `graph synth compile`
-Build a bounded synthesis card from selected refs.
+Generate a bounded synthesis card derived from selected reference sets.
 
-Input options can reuse existing graph helpers:
-- explicit `--record-ref ...`
-- `--from-preflight <json>`
-- `--from-query <query> --scope <scope>` (internally runs the existing preflight/index path first)
+**Input options**
+Supports standard graph-ingestion patterns:
+- `--record-ref <ref>` for explicit reference selection
+- `--from-preflight <json>` to consume preflight output
+- `--from-query <query> --scope <scope>` to run the preflight/index path before compilation
 
-Output:
-- synthesis card JSON receipt
-- optional Markdown materialization
+**Outputs**
+- a synthesis-card JSON receipt
+- optional Markdown materialization for human inspection
 
-Default posture:
+**Default posture**
 - safe mode
 - bounded output
 - provenance-first
-- no raw long-body excerpts by default
+- minimal excerpts by default
 
 ### `graph synth stale`
-Check whether a synthesis card is stale.
+Evaluate the freshness of an existing synthesis card.
 
-Signals:
+**Signals**
 - source digest mismatch
 - newer supporting refs added within scope
 - newer contradictory refs exist
 
-Output:
-- `fresh | stale | review`
-- reason list
-- minimal provenance summary
+**Output**
+- status: `fresh | stale | review`
+- a structured reason list
+- a minimal provenance summary
 
 ### `graph lint`
-Health-check the graph/cardiography layer.
+Run diagnostic health checks across the graph and cardiography layers.
 
-Initial v0 checks:
+**Initial v0 checks**
 - orphan captured nodes with repeated retrieval but no synthesis card
 - synthesis cards with missing or empty provenance
 - stale synthesis cards
-- suspicious hub growth / low-signal capture bursts
-- contradictory candidate refs in the same scope without a synthesis card update
+- suspicious hub growth or low-signal capture bursts
+- contradictory candidate refs in the same scope without a synthesis-card update
+
+### `graph synth recommend`
+Generate a bounded, read-only maintenance recommendation packet.
+
+**Purpose**
+Bridge stale-card pressure and uncovered-cluster pressure into a single actionable maintenance surface. This keeps mutation explicit instead of allowing silent background refreshes.
+
+**Outputs**
+- receipt kind: `openclaw-mem.graph.synth.recommend.v0`
+- action classes:
+  - `refresh_card`
+  - `compile_new_card`
+  - `no_action`
+- bounded target metadata and a suggested next command
+
+**Contract**
+- recommendation-only
+- no direct synthesis-card mutation
+- fail-open if graph or synthesis state is thin or empty
+- intended as the first Dream Lite maintenance lane before any governed autonomy layer exists
 
 ## A-fast / A-deep split
 

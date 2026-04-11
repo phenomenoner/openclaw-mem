@@ -109,18 +109,36 @@ If recall/docs results are weak, conflicting, or low-confidence:
 - **Docs ingest (L2):** `openclaw-mem docs ingest --path ./docs`
 - **Topology (L3):** repo inspection (`rg`, `tree`) + write a small topo note under `docs/topology/` (then ingest via docs)
 
-### Graphic Memory compiled synthesis (derived graph artifact, not L1)
-When multiple raw graph hits are already well-covered by a fresh synthesis card, retrieval surfaces may prefer the card instead of replaying every raw row.
+### Graphic Memory: compiled synthesis
 
-Current compiled-synthesis surfaces:
-- `openclaw-mem graph synth compile|stale|refresh`
-- `openclaw-mem graph lint` (staleness + coverage pressure / candidate-card suggestions)
-- Graph-aware consumption in `graph preflight`, `graph pack`, `pack --use-graph`, `search`, and `hybrid`
+Compiled synthesis cards are Layer 2 (L2) artifacts derived from raw Layer 1 (L1) graph data. When multiple raw graph hits are already well-covered by a fresh synthesis card, retrieval surfaces may prefer the card instead of replaying every raw row.
 
-Rule:
-- treat synthesis cards as **derived graph artifacts with provenance**, not as durable memory facts by default
-- prefer them when they reduce truthful repetition
-- keep raw refs reachable via receipts / citations / covered-refs metadata
+#### Core commands
+
+**Management and synthesis**
+- `openclaw-mem graph synth compile|stale|refresh|recommend`
+- `openclaw-mem graph lint` — surfaces staleness, coverage pressure, and candidate-card suggestions
+
+**Graph-aware consumption**
+The following surfaces may prefer synthesis cards over raw rows when coverage is sufficient:
+- `graph preflight`
+- `graph pack`
+- `pack --use-graph`
+- `search`
+- `hybrid`
+
+#### Maintenance: Dream Lite
+`openclaw-mem graph synth recommend` is the bounded, zero-write maintenance surface. It inspects stale/review pressure and uncovered clustered evidence, then emits explicit next-step recommendations without mutating synthesis cards directly.
+
+Possible recommendations:
+- `refresh_card`
+- `compile_new_card`
+- `no_action`
+
+#### Operational rules
+- Treat synthesis cards as **derived artifacts with provenance**, not as primary durable memory facts.
+- Prefer them when they reduce truthful repetition during retrieval.
+- Keep raw refs reachable through receipts, citations, or covered-ref metadata.
 - **Graph match (L3):** `openclaw-mem graph match "…"` for idea → project / concept → project candidate routing.
   - For unattended use, prefer `openclaw-mem graph readiness` (bridges freshness + topology-source drift + match-support availability).
   - If you want a single deterministic router across graph-semantic and transcript recall, use `openclaw-mem route auto "<query>"` (fail-open).
