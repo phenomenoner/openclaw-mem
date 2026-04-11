@@ -112,6 +112,11 @@ One line:
 Read-only maintenance and recall helpers may surface recommendation packets, but recommendation judgment and any future autonomous-write authority should remain in an explicit governor lane rather than helper/scout lanes.
 See: `docs/specs/governed-dreaming-suggestion-write-authority-v0.md`.
 
+### Apply-readiness note
+Even after `governor-review`, real mutation should stay behind a separate canary apply contract.
+The first acceptable apply-readiness cut is refresh-only, dry-run first, receipt-heavy, and rollbackable.
+See: `docs/specs/compiled-synthesis-assist-apply-canary-v0.md`.
+
 ### Receipt controls (P0-2)
 - `receipts.enabled` (default `true`)
 - `receipts.verbosity` (`low` default, `high` optional)
