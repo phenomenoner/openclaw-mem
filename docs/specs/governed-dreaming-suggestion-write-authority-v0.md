@@ -27,7 +27,7 @@ The next risk is governance drift:
 
 ## Core role split
 
-### 1) Scout lane
+### 1) Scout/helper lane
 Authorized to aggregate evidence and emit read-only recommendation packets.
 
 Allowed:

@@ -135,9 +135,9 @@ Possible recommendations:
 - `compile_new_card`
 - `no_action`
 
-#### Governor review
-`openclaw-mem optimize governor-review` is the next zero-write governance surface.
-It consumes recommendation packets and emits explicit judgment packets without performing mutation.
+#### Review and approval
+`openclaw-mem optimize governor-review` is the next read-only review command.
+It consumes recommendation packets and emits explicit approval decisions without performing mutation.
 
 Current decision ladder:
 - `ignore`

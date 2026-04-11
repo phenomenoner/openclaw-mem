@@ -8,7 +8,7 @@
 ## Intent
 Define the smallest rollbackable bridge between governed review and future mutation for compiled-synthesis maintenance.
 
-This spec **does not** authorize background autonomous mutation. It defines conditions under which a future canary apply lane could be considered safe enough to test.
+This spec **does not** authorize background autonomous mutation. It defines the conditions under which a future trial apply lane could be considered safe enough to test.
 
 ## Why this exists
 `openclaw-mem` now utilizes Dream Lite recommendation packets and governor judgment packets. To mitigate the risk of jumping straight from judgment into mutation, this spec inserts a **bounded canary gate**. The first apply path, if ever implemented, must be:
