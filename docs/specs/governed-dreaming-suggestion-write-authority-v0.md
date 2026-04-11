@@ -127,16 +127,19 @@ Before any future autonomous apply path is implemented, it must inherit these ru
 
 These should fail closed for mutation and fail open for read-only recommendation surfaces.
 
-## Minimal next implementation slice
+## Current implementation surface
 Do **not** build autonomous write next.
 
-The smallest sane next slice is a **governor review surface** that consumes recommendation packets and emits one explicit decision packet from the ladder above, while remaining zero-write.
+The first implementation slice for this contract is now landed as a zero-write governor review surface:
+- `openclaw-mem optimize governor-review`
 
-Example shape only:
-- read recommendation packet(s)
-- output decision packet(s)
-- no mutation
-- bounded receipts
+Current shape:
+- reads recommendation packet(s)
+- outputs explicit decision packet(s)
+- performs no mutation
+- keeps bounded receipts / decision ladder output
+
+The next mutation-adjacent slice, if reopened later, must still stay behind an explicit write contract and rollback posture.
 
 ## Acceptance criteria for this governance phase
 A reader should be able to answer:

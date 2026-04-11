@@ -5729,6 +5729,86 @@ class TestGraphSynthesisCli(unittest.TestCase):
         self.assertEqual(suggestion["recordRefs"], ["obs:1", "obs:2"])
         conn.close()
 
+    def test_graph_synth_recommend_recommends_refresh_for_stale_card(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha captured", "tool_name": "graph.capture-md", "detail": {}})
+
+        compile_args = build_parser().parse_args([
+            "graph", "synth", "compile",
+            "--query", "alpha",
+            "--title", "Alpha synthesis",
+            "--summary", "Alpha synthesis",
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_args.func(conn, compile_args)
+
+        _insert_observation(conn, {"kind": "note", "summary": "alpha new capture", "tool_name": "graph.capture-git", "detail": {}})
+        before_count = conn.execute("SELECT COUNT(*) AS n FROM observations").fetchone()["n"]
+
+        args = build_parser().parse_args(["graph", "synth", "recommend"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+
+        after_count = conn.execute("SELECT COUNT(*) AS n FROM observations").fetchone()["n"]
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.recommend.v0")
+        self.assertGreaterEqual(out["counts"]["refreshSynthesis"], 1)
+        refresh_items = [item for item in out["items"] if item["action"] == "refresh_card"]
+        self.assertTrue(refresh_items)
+        self.assertEqual(refresh_items[0]["target"]["recordRef"], "obs:2")
+        self.assertIn("graph synth refresh obs:2", refresh_items[0]["suggestion"]["command"])
+        self.assertEqual(before_count, after_count)
+        conn.close()
+
+    def test_graph_synth_recommend_recommends_compile_for_uncovered_scope_cluster(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "rollout checkpoint ready", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        _insert_observation(conn, {"kind": "note", "summary": "rollout checkpoint blocked", "tool_name": "memory_store", "detail": {"scope": "proj.alpha"}})
+        before_count = conn.execute("SELECT COUNT(*) AS n FROM observations").fetchone()["n"]
+
+        args = build_parser().parse_args(["graph", "synth", "recommend"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+
+        after_count = conn.execute("SELECT COUNT(*) AS n FROM observations").fetchone()["n"]
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.recommend.v0")
+        self.assertGreaterEqual(out["counts"]["compileSynthesis"], 1)
+        compile_items = [item for item in out["items"] if item["action"] == "compile_new_card"]
+        self.assertTrue(compile_items)
+        self.assertEqual(compile_items[0]["target"]["scope"], "proj.alpha")
+        self.assertEqual(compile_items[0]["target"]["clusterKey"], "checkpoint")
+        self.assertEqual(compile_items[0]["target"]["recordRefs"], ["obs:1", "obs:2"])
+        self.assertIn("--record-ref obs:1", compile_items[0]["suggestion"]["command"])
+        self.assertEqual(before_count, after_count)
+        conn.close()
+
+    def test_graph_synth_recommend_returns_no_action_on_empty_state_without_writes(self):
+        conn = _connect(":memory:")
+        before_count = conn.execute("SELECT COUNT(*) AS n FROM observations").fetchone()["n"]
+
+        args = build_parser().parse_args(["graph", "synth", "recommend"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(conn, args)
+
+        after_count = conn.execute("SELECT COUNT(*) AS n FROM observations").fetchone()["n"]
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.recommend.v0")
+        self.assertEqual(out["counts"]["refreshSynthesis"], 0)
+        self.assertEqual(out["counts"]["compileSynthesis"], 0)
+        self.assertEqual(out["counts"]["noAction"], 1)
+        self.assertEqual(out["items"], [{
+            "action": "no_action",
+            "reasons": ["no_recommendations"],
+            "target": {},
+            "suggestion": {"args": [], "command": None},
+        }])
+        self.assertEqual(before_count, after_count)
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

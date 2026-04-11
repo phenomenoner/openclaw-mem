@@ -135,6 +135,16 @@ Possible recommendations:
 - `compile_new_card`
 - `no_action`
 
+#### Governor review
+`openclaw-mem optimize governor-review` is the next zero-write governance surface.
+It consumes recommendation packets and emits explicit judgment packets without performing mutation.
+
+Current decision ladder:
+- `ignore`
+- `proposal_only`
+- `approved_for_apply`
+- `blocked_high_risk`
+
 #### Operational rules
 - Treat synthesis cards as **derived artifacts with provenance**, not as primary durable memory facts.
 - Prefer them when they reduce truthful repetition during retrieval.

@@ -1831,6 +1831,157 @@ def _optimize_policy_load_state(path: Optional[str]) -> Tuple[Optional[Dict[str,
     return (out, None)
 
 
+
+
+def _optimize_governor_review_load_packet(path_value: Optional[str]) -> Dict[str, Any]:
+    if path_value:
+        raw = Path(path_value).read_text(encoding='utf-8')
+    else:
+        raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except Exception as e:
+        raise ValueError(f"invalid_json: {e}") from e
+    if not isinstance(payload, dict):
+        raise ValueError("packet must be a JSON object")
+    if str(payload.get('kind') or '') != 'openclaw-mem.graph.synth.recommend.v0':
+        raise ValueError('unsupported packet kind')
+    items = payload.get('items')
+    if not isinstance(items, list):
+        raise ValueError('packet items must be a list')
+    return payload
+
+
+def _optimize_governor_review_item(item: Dict[str, Any], *, approve_refresh: bool, governor: str, index: int) -> Dict[str, Any]:
+    action = str(item.get('action') or '').strip()
+    reasons = [str(x) for x in list(item.get('reasons') or []) if str(x)]
+    target = item.get('target') if isinstance(item.get('target'), dict) else {}
+    suggestion = item.get('suggestion') if isinstance(item.get('suggestion'), dict) else {}
+    candidate_id = f"candidate-{index:03d}"
+    evidence_refs: List[str] = []
+    apply_lane = None
+    risk_level = 'low'
+    decision = 'proposal_only'
+    decision_reasons: List[str] = []
+
+    if action == 'no_action':
+        decision = 'ignore'
+        risk_level = 'low'
+        decision_reasons = ['no_action_packet']
+    elif action == 'refresh_card':
+        record_ref = str(target.get('recordRef') or '').strip()
+        if not record_ref:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['missing_refresh_target']
+        else:
+            evidence_refs.append(record_ref)
+            apply_lane = 'graph.synth.refresh'
+            if approve_refresh:
+                decision = 'approved_for_apply'
+                decision_reasons = ['refresh_target_present', 'approve_refresh_enabled']
+            else:
+                decision = 'proposal_only'
+                decision_reasons = ['refresh_target_present', 'awaiting_governor_approval']
+    elif action == 'compile_new_card':
+        record_refs = [str(x) for x in list(target.get('recordRefs') or []) if str(x)]
+        if not record_refs:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['missing_compile_targets']
+        else:
+            evidence_refs.extend(record_refs[:8])
+            apply_lane = 'graph.synth.compile'
+            risk_level = 'medium'
+            decision = 'proposal_only'
+            decision_reasons = ['new_card_requires_governor_review']
+    else:
+        decision = 'blocked_high_risk'
+        risk_level = 'high'
+        decision_reasons = ['unsupported_action_class']
+
+    if reasons:
+        decision_reasons.extend(reasons)
+
+    return {
+        'candidate_id': candidate_id,
+        'recommended_action': action or None,
+        'decision': decision,
+        'reasons': decision_reasons,
+        'evidence_refs': evidence_refs,
+        'risk_level': risk_level,
+        'apply_lane': apply_lane,
+        'judged_by': governor,
+        'target': target,
+        'suggestion': suggestion,
+    }
+
+
+def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    try:
+        packet = _optimize_governor_review_load_packet(getattr(args, 'from_file', None))
+    except Exception as e:
+        _emit({'error': str(e)}, True)
+        sys.exit(2)
+
+    items = packet.get('items') if isinstance(packet.get('items'), list) else []
+    governor = str(getattr(args, 'governor', None) or 'governor').strip() or 'governor'
+    judged_items = [
+        _optimize_governor_review_item(
+            item if isinstance(item, dict) else {},
+            approve_refresh=bool(getattr(args, 'approve_refresh', False)),
+            governor=governor,
+            index=i + 1,
+        )
+        for i, item in enumerate(items)
+    ]
+
+    counts = {
+        'ignore': sum(1 for x in judged_items if str(x.get('decision') or '') == 'ignore'),
+        'proposalOnly': sum(1 for x in judged_items if str(x.get('decision') or '') == 'proposal_only'),
+        'approvedForApply': sum(1 for x in judged_items if str(x.get('decision') or '') == 'approved_for_apply'),
+        'blockedHighRisk': sum(1 for x in judged_items if str(x.get('decision') or '') == 'blocked_high_risk'),
+        'items': len(judged_items),
+    }
+
+    payload = {
+        'kind': 'openclaw-mem.optimize.governor-review.v0',
+        'ts': _utcnow_iso(),
+        'source': {
+            'kind': str(packet.get('kind') or ''),
+            'fromFile': str(getattr(args, 'from_file', None) or '') or None,
+        },
+        'governor': {
+            'lane': governor,
+            'approvalMode': 'approve_refresh' if bool(getattr(args, 'approve_refresh', False)) else 'proposal_only',
+        },
+        'policy': {
+            'mode': 'review_only',
+            'writes_performed': 0,
+            'memory_mutation': 'none',
+        },
+        'counts': counts,
+        'items': judged_items,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    lines = [
+        f"openclaw-mem optimize governor-review ({governor})",
+        (
+            f"ignore={counts['ignore']} proposal_only={counts['proposalOnly']} "
+            f"approved_for_apply={counts['approvedForApply']} blocked_high_risk={counts['blockedHighRisk']}"
+        ),
+    ]
+    for item in judged_items[:10]:
+        lines.append(
+            f"{item.get('candidate_id')} action={item.get('recommended_action')} decision={item.get('decision')} risk={item.get('risk_level')}"
+        )
+    print("\n".join(lines))
+
 def cmd_optimize_policy_loop(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     review_limit = _optimize_policy_int(getattr(args, "review_limit", 1000), 1000, min_value=1)
     writeback_limit = _optimize_policy_int(getattr(args, "writeback_limit", 500), 500, min_value=1)
@@ -8700,6 +8851,32 @@ def cmd_graph_synth(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         print(markdown_text, end='')
         return
 
+    if synth_cmd == 'recommend':
+        payload = _graph_synth_recommend_payload(conn)
+        if bool(args.json):
+            _emit(payload, True)
+            return
+        for item in list(payload.get('items') or []):
+            action = str(item.get('action') or '')
+            reasons = ','.join(str(reason) for reason in list(item.get('reasons') or []) if str(reason)) or '-'
+            target = item.get('target') if isinstance(item.get('target'), dict) else {}
+            suggestion = item.get('suggestion') if isinstance(item.get('suggestion'), dict) else {}
+            parts = [f'action={action}', f'reasons={reasons}']
+            if action == 'refresh_card':
+                if target.get('recordRef'):
+                    parts.append(f"recordRef={target.get('recordRef')}")
+                if target.get('status'):
+                    parts.append(f"status={target.get('status')}")
+            elif action == 'compile_new_card':
+                if target.get('scope'):
+                    parts.append(f"scope={target.get('scope')}")
+                if target.get('clusterKey'):
+                    parts.append(f"clusterKey={target.get('clusterKey')}")
+            if suggestion.get('command'):
+                parts.append(f"command={suggestion.get('command')}")
+            print(' '.join(parts))
+        return
+
     _emit({'error': f'unknown graph synth command: {synth_cmd}'}, True)
     sys.exit(2)
 
@@ -8845,6 +9022,118 @@ def _graph_candidate_card_suggestions(
         'scopedSourceRows': scoped_row_count,
         'uncoveredScopedSourceRows': uncovered_scoped_count,
         'candidateCardSuggestions': suggestions,
+    }
+
+
+def _graph_synth_dream_lite_refresh_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    base_reasons = [str(reason) for reason in list(item.get('reasons') or []) if str(reason)]
+    review_reasons: List[str] = []
+    for signal in list(item.get('reviewSignals') or []):
+        kind = str(signal.get('kind') or '').strip()
+        keyword = str(signal.get('keyword') or '').strip()
+        if not kind:
+            continue
+        review_reasons.append(f"{kind}:{keyword}" if keyword else kind)
+    reasons = list(dict.fromkeys(base_reasons + review_reasons))
+    record_ref = str(item.get('recordRef') or '')
+    args = ['graph', 'synth', 'refresh', record_ref]
+    return {
+        'action': 'refresh_card',
+        'reasons': reasons,
+        'target': {
+            'recordRef': record_ref,
+            'title': item.get('title'),
+            'status': item.get('status'),
+            'scope': item.get('scope'),
+        },
+        'suggestion': {
+            'args': args,
+            'command': 'openclaw-mem ' + ' '.join(shlex.quote(part) for part in args),
+        },
+    }
+
+
+def _graph_synth_dream_lite_compile_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    scope = str(item.get('scope') or '').strip() or None
+    cluster_key = str(item.get('clusterKey') or '').strip() or None
+    record_refs = _graph_collect_ref_tokens(item.get('recordRefs') or [])
+    args: List[str] = ['graph', 'synth', 'compile']
+    for ref in record_refs:
+        args.extend(['--record-ref', ref])
+    title_parts = [part for part in [scope, cluster_key] if part]
+    if title_parts:
+        args.extend(['--title', f"Graph synthesis: {' '.join(title_parts)}"])
+    return {
+        'action': 'compile_new_card',
+        'reasons': [str(item.get('reason') or 'uncovered_scope_cluster')],
+        'target': {
+            'scope': scope,
+            'clusterKey': cluster_key,
+            'clusterType': item.get('clusterType'),
+            'recordRefs': record_refs,
+            'uncoveredSourceCount': int(item.get('uncoveredSourceCount') or 0),
+            'toolNames': list(item.get('toolNames') or []),
+        },
+        'suggestion': {
+            'args': args,
+            'command': 'openclaw-mem ' + ' '.join(shlex.quote(part) for part in args),
+        },
+    }
+
+
+def _graph_synth_recommend_payload(conn: sqlite3.Connection) -> Dict[str, Any]:
+    synth_rows = conn.execute(
+        "SELECT id, ts, kind, tool_name, summary, detail_json FROM observations WHERE tool_name = 'graph.synth-compile' ORDER BY id"
+    ).fetchall()
+    synth_items = [_graph_eval_synthesis_card(conn, row) for row in synth_rows]
+
+    refresh_items: List[Dict[str, Any]] = []
+    for item in synth_items:
+        status = str(item.get('status') or '').strip()
+        if status not in {'stale', 'review'}:
+            continue
+        refresh_items.append(_graph_synth_dream_lite_refresh_item(item))
+    refresh_items.sort(
+        key=lambda it: (
+            0 if str(((it.get('target') or {}).get('status') or '')) == 'stale' else 1,
+            -len(it.get('reasons') or []),
+            str(((it.get('target') or {}).get('recordRef') or '')),
+        )
+    )
+
+    coverage_pressure = _graph_candidate_card_suggestions(conn, synth_items=synth_items)
+    compile_items = [
+        _graph_synth_dream_lite_compile_item(item)
+        for item in list(coverage_pressure.get('candidateCardSuggestions') or [])
+    ]
+
+    items = refresh_items + compile_items
+    if not items:
+        items = [
+            {
+                'action': 'no_action',
+                'reasons': ['no_recommendations'],
+                'target': {},
+                'suggestion': {
+                    'args': [],
+                    'command': None,
+                },
+            }
+        ]
+
+    counts = {
+        'refreshSynthesis': len(refresh_items),
+        'compileSynthesis': len(compile_items),
+        'noAction': 1 if items and str(items[0].get('action') or '') == 'no_action' else 0,
+        'items': len(items),
+        'synthesisCards': len(synth_items),
+        'candidateCardSuggestions': len(compile_items),
+    }
+    return {
+        'kind': 'openclaw-mem.graph.synth.recommend.v0',
+        'ts': _utcnow_iso(),
+        'counts': counts,
+        'items': items,
     }
 
 
@@ -12735,6 +13024,13 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--max-repeated-miss-groups-stage-c", dest="max_repeated_miss_groups_stage_c", type=int, default=1, help="Maximum repeated miss groups tolerated for Stage C gate (default: 1)")
     o.set_defaults(func=cmd_optimize_policy_loop)
 
+    o = osub.add_parser("governor-review", help="Review recommendation packets and emit explicit judgment packets (no writes)")
+    add_common(o)
+    o.add_argument("--from-file", dest="from_file", default=None, help="Recommendation packet JSON path (default: stdin)")
+    o.add_argument("--governor", default="governor", help="Judging lane label recorded in output (default: governor)")
+    o.add_argument("--approve-refresh", dest="approve_refresh", action="store_true", help="Approve low-risk refresh_card actions for apply consideration")
+    o.set_defaults(func=cmd_optimize_governor_review)
+
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)
     sp.add_argument("--file", help="JSONL file path (default: stdin)")
@@ -13060,6 +13356,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--why-it-matters", dest="why_it_matters", help="Optional replacement why-it-matters note")
     s.add_argument("--write-md", dest="write_md", help="Optional Markdown materialization path")
     s.add_argument("--force", action="store_true", help="Force a refresh even if the card currently evaluates as fresh")
+    s.set_defaults(func=cmd_graph_synth)
+
+    s = ssub.add_parser("recommend", help="Emit bounded zero-write maintenance recommendations from synthesis health and coverage pressure")
     s.set_defaults(func=cmd_graph_synth)
 
     g = gsub.add_parser("lint", help="Run deterministic health checks for synthesis-card coverage / staleness")
