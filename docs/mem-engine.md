@@ -108,6 +108,10 @@ Related boundary: the shipped **verbatim semantic lane** remains a **sidecar ret
 One line:
 - set `plugins.slots.memory` back to `memory-lancedb` (or `memory-core`) and restart gateway.
 
+### Governance note (post-Dream-Lite)
+Read-only maintenance and recall helpers may surface recommendation packets, but recommendation judgment and any future autonomous-write authority should remain in an explicit governor lane rather than helper/scout lanes.
+See: `docs/specs/governed-dreaming-suggestion-write-authority-v0.md`.
+
 ### Receipt controls (P0-2)
 - `receipts.enabled` (default `true`)
 - `receipts.verbosity` (`low` default, `high` optional)

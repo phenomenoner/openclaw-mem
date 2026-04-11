@@ -164,7 +164,7 @@ Acceptance criteria:
 
 ### 1.7c) Compiled synthesis layer (selected refs → maintained synthesis cards)
 
-Status: **PARTIAL** (`graph synth compile` / `graph synth stale` / `graph synth refresh` / `graph synth recommend` / deterministic `graph lint` shipped; graph preflight and graph pack now prefer fresh synthesis cards; deterministic review/contradiction signals now surface in stale/lint; richer maintenance and governed autonomy still pending).
+Status: **PARTIAL** (`graph synth compile` / `graph synth stale` / `graph synth refresh` / `graph synth recommend` / deterministic `graph lint` shipped; graph preflight and graph pack now prefer fresh synthesis cards; deterministic review/contradiction signals now surface in stale/lint; governed-autonomy contract now documented; richer maintenance and governor-review implementation still pending).
 
 - Problem: Graphic Memory can capture refs and build bounded preflight/query bundles, but it still has to re-derive many high-value cross-source conclusions from scratch.
 - Goal: add a small, provenance-carrying **compiled synthesis layer** that turns selected refs into reusable synthesis cards with a stale/lint loop.
@@ -632,4 +632,6 @@ These are projects we referenced and **actually used** to shape features or arch
 - Reference-based decay / archive-first lifecycle (trusted background + field note):
   - Cepeda et al. (2006) distributed practice / spaced repetition: <https://doi.org/10.1037/0033-2909.132.3.354>
   - ARC cache replacement (recency+frequency): <https://www.usenix.org/legacy/publications/library/proceedings/fast03/tech/full_papers/megiddo/megiddo.pdf>
+  - X thread (untrusted inspiration): <https://x.com/ohxiyu/status/2022924956594806821>
+ecency+frequency): <https://www.usenix.org/legacy/publications/library/proceedings/fast03/tech/full_papers/megiddo/megiddo.pdf>
   - X thread (untrusted inspiration): <https://x.com/ohxiyu/status/2022924956594806821>
