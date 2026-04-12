@@ -145,7 +145,7 @@ Store 1 record per scope as a single memory row:
 - upsert semantics (one active row per scope) when `workingSet.persist=true`
 
 **Injection rule**
-- on `before_agent_start`: inject Working Set **before** normal autoRecall results (pinned first slot)
+- on the prompt-mutation path (`before_prompt_build` primary, `before_agent_start` fallback): inject Working Set **before** normal autoRecall results (pinned first slot)
 - treat Working Set as the **backbone lane**; normal autoRecall is the **hot recall lane** and should not waste slots re-injecting the same durable content by default
 
 **Explainability**

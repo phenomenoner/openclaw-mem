@@ -61,6 +61,8 @@ If asked to “remember” routine logs/OK checks:
 ## Graphic Memory compiled synthesis note
 - Read-only lanes may inspect synthesis cards as **derived graph artifacts**.
 - Do not promote a synthesis card itself into durable memory by default; use it as a provenance-carrying reference surface.
+- For maintenance triage, `openclaw-mem graph synth recommend` is the preferred zero-write review surface.
+- Read-only/helper lanes may inspect and packetize these recommendations, but judgment/write authority remains with **Lyria**.
 
 ## Runtime enforcement (recommended)
 This card is a *prompt-layer contract*. When possible, also enforce it at runtime:

@@ -6,7 +6,8 @@ What it does:
 - becomes the active OpenClaw memory backend when selected in `plugins.slots.memory`
 - provides hybrid recall controls (FTS + vector) with scope-aware policies
 - exposes bounded autoRecall / autoCapture controls and lifecycle receipts
-- can optionally call `openclaw-mem route auto` before agent start and inject a compact routing hint block into live turns
+- injects live-turn recall through `before_prompt_build` on current OpenClaw, with `before_agent_start` kept as a legacy fallback for older installs
+- can optionally call `openclaw-mem route auto` before recall injection and add a compact routing hint block into live turns
 - hosts the docs cold-lane ingest/search surfaces for operator-authored markdown
 - can optionally auto-run **Wei Ji memory preflight** before `memory_store` writes
 
@@ -56,6 +57,14 @@ openclaw plugins install @phenomenoner/openclaw-mem-engine
   }
 }
 ```
+
+## Prompt hook compatibility
+
+`openclaw-mem-engine` now registers prompt mutation on both hook surfaces:
+- primary: `before_prompt_build`
+- fallback: `before_agent_start`
+
+The plugin dedupes by run/session key so a newer OpenClaw that invokes both paths does not inject the same recall block twice.
 
 ## Route-auto prompt hook (optional)
 

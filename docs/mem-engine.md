@@ -78,10 +78,11 @@ Related boundary: the shipped **verbatim semantic lane** remains a **sidecar ret
 ## M1 automation (what is safe to ship now)
 
 ### autoRecall (conservative)
-- Hook: `before_agent_start`
+- Hook: `before_prompt_build` on current OpenClaw, with `before_agent_start` retained as a legacy fallback
 - Default: **on** (but gated by heuristics)
 - Behavior:
   - optional `autoRecall.routeAuto` hook can call `openclaw-mem route auto` before normal recall and inject a compact synthesis-aware routing hint block
+  - dual registration is deduped by run/session key so sequential `before_prompt_build` then legacy `before_agent_start` does not double-inject
   - when route-auto carries `preferredCardRefs` / `coveredRawRefs`, the hook prefers the fresh synthesis card but keeps the covered-raw receipt visible
   - route hook is recommendation-only and fail-open (timeout/runtime failure does not block the turn)
   - skip trivial prompts (greetings/ack/emojis/HEARTBEAT/slash commands)
@@ -251,7 +252,7 @@ Rollback:
 
 ### Rollout Step 4 — deterministic Working Set (canary-gated)
 
-Step 4 is now wired in `before_agent_start` behind a rollbackable config gate:
+Step 4 is now wired into the prompt-mutation path (`before_prompt_build` primary, `before_agent_start` fallback) behind a rollbackable config gate:
 - `workingSet.enabled` (default `false`)
 - `workingSet.persist` (default `true`)
 - `workingSet.maxChars` / `maxItemsPerSection` / `maxGoalChars` / `maxItemChars`

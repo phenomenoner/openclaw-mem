@@ -5639,7 +5639,52 @@ const memoryPlugin = {
         api.logger.warn("openclaw-mem-engine: autoRecall enabled but embeddings are unavailable (FTS/docs fail-open)");
       }
 
-      api.on("before_agent_start", async (event) => {
+      const PROMPT_MUTATION_HOOK_DEDUPE_WINDOW_MS = 4_000;
+      const promptMutationHookRuns = new Map<string, number>();
+
+      const buildPromptMutationHookRunKey = (
+        event: { prompt?: unknown; messages?: unknown[] },
+        ctx?: { sessionKey?: string; sessionId?: string; agentId?: string },
+      ) => {
+        const prompt = typeof event.prompt === "string" ? event.prompt : "";
+        const sessionRef = ctx?.sessionKey ?? ctx?.sessionId ?? ctx?.agentId ?? "no-session";
+        const messageCount = Array.isArray(event.messages) ? event.messages.length : 0;
+        const promptHash = createHash("sha1").update(prompt).digest("hex").slice(0, 16);
+        return `${sessionRef}:${messageCount}:${promptHash}`;
+      };
+
+      const shouldSkipPromptMutationHookRun = (
+        hookName: string,
+        event: { prompt?: unknown; messages?: unknown[] },
+        ctx?: { sessionKey?: string; sessionId?: string; agentId?: string },
+      ) => {
+        const now = Date.now();
+        for (const [key, seenAt] of promptMutationHookRuns.entries()) {
+          if (now - seenAt > PROMPT_MUTATION_HOOK_DEDUPE_WINDOW_MS) {
+            promptMutationHookRuns.delete(key);
+          }
+        }
+
+        const runKey = buildPromptMutationHookRunKey(event, ctx);
+        if (promptMutationHookRuns.has(runKey)) {
+          api.logger.info(
+            `openclaw-mem-engine:promptHook.dedupe ${JSON.stringify({ hookName, sessionKey: ctx?.sessionKey, sessionId: ctx?.sessionId, agentId: ctx?.agentId })}`,
+          );
+          return true;
+        }
+
+        promptMutationHookRuns.set(runKey, now);
+        return false;
+      };
+
+      const promptMutationHook = async (
+        event: { prompt?: unknown; messages?: unknown[] },
+        ctx?: { sessionKey?: string; sessionId?: string; agentId?: string },
+      ) => {
+          if (shouldSkipPromptMutationHookRun("prompt_mutation", event, ctx)) {
+            return;
+          }
+
           const prompt = typeof event.prompt === "string" ? event.prompt : "";
           const trimmedPrompt = prompt.trim();
           const scopeInfo = resolveScope({ text: trimmedPrompt, policy: scopePolicyCfg });
@@ -6071,7 +6116,25 @@ const memoryPlugin = {
           } catch (err) {
             api.logger.warn(`openclaw-mem-engine: autoRecall failed: ${String(err)}`);
           }
-        });
+        };
+
+      try {
+        (api as {
+          on?: (
+            hookName: string,
+            handler: (
+              event: { prompt?: unknown; messages?: unknown[] },
+              ctx?: { sessionKey?: string; sessionId?: string; agentId?: string },
+            ) => Promise<{ prependContext?: string } | void>,
+            opts?: { priority?: number },
+          ) => void;
+        }).on?.("before_prompt_build", promptMutationHook, { priority: 0 });
+        api.logger.info("openclaw-mem-engine: registered before_prompt_build prompt hook");
+      } catch (err) {
+        api.logger.info(`openclaw-mem-engine: before_prompt_build unavailable, using legacy fallback (${String(err)})`);
+      }
+
+      api.on("before_agent_start", promptMutationHook);
     }
 
     if (autoCaptureCfg.enabled && readOnlyEnabled) {
