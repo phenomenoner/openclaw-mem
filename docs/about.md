@@ -1,23 +1,25 @@
 # About openclaw-mem
 
-`openclaw-mem` is a **local-first memory layer for OpenClaw**.
+`openclaw-mem` is a **local-first context supply chain for OpenClaw**.
 
-It gives operators a durable record of what the agent actually did, plus a practical recall surface they can inspect, test, and roll back.
+It gives operators a durable record of what the agent actually did and a practical recall surface they can inspect.
+It also gives them a bounded packing surface they can inject, test, and roll back.
 
 ## The problem it solves
 
-Most agent memory stories sound good until you need one of these in production:
+Most agent memory stories sound good until you need all of these in production:
 
 - **fresh recall** of what happened recently
 - **auditability** for tool outcomes, decisions, and ops breadcrumbs
 - **cheap local lookup** before asking a remote semantic system again
+- **bounded context assembly** that fits inside a prompt instead of flooding it
 - **safe rollback** when a memory backend or embedding path gets weird
 
-`openclaw-mem` exists to make memory more operational, not more mystical.
+`openclaw-mem` exists to make memory and context assembly more operational, not more mystical.
 
 ## Product shape
 
-### Sidecar (default)
+### Store (default starting point)
 
 This is the normal starting point.
 
@@ -32,6 +34,16 @@ What you get:
 - optional ingest / triage / packaging flows
 - no forced change to your active OpenClaw memory slot
 
+### Pack (shipped contract)
+
+When you need a bounded, injection-ready result instead of another search result list, `openclaw-mem pack` emits a stable `ContextPack` object:
+
+- short `bundle_text` for direct injection
+- structured items with `recordRef` citations
+- optional redaction-safe trace receipts for include/exclude debugging
+
+This keeps recall, packing, and debugging on one auditable path.
+
 ### Mem Engine (optional)
 
 When you want `openclaw-mem` to do more than sidecar work, the optional **openclaw-mem-engine** can become the active OpenClaw memory backend.
@@ -42,6 +54,16 @@ What it adds:
 - scoped / policy-aware retrieval
 - bounded autoRecall / autoCapture behavior
 - explicit receipts and rollbackable config knobs
+
+### Observe (cross-cutting)
+
+Operators also need to see what the system kept, what it cut, and where large raw payloads went.
+
+`openclaw-mem` therefore treats receipts and artifacts as first-class:
+
+- retrieval traces explain pack decisions
+- artifact handles keep raw payloads off-prompt but retrievable
+- local files stay diffable and backup-friendly
 
 ## Why local-first matters
 
@@ -84,6 +106,7 @@ The sidecar-first posture is deliberate: prove usefulness first, then expand.
 ## Read next
 
 - [Choose an install path](install-modes.md)
+- [v2 blueprint](context-supply-chain-blueprint.md)
 - [Quickstart](quickstart.md)
 - [Reality check & status](reality-check.md)
 - [Deployment guide](deployment.md)

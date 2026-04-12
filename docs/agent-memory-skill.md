@@ -226,7 +226,7 @@ Rationale: cron lanes produce high-volume, low-signal observations; a store-by-d
 
 ### Relationship to ContextPack + importance grading
 
-- Treat **ContextPack / `pack --trace`** as the preferred *bounded* way to carry L1 state into a long-running task.
+- Treat **`openclaw-mem.context-pack.v1` / `pack --trace`** as the preferred *bounded* way to carry L1 state into a long-running task.
 - When you *do* store, set an **importance score/label** (see [Importance grading](importance-grading.md)) so packing/triage can stay selective.
 
 ## Scenario fixtures (for agreement testing)

@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -20,8 +21,12 @@ class TestJsonContracts(unittest.TestCase):
     def tearDown(self):
         self.tmpdir.cleanup()
 
-    def _run_cli(self, *args):
+    def _run_cli(self, *args, input_data: str | None = None, env: dict | None = None):
         uv = shutil.which("uv")
+        env_vars = os.environ.copy()
+        if env:
+            env_vars.update(env)
+
         if uv:
             cmd = [
                 uv,
@@ -53,10 +58,12 @@ class TestJsonContracts(unittest.TestCase):
             capture_output=True,
             text=True,
             cwd=self.repo_root,
+            input=input_data,
+            env=env_vars,
         )
 
-    def _run_json_ok(self, *args):
-        result = self._run_cli(*args)
+    def _run_json_ok(self, *args, **kwargs):
+        result = self._run_cli(*args, **kwargs)
         if result.returncode != 0:
             self.fail(
                 f"CLI failed: rc={result.returncode}\\nstderr=\\n{result.stderr}\\nstdout=\\n{result.stdout}"
@@ -65,6 +72,121 @@ class TestJsonContracts(unittest.TestCase):
             return json.loads(result.stdout)
         except json.JSONDecodeError:
             self.fail(f"Invalid JSON output:\\n{result.stdout}")
+
+    def test_pack_context_pack_json_contract_v1(self):
+        self._write_source_observation(
+            {
+                "kind": "fact",
+                "summary": "context pack contract sample",
+                "summary_en": "context pack contract sample",
+                "tool_name": "test",
+                "detail": {"note": "contract baseline"},
+            }
+        )
+        harvest_out = self._run_json_ok(
+            "harvest",
+            "--source",
+            str(self.source),
+            "--no-embed",
+            "--no-update-index",
+        )
+        self.assertEqual(harvest_out["ingested"], 1)
+
+        out = self._run_json_ok(
+            "pack",
+            "--query",
+            "context pack",
+            "--json",
+            "--trace",
+            "--limit",
+            "4",
+            "--budget-tokens",
+            "220",
+        )
+        self._assert_exact_keys(
+            out,
+            {"bundle_text", "items", "citations", "trace", "context_pack"},
+            "pack",
+        )
+
+        context_pack = out["context_pack"]
+        self._assert_exact_keys(
+            context_pack,
+            {"schema", "meta", "bundle_text", "items", "notes"},
+            "pack.context_pack",
+        )
+        self.assertEqual(context_pack["schema"], "openclaw-mem.context-pack.v1")
+        self.assertEqual(context_pack["bundle_text"], out["bundle_text"])
+        self.assertIsInstance(context_pack["items"], list)
+        self.assertIsInstance(context_pack["notes"], dict)
+        self._assert_exact_keys(context_pack["notes"], {"how_to_use"}, "pack.context_pack.notes")
+        if context_pack["items"]:
+            item = context_pack["items"][0]
+            self._assert_exact_keys(
+                item,
+                {"recordRef", "layer", "type", "importance", "trust", "text", "citations"},
+                "pack.context_pack.items[0]",
+            )
+            self._assert_exact_keys(item["citations"], {"url", "recordRef"}, "pack.context_pack.items[0].citations")
+            self.assertIsInstance(item["recordRef"], str)
+
+        self._assert_exact_keys(context_pack["meta"], {"ts", "query", "scope", "budgetTokens", "maxItems"}, "pack.context_pack.meta")
+
+    def test_artifact_cli_json_contracts(self):
+        with tempfile.TemporaryDirectory() as td:
+            env = {"OPENCLAW_STATE_DIR": td}
+            payload = Path(td) / "tool-output.txt"
+            payload.write_text("A" * 250 + "\n" + "B" * 250, encoding="utf-8")
+
+            stash = self._run_json_ok(
+                "artifact",
+                "stash",
+                "--from",
+                str(payload),
+                "--meta-json",
+                '{"source":"json-contract-test"}',
+                env=env,
+            )
+            self._assert_exact_keys(
+                stash,
+                {"schema", "handle", "sha256", "bytes", "createdAt", "kind", "meta"},
+                "artifact.stash",
+            )
+            self.assertEqual(stash["schema"], "openclaw-mem.artifact.stash.v1")
+
+            fetch = self._run_json_ok(
+                "artifact",
+                "fetch",
+                stash["handle"],
+                "--mode",
+                "headtail",
+                "--max-chars",
+                "20",
+                env=env,
+            )
+            self._assert_exact_keys(
+                fetch,
+                {"schema", "handle", "selector", "text"},
+                "artifact.fetch",
+            )
+            self.assertEqual(fetch["schema"], "openclaw-mem.artifact.fetch.v1")
+            self.assertEqual(fetch["selector"], {"mode": "headtail", "maxChars": 20})
+
+            peek = self._run_json_ok(
+                "artifact",
+                "peek",
+                stash["handle"],
+                "--preview-chars",
+                "18",
+                env=env,
+            )
+            self._assert_exact_keys(
+                peek,
+                {"schema", "handle", "sha256", "bytes", "createdAt", "kind", "compression", "meta", "preview", "previewChars"},
+                "artifact.peek",
+            )
+            self.assertEqual(peek["schema"], "openclaw-mem.artifact.peek.v1")
+            self.assertEqual(len(peek["preview"]), 18)
 
     def _assert_exact_keys(self, payload, expected, label):
         actual_keys = set(payload.keys())
@@ -290,7 +412,31 @@ class TestJsonContracts(unittest.TestCase):
             "--budget-tokens",
             "200",
         )
-        self._assert_exact_keys(out, {"bundle_text", "items", "citations", "trace"}, "pack")
+        self._assert_exact_keys(out, {"bundle_text", "items", "citations", "context_pack", "trace"}, "pack")
+
+        context_pack = out["context_pack"]
+        self.assertEqual(context_pack["schema"], "openclaw-mem.context-pack.v1")
+        self._assert_exact_keys(context_pack, {"schema", "meta", "bundle_text", "items", "notes"}, "pack.context_pack")
+        self._assert_exact_keys(
+            context_pack["meta"],
+            {"ts", "query", "scope", "budgetTokens", "maxItems"},
+            "pack.context_pack.meta",
+        )
+        self._assert_exact_keys(context_pack["notes"], {"how_to_use"}, "pack.context_pack.notes")
+        self.assertIsInstance(context_pack["items"], list)
+        self.assertEqual(context_pack["bundle_text"], out["bundle_text"])
+        if context_pack["items"]:
+            item = context_pack["items"][0]
+            self._assert_exact_keys(
+                item,
+                {"recordRef", "layer", "type", "importance", "trust", "text", "citations"},
+                "pack.context_pack.items[0]",
+            )
+            self._assert_exact_keys(
+                item["citations"],
+                {"url", "recordRef"},
+                "pack.context_pack.items[0].citations",
+            )
 
         trace = out["trace"]
         self.assertEqual(trace["kind"], "openclaw-mem.pack.trace.v1")

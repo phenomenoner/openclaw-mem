@@ -1,20 +1,22 @@
 # Context packing (ContextPack) — hybrid text + JSON
 
-Status: **ROADMAP** (v0 pack exists; this doc defines the direction + contract).
+Status: **SHIPPED** (`openclaw-mem pack` emits a stable `context_pack` object; graph-aware and protected-tail extensions remain roadmap).
 
 ## Shipped today vs proposed next
 
 ### Shipped today
-- `openclaw-mem pack` already emits `bundle_text`
+- `openclaw-mem pack` emits `bundle_text`
 - `items[]` are available for structured inspection
+- `context_pack` emits a stable `openclaw-mem.context-pack.v1` object
 - optional trace receipts exist for debugging selection behavior
 
-### Proposed / not yet a frozen contract
-- the exact `ContextPack.v1` JSON schema below
-- stronger L0/L1/L2 packaging conventions
-- future protected-tail / expand-style hooks
+For migration safety, the legacy top-level `bundle_text` / `items` / `citations` fields still ship alongside `context_pack`. New consumers should prefer `context_pack` as the canonical contract.
 
-Read this page as: **current behavior + forward contract**, not as a promise that every field below is already frozen.
+### Planned extensions
+- stronger L0/L1/L2 packaging conventions
+- protected-tail and expand-style hooks
+
+The JSON contract below is now the shipped baseline for `context_pack`. Future additions should extend it compatibly.
 
 ## Why this exists
 
@@ -39,7 +41,7 @@ In v0 today, `openclaw-mem pack` already outputs:
 - `items[]` (structured list)
 - optional `trace` (`openclaw-mem.pack.trace.v1`, redaction-safe)
 
-This doc proposes an explicit **ContextPack.v1** schema to make that structure stable, shallow, and easy for LLMs (and ops tooling) to consume.
+This doc defines the explicit **ContextPack.v1** schema used by `openclaw-mem pack` to keep that structure stable, shallow, and easy for LLMs (and ops tooling) to consume.
 
 ## Design principles (non-negotiable)
 
@@ -49,7 +51,7 @@ This doc proposes an explicit **ContextPack.v1** schema to make that structure s
 
 So we intentionally ship **both**:
 - **Text**: compact bullets (`bundle_text`) for direct injection
-- **JSON**: a stable object (`context_pack_json`) for deterministic parsing/anchoring
+- **JSON**: a stable object (`context_pack`) for deterministic parsing/anchoring
 
 2) **Shallow JSON beats deep JSON**
 - Prefer flat objects and short arrays.
@@ -78,7 +80,7 @@ We treat lossless context engines as a thought-link: they inspire patterns (fres
 
 See: `docs/thought-links.md` (Lossless Context / lossless-claw).
 
-## ContextPack.v1 (proposed)
+## ContextPack.v1 (shipped baseline)
 
 A minimal, stable schema optimized for LLM absorption.
 
@@ -89,8 +91,8 @@ A minimal, stable schema optimized for LLM absorption.
     "ts": "2026-02-25T00:00:00Z",
     "query": "…",
     "scope": null,
-    "budget_tokens": 1200,
-    "max_items": 12
+    "budgetTokens": 1200,
+    "maxItems": 12
   },
   "bundle_text": "- [obs:123] …\n- [obs:456] …",
   "items": [
@@ -101,7 +103,7 @@ A minimal, stable schema optimized for LLM absorption.
       "importance": "must_remember",
       "trust": "unknown",
       "text": "…",
-      "citations": {"url": null}
+      "citations": {"url": null, "recordRef": "obs:123"}
     }
   ],
   "notes": {

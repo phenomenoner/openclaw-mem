@@ -56,6 +56,8 @@ class TestCliM0(unittest.TestCase):
         with redirect_stdout(buf):
             cmd_pack(conn, args)
         payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["context_pack"]["schema"], "openclaw-mem.context-pack.v1")
+        self.assertEqual(payload["context_pack"]["bundle_text"], payload["bundle_text"])
         texts = [it.get("summary") for it in payload.get("items", [])]
         self.assertTrue(any("UTC+8" in (t or "") for t in texts))
         conn.close()

@@ -76,9 +76,26 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem timeline 2 --window 2 --
 uv run --python 3.13 --frozen -- python -m openclaw_mem get 1 --json
 ```
 
+## Step 4.5: Build prompt-ready context + offload artifacts (context-pack v1)
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack "What should I prioritize next?" --limit 6 --json
+
+# Optional: keep large tool payloads as artifacts and pass only a handle in context
+printf 'very long tool output...' > ./tool-output.txt
+uv run --python 3.13 --frozen -- python -m openclaw_mem artifact stash --from ./tool-output.txt --meta-json '{"source":"agent-cli-demo"}' --json
+
+# Replace <64hex> with the returned handle suffix
+uv run --python 3.13 --frozen -- python -m openclaw_mem artifact fetch ocm_artifact:v1:sha256:<64hex> --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifact:v1:sha256:<64hex> --json
+```
+
+The `pack` response carries a stable `context_pack` field for handoff, and
+`artifact` commands use deterministic JSON contracts for machine parsing.
+
 ---
 
-## Step 4.5: Dual-language memory (optional)
+## Step 4.6: Dual-language memory (optional)
 
 ```bash
 uv run --python 3.13 --frozen -- python -m openclaw_mem store "<original non-English text>" \
