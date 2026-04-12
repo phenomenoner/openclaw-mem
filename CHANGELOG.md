@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No unreleased changes yet.
 
+## [1.5.1] - 2026-04-13
+
+### Changed
+
+- Shipped a stable `openclaw-mem.context-pack.v1` contract from `openclaw-mem pack` while keeping the legacy top-level `bundle_text` / `items` / `citations` keys for migration safety.
+- Reframed the public product surface around **Store / Pack / Observe** so docs, quickstart, and architecture all describe the same bounded-context supply-chain story.
+- Added deterministic artifact CLI contract coverage and exact-key contract tests for the new `context_pack` payload.
+- Carried the already-landed mem-engine prompt-hook migration line into the current mainline release surface so route-auto + context-pack docs stay aligned with shipped behavior.
+
+### Testing
+
+- Re-ran `python -m unittest tests.test_cli tests.test_json_contracts tests.test_artifact_sidecar tests.test_artifact_cli_parser tests.test_artifact_cli`.
+- Re-ran the same suite on `main` after merge conflict resolution to confirm the trust-policy contract path also accepts additive `context_pack` output.
+
 ## [1.4.3] - 2026-04-09
 
 ### Fixed
