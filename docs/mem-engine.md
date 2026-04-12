@@ -71,6 +71,19 @@ Owned by `openclaw-mem-engine`:
 
 Key stance: **sidecar governs; engine serves**.
 
+### Single-write-path posture (important)
+
+When `openclaw-mem-engine` owns `plugins.slots.memory`, treat it as the **only canonical durable-memory write path**.
+
+That means:
+
+- `memory_store` / `memory_forget` / `memory_import` / `memory_docs_ingest` authority lives in the engine lane
+- the sidecar remains capture, receipts, governance, and recall support
+- graph/docs/synthesis lanes may improve recall or packing, but they do **not** become competing durable-memory writers
+
+If you need watchdog or advisory-only execution, set `readOnly: true` (or `OPENCLAW_MEM_ENGINE_READONLY=1`).
+That forces write-path rejection and disables `autoCapture`, which keeps the ownership boundary honest.
+
 Related boundary: the shipped **verbatim semantic lane** remains a **sidecar retrieval surface** over episodic evidence (`episodes embed` / `episodes search --mode ...`). It is not a new slot-backend memory type and does not change durable-memory write discipline.
 
 ---

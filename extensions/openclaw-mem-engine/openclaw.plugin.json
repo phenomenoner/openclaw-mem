@@ -46,7 +46,7 @@
     },
     "readOnly": {
       "label": "Read-only mode",
-      "help": "Reject write-path tools (memory_store/forget/import/docs_ingest) and disable autoCapture.",
+      "help": "Keep mem-engine as the only canonical slot owner by rejecting write-path tools (memory_store/forget/import/docs_ingest), disabling autoCapture, and leaving sidecar/docs/graph as read-or-observe lanes.",
       "advanced": true
     },
     "autoRecall.enabled": {

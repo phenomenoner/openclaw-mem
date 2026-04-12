@@ -214,8 +214,9 @@ type PluginConfig = {
   receipts?: boolean | ReceiptsConfigInput;
   docsColdLane?: boolean | DocsColdLaneConfigInput;
   weijiMemoryPreflight?: boolean | WeiJiMemoryPreflightConfigInput;
-  // Hard write-path guard. When enabled, reject memory_store/memory_forget/memory_import/memory_docs_ingest
-  // and disable autoCapture.
+  // Hard write-path guard. When enabled, mem-engine remains the only canonical
+  // durable-memory write lane for the active slot: explicit write tools are rejected,
+  // sidecar/docs/graph stay read-or-observe surfaces, and autoCapture is disabled.
   readOnly?: boolean;
 };
 

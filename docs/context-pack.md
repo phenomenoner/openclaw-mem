@@ -34,6 +34,8 @@ Long-running OpenClaw sessions drift because the live prompt becomes a soup of:
 - Keep it **auditable** (citations + trace receipts)
 - Keep it **safe-by-default** (redaction + trust gating)
 
+Graph integration follows the same rule: graph may improve selection, coverage, or compression, but it is an **enhancement lane inside pack**, not a separate truth owner.
+
 ## What we mean by “ContextPack”
 
 A **ContextPack** is an injection-ready payload that can be fed to an agent as “relevant state”.

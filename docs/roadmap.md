@@ -381,6 +381,8 @@ Acceptance criteria:
 
 Goal: for each request, locally build a **small, high-signal context bundle** instead of shipping the whole session history.
 
+Boundary reminder: graph is a pack enhancement lane, not a parallel memory owner. If graph cannot improve the bounded bundle while staying fail-open, it should not expand the product surface.
+
 Deliverables:
 - A packing spec (inputs, budgets, citations, redaction rules) **including trust gating**
 - A stable **ContextPack** output contract (hybrid text + JSON) for injection + ops tooling:
