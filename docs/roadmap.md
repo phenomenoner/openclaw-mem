@@ -386,6 +386,7 @@ Deliverables:
 - A stable **ContextPack** output contract (hybrid text + JSON) for injection + ops tooling:
   - `openclaw-mem.context-pack.v1`
   - See: `docs/context-pack.md`
+  - Status: shipped baseline in `openclaw-mem pack` as `context_pack`; future changes should extend compatibly
 - `pack` CLI (or equivalent) that outputs:
   - a short “relevant state” section
   - bounded summaries of the top-K relevant durable facts/tasks

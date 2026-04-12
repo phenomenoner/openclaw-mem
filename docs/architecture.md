@@ -1,18 +1,29 @@
 # Architecture (Design)
 
-`openclaw-mem` is a **local-first memory sidecar** for OpenClaw.
+`openclaw-mem` is a **local-first context supply chain** for OpenClaw.
 
 It does **not** force-replace OpenClaw’s canonical memory slot/backends. Instead, it:
 - captures high-signal tool outcomes to durable local storage,
 - makes recall **cheap and auditable**,
 - adds governance (importance, receipts, redaction),
-- and (planned) provides **clean, minimal context bundles** for each request.
+- provides **clean, minimal context bundles** for each request,
+- and keeps large/raw payloads observable without stuffing them into the prompt.
 
 Status tags used below: **DONE / PARTIAL / ROADMAP**.
 
 ## Philosophy (small, but non-negotiable)
 
 Agent “self/continuity” is largely a narrative constructed from memory. For systems, that continuity should be treated as a **designed interface**: allow narrative, but anchor it in **auditable evidence** (provenance + trust tiers + citations + receipts) so we don’t amplify confident self-deception or poisoned inputs.
+
+## Operating doctrine
+
+Treat the product as three cooperating surfaces:
+
+- **Store**: capture, ingest, local recall, optional mem-engine slot ownership.
+- **Pack**: bounded `ContextPack` assembly with citations and trace receipts.
+- **Observe**: artifacts, receipts, and local files that make rollback and audits honest.
+
+Recall quality alone is not enough. If a result cannot be packed into a bounded, explainable bundle, the runtime still drowns.
 
 ## Non-goals
 

@@ -1,6 +1,9 @@
 # openclaw-mem
 
-A memory layer for [OpenClaw](https://github.com/openclaw/openclaw) that keeps agent context small, cited, and less likely to be polluted by stale or untrusted content.
+**A local-first context supply chain for OpenClaw: store what matters, pack what fits, observe what changed.**
+
+`openclaw-mem` turns agent work into a durable, searchable, auditable memory trail, then assembles bounded context bundles that are small enough to inject and easy to verify.
+Start with a local SQLite sidecar. Keep your current OpenClaw memory backend if you want. Promote to the optional mem engine later if you need hybrid recall, policy controls, and safer automation.
 
 ## What you get
 
@@ -8,6 +11,10 @@ A memory layer for [OpenClaw](https://github.com/openclaw/openclaw) that keeps a
 - trust-policy controls for excluding quarantined content
 - sidecar deployment on an existing OpenClaw install
 - optional promotion to `openclaw-mem-engine` later for hybrid recall and tighter policy controls
+- **Local-first by default**: JSONL + SQLite, no external database required
+- **Cheap recall loop**: `search → timeline → get` keeps routine lookups fast and inspectable
+- **Bounded packing**: `pack` emits a stable `ContextPack` contract for injection, citations, and trace-backed debugging
+- **Fits real OpenClaw ops**: capture tool outcomes, retain receipts, and keep rollback simple
 
 ## Why this exists
 
@@ -40,8 +47,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
   --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
   --limit 5 \
   --budget-tokens 500 \
-  --trace \
-  --pack-trust-policy exclude_quarantined_fail_open
+  --trace
 ```
 
 ### What this proof shows
@@ -56,20 +62,36 @@ Full proof path:
 - [Synthetic fixture + receipts](docs/showcase/artifacts/index.md)
 - [Inside-out demo](docs/showcase/inside-out-demo.md)
 
-## Install paths
+## Store + Pack + Observe
 
-Three paths: local proof, sidecar plugin, or full memory engine.
-Read the guide: [Choose an install path](docs/install-modes.md)
+The product loop is simple and stable:
+
+1. **Store**: capture, ingest, and query observations with `store`/`ingest`/`search`.
+2. **Pack**: run `pack` to get a bounded `bundle_text` and `context_pack` (`schema: openclaw-mem.context-pack.v1`).
+3. **Observe**: use `timeline`, `get`, and `artifact` outputs for explainability and rollback.
+
+Example:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack "What changed this week?" --limit 6 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem artifact stash --from ./tool-output.txt --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifact:v1:sha256:<64hex> --json
+```
 
 ## Start here
 
-- [Quickstart](docs/quickstart.md)
-- [Reality check & status](docs/reality-check.md)
-- [Deployment guide](docs/deployment.md)
+- **About the product:** [`docs/about.md`](docs/about.md)
+- **v2 blueprint:** [`docs/context-supply-chain-blueprint.md`](docs/context-supply-chain-blueprint.md)
+- **Choose an install path:** [`docs/install-modes.md`](docs/install-modes.md)
+- **Detailed quickstart:** [`QUICKSTART.md`](QUICKSTART.md)
+- **Docs site:** <https://phenomenoner.github.io/openclaw-mem/>
+- **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
+- **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
+- **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
+- **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
+- **Optional Mem Engine:** [`docs/mem-engine.md`](docs/mem-engine.md)
+- **Release notes:** <https://github.com/phenomenoner/openclaw-mem/releases>
 
 ## License
 
-Dual-licensed: **MIT OR Apache-2.0**, at your option.
-
-- MIT terms: `LICENSE` (root canonical text for GitHub/license-scanner detection)
-- Apache 2.0 terms: `LICENSE-APACHE` (root canonical text for GitHub/license-scanner detection)
+Dual-licensed: **MIT OR Apache-2.0**. See `LICENSE`, `LICENSE-MIT`, and `LICENSE-APACHE`.

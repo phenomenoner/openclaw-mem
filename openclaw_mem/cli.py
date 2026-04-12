@@ -34,6 +34,7 @@ from typing import Iterable, Dict, Any, List, Optional, Set, Tuple
 
 from openclaw_mem import __version__
 from openclaw_mem import defaults
+from openclaw_mem import context_pack_v1
 from openclaw_mem import pack_trace_v1
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
@@ -5449,6 +5450,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     selected_items: List[Dict[str, Any]] = []
     citations: List[Dict[str, Any]] = []
     candidate_trace: List[pack_trace_v1.PackTraceV1Candidate] = []
+    context_pack_items: List[context_pack_v1.ContextPackV1Item] = []
 
     used_tokens = 0
     for rid in ordered_ids:
@@ -5502,6 +5504,22 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 }
             )
             citations.append({"recordRef": record_ref, "url": None})
+            context_pack_items.append(
+                context_pack_v1.ContextPackV1Item(
+                    recordRef=record_ref,
+                    # v1 pack emits L1-only items. Keep this explicit until L0/L2
+                    # become real pack outputs rather than roadmap labels.
+                    layer="L1",
+                    type="memory",
+                    importance=importance_label,
+                    trust=trust_tier,
+                    text=text,
+                    citations=context_pack_v1.ContextPackV1ItemCitations(
+                        url=None,
+                        recordRef=record_ref,
+                    ),
+                )
+            )
 
         candidate_trace.append(
             pack_trace_v1.PackTraceV1Candidate(
@@ -5532,11 +5550,31 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     bundle_lines = [f"- [{item['recordRef']}] {item['summary']}" for item in selected_items]
     bundle_text = "\n".join(bundle_lines)
+    context_pack = context_pack_v1.ContextPackV1(
+        schema=context_pack_v1.CONTEXT_PACK_V1_SCHEMA,
+        meta=context_pack_v1.ContextPackV1Meta(
+            ts=_utcnow_iso(),
+            query=query,
+            scope=None,
+            budgetTokens=budget_tokens,
+            maxItems=limit,
+        ),
+        bundle_text=bundle_text,
+        items=context_pack_items,
+        notes=context_pack_v1.ContextPackV1Notes(
+            how_to_use=[
+                "Prefer bundle_text for direct injection.",
+                "Use items[].recordRef as the citation key.",
+                "If you need detail, retrieve L2 by recordRef in a bounded follow-up.",
+            ]
+        ),
+    )
 
     payload: Dict[str, Any] = {
         "bundle_text": bundle_text,
         "items": selected_items,
         "citations": citations,
+        "context_pack": context_pack_v1.to_dict(context_pack),
     }
 
     graph_provenance_policy: Optional[Dict[str, Any]] = None
@@ -7173,7 +7211,12 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 def cmd_artifact_stash(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if getattr(args, "from_path", None):
-        data = Path(str(args.from_path)).expanduser().read_bytes()
+        artifact_path = Path(str(args.from_path)).expanduser()
+        try:
+            data = artifact_path.read_bytes()
+        except (FileNotFoundError, IsADirectoryError, PermissionError, OSError) as e:
+            _emit({"error": f"cannot read artifact source: {e}"}, True)
+            sys.exit(2)
     else:
         data = sys.stdin.buffer.read()
 
@@ -7190,12 +7233,17 @@ def cmd_artifact_stash(_conn: sqlite3.Connection, args: argparse.Namespace) -> N
             sys.exit(2)
         meta_obj = parsed
 
-    receipt = stash_artifact(
-        data,
-        kind=str(getattr(args, "kind", "tool_output") or "tool_output"),
-        meta=meta_obj,
-        compress=bool(getattr(args, "gzip", False)),
-    )
+    try:
+        receipt = stash_artifact(
+            data,
+            kind=str(getattr(args, "kind", "tool_output") or "tool_output"),
+            meta=meta_obj,
+            compress=bool(getattr(args, "gzip", False)),
+        )
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+
     _emit(receipt, bool(args.json))
 
 
@@ -7219,6 +7267,9 @@ def cmd_artifact_fetch(_conn: sqlite3.Connection, args: argparse.Namespace) -> N
     except ValueError as e:
         _emit({"error": str(e)}, True)
         sys.exit(2)
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
 
     if bool(args.json):
         _emit(receipt, True)
@@ -7241,6 +7292,9 @@ def cmd_artifact_peek(_conn: sqlite3.Connection, args: argparse.Namespace) -> No
             preview_chars=max(1, int(getattr(args, "preview_chars", 240) or 240)),
         )
     except FileNotFoundError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+    except Exception as e:
         _emit({"error": str(e)}, True)
         sys.exit(1)
 
@@ -13528,7 +13582,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     a = asub.add_parser("stash", help="Store raw tool output from --from PATH or stdin")
     a.add_argument("--db", default=None, help="SQLite DB path")
-    a.add_argument("--json", action="store_true", help="Structured JSON output")
+    a.add_argument(
+        "--json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true). Use --no-json for a plain response.",
+    )
     a.add_argument("--from", dest="from_path", help="Read raw payload bytes from file path (default: stdin)")
     a.add_argument("--kind", default="tool_output", help="Artifact kind label (default: tool_output)")
     a.add_argument("--meta-json", default=None, help="Optional metadata JSON object (small, non-raw)")
@@ -13551,7 +13610,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     a = asub.add_parser("peek", help="Show artifact metadata + tiny preview")
     a.add_argument("--db", default=None, help="SQLite DB path")
-    a.add_argument("--json", action="store_true", help="Structured JSON output")
+    a.add_argument(
+        "--json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true). Use --no-json for a plain preview.",
+    )
     a.add_argument("handle", help="Artifact handle: ocm_artifact:v1:sha256:<64hex>")
     a.add_argument("--preview-chars", dest="preview_chars", type=int, default=240, help="Preview character budget (default: 240)")
     a.set_defaults(func=cmd_artifact_peek)
