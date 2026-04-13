@@ -166,6 +166,16 @@ openclaw plugins install -l ./extensions/openclaw-mem
 openclaw gateway restart
 ```
 
+If you are promoting the optional mem-engine from a source checkout, install its local Node deps first:
+
+```bash
+cd extensions/openclaw-mem-engine
+npm install
+cd ../..
+openclaw plugins install -l ./extensions/openclaw-mem-engine
+openclaw gateway restart
+```
+
 ---
 
 ## Next steps

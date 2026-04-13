@@ -22,8 +22,15 @@ The marketplace split is there to keep install and rollback boundaries honest, n
 ### Local checkout
 
 ```bash
+cd extensions/openclaw-mem-engine
+npm install
+cd ../..
 openclaw plugins install -l ./extensions/openclaw-mem-engine
 ```
+
+Why the extra step:
+- this extension imports runtime Node dependencies such as `@sinclair/typebox`
+- a source checkout needs its local `node_modules/` present before the gateway can load the plugin cleanly
 
 ### Marketplace package
 
