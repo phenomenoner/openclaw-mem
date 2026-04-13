@@ -771,6 +771,67 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("why=Prefer the synthesis card", out["bundle_text"])
         conn.close()
 
+    def test_graph_pack_prefers_narrower_synthesis_card_then_record_ref_for_ties(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source one", "tool_name": "read", "detail": {}})
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source two", "tool_name": "exec", "detail": {}})
+        _insert_observation(conn, {"kind": "tool", "summary": "alpha source three", "tool_name": "write", "detail": {}})
+
+        compile_three = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--record-ref", "obs:3",
+            "--title", "Broader card",
+            "--summary", "Broader card",
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_three.func(conn, compile_three)
+
+        compile_narrow_a = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Narrow card A",
+            "--summary", "Narrow card A",
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_narrow_a.func(conn, compile_narrow_a)
+
+        compile_narrow_b = build_parser().parse_args([
+            "graph", "--json", "synth", "compile",
+            "--record-ref", "obs:1",
+            "--record-ref", "obs:2",
+            "--title", "Narrow card B",
+            "--summary", "Narrow card B",
+        ])
+        with redirect_stdout(io.StringIO()):
+            compile_narrow_b.func(conn, compile_narrow_b)
+
+        args = type(
+            "Args",
+            (),
+            {
+                "ids": ["obs:1", "obs:2"],
+                "max_items": 20,
+                "budget_tokens": 120,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_graph_pack(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["selection"]["recordRefs"], ["obs:5"])
+        self.assertEqual(out["selection"]["preferredCardRefs"], ["obs:5"])
+        self.assertEqual(out["selection"]["coveredRawRefs"], ["obs:1", "obs:2"])
+        self.assertIn("Narrow card A", out["bundle_text"])
+        self.assertNotIn("Broader card", out["bundle_text"])
+        self.assertNotIn("Narrow card B", out["bundle_text"])
+        conn.close()
+
     def test_graph_auto_status_reports_flags_and_invalid_values(self):
         from unittest.mock import patch
 
