@@ -102,6 +102,7 @@ Disable the plugin, stop harvest jobs, remove the symlink if you added one. Your
 - hybrid recall path
 - operator-tunable receipts and policies
 - more explicit control over recall/capture behavior
+- optional **Proactive Pack** lane for bounded pre-reply recall during live turns
 - one-line rollback to `memory-core` or `memory-lancedb`
 
 ### First step
@@ -109,6 +110,7 @@ Disable the plugin, stop harvest jobs, remove the symlink if you added one. Your
 Read:
 
 - [Mem Engine reference](mem-engine.md)
+- [Proactive Pack](proactive-pack.md)
 - [Ecosystem fit](ecosystem-fit.md)
 - [Deployment guide](deployment.md)
 - [Agent memory skill (SOP)](agent-memory-skill.md) (recommended agent prompt contract)

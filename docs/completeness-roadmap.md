@@ -8,7 +8,7 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
 - ✅ Hybrid recall (FTS + vector) in `openclaw-mem-engine`
 - ✅ Scope-aware filtering + policy tiers (must → nice → optional unknown)
 - ✅ M1 automation:
-  - ✅ autoRecall (conservative, skip trivial prompts, capped, escaped)
+  - ✅ Proactive Pack / autoRecall (conservative, skip trivial prompts, capped, escaped)
   - ✅ autoCapture (strict allowlist, secret-skip, dedupe, capped)
 - ✅ Deterministic, rollbackable ops posture (slot switch + per-feature disable)
 

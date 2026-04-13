@@ -11,10 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Clarified the mem-engine **single-write-path posture** across plugin schema help, mem-engine docs, and source markers so slot ownership stays explicit when `openclaw-mem-engine` is active.
 - Re-stated the graph boundary in pack-facing docs: graph may improve bounded pack selection/coverage, but it does not become a competing truth owner.
+- Reframed mem-engine live-turn recall as **Proactive Pack** across README, docs, skill cards, and plugin metadata so the public story stays aligned with `Store / Pack / Observe`.
 
 ### Testing
 
 - Added `tests/test_mem_engine_write_authority.py` to lock the single-write-path wording across docs/schema/source markers.
+- Added `tests/test_proactive_pack_docs.py` to lock the public Proactive Pack wording across docs and plugin metadata.
 
 ## [1.5.1] - 2026-04-13
 

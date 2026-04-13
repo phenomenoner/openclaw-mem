@@ -13,6 +13,7 @@
 - do **hybrid recall** (FTS + vector) with **scopes & metadata filters**,
 - make recall behavior **auditable + tunable** (receipts, knobs, policies),
 - add **safe M1 automation**: conservative `autoRecall` + strict `autoCapture` (configurable),
+- expose **Proactive Pack** as the public-facing name for bounded pre-reply recall orchestration,
 - and actually exploit LanceDB features that the official `memory-lancedb` backend doesn’t surface.
 
 Rollback remains trivial: switch `plugins.slots.memory` back to `memory-lancedb` or `memory-core`.
@@ -71,6 +72,8 @@ Owned by `openclaw-mem-engine`:
 
 Key stance: **sidecar governs; engine serves**.
 
+Public-facing framing: when mem-engine injects a bounded recall block during prompt build, treat that surface as **Proactive Pack**, not as a separate hidden memory product.
+
 ### Single-write-path posture (important)
 
 When `openclaw-mem-engine` owns `plugins.slots.memory`, treat it as the **only canonical durable-memory write path**.
@@ -90,7 +93,7 @@ Related boundary: the shipped **verbatim semantic lane** remains a **sidecar ret
 
 ## M1 automation (what is safe to ship now)
 
-### autoRecall (conservative)
+### Proactive Pack (`autoRecall`, conservative)
 - Hook: `before_prompt_build` on current OpenClaw, with `before_agent_start` retained as a legacy fallback
 - Default: **on** (but gated by heuristics)
 - Behavior:
@@ -107,6 +110,11 @@ Related boundary: the shipped **verbatim semantic lane** remains a **sidecar ret
   - emits bounded lifecycle receipt (`openclaw-mem-engine.recall.receipt.v1`) with skip reason / tier counts / top IDs
   - in `receipts.verbosity=high`, injects a compact autoRecall wrapper comment (IDs only; no memory text in receipt)
     - default `low` keeps receipts in logs only (no prompt-side comment)
+
+Boundary rule:
+- this is a **Pack runtime mode** that assembles a small pre-reply bundle
+- it does **not** create a second durable-memory truth owner
+- it should stay bounded by scope policy, receipts, and final context budget
 
 ### autoCapture (strict)
 - Hook: `agent_end`

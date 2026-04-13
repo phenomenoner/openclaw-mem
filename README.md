@@ -4,6 +4,7 @@
 
 `openclaw-mem` turns agent work into a durable, searchable, auditable memory trail, then assembles bounded context bundles that are small enough to inject and easy to verify.
 Start with a local SQLite sidecar. Keep your current OpenClaw memory backend if you want. Promote to the optional mem engine later if you need hybrid recall, policy controls, and safer automation.
+When you do promote the engine, the live-turn hook is framed as **Proactive Pack**: bounded pre-reply recall orchestration, not a second hidden memory kingdom.
 
 ## What you get
 
@@ -11,6 +12,7 @@ Start with a local SQLite sidecar. Keep your current OpenClaw memory backend if 
 - trust-policy controls for excluding quarantined content
 - sidecar deployment on an existing OpenClaw install
 - optional promotion to `openclaw-mem-engine` later for hybrid recall and tighter policy controls
+- optional **Proactive Pack** lane in `openclaw-mem-engine` for pre-reply bounded recall with receipts and fail-open behavior
 - **Local-first by default**: JSONL + SQLite, no external database required
 - **Cheap recall loop**: `search → timeline → get` keeps routine lookups fast and inspectable
 - **Bounded packing**: `pack` emits a stable `ContextPack` contract for injection, citations, and trace-backed debugging
@@ -70,6 +72,8 @@ The product loop is simple and stable:
 2. **Pack**: run `pack` to get a bounded `bundle_text` and `context_pack` (`schema: openclaw-mem.context-pack.v1`).
 3. **Observe**: use `timeline`, `get`, and `artifact` outputs for explainability and rollback.
 
+When mem-engine is active, **Proactive Pack** is the runtime extension of the same Pack contract: a small, receipt-backed pre-reply bundle, not a separate truth owner.
+
 Example:
 
 ```bash
@@ -81,6 +85,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifa
 ## Start here
 
 - **About the product:** [`docs/about.md`](docs/about.md)
+- **Proactive Pack:** [`docs/proactive-pack.md`](docs/proactive-pack.md)
 - **v2 blueprint:** [`docs/context-supply-chain-blueprint.md`](docs/context-supply-chain-blueprint.md)
 - **Choose an install path:** [`docs/install-modes.md`](docs/install-modes.md)
 - **Detailed quickstart:** [`QUICKSTART.md`](QUICKSTART.md)

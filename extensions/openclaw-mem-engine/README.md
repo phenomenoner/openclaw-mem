@@ -6,6 +6,7 @@ What it does:
 - becomes the active OpenClaw memory backend when selected in `plugins.slots.memory`
 - provides hybrid recall controls (FTS + vector) with scope-aware policies
 - exposes bounded autoRecall / autoCapture controls and lifecycle receipts
+- frames live-turn bounded recall as **Proactive Pack**: pre-reply orchestration, not a second hidden memory kingdom
 - injects live-turn recall through `before_prompt_build` on current OpenClaw, with `before_agent_start` kept as a legacy fallback for older installs
 - can optionally call `openclaw-mem route auto` before recall injection and add a compact routing hint block into live turns
 - hosts the docs cold-lane ingest/search surfaces for operator-authored markdown
@@ -14,6 +15,8 @@ What it does:
 This package is the engine-role package inside the same `openclaw-mem` family:
 - **`openclaw-mem`** = sidecar capture / observability / episodic spool / operator workflows
 - **`openclaw-mem-engine`** = active memory slot backend
+
+Public contract: the prompt-build hook is a **Pack runtime mode**. In docs and operator language, call it **Proactive Pack**.
 
 The marketplace split is there to keep install and rollback boundaries honest, not to imply two unrelated products.
 
@@ -75,7 +78,7 @@ The plugin dedupes by run/session key so a newer OpenClaw that invokes both path
 
 ## Route-auto prompt hook (optional)
 
-If you want live turns to consult the graph/transcript router before normal memory recall, enable `autoRecall.routeAuto`.
+If you want **Proactive Pack** live turns to consult the graph/transcript router before normal memory recall, enable `autoRecall.routeAuto`.
 
 Example host config:
 

@@ -47,12 +47,15 @@ When you need a bounded, injection-ready result instead of another search result
 
 This keeps recall, packing, and debugging on one auditable path.
 
+When the optional mem-engine role is active, this same Pack posture extends into live turns as **Proactive Pack**: a bounded pre-reply recall mode with receipts, scope policy, and fail-open behavior.
+
 ### Memory engine (optional)
 
 This is the controlled next step when sidecar mode already proved useful.
 
 - can become the active OpenClaw memory backend
 - adds hybrid recall and tighter policy controls
+- exposes **Proactive Pack** for bounded pre-reply recall during prompt build
 - keeps rollback explicit and configuration-driven
 
 ### Observe (cross-cutting)
@@ -97,6 +100,7 @@ The local-first posture keeps the base layer simple:
 ## Read next
 
 - [Choose an install path](install-modes.md)
+- [Proactive Pack](proactive-pack.md)
 - [v2 blueprint](context-supply-chain-blueprint.md)
 - [Quickstart](quickstart.md)
 - [Reality check & status](reality-check.md)

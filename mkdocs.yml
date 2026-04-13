@@ -30,6 +30,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - About: about.md
+  - Proactive Pack: proactive-pack.md
   - Choose an install path: install-modes.md
   - Quickstart: quickstart.md
   - Reality check & status: reality-check.md
@@ -48,6 +49,7 @@ nav:
   - Reference:
       - Ecosystem fit: ecosystem-fit.md
       - Deployment: deployment.md
+      - Proactive Pack: proactive-pack.md
       - Auto-capture (sidecar plugin): auto-capture.md
       - Mem Engine (slot backend): mem-engine.md
       - Verbatim semantic lane: verbatim-semantic-lane.md

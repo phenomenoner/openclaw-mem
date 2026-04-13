@@ -153,7 +153,7 @@ Current decision ladder:
   - For unattended use, prefer `openclaw-mem graph readiness` (bridges freshness + topology-source drift + match-support availability).
   - If you want a single deterministic router across graph-semantic and transcript recall, use `openclaw-mem route auto "<query>"` (fail-open).
     - when graph candidates are truthfully covered by a fresh synthesis card, the router should prefer that synthesis card while keeping `preferredCardRefs` / `coveredRawRefs` receipts visible.
-  - If `openclaw-mem-engine` is your active memory slot, you can also enable `autoRecall.routeAuto` so live turns consult that router automatically during prompt build and inject the same synthesis-aware hint.
+  - If `openclaw-mem-engine` is your active memory slot, you can also enable `autoRecall.routeAuto` so **Proactive Pack** consults that router automatically during prompt build and injects the same synthesis-aware hint.
     - current OpenClaw prefers `before_prompt_build`; the engine keeps `before_agent_start` as a backward-compatible fallback.
 
 ---

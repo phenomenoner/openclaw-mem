@@ -83,5 +83,5 @@ Current pilot sequencing (2026-02):
   - `openclaw-mem route auto "<query>"` → deterministic default routing: consult readiness, then prefer graph-semantic only when ready and returning candidates; when a fresh synthesis card truthfully covers multiple matched raw refs, surface `preferredCardRefs` / `coveredRawRefs` receipts and let downstream hooks prefer the synthesis card (otherwise fail open to transcript recall)
 - This is still not auto-wired into the OpenClaw default agent loop by default.
   - For unattended use, the recommended posture is `graph readiness` first, then `route auto` as the single routing entrypoint.
-  - If you promote the mem-engine hook, `autoRecall.routeAuto` now injects the same synthesis-aware routing hint instead of replaying only raw graph candidates.
+  - If you promote the mem-engine hook, **Proactive Pack** via `autoRecall.routeAuto` now injects the same synthesis-aware routing hint instead of replaying only raw graph candidates.
 - Deeper typed schema/storage/autonomy enforcement remain future work.

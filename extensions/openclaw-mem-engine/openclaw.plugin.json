@@ -1,7 +1,7 @@
 {
   "id": "openclaw-mem-engine",
   "name": "OpenClaw Mem Engine",
-  "description": "Optional memory slot backend (LanceDB + OpenAI embeddings)",
+  "description": "Optional memory slot backend with hybrid recall and Proactive Pack runtime recall",
   "kind": "memory",
   "version": "0.0.3",
   "uiHints": {
@@ -50,8 +50,8 @@
       "advanced": true
     },
     "autoRecall.enabled": {
-      "label": "Auto Recall",
-      "help": "Inject a bounded, sanitized memory context before agent start"
+      "label": "Proactive Pack (Auto Recall)",
+      "help": "Run bounded, sanitized pre-reply recall during prompt build"
     },
     "autoRecall.selectionMode": {
       "label": "Auto Recall Selection Mode",
