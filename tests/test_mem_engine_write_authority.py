@@ -14,10 +14,31 @@ def test_single_write_path_markers_present_in_ts_and_schema():
     assert "autoCapture disabled (readOnly=" in ts
     assert 'tool: "memory_store"' in ts
     assert 'tool: "memory_forget"' in ts
+    assert 'tool: "memory_import"' in ts
+    assert 'tool: "memory_docs_ingest"' in ts
+    assert "Refusing to import memories: openclaw-mem-engine is running in read-only mode." in ts
+    assert "Re-run with dryRun/validateOnly if you only need validation." in ts
+    assert "Refusing to ingest docs: openclaw-mem-engine is running in read-only mode." in ts
 
     help_text = plugin["uiHints"]["readOnly"]["help"]
     assert "only canonical slot owner" in help_text
     assert "sidecar/docs/graph as read-or-observe lanes" in help_text
+
+
+def test_readonly_enforcement_covers_import_docs_and_startup_ingest_paths():
+    ts = INDEX_TS.read_text("utf-8")
+
+    # Non-dry-run imports must be rejected when readOnly is on, but validation stays allowed.
+    assert "const effectiveDryRun = Boolean(parsed.dryRun) || Boolean(parsed.validateOnly);" in ts
+    assert "if (readOnlyEnabled && !effectiveDryRun) {" in ts
+
+    # Manual docs ingest must be blocked in readOnly mode.
+    assert 'name: "memory_docs_ingest"' in ts
+    assert "if (readOnlyEnabled) {" in ts
+    assert "Refusing to ingest docs: openclaw-mem-engine is running in read-only mode." in ts
+
+    # Startup docs ingest must also stay off under readOnly so the boundary is single-write-path, not tool-only.
+    assert "if (docsColdLaneResolved.enabled && docsColdLaneResolved.ingestOnStart && !readOnlyEnabled) {" in ts
 
 
 def test_mem_engine_docs_state_single_write_path_posture():
