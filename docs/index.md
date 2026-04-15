@@ -10,7 +10,7 @@ If you are starting cold, the GitHub README is the shortest funnel. If you are a
 - [Quickstart](quickstart.md) — fastest local proof from a fresh clone
 - [About openclaw-mem](about.md) — what the project does, who it is for, and what it is not
 - [Choose an install path](install-modes.md) — local proof vs sidecar vs memory engine
-- [Proactive Pack](proactive-pack.md) — bounded pre-reply recall without a second memory kingdom
+- [Proactive Pack](proactive-pack.md) — bounded pre-reply recall without a separate hidden memory layer
 - [Reality check & status](reality-check.md) — what is shipped, partial, and roadmap
 
 ## Proof and evaluation

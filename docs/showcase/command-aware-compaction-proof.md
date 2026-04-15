@@ -83,8 +83,8 @@ This lane upgrades `openclaw-mem` in the right direction:
 - safer review posture because raw evidence is still reachable
 
 It also keeps the architecture clean:
-- no new truth owner
-- no new DB tables
+- no new canonical-memory layer
+- no new storage tables
 - no silent automatic rehydrate inside pack
 
 ## Recommended operator talk track

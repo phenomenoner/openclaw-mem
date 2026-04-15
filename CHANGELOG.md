@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Re-stated the graph boundary in pack-facing docs: graph may improve bounded pack selection/coverage, but it does not become a competing truth owner.
 - Reframed mem-engine live-turn recall as **Proactive Pack** across README, docs, skill cards, and plugin metadata so the public story stays aligned with `Store / Pack / Observe`.
 - Added `openclaw-mem artifact compact-receipt` as the first shipped **command-aware compaction sideband** contract: compact command output can now point back to a recoverable raw artifact instead of silently replacing it.
-- Added the RTK thought-link + `command-aware-compaction-sideband-v0` spec so the product line explicitly absorbs command-aware compaction as an Observe-layer pattern, not as a shell-hook truth mutation.
+- Added the command-aware compaction adoption note + `command-aware-compaction-sideband-v0` spec so the product line explicitly absorbs command-aware compaction as an Observe-layer pattern, not as a shell-hook rewrite of canonical evidence.
 - Extended the context-supply-chain blueprint so Observe now explicitly covers compacted-command sideband receipts alongside raw artifact offload.
 - Landed the first **pack consume path** for compaction receipts: when pack selects a sideband receipt, it now prefers `compact.text` in bundle output, emits `compaction_sideband` recovery metadata, and records the preference in pack trace extensions.
 - Added `openclaw-mem artifact rehydrate` as a bounded raw-recovery helper for compaction receipts / raw artifact handles, and added lightweight family classification for `git_diff`, `test_failures`, and `long_logs` compaction lanes.

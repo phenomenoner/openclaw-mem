@@ -6,7 +6,7 @@ What it does:
 - becomes the active OpenClaw memory backend when selected in `plugins.slots.memory`
 - provides hybrid recall controls (FTS + vector) with scope-aware policies
 - exposes bounded autoRecall / autoCapture controls and lifecycle receipts
-- frames live-turn bounded recall as **Proactive Pack**: pre-reply orchestration, not a second hidden memory kingdom
+- frames live-turn bounded recall as **Proactive Pack**: pre-reply orchestration, not a separate hidden memory layer
 - injects live-turn recall through `before_prompt_build` on current OpenClaw, with `before_agent_start` kept as a legacy fallback for older installs
 - can optionally call `openclaw-mem route auto` before recall injection and add a compact routing hint block into live turns
 - hosts the docs cold-lane ingest/search surfaces for operator-authored markdown
