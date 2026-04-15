@@ -32,6 +32,9 @@ Additional trusted references (for lifecycle/decay):
 - 2026-04-10 — graphify absorption cut lands in route-auto synthesis propagation (whole-product continuation, not graph-as-truth)
   - `docs/archive/thought-links/2026-04-10_graphify-route-auto-synthesis-propagation.md`
   - Playbook tech note: `../openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/2026-04-10_route-auto-synthesis-propagation_and_graphify-absorption.md`
+- 2026-04-15 — RTK / command-aware compaction sideband (adopt the sideband receipt, refuse silent truth mutation)
+  - `docs/archive/thought-links/2026-04-15_rtk-command-aware-compaction-sideband.md`
+  - Spec: `docs/specs/command-aware-compaction-sideband-v0.md`
 
 ## 1) memvid / portable capsule pattern → what we take and what we refuse
 

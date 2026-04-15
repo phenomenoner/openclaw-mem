@@ -7301,6 +7301,115 @@ def cmd_artifact_peek(_conn: sqlite3.Connection, args: argparse.Namespace) -> No
     _emit(receipt, bool(args.json))
 
 
+def cmd_artifact_compact_receipt(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    compact_text = str(getattr(args, "compact_text", "") or "")
+    compact_file = getattr(args, "compact_file", None)
+    if compact_text and compact_file:
+        _emit({"error": "use either --compact-text or --compact-file, not both"}, True)
+        sys.exit(2)
+    if compact_file:
+        compact_path = Path(str(compact_file)).expanduser()
+        try:
+            compact_text = compact_path.read_text(encoding="utf-8")
+        except (FileNotFoundError, IsADirectoryError, PermissionError, OSError) as e:
+            _emit({"error": f"cannot read compact source: {e}"}, True)
+            sys.exit(2)
+    if not compact_text.strip():
+        _emit({"error": "compact text is required (--compact-text or --compact-file)"}, True)
+        sys.exit(2)
+
+    raw_file = getattr(args, "raw_file", None)
+    raw_handle = str(getattr(args, "raw_handle", "") or "").strip()
+    if bool(raw_file) == bool(raw_handle):
+        _emit({"error": "use exactly one of --raw-file or --raw-handle"}, True)
+        sys.exit(2)
+
+    command = str(getattr(args, "command", "") or "").strip()
+    if not command:
+        _emit({"error": "--command is required"}, True)
+        sys.exit(2)
+
+    meta_obj: Dict[str, Any] = {}
+    raw_meta_json = (getattr(args, "meta_json", None) or "").strip()
+    if raw_meta_json:
+        try:
+            parsed = json.loads(raw_meta_json)
+        except json.JSONDecodeError as e:
+            _emit({"error": f"invalid --meta-json: {e}"}, True)
+            sys.exit(2)
+        if not isinstance(parsed, dict):
+            _emit({"error": "--meta-json must be a JSON object"}, True)
+            sys.exit(2)
+        meta_obj = parsed
+
+    raw_artifact: Dict[str, Any]
+    if raw_handle:
+        try:
+            parse_artifact_handle(raw_handle)
+            raw_artifact = peek_artifact(raw_handle, preview_chars=1)
+        except FileNotFoundError as e:
+            _emit({"error": str(e)}, True)
+            sys.exit(1)
+        except ValueError as e:
+            _emit({"error": str(e)}, True)
+            sys.exit(2)
+        except Exception as e:
+            _emit({"error": str(e)}, True)
+            sys.exit(1)
+    else:
+        raw_path = Path(str(raw_file)).expanduser()
+        try:
+            data = raw_path.read_bytes()
+        except (FileNotFoundError, IsADirectoryError, PermissionError, OSError) as e:
+            _emit({"error": f"cannot read raw source: {e}"}, True)
+            sys.exit(2)
+        try:
+            stash_receipt = stash_artifact(
+                data,
+                kind=str(getattr(args, "kind", "tool_output") or "tool_output"),
+                meta={
+                    "source": "artifact.compact-receipt",
+                    "command": command,
+                    "tool": str(getattr(args, "tool", "external_compactor") or "external_compactor"),
+                    **meta_obj,
+                },
+                compress=bool(getattr(args, "gzip", False)),
+            )
+        except Exception as e:
+            _emit({"error": str(e)}, True)
+            sys.exit(1)
+        raw_artifact = {
+            "handle": stash_receipt.get("handle"),
+            "sha256": stash_receipt.get("sha256"),
+            "bytes": stash_receipt.get("bytes"),
+            "createdAt": stash_receipt.get("createdAt"),
+            "kind": stash_receipt.get("kind"),
+            "compression": "gzip" if bool(getattr(args, "gzip", False)) else "none",
+            "meta": stash_receipt.get("meta") if isinstance(stash_receipt.get("meta"), dict) else {},
+        }
+
+    receipt = {
+        "schema": "openclaw-mem.artifact.compaction-receipt.v1",
+        "createdAt": _utcnow_iso(),
+        "mode": "sideband",
+        "tool": str(getattr(args, "tool", "external_compactor") or "external_compactor"),
+        "command": command,
+        "rewrittenCommand": str(getattr(args, "rewritten_command", "") or "").strip() or None,
+        "rawArtifact": {
+            "handle": raw_artifact.get("handle"),
+            "sha256": raw_artifact.get("sha256"),
+            "bytes": raw_artifact.get("bytes"),
+            "kind": raw_artifact.get("kind"),
+        },
+        "compact": {
+            "text": compact_text,
+            "bytes": len(compact_text.encode("utf-8")),
+        },
+        "meta": meta_obj,
+    }
+    _emit(receipt, bool(args.json))
+
+
 # --- Graphic memory (GraphRAG-lite) — v0 skeleton (index-first + progressive disclosure) ---
 #
 # v0 design goals:
@@ -13619,6 +13728,27 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("handle", help="Artifact handle: ocm_artifact:v1:sha256:<64hex>")
     a.add_argument("--preview-chars", dest="preview_chars", type=int, default=240, help="Preview character budget (default: 240)")
     a.set_defaults(func=cmd_artifact_peek)
+
+    a = asub.add_parser("compact-receipt", help="Emit a sideband compaction receipt with raw artifact provenance")
+    a.add_argument("--db", default=None, help="SQLite DB path")
+    a.add_argument(
+        "--json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true). Use --no-json for plain JSON text.",
+    )
+    a.add_argument("--command", required=True, help="Original command observed by the operator or agent")
+    a.add_argument("--rewritten-command", dest="rewritten_command", help="Optional explicit rewritten or compactor command")
+    a.add_argument("--tool", default="external_compactor", help="Compactor/tool label (for example: rtk)")
+    a.add_argument("--compact-text", dest="compact_text", help="Compacted text content")
+    a.add_argument("--compact-file", dest="compact_file", help="Read compacted text from file")
+    raw_group = a.add_mutually_exclusive_group(required=True)
+    raw_group.add_argument("--raw-file", dest="raw_file", help="Raw output file to stash as an artifact")
+    raw_group.add_argument("--raw-handle", dest="raw_handle", help="Existing raw artifact handle")
+    a.add_argument("--kind", default="tool_output", help="Artifact kind when stashing raw output")
+    a.add_argument("--gzip", action="store_true", help="Compress newly stashed raw artifact")
+    a.add_argument("--meta-json", default=None, help="Optional metadata JSON object")
+    a.set_defaults(func=cmd_artifact_compact_receipt)
 
     sp = sub.add_parser("episodes", help="Append/extract/ingest/query/replay/redact/gc for episodic session events")
     add_common(sp)

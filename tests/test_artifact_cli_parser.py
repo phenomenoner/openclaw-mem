@@ -29,6 +29,39 @@ class TestArtifactCliParser(unittest.TestCase):
         d_no_json = build_parser().parse_args(["artifact", "peek", "--no-json", "ocm_artifact:v1:sha256:" + ("a" * 64)])
         self.assertFalse(d_no_json.json)
 
+        e = build_parser().parse_args(
+            [
+                "artifact",
+                "compact-receipt",
+                "--command",
+                "git status",
+                "--tool",
+                "rtk",
+                "--compact-text",
+                "ok main",
+                "--raw-handle",
+                "ocm_artifact:v1:sha256:" + ("a" * 64),
+            ]
+        )
+        self.assertEqual(e.cmd, "artifact")
+        self.assertEqual(e.artifact_cmd, "compact-receipt")
+        self.assertTrue(e.json)
+
+        e_no_json = build_parser().parse_args(
+            [
+                "artifact",
+                "compact-receipt",
+                "--command",
+                "git status",
+                "--compact-text",
+                "ok main",
+                "--raw-handle",
+                "ocm_artifact:v1:sha256:" + ("a" * 64),
+                "--no-json",
+            ]
+        )
+        self.assertFalse(e_no_json.json)
+
 
 if __name__ == "__main__":
     unittest.main()

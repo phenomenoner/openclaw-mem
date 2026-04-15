@@ -12,11 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clarified the mem-engine **single-write-path posture** across plugin schema help, mem-engine docs, and source markers so slot ownership stays explicit when `openclaw-mem-engine` is active.
 - Re-stated the graph boundary in pack-facing docs: graph may improve bounded pack selection/coverage, but it does not become a competing truth owner.
 - Reframed mem-engine live-turn recall as **Proactive Pack** across README, docs, skill cards, and plugin metadata so the public story stays aligned with `Store / Pack / Observe`.
+- Added `openclaw-mem artifact compact-receipt` as the first shipped **command-aware compaction sideband** contract: compact command output can now point back to a recoverable raw artifact instead of silently replacing it.
+- Added the RTK thought-link + `command-aware-compaction-sideband-v0` spec so the product line explicitly absorbs command-aware compaction as an Observe-layer pattern, not as a shell-hook truth mutation.
+- Extended the context-supply-chain blueprint so Observe now explicitly covers compacted-command sideband receipts alongside raw artifact offload.
 
 ### Testing
 
 - Added `tests/test_mem_engine_write_authority.py` to lock the single-write-path wording across docs/schema/source markers.
 - Added `tests/test_proactive_pack_docs.py` to lock the public Proactive Pack wording across docs and plugin metadata.
+- Added parser/CLI contract coverage for `artifact compact-receipt` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.
 
 ## [1.5.1] - 2026-04-13
 

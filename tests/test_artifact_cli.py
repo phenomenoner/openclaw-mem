@@ -109,6 +109,43 @@ class TestArtifactCli(unittest.TestCase):
                     "artifact.peek",
                 )
 
+                compact_args = build_parser().parse_args(
+                    [
+                        "artifact",
+                        "compact-receipt",
+                        "--command",
+                        "git status",
+                        "--rewritten-command",
+                        "rtk git status",
+                        "--tool",
+                        "rtk",
+                        "--compact-text",
+                        "ok main",
+                        "--raw-handle",
+                        handle,
+                        "--meta-json",
+                        '{"scope":"cli","mode":"sideband"}',
+                    ]
+                )
+                compact_buf = io.StringIO()
+                with contextlib.redirect_stdout(compact_buf):
+                    compact_args.func(conn, compact_args)
+
+                compact_out = json.loads(compact_buf.getvalue())
+                self.assertEqual(compact_out["schema"], "openclaw-mem.artifact.compaction-receipt.v1")
+                self.assertEqual(compact_out["mode"], "sideband")
+                self.assertEqual(compact_out["tool"], "rtk")
+                self.assertEqual(compact_out["command"], "git status")
+                self.assertEqual(compact_out["rewrittenCommand"], "rtk git status")
+                self.assertEqual(compact_out["rawArtifact"]["handle"], handle)
+                self.assertEqual(compact_out["compact"], {"text": "ok main", "bytes": len("ok main".encode("utf-8"))})
+                self.assertEqual(compact_out["meta"], {"scope": "cli", "mode": "sideband"})
+                self._assert_exact_keys(
+                    compact_out,
+                    {"schema", "createdAt", "mode", "tool", "command", "rewrittenCommand", "rawArtifact", "compact", "meta"},
+                    "artifact.compact-receipt",
+                )
+
                 nojson_args = build_parser().parse_args(["artifact", "fetch", "--no-json", handle, "--max-chars", "16"])
                 nojson_buf = io.StringIO()
                 with contextlib.redirect_stdout(nojson_buf):

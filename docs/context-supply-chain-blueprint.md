@@ -56,10 +56,11 @@ Primary shipped surfaces:
 
 - trace receipts
 - artifact stash/fetch/peek
+- artifact compaction sideband receipts
 - local files and deterministic JSON outputs
 
 Observe keeps the system explainable.
-It proves what was selected, what was cut, and where large raw payloads went.
+It proves what was selected, what was cut, where large raw payloads went, and when a compacted command view is standing beside raw evidence instead of replacing it.
 
 ## Product split
 

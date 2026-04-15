@@ -6,3 +6,4 @@ Dated design notes and tracepacks that informed current docs, kept for provenanc
 
 - `2026-02-20_qmd-fit-4a-tracepack.md` — QMD fit tracepack / research receipt.
 - `2026-03-04_context-budget-sidecar-openclaw-token-cost.md` — context-budget sidecar exploration receipt.
+- `2026-04-15_rtk-command-aware-compaction-sideband.md` — RTK-derived command-aware compaction sideband adoption note.
