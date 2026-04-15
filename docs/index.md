@@ -16,6 +16,7 @@ If you are starting cold, the GitHub README is the shortest funnel. If you are a
 ## Proof and evaluation
 
 - [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md)
+- [Command-aware compaction proof](showcase/command-aware-compaction-proof.md)
 - [Metrics JSON](showcase/artifacts/trust-aware-context-pack.metrics.json)
 - [Synthetic fixture + receipts](showcase/artifacts/index.md)
 - [Inside-out demo](showcase/inside-out-demo.md)

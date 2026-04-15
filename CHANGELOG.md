@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-04-15
+
 ### Changed
 
 - Clarified the mem-engine **single-write-path posture** across plugin schema help, mem-engine docs, and source markers so slot ownership stays explicit when `openclaw-mem-engine` is active.
@@ -20,19 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added advisory-only `compaction_policy_hints` to pack / trace outputs so family metadata can shape operator guidance without mutating retrieval ranking.
 - Added README / QUICKSTART operator examples for compaction receipts and bounded raw rehydrate.
 - Added a public-safe showcase proof for command-aware compaction plus `compaction-family-policy-cards-v0` so the advisory family lane is now documented as an operator surface.
-- Extended the showcase proof pack with a second synthetic `test_failures` example covering receipt -> rehydrate -> pack -> advisory guidance.
-@@
--- Added parser/CLI contract coverage for `artifact compact-receipt` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.
-+- Added parser/CLI contract coverage for `artifact compact-receipt` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.
-+- Added pack-path coverage for compaction receipts in `tests/test_cli.py`, including trace-side raw rehydrate metadata.
-- Added artifact rehydrate + family-classification coverage in `tests/test_artifact_cli.py`, `tests/test_artifact_cli_parser.py`, and `tests/test_cli.py`.
-- Added pack-path coverage for advisory `compaction_policy_hints` in `tests/test_cli.py`.
+- Extended the showcase proof pack with synthetic `git_diff` and `test_failures` examples covering receipt -> rehydrate -> pack -> advisory guidance.
+- Updated external docs + skill-card surfaces so compaction evidence is framed as orientation-first, raw-evidence-second behavior instead of durable truth.
 
 ### Testing
 
 - Added `tests/test_mem_engine_write_authority.py` to lock the single-write-path wording across docs/schema/source markers.
 - Added `tests/test_proactive_pack_docs.py` to lock the public Proactive Pack wording across docs and plugin metadata.
-- Added parser/CLI contract coverage for `artifact compact-receipt` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.
+- Added parser/CLI contract coverage for `artifact compact-receipt` and `artifact rehydrate` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.
+- Added pack-path coverage for compaction receipts, raw-rehydrate hints, family classification, and advisory `compaction_policy_hints` in `tests/test_cli.py`.
 
 ## [1.5.1] - 2026-04-13
 
