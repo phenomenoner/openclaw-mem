@@ -145,7 +145,11 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(payload["compaction_sideband"]["selected"][0]["family"], "generic")
         self.assertEqual(payload["compaction_sideband"]["selected"][0]["rawArtifactHandle"], "ocm_artifact:v1:sha256:" + ("a" * 64))
         self.assertIn("raw artifact handle", payload["compaction_sideband"]["raw_rehydrate_hint"].lower())
+        self.assertEqual(payload["compaction_policy_hints"]["mode"], "advisory_only")
+        self.assertEqual(payload["compaction_policy_hints"]["family_counts"]["generic"], 1)
+        self.assertIn("generic", payload["compaction_policy_hints"]["preferred_families"])
         self.assertEqual(payload["trace"]["extensions"]["compaction_sideband"]["selected_count"], 1)
+        self.assertEqual(payload["trace"]["extensions"]["compaction_policy_hints"], payload["compaction_policy_hints"])
         self.assertEqual(payload["trace"]["extensions"]["compaction_sideband"]["selected"][0]["rewrittenCommand"], "rtk git status")
         self.assertTrue(any("compaction sideband" in note.lower() for note in payload["context_pack"]["notes"]["how_to_use"]))
         conn.close()
@@ -198,6 +202,8 @@ class TestCliM0(unittest.TestCase):
                 cmd_pack(conn, args)
             payload = json.loads(buf.getvalue())
             self.assertEqual(payload["compaction_sideband"]["selected"][0]["family"], expected)
+            self.assertEqual(payload["compaction_policy_hints"]["family_counts"][expected], 1)
+            self.assertIn(expected, payload["compaction_policy_hints"]["preferred_families"])
         conn.close()
 
     def test_normalize_importance_scorer_value_accepts_common_aliases(self):

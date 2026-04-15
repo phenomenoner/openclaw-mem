@@ -62,6 +62,11 @@ Primary shipped surfaces:
 Observe keeps the system explainable.
 It proves what was selected, what was cut, where large raw payloads went, and when a compacted command view is standing beside raw evidence instead of replacing it.
 
+Current Observe-side command-compaction contract:
+- `artifact compact-receipt` binds compact output to a recoverable raw artifact
+- `artifact rehydrate` recovers bounded raw evidence from a receipt or raw handle
+- `pack` may emit `compaction_policy_hints` as advisory-only family guidance without mutating retrieval ranking or durable truth
+
 ## Product split
 
 ### Core

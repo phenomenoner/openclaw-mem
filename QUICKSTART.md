@@ -119,6 +119,32 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifa
 
 The `pack` response carries a stable `context_pack` field for handoff, and `artifact` commands use deterministic JSON contracts for machine parsing.
 
+### Step 4.5b: Command-aware compaction, bounded raw recovery
+
+```bash
+# Raw + compact outputs from your own toolchain
+printf 'diff --git a/a.py b/a.py\n-foo\n+bar\n' > ./raw-git-diff.txt
+printf 'M a.py (+1 -1)\n' > ./compact-git-diff.txt
+
+uv run --python 3.13 --frozen -- python -m openclaw_mem artifact compact-receipt \
+  --command "git diff --stat" \
+  --tool rtk \
+  --compact-file ./compact-git-diff.txt \
+  --raw-file ./raw-git-diff.txt \
+  --json > ./compaction-receipt.json
+
+uv run --python 3.13 --frozen -- python -m openclaw_mem artifact rehydrate \
+  --receipt-file ./compaction-receipt.json \
+  --max-chars 120 \
+  --json
+```
+
+What this proves:
+- compacted command output can be stored as an Observe-side sideband receipt
+- the receipt keeps a deterministic pointer back to bounded raw evidence
+- family metadata is attached advisory-only (`git_diff`, `test_failures`, `long_logs`, `generic`)
+- later `pack` runs can prefer compact evidence without losing raw recovery
+
 ---
 
 ## Step 4.6: Dual-language memory (optional)

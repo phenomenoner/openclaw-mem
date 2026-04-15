@@ -82,6 +82,35 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem artifact stash --from ./
 uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifact:v1:sha256:<64hex> --json
 ```
 
+### Command-aware compaction, minimal operator path
+
+If you already use a compactor such as RTK, keep it in the Observe lane first:
+
+```bash
+# 1) Produce raw + compact outputs with your own toolchain
+rtk git diff --stat > ./compact-git-diff.txt
+git diff --stat > ./raw-git-diff.txt
+
+# 2) Bind them into a sideband receipt
+uv run --python 3.13 --frozen -- python -m openclaw_mem artifact compact-receipt \
+  --command "git diff --stat" \
+  --tool rtk \
+  --compact-file ./compact-git-diff.txt \
+  --raw-file ./raw-git-diff.txt \
+  --json
+
+# 3) Recover bounded raw evidence later, from the receipt or raw handle
+uv run --python 3.13 --frozen -- python -m openclaw_mem artifact rehydrate \
+  --receipt-file ./compaction-receipt.json \
+  --max-chars 1200 \
+  --json
+```
+
+When a compaction receipt is later selected by `pack`, the response may include:
+- `compaction_sideband` for raw recovery metadata
+- `compaction_policy_hints` for advisory family-level guidance (`git_diff`, `test_failures`, `long_logs`, `generic`)
+- `trace.extensions.compaction_sideband` / `compaction_policy_hints` for auditable preference receipts
+
 ## Start here
 
 - **About the product:** [`docs/about.md`](docs/about.md)

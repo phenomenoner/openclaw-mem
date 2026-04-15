@@ -17,11 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended the context-supply-chain blueprint so Observe now explicitly covers compacted-command sideband receipts alongside raw artifact offload.
 - Landed the first **pack consume path** for compaction receipts: when pack selects a sideband receipt, it now prefers `compact.text` in bundle output, emits `compaction_sideband` recovery metadata, and records the preference in pack trace extensions.
 - Added `openclaw-mem artifact rehydrate` as a bounded raw-recovery helper for compaction receipts / raw artifact handles, and added lightweight family classification for `git_diff`, `test_failures`, and `long_logs` compaction lanes.
+- Added advisory-only `compaction_policy_hints` to pack / trace outputs so family metadata can shape operator guidance without mutating retrieval ranking.
+- Added README / QUICKSTART operator examples for compaction receipts and bounded raw rehydrate.
 @@
 -- Added parser/CLI contract coverage for `artifact compact-receipt` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.
 +- Added parser/CLI contract coverage for `artifact compact-receipt` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.
 +- Added pack-path coverage for compaction receipts in `tests/test_cli.py`, including trace-side raw rehydrate metadata.
 - Added artifact rehydrate + family-classification coverage in `tests/test_artifact_cli.py`, `tests/test_artifact_cli_parser.py`, and `tests/test_cli.py`.
+- Added pack-path coverage for advisory `compaction_policy_hints` in `tests/test_cli.py`.
 
 ### Testing
 

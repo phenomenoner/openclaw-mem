@@ -4806,6 +4806,36 @@ def _pack_policy_surface_summary(policy: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def _pack_compaction_policy_hints(compaction_selected: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not compaction_selected:
+        return None
+
+    family_counts: Dict[str, int] = {}
+    families_in_order: List[str] = []
+    for item in compaction_selected:
+        family = str(item.get("family") or "").strip() or "generic"
+        family_counts[family] = int(family_counts.get(family, 0)) + 1
+        if family not in families_in_order:
+            families_in_order.append(family)
+
+    guidance_map = {
+        "git_diff": "Prefer compact summaries first for review/navigation, then rehydrate raw diff before exact line-level claims.",
+        "test_failures": "Prefer compact summaries first for failure triage, then rehydrate raw output for stack traces and exact assertions.",
+        "long_logs": "Prefer compact summaries first for log scanning, then rehydrate bounded raw windows around suspect events.",
+        "generic": "Prefer compact summaries first when they reduce noise, but rehydrate raw evidence before exact operational claims.",
+    }
+    preferred = [family for family in families_in_order if family in guidance_map]
+    if not preferred:
+        preferred = ["generic"]
+
+    return {
+        "mode": "advisory_only",
+        "family_counts": {key: int(family_counts[key]) for key in sorted(family_counts.keys())},
+        "preferred_families": preferred,
+        "guidance": [guidance_map.get(family, guidance_map["generic"]) for family in preferred],
+    }
+
+
 def _pack_compose_policy_surface(
     *,
     selected_items: List[Dict[str, Any]],
@@ -5659,11 +5689,14 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "context_pack": context_pack_v1.to_dict(context_pack),
     }
     if compaction_selected:
+        compaction_policy_hints = _pack_compaction_policy_hints(compaction_selected)
         payload["compaction_sideband"] = {
             "mode": "prefer_compact_fail_open",
             "selected": compaction_selected,
             "raw_rehydrate_hint": "Use the raw artifact handle with `openclaw-mem artifact fetch` or `peek` to recover bounded raw evidence.",
         }
+        if compaction_policy_hints is not None:
+            payload["compaction_policy_hints"] = compaction_policy_hints
 
     graph_provenance_policy: Optional[Dict[str, Any]] = None
     if (graph_state or {}).get("use_graph") != "off":
@@ -5785,6 +5818,9 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 "selected": compaction_selected,
                 "selected_count": len(compaction_selected),
             }
+            compaction_policy_hints = _pack_compaction_policy_hints(compaction_selected)
+            if compaction_policy_hints is not None:
+                trace_extensions["compaction_policy_hints"] = compaction_policy_hints
 
         trace = pack_trace_v1.PackTraceV1(
             kind=pack_trace_v1.PACK_TRACE_V1_KIND,
