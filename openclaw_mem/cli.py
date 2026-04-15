@@ -4149,6 +4149,29 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 _PACK_COMPACTION_RECEIPT_SCHEMA = "openclaw-mem.artifact.compaction-receipt.v1"
 
 
+def _compact_family_from_command(command: str) -> str:
+    cmd = str(command or "").strip().lower()
+    if not cmd:
+        return "generic"
+    if re.search(r"\bgit\s+diff\b|\bdiff\b", cmd):
+        return "git_diff"
+    if re.search(r"\b(pytest|cargo\s+test|npm\s+test|pnpm\s+test|yarn\s+test|go\s+test|vitest|playwright\s+test|rspec|rake\s+test)\b", cmd):
+        return "test_failures"
+    if re.search(r"\b(docker\s+logs|kubectl\s+logs|journalctl|tail|less|cat\s+.*log|grep\s+.*log|awk\s+.*log)\b", cmd):
+        return "long_logs"
+    return "generic"
+
+
+def _extract_compaction_raw_handle(detail_obj: Dict[str, Any]) -> Optional[str]:
+    receipt = _pack_compaction_receipt(detail_obj)
+    if receipt is None:
+        return None
+    handle = str(receipt.get("rawArtifactHandle") or "").strip()
+    if not handle:
+        return None
+    return handle
+
+
 def _pack_compaction_receipt(detail_obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not isinstance(detail_obj, dict):
         return None
@@ -4160,6 +4183,7 @@ def _pack_compaction_receipt(detail_obj: Dict[str, Any]) -> Optional[Dict[str, A
         return None
     raw_artifact = detail_obj.get("rawArtifact") if isinstance(detail_obj.get("rawArtifact"), dict) else {}
     return {
+        "family": str(detail_obj.get("family") or "").strip() or _compact_family_from_command(detail_obj.get("command") or ""),
         "tool": str(detail_obj.get("tool") or "").strip() or None,
         "command": str(detail_obj.get("command") or "").strip() or None,
         "rewrittenCommand": str(detail_obj.get("rewrittenCommand") or "").strip() or None,
@@ -5535,6 +5559,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             )
             if compaction_receipt is not None:
                 selected_items[-1]["compaction"] = {
+                    "family": compaction_receipt.get("family"),
                     "tool": compaction_receipt.get("tool"),
                     "command": compaction_receipt.get("command"),
                     "rewrittenCommand": compaction_receipt.get("rewrittenCommand"),
@@ -5543,6 +5568,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 compaction_selected.append(
                     {
                         "recordRef": record_ref,
+                        "family": compaction_receipt.get("family"),
                         "tool": compaction_receipt.get("tool"),
                         "command": compaction_receipt.get("command"),
                         "rewrittenCommand": compaction_receipt.get("rewrittenCommand"),
@@ -7369,6 +7395,80 @@ def cmd_artifact_peek(_conn: sqlite3.Connection, args: argparse.Namespace) -> No
     _emit(receipt, bool(args.json))
 
 
+def cmd_artifact_rehydrate(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    raw_handle = str(getattr(args, "raw_handle", "") or "").strip()
+    receipt_json = (getattr(args, "receipt_json", None) or "").strip()
+    receipt_file = getattr(args, "receipt_file", None)
+    if sum(bool(x) for x in (raw_handle, receipt_json, receipt_file)) != 1:
+        _emit({"error": "use exactly one of --raw-handle, --receipt-json, or --receipt-file"}, True)
+        sys.exit(2)
+
+    if receipt_file:
+        receipt_path = Path(str(receipt_file)).expanduser()
+        try:
+            receipt_json = receipt_path.read_text(encoding="utf-8")
+        except (FileNotFoundError, IsADirectoryError, PermissionError, OSError) as e:
+            _emit({"error": f"cannot read receipt source: {e}"}, True)
+            sys.exit(2)
+
+    if receipt_json:
+        try:
+            parsed = json.loads(receipt_json)
+        except json.JSONDecodeError as e:
+            _emit({"error": f"invalid receipt JSON: {e}"}, True)
+            sys.exit(2)
+        if not isinstance(parsed, dict):
+            _emit({"error": "receipt JSON must be an object"}, True)
+            sys.exit(2)
+        raw_handle = _extract_compaction_raw_handle(parsed) or ""
+        if not raw_handle:
+            _emit({"error": "receipt does not contain a valid raw artifact handle"}, True)
+            sys.exit(2)
+
+    try:
+        parse_artifact_handle(raw_handle)
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    try:
+        fetched = fetch_artifact(
+            raw_handle,
+            mode=str(getattr(args, "mode", "headtail") or "headtail"),
+            max_chars=max(1, int(getattr(args, "max_chars", 8000) or 8000)),
+        )
+        preview = peek_artifact(
+            raw_handle,
+            preview_chars=max(1, min(240, int(getattr(args, "max_chars", 8000) or 8000))),
+        )
+    except FileNotFoundError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(1)
+
+    receipt = {
+        "schema": "openclaw-mem.artifact.rehydrate.v1",
+        "handle": raw_handle,
+        "selector": fetched.get("selector"),
+        "artifact": {
+            "sha256": preview.get("sha256"),
+            "bytes": preview.get("bytes"),
+            "kind": preview.get("kind"),
+            "compression": preview.get("compression"),
+        },
+        "text": fetched.get("text") or "",
+    }
+    if bool(args.json):
+        _emit(receipt, True)
+        return
+    sys.stdout.write(str(receipt.get("text") or ""))
+
+
 def cmd_artifact_compact_receipt(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     compact_text = str(getattr(args, "compact_text", "") or "")
     compact_file = getattr(args, "compact_file", None)
@@ -7460,6 +7560,7 @@ def cmd_artifact_compact_receipt(_conn: sqlite3.Connection, args: argparse.Names
         "schema": "openclaw-mem.artifact.compaction-receipt.v1",
         "createdAt": _utcnow_iso(),
         "mode": "sideband",
+        "family": _compact_family_from_command(command),
         "tool": str(getattr(args, "tool", "external_compactor") or "external_compactor"),
         "command": command,
         "rewrittenCommand": str(getattr(args, "rewritten_command", "") or "").strip() or None,
@@ -13784,6 +13885,23 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--mode", choices=["headtail", "head", "tail"], default="headtail", help="Bounded extraction mode (default: headtail)")
     a.add_argument("--max-chars", dest="max_chars", type=int, default=8000, help="Maximum characters to return (default: 8000)")
     a.set_defaults(func=cmd_artifact_fetch)
+
+    a = asub.add_parser("rehydrate", help="Bounded raw recovery from a compaction receipt or raw artifact handle")
+    a.add_argument("--db", default=None, help="SQLite DB path")
+    a.add_argument(
+        "--json",
+        dest="json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true). Use --no-json for raw bounded text only.",
+    )
+    source_group = a.add_mutually_exclusive_group(required=True)
+    source_group.add_argument("--raw-handle", dest="raw_handle", help="Raw artifact handle to recover")
+    source_group.add_argument("--receipt-json", dest="receipt_json", help="Compaction receipt JSON object")
+    source_group.add_argument("--receipt-file", dest="receipt_file", help="Path to a compaction receipt JSON file")
+    a.add_argument("--mode", choices=["headtail", "head", "tail"], default="headtail", help="Bounded extraction mode (default: headtail)")
+    a.add_argument("--max-chars", dest="max_chars", type=int, default=8000, help="Maximum characters to return (default: 8000)")
+    a.set_defaults(func=cmd_artifact_rehydrate)
 
     a = asub.add_parser("peek", help="Show artifact metadata + tiny preview")
     a.add_argument("--db", default=None, help="SQLite DB path")

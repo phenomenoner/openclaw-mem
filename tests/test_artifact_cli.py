@@ -134,6 +134,7 @@ class TestArtifactCli(unittest.TestCase):
                 compact_out = json.loads(compact_buf.getvalue())
                 self.assertEqual(compact_out["schema"], "openclaw-mem.artifact.compaction-receipt.v1")
                 self.assertEqual(compact_out["mode"], "sideband")
+                self.assertEqual(compact_out["family"], "generic")
                 self.assertEqual(compact_out["tool"], "rtk")
                 self.assertEqual(compact_out["command"], "git status")
                 self.assertEqual(compact_out["rewrittenCommand"], "rtk git status")
@@ -142,8 +143,32 @@ class TestArtifactCli(unittest.TestCase):
                 self.assertEqual(compact_out["meta"], {"scope": "cli", "mode": "sideband"})
                 self._assert_exact_keys(
                     compact_out,
-                    {"schema", "createdAt", "mode", "tool", "command", "rewrittenCommand", "rawArtifact", "compact", "meta"},
+                    {"schema", "createdAt", "mode", "family", "tool", "command", "rewrittenCommand", "rawArtifact", "compact", "meta"},
                     "artifact.compact-receipt",
+                )
+
+                rehydrate_args = build_parser().parse_args(
+                    [
+                        "artifact",
+                        "rehydrate",
+                        "--receipt-json",
+                        compact_buf.getvalue(),
+                        "--max-chars",
+                        "18",
+                    ]
+                )
+                rehydrate_buf = io.StringIO()
+                with contextlib.redirect_stdout(rehydrate_buf):
+                    rehydrate_args.func(conn, rehydrate_args)
+                rehydrate_out = json.loads(rehydrate_buf.getvalue())
+                self.assertEqual(rehydrate_out["schema"], "openclaw-mem.artifact.rehydrate.v1")
+                self.assertEqual(rehydrate_out["handle"], handle)
+                self.assertEqual(rehydrate_out["selector"], {"mode": "headtail", "maxChars": 18})
+                self.assertLessEqual(len(rehydrate_out["text"]), 18)
+                self._assert_exact_keys(
+                    rehydrate_out,
+                    {"schema", "handle", "selector", "artifact", "text"},
+                    "artifact.rehydrate",
                 )
 
                 nojson_args = build_parser().parse_args(["artifact", "fetch", "--no-json", handle, "--max-chars", "16"])

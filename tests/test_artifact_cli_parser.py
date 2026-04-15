@@ -18,6 +18,11 @@ class TestArtifactCliParser(unittest.TestCase):
         self.assertEqual(b.artifact_cmd, "fetch")
         self.assertTrue(b.json)
 
+        b2 = build_parser().parse_args(["artifact", "rehydrate", "--raw-handle", "ocm_artifact:v1:sha256:" + ("a" * 64)])
+        self.assertEqual(b2.cmd, "artifact")
+        self.assertEqual(b2.artifact_cmd, "rehydrate")
+        self.assertTrue(b2.json)
+
         c = build_parser().parse_args(["artifact", "fetch", "--no-json", "ocm_artifact:v1:sha256:" + ("a" * 64)])
         self.assertFalse(c.json)
 

@@ -95,4 +95,6 @@ openclaw-mem artifact compact-receipt \
 The first pack follow-through is now landed:
 - when pack selects a compaction receipt, it may prefer `compact.text` in `bundle_text` / item summaries,
 - payloads expose `compaction_sideband` with raw-artifact recovery metadata,
-- pack trace exposes `extensions.compaction_sideband` so the preference stays auditable.
+- pack trace exposes `extensions.compaction_sideband` so the preference stays auditable,
+- compaction receipts now classify lightweight families (`git_diff`, `test_failures`, `long_logs`, `generic`),
+- `openclaw-mem artifact rehydrate` can recover bounded raw evidence from either a compaction receipt or a raw artifact handle.

@@ -38,6 +38,11 @@ Graph integration follows the same rule: graph may improve selection, coverage, 
 
 Command-aware compaction follows the same boundary. If a selected record is an Observe-side compaction receipt, pack may prefer the compact view for `bundle_text`, but raw evidence must stay recoverable through the attached artifact handle rather than being silently treated as canonical truth.
 
+The current additive surfaces are:
+- `compaction_sideband.selected[].family` for lightweight command-family hints (`git_diff`, `test_failures`, `long_logs`, `generic`)
+- `compaction_sideband.selected[].rawArtifactHandle` for deterministic raw recovery
+- `trace.extensions.compaction_sideband` for redaction-safe provenance of the preference path
+
 ## What we mean by “ContextPack”
 
 A **ContextPack** is an injection-ready payload that can be fed to an agent as “relevant state”.
