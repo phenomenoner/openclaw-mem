@@ -1,0 +1,20 @@
+{
+  "schema": "openclaw-mem.artifact.compaction-receipt.v1",
+  "createdAt": "2026-04-15T14:34:14.324069+00:00",
+  "mode": "sideband",
+  "family": "git_diff",
+  "tool": "rtk",
+  "command": "git diff --stat",
+  "rewrittenCommand": null,
+  "rawArtifact": {
+    "handle": "ocm_artifact:v1:sha256:6a9efc6967a01a716de4f733721e1644c2567008ec7828c471a04bfe412957b8",
+    "sha256": "6a9efc6967a01a716de4f733721e1644c2567008ec7828c471a04bfe412957b8",
+    "bytes": 43,
+    "kind": "tool_output"
+  },
+  "compact": {
+    "text": "M app.py (+1 -1)\n",
+    "bytes": 17
+  },
+  "meta": {}
+}

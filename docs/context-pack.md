@@ -41,7 +41,11 @@ Command-aware compaction follows the same boundary. If a selected record is an O
 The current additive surfaces are:
 - `compaction_sideband.selected[].family` for lightweight command-family hints (`git_diff`, `test_failures`, `long_logs`, `generic`)
 - `compaction_sideband.selected[].rawArtifactHandle` for deterministic raw recovery
-- `trace.extensions.compaction_sideband` for redaction-safe provenance of the preference path
+- `compaction_policy_hints` for advisory operator guidance by compaction family
+- `trace.extensions.compaction_sideband` and `trace.extensions.compaction_policy_hints` for redaction-safe provenance of the preference path
+
+Public-safe proof:
+- [Command-aware compaction proof](showcase/command-aware-compaction-proof.md)
 
 ## What we mean by “ContextPack”
 

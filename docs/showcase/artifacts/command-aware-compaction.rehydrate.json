@@ -1,0 +1,15 @@
+{
+  "schema": "openclaw-mem.artifact.rehydrate.v1",
+  "handle": "ocm_artifact:v1:sha256:6a9efc6967a01a716de4f733721e1644c2567008ec7828c471a04bfe412957b8",
+  "selector": {
+    "mode": "headtail",
+    "maxChars": 24
+  },
+  "artifact": {
+    "sha256": "6a9efc6967a01a716de4f733721e1644c2567008ec7828c471a04bfe412957b8",
+    "bytes": 43,
+    "kind": "tool_output",
+    "compression": "none"
+  },
+  "text": "diff --gi\n...\n()\n+bar()\n"
+}

@@ -144,6 +144,11 @@ What this proves:
 - the receipt keeps a deterministic pointer back to bounded raw evidence
 - family metadata is attached advisory-only (`git_diff`, `test_failures`, `long_logs`, `generic`)
 - later `pack` runs can prefer compact evidence without losing raw recovery
+- `pack` can emit advisory `compaction_policy_hints` for operator guidance without mutating retrieval ranking
+
+See also:
+- `docs/showcase/command-aware-compaction-proof.md`
+- `docs/specs/compaction-family-policy-cards-v0.md`
 
 ---
 

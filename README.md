@@ -60,6 +60,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
 
 Full proof path:
 - [Trust-aware pack proof](docs/showcase/trust-aware-context-pack-proof.md)
+- [Command-aware compaction proof](docs/showcase/command-aware-compaction-proof.md)
 - [Metrics JSON](docs/showcase/artifacts/trust-aware-context-pack.metrics.json)
 - [Synthetic fixture + receipts](docs/showcase/artifacts/index.md)
 - [Inside-out demo](docs/showcase/inside-out-demo.md)

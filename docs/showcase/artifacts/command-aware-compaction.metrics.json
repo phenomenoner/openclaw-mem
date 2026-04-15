@@ -1,0 +1,11 @@
+{
+  "family": "git_diff",
+  "bundle_text": "- [obs:1] M app.py (+1 -1)",
+  "preferred_families": [
+    "git_diff"
+  ],
+  "guidance": [
+    "Prefer compact summaries first for review/navigation, then rehydrate raw diff before exact line-level claims."
+  ],
+  "raw_rehydrate_hint": "Use the raw artifact handle with `openclaw-mem artifact fetch` or `peek` to recover bounded raw evidence."
+}
