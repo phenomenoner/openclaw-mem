@@ -36,6 +36,8 @@ Long-running OpenClaw sessions drift because the live prompt becomes a soup of:
 
 Graph integration follows the same rule: graph may improve selection, coverage, or compression, but it is an **enhancement lane inside pack**, not a separate truth owner.
 
+Command-aware compaction follows the same boundary. If a selected record is an Observe-side compaction receipt, pack may prefer the compact view for `bundle_text`, but raw evidence must stay recoverable through the attached artifact handle rather than being silently treated as canonical truth.
+
 ## What we mean by “ContextPack”
 
 A **ContextPack** is an injection-ready payload that can be fed to an agent as “relevant state”.

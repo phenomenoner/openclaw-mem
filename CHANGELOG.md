@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `openclaw-mem artifact compact-receipt` as the first shipped **command-aware compaction sideband** contract: compact command output can now point back to a recoverable raw artifact instead of silently replacing it.
 - Added the RTK thought-link + `command-aware-compaction-sideband-v0` spec so the product line explicitly absorbs command-aware compaction as an Observe-layer pattern, not as a shell-hook truth mutation.
 - Extended the context-supply-chain blueprint so Observe now explicitly covers compacted-command sideband receipts alongside raw artifact offload.
+- Landed the first **pack consume path** for compaction receipts: when pack selects a sideband receipt, it now prefers `compact.text` in bundle output, emits `compaction_sideband` recovery metadata, and records the preference in pack trace extensions.
+@@
+-- Added parser/CLI contract coverage for `artifact compact-receipt` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.
++- Added parser/CLI contract coverage for `artifact compact-receipt` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.
++- Added pack-path coverage for compaction receipts in `tests/test_cli.py`, including trace-side raw rehydrate metadata.
 
 ### Testing
 

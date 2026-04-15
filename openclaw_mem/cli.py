@@ -4146,7 +4146,35 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(out, args.json)
 
 
-def _pack_item_text(row: Dict[str, Any]) -> str:
+_PACK_COMPACTION_RECEIPT_SCHEMA = "openclaw-mem.artifact.compaction-receipt.v1"
+
+
+def _pack_compaction_receipt(detail_obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(detail_obj, dict):
+        return None
+    if str(detail_obj.get("schema") or "").strip() != _PACK_COMPACTION_RECEIPT_SCHEMA:
+        return None
+    compact = detail_obj.get("compact") if isinstance(detail_obj.get("compact"), dict) else {}
+    compact_text = str(compact.get("text") or "").replace("\n", " ").strip()
+    if not compact_text:
+        return None
+    raw_artifact = detail_obj.get("rawArtifact") if isinstance(detail_obj.get("rawArtifact"), dict) else {}
+    return {
+        "tool": str(detail_obj.get("tool") or "").strip() or None,
+        "command": str(detail_obj.get("command") or "").strip() or None,
+        "rewrittenCommand": str(detail_obj.get("rewrittenCommand") or "").strip() or None,
+        "compactText": compact_text,
+        "compactBytes": max(0, int(compact.get("bytes") or len(compact_text.encode("utf-8")))),
+        "rawArtifactHandle": str(raw_artifact.get("handle") or "").strip() or None,
+        "rawArtifactBytes": raw_artifact.get("bytes"),
+        "rawArtifactKind": str(raw_artifact.get("kind") or "").strip() or None,
+    }
+
+
+def _pack_item_text(row: Dict[str, Any], detail_obj: Optional[Dict[str, Any]] = None) -> str:
+    compaction = _pack_compaction_receipt(detail_obj or {})
+    if compaction is not None:
+        return str(compaction.get("compactText") or "")
     return ((row.get("summary_en") or row.get("summary") or "").replace("\n", " ").strip())
 
 
@@ -5451,6 +5479,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     citations: List[Dict[str, Any]] = []
     candidate_trace: List[pack_trace_v1.PackTraceV1Candidate] = []
     context_pack_items: List[context_pack_v1.ContextPackV1Item] = []
+    compaction_selected: List[Dict[str, Any]] = []
 
     used_tokens = 0
     for rid in ordered_ids:
@@ -5458,9 +5487,10 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         detail_obj = detail_map.get(rid, {})
         importance_label = _pack_importance_label(detail_obj)
         trust_tier = _pack_trust_tier(detail_obj)
+        compaction_receipt = _pack_compaction_receipt(detail_obj)
 
         record_ref = f"obs:{rid}"
-        text = _pack_item_text(row or {})
+        text = _pack_item_text(row or {}, detail_obj)
         token_estimate = _estimate_tokens(text) if text else 0
 
         include = False
@@ -5503,6 +5533,25 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                     "lang": row.get("lang"),
                 }
             )
+            if compaction_receipt is not None:
+                selected_items[-1]["compaction"] = {
+                    "tool": compaction_receipt.get("tool"),
+                    "command": compaction_receipt.get("command"),
+                    "rewrittenCommand": compaction_receipt.get("rewrittenCommand"),
+                    "rawArtifactHandle": compaction_receipt.get("rawArtifactHandle"),
+                }
+                compaction_selected.append(
+                    {
+                        "recordRef": record_ref,
+                        "tool": compaction_receipt.get("tool"),
+                        "command": compaction_receipt.get("command"),
+                        "rewrittenCommand": compaction_receipt.get("rewrittenCommand"),
+                        "rawArtifactHandle": compaction_receipt.get("rawArtifactHandle"),
+                        "rawArtifactBytes": compaction_receipt.get("rawArtifactBytes"),
+                        "rawArtifactKind": compaction_receipt.get("rawArtifactKind"),
+                        "compactBytes": compaction_receipt.get("compactBytes"),
+                    }
+                )
             citations.append({"recordRef": record_ref, "url": None})
             context_pack_items.append(
                 context_pack_v1.ContextPackV1Item(
@@ -5566,6 +5615,13 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 "Prefer bundle_text for direct injection.",
                 "Use items[].recordRef as the citation key.",
                 "If you need detail, retrieve L2 by recordRef in a bounded follow-up.",
+                *(
+                    [
+                        "When compaction sideband is present, bundle_text may prefer compact evidence; use the raw artifact handle from compaction_sideband to rehydrate bounded raw output."
+                    ]
+                    if compaction_selected
+                    else []
+                ),
             ]
         ),
     )
@@ -5576,6 +5632,12 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "citations": citations,
         "context_pack": context_pack_v1.to_dict(context_pack),
     }
+    if compaction_selected:
+        payload["compaction_sideband"] = {
+            "mode": "prefer_compact_fail_open",
+            "selected": compaction_selected,
+            "raw_rehydrate_hint": "Use the raw artifact handle with `openclaw-mem artifact fetch` or `peek` to recover bounded raw evidence.",
+        }
 
     graph_provenance_policy: Optional[Dict[str, Any]] = None
     if (graph_state or {}).get("use_graph") != "off":
@@ -5691,6 +5753,12 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             trace_extensions["policy_surface"] = policy_surface
         if lifecycle_shadow_receipt is not None:
             trace_extensions["lifecycle_shadow"] = lifecycle_shadow_receipt
+        if compaction_selected:
+            trace_extensions["compaction_sideband"] = {
+                "mode": "prefer_compact_fail_open",
+                "selected": compaction_selected,
+                "selected_count": len(compaction_selected),
+            }
 
         trace = pack_trace_v1.PackTraceV1(
             kind=pack_trace_v1.PACK_TRACE_V1_KIND,

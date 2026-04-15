@@ -88,6 +88,11 @@ openclaw-mem artifact compact-receipt \
 - local operator smoke using RTK on a real repo command
 
 ## Follow-up
-- pack trace awareness of compaction receipts
 - bounded raw rehydrate helper in pack/observe flows
 - command-family-specific compaction policies
+
+## 2026-04-15 landed follow-through
+The first pack follow-through is now landed:
+- when pack selects a compaction receipt, it may prefer `compact.text` in `bundle_text` / item summaries,
+- payloads expose `compaction_sideband` with raw-artifact recovery metadata,
+- pack trace exposes `extensions.compaction_sideband` so the preference stays auditable.

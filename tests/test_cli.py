@@ -92,6 +92,63 @@ class TestCliM0(unittest.TestCase):
         self.assertTrue(any("UTC+8" in (t or "") for t in texts))
         conn.close()
 
+    def test_pack_prefers_compaction_sideband_text_and_exposes_raw_rehydrate_hint(self):
+        conn = _connect(":memory:")
+        _insert_observation(
+            conn,
+            {
+                "kind": "tool.result",
+                "summary": "git status compact sideband sample",
+                "tool_name": "openclaw-mem.artifact.compact-receipt",
+                "detail": {
+                    "schema": "openclaw-mem.artifact.compaction-receipt.v1",
+                    "tool": "rtk",
+                    "command": "git status",
+                    "rewrittenCommand": "rtk git status",
+                    "rawArtifact": {
+                        "handle": "ocm_artifact:v1:sha256:" + ("a" * 64),
+                        "sha256": "a" * 64,
+                        "bytes": 791,
+                        "kind": "tool_output",
+                    },
+                    "compact": {
+                        "text": "ok main",
+                        "bytes": 7,
+                    },
+                },
+            },
+        )
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "git status compact",
+                "query_en": None,
+                "limit": 12,
+                "budget_tokens": 400,
+                "trace": True,
+                "json": True,
+                "trust_policy": "off",
+                "use_graph": "off",
+                "lifecycle_shadow": "on",
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_pack(conn, args)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["items"][0]["summary"], "ok main")
+        self.assertIn("compaction_sideband", payload)
+        self.assertEqual(payload["compaction_sideband"]["mode"], "prefer_compact_fail_open")
+        self.assertEqual(payload["compaction_sideband"]["selected"][0]["rawArtifactHandle"], "ocm_artifact:v1:sha256:" + ("a" * 64))
+        self.assertIn("raw artifact handle", payload["compaction_sideband"]["raw_rehydrate_hint"].lower())
+        self.assertEqual(payload["trace"]["extensions"]["compaction_sideband"]["selected_count"], 1)
+        self.assertEqual(payload["trace"]["extensions"]["compaction_sideband"]["selected"][0]["rewrittenCommand"], "rtk git status")
+        self.assertTrue(any("compaction sideband" in note.lower() for note in payload["context_pack"]["notes"]["how_to_use"]))
+        conn.close()
+
     def test_normalize_importance_scorer_value_accepts_common_aliases(self):
         self.assertEqual(_normalize_importance_scorer_value("heuristic_v1"), "heuristic-v1")
         self.assertEqual(_normalize_importance_scorer_value("heuristic_v2"), "heuristic-v2")
