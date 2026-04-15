@@ -24,6 +24,11 @@ Synthetic example:
 - `artifact rehydrate` proves bounded raw recovery
 - `pack` selects the receipt and emits both `compaction_sideband` and `compaction_policy_hints`
 
+The showcase now also includes a second synthetic proof for `test_failures`:
+- raw `pytest -q` failure output
+- compact triage summary
+- receipt + rehydrate + pack + metrics artifacts under `docs/showcase/artifacts/test-failures-compaction.*`
+
 ## What the proof shows
 
 ### 1. Observe keeps both sides
@@ -65,6 +70,10 @@ The same pack output emits:
 This is the key product boundary.
 
 Family metadata can improve human/operator behavior now, without becoming ranking truth or write-path logic.
+
+The `test_failures` proof shows the same boundary with a different operator posture:
+- compact first for triage speed
+- raw second for exact stack traces and assertions
 
 ## Why this matters
 

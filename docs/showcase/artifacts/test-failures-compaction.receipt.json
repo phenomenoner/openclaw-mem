@@ -1,0 +1,20 @@
+{
+  "schema": "openclaw-mem.artifact.compaction-receipt.v1",
+  "createdAt": "2026-04-15T14:39:50.181725+00:00",
+  "mode": "sideband",
+  "family": "test_failures",
+  "tool": "rtk",
+  "command": "pytest -q",
+  "rewrittenCommand": null,
+  "rawArtifact": {
+    "handle": "ocm_artifact:v1:sha256:3cf834f88a334617f67d60e244427945ab018d12b9a49bb97fd99112a616d928",
+    "sha256": "3cf834f88a334617f67d60e244427945ab018d12b9a49bb97fd99112a616d928",
+    "bytes": 257,
+    "kind": "tool_output"
+  },
+  "compact": {
+    "text": "2 failed, 18 passed; create_user expected 201 got 500; delete_user missing user_id\n",
+    "bytes": 83
+  },
+  "meta": {}
+}

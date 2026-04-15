@@ -1,0 +1,11 @@
+{
+  "family": "test_failures",
+  "bundle_text": "- [obs:1] 2 failed, 18 passed; create_user expected 201 got 500; delete_user missing user_id",
+  "preferred_families": [
+    "test_failures"
+  ],
+  "guidance": [
+    "Prefer compact summaries first for failure triage, then rehydrate raw output for stack traces and exact assertions."
+  ],
+  "raw_rehydrate_hint": "Use the raw artifact handle with `openclaw-mem artifact fetch` or `peek` to recover bounded raw evidence."
+}

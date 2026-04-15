@@ -21,6 +21,10 @@ Use the narrated walkthrough for context:
 - [Rehydrate receipt](command-aware-compaction.rehydrate.json)
 - [Pack output](command-aware-compaction.pack.json)
 - [Metrics summary](command-aware-compaction.metrics.json)
+- [Test-failures compaction receipt](test-failures-compaction.receipt.json)
+- [Test-failures rehydrate receipt](test-failures-compaction.rehydrate.json)
+- [Test-failures pack output](test-failures-compaction.pack.json)
+- [Test-failures metrics summary](test-failures-compaction.metrics.json)
 
 Use the narrated walkthrough for context:
 - [Command-aware compaction proof](../command-aware-compaction-proof.md)

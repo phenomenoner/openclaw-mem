@@ -1,0 +1,288 @@
+{
+  "bundle_text": "- [obs:1] 2 failed, 18 passed; create_user expected 201 got 500; delete_user missing user_id",
+  "items": [
+    {
+      "recordRef": "obs:1",
+      "layer": "L1",
+      "id": 1,
+      "summary": "2 failed, 18 passed; create_user expected 201 got 500; delete_user missing user_id",
+      "kind": "tool.result",
+      "lang": null,
+      "compaction": {
+        "family": "test_failures",
+        "tool": "rtk",
+        "command": "pytest -q",
+        "rewrittenCommand": null,
+        "rawArtifactHandle": "ocm_artifact:v1:sha256:3cf834f88a334617f67d60e244427945ab018d12b9a49bb97fd99112a616d928"
+      }
+    }
+  ],
+  "citations": [
+    {
+      "recordRef": "obs:1",
+      "url": null
+    }
+  ],
+  "context_pack": {
+    "schema": "openclaw-mem.context-pack.v1",
+    "meta": {
+      "ts": "2026-04-15T14:39:50.353950+00:00",
+      "query": "pytest compact showcase",
+      "scope": null,
+      "budgetTokens": 220,
+      "maxItems": 4
+    },
+    "bundle_text": "- [obs:1] 2 failed, 18 passed; create_user expected 201 got 500; delete_user missing user_id",
+    "items": [
+      {
+        "recordRef": "obs:1",
+        "layer": "L1",
+        "type": "memory",
+        "importance": "unknown",
+        "trust": "unknown",
+        "text": "2 failed, 18 passed; create_user expected 201 got 500; delete_user missing user_id",
+        "citations": {
+          "url": null,
+          "recordRef": "obs:1"
+        }
+      }
+    ],
+    "notes": {
+      "how_to_use": [
+        "Prefer bundle_text for direct injection.",
+        "Use items[].recordRef as the citation key.",
+        "If you need detail, retrieve L2 by recordRef in a bounded follow-up.",
+        "When compaction sideband is present, bundle_text may prefer compact evidence; use the raw artifact handle from compaction_sideband to rehydrate bounded raw output."
+      ]
+    }
+  },
+  "compaction_sideband": {
+    "mode": "prefer_compact_fail_open",
+    "selected": [
+      {
+        "recordRef": "obs:1",
+        "family": "test_failures",
+        "tool": "rtk",
+        "command": "pytest -q",
+        "rewrittenCommand": null,
+        "rawArtifactHandle": "ocm_artifact:v1:sha256:3cf834f88a334617f67d60e244427945ab018d12b9a49bb97fd99112a616d928",
+        "rawArtifactBytes": 257,
+        "rawArtifactKind": "tool_output",
+        "compactBytes": 83
+      }
+    ],
+    "raw_rehydrate_hint": "Use the raw artifact handle with `openclaw-mem artifact fetch` or `peek` to recover bounded raw evidence."
+  },
+  "compaction_policy_hints": {
+    "mode": "advisory_only",
+    "family_counts": {
+      "test_failures": 1
+    },
+    "preferred_families": [
+      "test_failures"
+    ],
+    "guidance": [
+      "Prefer compact summaries first for failure triage, then rehydrate raw output for stack traces and exact assertions."
+    ]
+  },
+  "trace": {
+    "kind": "openclaw-mem.pack.trace.v1",
+    "ts": "2026-04-15T14:39:50.354216+00:00",
+    "version": {
+      "openclaw_mem": "1.5.1",
+      "schema": "v1"
+    },
+    "query": {
+      "text": "pytest compact showcase",
+      "scope": null,
+      "intent": null
+    },
+    "budgets": {
+      "budgetTokens": 220,
+      "maxItems": 4,
+      "maxL2Items": 0,
+      "niceCap": 100
+    },
+    "lanes": [
+      {
+        "name": "hot",
+        "source": "session/recent",
+        "searched": false,
+        "retrievers": []
+      },
+      {
+        "name": "warm",
+        "source": "sqlite-observations",
+        "searched": true,
+        "retrievers": [
+          {
+            "kind": "fts5",
+            "topK": 12,
+            "k": null
+          },
+          {
+            "kind": "vector",
+            "topK": 12,
+            "k": null
+          },
+          {
+            "kind": "rrf",
+            "topK": null,
+            "k": 60
+          }
+        ]
+      },
+      {
+        "name": "cold",
+        "source": "curated/durable",
+        "searched": false,
+        "retrievers": []
+      }
+    ],
+    "candidates": [
+      {
+        "id": "obs:1",
+        "layer": "L1",
+        "importance": "unknown",
+        "trust": "unknown",
+        "scores": {
+          "rrf": 0.01639344262295082,
+          "fts": 1.0,
+          "semantic": 0.0
+        },
+        "decision": {
+          "included": true,
+          "reason": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "rationale": [
+            "within_item_limit",
+            "within_budget",
+            "matched_fts"
+          ],
+          "caps": {
+            "niceCapHit": false,
+            "l2CapHit": false
+          }
+        },
+        "citations": {
+          "url": null,
+          "recordRef": "obs:1"
+        }
+      }
+    ],
+    "output": {
+      "includedCount": 1,
+      "excludedCount": 0,
+      "l2IncludedCount": 0,
+      "citationsCount": 1,
+      "refreshedRecordRefs": [
+        "obs:1"
+      ],
+      "coverage": {
+        "rationaleMissingCount": 0,
+        "citationMissingCount": 0,
+        "allIncludedHaveRationale": true,
+        "allIncludedHaveCitations": true
+      }
+    },
+    "timing": {
+      "durationMs": 1
+    },
+    "extensions": {
+      "lifecycle_shadow": {
+        "kind": "openclaw-mem.pack.lifecycle-shadow.v1",
+        "mode": "shadow_receipt_only",
+        "ts": "2026-04-15T14:39:50.354037+00:00",
+        "query": {
+          "hash": "sha256:6b4b9e1a584a59e116d48b1e",
+          "chars": 23
+        },
+        "selection": {
+          "pack_selected_refs": [
+            "obs:1"
+          ],
+          "citation_record_refs": [
+            "obs:1"
+          ],
+          "trace_refreshed_record_refs": [
+            "obs:1"
+          ],
+          "selection_signature": "sha256:b61b29bc42ebb771d6649351"
+        },
+        "counts": {
+          "selected_total": 1,
+          "citation_total": 1,
+          "candidate_total": 1,
+          "excluded_total": 0,
+          "selected_by_trust": {
+            "unknown": 1
+          },
+          "selected_by_importance": {
+            "unknown": 1
+          }
+        },
+        "reasons": {
+          "pack_included_reason_counts": {
+            "matched_fts": 1,
+            "within_budget": 1,
+            "within_item_limit": 1
+          },
+          "pack_excluded_reason_counts": {},
+          "trust_policy_reason_counts": {},
+          "graph_provenance_reason_counts": {}
+        },
+        "policies": {
+          "trust_policy_mode": "off",
+          "graph_provenance_policy_mode": "off"
+        },
+        "mutation": {
+          "memory_mutation": "none",
+          "auto_archive_applied": 0,
+          "auto_mutation_applied": 0,
+          "writes_observations": 0,
+          "writes_embeddings": 0,
+          "writes_lifecycle_state": 0,
+          "writes_shadow_log": 1
+        },
+        "storage": {
+          "table": "pack_lifecycle_shadow_log",
+          "append_only": true,
+          "max_rows": 2000,
+          "error_code": null
+        }
+      },
+      "compaction_sideband": {
+        "mode": "prefer_compact_fail_open",
+        "selected": [
+          {
+            "recordRef": "obs:1",
+            "family": "test_failures",
+            "tool": "rtk",
+            "command": "pytest -q",
+            "rewrittenCommand": null,
+            "rawArtifactHandle": "ocm_artifact:v1:sha256:3cf834f88a334617f67d60e244427945ab018d12b9a49bb97fd99112a616d928",
+            "rawArtifactBytes": 257,
+            "rawArtifactKind": "tool_output",
+            "compactBytes": 83
+          }
+        ],
+        "selected_count": 1
+      },
+      "compaction_policy_hints": {
+        "mode": "advisory_only",
+        "family_counts": {
+          "test_failures": 1
+        },
+        "preferred_families": [
+          "test_failures"
+        ],
+        "guidance": [
+          "Prefer compact summaries first for failure triage, then rehydrate raw output for stack traces and exact assertions."
+        ]
+      }
+    }
+  }
+}

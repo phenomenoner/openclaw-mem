@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added advisory-only `compaction_policy_hints` to pack / trace outputs so family metadata can shape operator guidance without mutating retrieval ranking.
 - Added README / QUICKSTART operator examples for compaction receipts and bounded raw rehydrate.
 - Added a public-safe showcase proof for command-aware compaction plus `compaction-family-policy-cards-v0` so the advisory family lane is now documented as an operator surface.
+- Extended the showcase proof pack with a second synthetic `test_failures` example covering receipt -> rehydrate -> pack -> advisory guidance.
 @@
 -- Added parser/CLI contract coverage for `artifact compact-receipt` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.
 +- Added parser/CLI contract coverage for `artifact compact-receipt` in `tests/test_artifact_cli_parser.py` and `tests/test_artifact_cli.py`.

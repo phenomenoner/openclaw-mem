@@ -1,0 +1,15 @@
+{
+  "schema": "openclaw-mem.artifact.rehydrate.v1",
+  "handle": "ocm_artifact:v1:sha256:3cf834f88a334617f67d60e244427945ab018d12b9a49bb97fd99112a616d928",
+  "selector": {
+    "mode": "headtail",
+    "maxChars": 80
+  },
+  "artifact": {
+    "sha256": "3cf834f88a334617f67d60e244427945ab018d12b9a49bb97fd99112a616d928",
+    "bytes": 257,
+    "kind": "tool_output",
+    "compression": "none"
+  },
+  "text": "=========================== short tes\n...\nuser_id'\n2 failed, 18 passed in 3.21s\n"
+}
