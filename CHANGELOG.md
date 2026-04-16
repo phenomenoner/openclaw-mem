@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Narrowed the first shipped apply whitelist to lifecycle stale-candidate fields plus bounded `optimization.assist` metadata so the write lane stays auditable and rollbackable.
 - Added `tools/optimize_assist_runner.py` as the dedicated scheduled-worker surface for the governed optimize-assist lane, plus deployable OpenClaw/systemd enablement docs and snippet assets.
 - Updated README, deployment guidance, optimization specs, and public skill-card docs so the shipped apply lane is described in external-safe product language.
+- Added the next-phase planning spec `docs/specs/self-optimizing-memory-autonomy-ramp-v0.md` to define the bounded path from governed canary toward higher-autonomy low-risk evolution.
 
 ### Testing
 
