@@ -1579,12 +1579,14 @@ def build_evolution_review(
     items: List[Dict[str, Any]] = []
 
     threshold_days = int(stale.get("threshold_days") or stale_days)
+    candidate_obs_ids: Set[int] = set()
     for raw in list(stale.get("items") or [])[:top]:
         if not isinstance(raw, dict):
             continue
         obs_id = int(raw.get("id") or 0)
         if obs_id <= 0:
             continue
+        candidate_obs_ids.add(obs_id)
         items.append(
             {
                 "candidate_id": f"stale-candidate-{obs_id}",
@@ -1620,6 +1622,78 @@ def build_evolution_review(
             }
         )
 
+    importance_rows: Dict[int, Dict[str, Any]] = {}
+    if candidate_obs_ids:
+        placeholders = ",".join(["?"] * len(candidate_obs_ids))
+        for row in conn.execute(
+            f"SELECT id, detail_json FROM observations WHERE id IN ({placeholders})",
+            list(sorted(candidate_obs_ids)),
+        ).fetchall():
+            detail_obj = _parse_detail(row["detail_json"] or "")
+            importance = detail_obj.get("importance")
+            if not is_parseable_importance(importance):
+                continue
+            score = round(parse_importance_score(importance), 4)
+            importance_rows[int(row["id"])] = {
+                "score": score,
+                "label": label_from_score(score),
+            }
+
+    for raw in list(stale.get("items") or [])[:top]:
+        if not isinstance(raw, dict):
+            continue
+        obs_id = int(raw.get("id") or 0)
+        if obs_id <= 0:
+            continue
+        imp = importance_rows.get(obs_id)
+        if not imp:
+            continue
+        current_score = float(imp.get("score") or 0.0)
+        if current_score <= 0.10:
+            continue
+        next_score = round(max(0.0, current_score - 0.10), 4)
+        if next_score == current_score:
+            continue
+        next_label = label_from_score(next_score)
+        items.append(
+            {
+                "candidate_id": f"importance-downshift-{obs_id}",
+                "action": "adjust_importance_score",
+                "risk_level": "low",
+                "confidence": 0.68,
+                "safe_for_auto_apply": True,
+                "reasons": [
+                    "stale_pressure",
+                    "bounded_score_delta",
+                    f"older_than_{threshold_days}d",
+                ],
+                "target": {
+                    "observationId": obs_id,
+                    "recordRef": f"obs:{obs_id}",
+                    "scope": raw.get("scope"),
+                },
+                "patch": {
+                    "importance": {
+                        "score": next_score,
+                        "label": next_label,
+                        "delta": round(next_score - current_score, 4),
+                        "reason_code": "stale_pressure",
+                    }
+                },
+                "evidence_refs": [f"obs:{obs_id}"],
+                "evidence": {
+                    "signal": "staleness",
+                    "age_days": raw.get("age_days"),
+                    "threshold_days": threshold_days,
+                    "current_score": current_score,
+                    "next_score": next_score,
+                    "current_label": imp.get("label"),
+                    "next_label": next_label,
+                    "summary_preview": raw.get("summary_preview"),
+                },
+            }
+        )
+
     deferred_actions = [
         rec for rec in recommendations if str(rec.get("type") or "") != "mark_stale_candidate"
     ]
@@ -1642,7 +1716,7 @@ def build_evolution_review(
             "writes_performed": 0,
             "memory_mutation": "none",
             "governor_required": True,
-            "supported_apply_actions": ["set_stale_candidate"],
+            "supported_apply_actions": ["set_stale_candidate", "adjust_importance_score"],
             "auto_apply_without_governor": False,
         },
         "counts": {

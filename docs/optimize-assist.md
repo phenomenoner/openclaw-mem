@@ -19,6 +19,8 @@ The lane runs this packet chain:
 The shipped write whitelist is currently limited to:
 - `detail_json.lifecycle.stale_candidate`
 - `detail_json.lifecycle.stale_reason_code`
+- `detail_json.importance.score`
+- `detail_json.importance.label`
 - bounded `detail_json.optimization.assist` metadata
 
 ## Default posture
@@ -42,7 +44,7 @@ python tools/optimize_assist_runner.py --json
 
 Default behavior:
 - runs the full packet chain
-- keeps stale candidates as the approved low-risk action class
+- keeps stale candidates and bounded importance adjustments as the approved low-risk action classes
 - runs `assist-apply` in **dry-run** mode unless `--allow-apply` is set
 - writes runner packet artifacts under `~/.openclaw/memory/openclaw-mem/optimize-assist-runner/`
 
@@ -62,6 +64,8 @@ python tools/optimize_assist_runner.py --allow-apply --json
 - `--stale-days 60`
 - `--max-rows-per-run 5`
 - `--max-rows-per-24h 20`
+- `--no-approve-importance`
+- `--no-approve-stale`
 
 ## OpenClaw cron enablement
 

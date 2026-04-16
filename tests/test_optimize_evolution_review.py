@@ -69,12 +69,16 @@ class TestOptimizeEvolutionReview(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["kind"], "openclaw-mem.optimize.evolution-review.v0")
         self.assertEqual(out["policy"]["memory_mutation"], "none")
-        self.assertEqual(out["counts"]["items"], 1)
+        self.assertEqual(out["counts"]["items"], 2)
         self.assertEqual(out["items"][0]["action"], "set_stale_candidate")
         self.assertEqual(out["items"][0]["risk_level"], "low")
         self.assertTrue(out["items"][0]["safe_for_auto_apply"])
         self.assertEqual(out["items"][0]["target"]["observationId"], obs_id)
         self.assertEqual(out["items"][0]["patch"]["lifecycle"]["stale_reason_code"], "age_threshold")
+        self.assertEqual(out["items"][1]["action"], "adjust_importance_score")
+        self.assertEqual(out["items"][1]["target"]["observationId"], obs_id)
+        self.assertEqual(out["items"][1]["patch"]["importance"]["score"], 0.31)
+        self.assertEqual(out["items"][1]["patch"]["importance"]["label"], "ignore")
         conn.close()
 
 

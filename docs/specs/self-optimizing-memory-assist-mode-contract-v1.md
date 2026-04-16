@@ -110,4 +110,7 @@ The current CLI bridge is:
 The shipped writer lane currently supports one bounded action class:
 - `set_stale_candidate`
 
+Current canary expansion also allows one additional bounded low-risk action class:
+- `adjust_importance_score`
+
 Everything else remains proposal-only until a later whitelist expansion is explicitly documented.

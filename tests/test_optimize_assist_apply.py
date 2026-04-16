@@ -40,6 +40,67 @@ class TestOptimizeAssistApply(unittest.TestCase):
         self.assertEqual(args.max_rows_per_24h, 9)
         self.assertTrue(args.dry_run)
 
+    def test_assist_apply_updates_importance_score_and_label(self):
+        conn = _connect(":memory:")
+        stale_ts = (datetime.now(timezone.utc) - timedelta(days=120)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        obs_id = _insert_observation(
+            conn,
+            {
+                "ts": stale_ts,
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Candidate memory",
+                "detail": {"scope": "team/alpha", "importance": {"score": 0.52, "label": "nice_to_have"}},
+            },
+        )
+        packet = {
+            "kind": "openclaw-mem.optimize.governor-review.v0",
+            "items": [
+                {
+                    "candidate_id": f"importance-downshift-{obs_id}",
+                    "recommended_action": "adjust_importance_score",
+                    "decision": "approved_for_apply",
+                    "apply_lane": "observations.assist",
+                    "target": {"observationId": obs_id, "recordRef": f"obs:{obs_id}"},
+                    "patch": {"importance": {"score": 0.42, "label": "ignore", "delta": -0.1, "reason_code": "stale_pressure"}},
+                    "evidence_refs": [f"obs:{obs_id}"],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "governor.json"
+            path.write_text(json.dumps(packet), encoding="utf-8")
+            args = type(
+                "Args",
+                (),
+                {
+                    "from_file": str(path),
+                    "operator": "lyria",
+                    "lane": "observations.assist",
+                    "run_dir": td,
+                    "max_rows_per_run": 5,
+                    "max_rows_per_24h": 20,
+                    "dry_run": False,
+                    "db": ":memory:",
+                    "json": True,
+                },
+            )()
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_optimize_assist_apply(conn, args)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["result"], "applied")
+            self.assertEqual(out["applied_rows"], 1)
+            self.assertTrue(any(x["path"] == "/importance/score" for x in out["diff_summary"]))
+            self.assertTrue(any(x["path"] == "/importance/label" for x in out["diff_summary"]))
+
+        row = conn.execute("SELECT detail_json FROM observations WHERE id = ?", (obs_id,)).fetchone()
+        detail = json.loads(row["detail_json"])
+        self.assertEqual(detail["importance"]["score"], 0.42)
+        self.assertEqual(detail["importance"]["label"], "ignore")
+        self.assertEqual(detail["importance"]["method"], "optimize_assist")
+        conn.close()
+
     def test_assist_apply_dry_run_emits_receipts_and_skips_write(self):
         conn = _connect(":memory:")
         stale_ts = (datetime.now(timezone.utc) - timedelta(days=120)).replace(microsecond=0).isoformat().replace("+00:00", "Z")

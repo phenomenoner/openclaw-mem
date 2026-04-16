@@ -14,12 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `tools/optimize_assist_runner.py` as the dedicated scheduled-worker surface for the governed optimize-assist lane, plus deployable OpenClaw/systemd enablement docs and snippet assets.
 - Updated README, deployment guidance, optimization specs, and public skill-card docs so the shipped apply lane is described in external-safe product language.
 - Added the next-phase planning spec `docs/specs/self-optimizing-memory-autonomy-ramp-v0.md` to define the bounded path from governed canary toward higher-autonomy low-risk evolution.
+- Expanded the governed canary whitelist to include bounded low-risk importance downshifts (`adjust_importance_score`), plus governor/runner flags for approving that class without opening a general-purpose edit lane.
 
 ### Testing
 
 - Added CLI/parser + mutation-path coverage in `tests/test_optimize_evolution_review.py`, `tests/test_optimize_assist_apply.py`, and `tests/test_optimize_governor_review.py`.
 - Added runner coverage in `tests/test_optimize_assist_runner.py`.
 - Re-ran the optimize review/governor/apply suite plus policy/consolidation regression coverage.
+- Added regression coverage for importance-adjustment proposal, approval, assist-apply, and runner flag propagation.
 
 ## [1.6.0] - 2026-04-15
 

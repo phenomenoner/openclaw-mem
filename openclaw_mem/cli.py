@@ -87,6 +87,7 @@ from openclaw_mem.provenance_trust_schema import (
 )
 from openclaw_mem.task_markers import summary_has_task_marker as _summary_has_task_marker_impl
 from openclaw_mem.capsule import add_capsule_parser_to_cli
+from openclaw_mem.importance import label_from_score, make_importance, parse_importance_score
 
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
@@ -1902,6 +1903,7 @@ def _optimize_governor_review_item(
     *,
     source_kind: str,
     approve_refresh: bool,
+    approve_importance: bool,
     approve_stale: bool,
     governor: str,
     index: int,
@@ -1947,6 +1949,53 @@ def _optimize_governor_review_item(
             else:
                 decision = 'proposal_only'
                 decision_reasons = ['stale_patch_valid', 'awaiting_governor_approval']
+    elif source_kind == 'openclaw-mem.optimize.evolution-review.v0' and action == 'adjust_importance_score':
+        obs_id = int(target.get('observationId') or 0)
+        importance_patch = patch.get('importance') if isinstance(patch.get('importance'), dict) else {}
+        candidate_score = importance_patch.get('score')
+        candidate_label = _normalize_importance_label(importance_patch.get('label'))
+        delta = importance_patch.get('delta')
+        reason_code = str(importance_patch.get('reason_code') or '').strip()
+        try:
+            score_value = round(max(0.0, min(1.0, float(candidate_score))), 4)
+        except Exception:
+            score_value = None
+        try:
+            delta_value = round(float(delta), 4)
+        except Exception:
+            delta_value = None
+        expected_label = label_from_score(score_value) if score_value is not None else None
+        if obs_id <= 0:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['missing_observation_id']
+        elif score_value is None or delta_value is None:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['invalid_importance_patch']
+        elif abs(delta_value) > 0.10:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['importance_delta_exceeds_low_risk_cap']
+        elif candidate_label != expected_label:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['importance_label_mismatch']
+        elif reason_code not in {'stale_pressure', 'reuse_signal', 'label_alignment'}:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['invalid_importance_reason_code']
+        else:
+            if not evidence_refs:
+                evidence_refs = [f'obs:{obs_id}']
+            apply_lane = 'observations.assist'
+            risk_level = 'low'
+            if approve_importance:
+                decision = 'approved_for_apply'
+                decision_reasons = ['importance_patch_valid', 'approve_importance_enabled']
+            else:
+                decision = 'proposal_only'
+                decision_reasons = ['importance_patch_valid', 'awaiting_governor_approval']
     elif action == 'no_action':
         decision = 'ignore'
         risk_level = 'low'
@@ -2079,6 +2128,11 @@ def _optimize_assist_diff_summary(before_detail: Dict[str, Any], after_detail: D
     for key in ('stale_candidate', 'stale_reason_code'):
         if before_lifecycle.get(key) != after_lifecycle.get(key):
             changes.append({'path': f'/lifecycle/{key}', 'before': before_lifecycle.get(key), 'after': after_lifecycle.get(key)})
+    before_importance = before_detail.get('importance') if isinstance(before_detail.get('importance'), dict) else {}
+    after_importance = after_detail.get('importance') if isinstance(after_detail.get('importance'), dict) else {}
+    for key in ('score', 'label'):
+        if before_importance.get(key) != after_importance.get(key):
+            changes.append({'path': f'/importance/{key}', 'before': before_importance.get(key), 'after': after_importance.get(key)})
     return changes
 
 
@@ -2091,7 +2145,7 @@ def _optimize_assist_apply_item(
     applied_at: str,
 ) -> Dict[str, Any]:
     action = str(item.get('recommended_action') or '').strip()
-    if action != 'set_stale_candidate':
+    if action not in {'set_stale_candidate', 'adjust_importance_score'}:
         raise ValueError('unsupported_action_class')
 
     target = item.get('target') if isinstance(item.get('target'), dict) else {}
@@ -2107,22 +2161,48 @@ def _optimize_assist_apply_item(
         raise ValueError(f'missing observation id: {obs_id}')
 
     before_detail = _pack_parse_detail_json(row['detail_json'])
-    patch = item.get('patch') if isinstance(item.get('patch'), dict) else {}
-    lifecycle_patch = patch.get('lifecycle') if isinstance(patch.get('lifecycle'), dict) else {}
-    stale_reason_code = str(lifecycle_patch.get('stale_reason_code') or '').strip()
-    if lifecycle_patch.get('stale_candidate') is not True or stale_reason_code not in {
-        'age_threshold',
-        'repeated_miss_pressure',
-        'duplicate_cluster',
-        'operator_override',
-    }:
-        raise ValueError('invalid_stale_patch')
-
     after_detail = json.loads(json.dumps(before_detail, ensure_ascii=False)) if before_detail else {}
-    lifecycle = after_detail.get('lifecycle') if isinstance(after_detail.get('lifecycle'), dict) else {}
-    lifecycle['stale_candidate'] = True
-    lifecycle['stale_reason_code'] = stale_reason_code
-    after_detail['lifecycle'] = lifecycle
+    patch = item.get('patch') if isinstance(item.get('patch'), dict) else {}
+    if action == 'set_stale_candidate':
+        lifecycle_patch = patch.get('lifecycle') if isinstance(patch.get('lifecycle'), dict) else {}
+        stale_reason_code = str(lifecycle_patch.get('stale_reason_code') or '').strip()
+        if lifecycle_patch.get('stale_candidate') is not True or stale_reason_code not in {
+            'age_threshold',
+            'repeated_miss_pressure',
+            'duplicate_cluster',
+            'operator_override',
+        }:
+            raise ValueError('invalid_stale_patch')
+        lifecycle = after_detail.get('lifecycle') if isinstance(after_detail.get('lifecycle'), dict) else {}
+        lifecycle['stale_candidate'] = True
+        lifecycle['stale_reason_code'] = stale_reason_code
+        after_detail['lifecycle'] = lifecycle
+    elif action == 'adjust_importance_score':
+        importance_patch = patch.get('importance') if isinstance(patch.get('importance'), dict) else {}
+        try:
+            next_score = round(max(0.0, min(1.0, float(importance_patch.get('score')))), 4)
+            delta = round(float(importance_patch.get('delta')), 4)
+        except Exception as e:
+            raise ValueError('invalid_importance_patch') from e
+        if abs(delta) > 0.10:
+            raise ValueError('importance_delta_exceeds_low_risk_cap')
+        next_label = _normalize_importance_label(importance_patch.get('label'))
+        expected_label = label_from_score(next_score)
+        if next_label != expected_label:
+            raise ValueError('importance_label_mismatch')
+        reason_code = str(importance_patch.get('reason_code') or '').strip()
+        if reason_code not in {'stale_pressure', 'reuse_signal', 'label_alignment'}:
+            raise ValueError('invalid_importance_reason_code')
+        current_score = round(parse_importance_score(after_detail.get('importance')), 4)
+        if round(next_score - current_score, 4) != delta:
+            raise ValueError('importance_delta_mismatch')
+        after_detail['importance'] = make_importance(
+            next_score,
+            method='optimize_assist',
+            rationale=reason_code,
+            graded_at=applied_at,
+            label=next_label,
+        )
     after_detail['optimization'] = {
         **(after_detail.get('optimization') if isinstance(after_detail.get('optimization'), dict) else {}),
         'assist': {
@@ -2167,7 +2247,7 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
         item for item in all_items
         if str(item.get('decision') or '') == 'approved_for_apply'
         and str(item.get('apply_lane') or '') == lane
-        and str(item.get('recommended_action') or '') == 'set_stale_candidate'
+        and str(item.get('recommended_action') or '') in {'set_stale_candidate', 'adjust_importance_score'}
     ]
 
     target_rows = [int((item.get('target') or {}).get('observationId') or 0) for item in approved_items]
@@ -2340,6 +2420,7 @@ def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namesp
             item if isinstance(item, dict) else {},
             source_kind=str(packet.get('kind') or ''),
             approve_refresh=bool(getattr(args, 'approve_refresh', False)),
+            approve_importance=bool(getattr(args, 'approve_importance', False)),
             approve_stale=bool(getattr(args, 'approve_stale', False)),
             governor=governor,
             index=i + 1,
@@ -2368,6 +2449,7 @@ def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namesp
                 mode
                 for mode, enabled in (
                     ('approve_refresh', bool(getattr(args, 'approve_refresh', False))),
+                    ('approve_importance', bool(getattr(args, 'approve_importance', False))),
                     ('approve_stale', bool(getattr(args, 'approve_stale', False))),
                 )
                 if enabled
@@ -13818,6 +13900,7 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--from-file", dest="from_file", default=None, help="Recommendation packet JSON path (default: stdin)")
     o.add_argument("--governor", default="governor", help="Judging lane label recorded in output (default: governor)")
     o.add_argument("--approve-refresh", dest="approve_refresh", action="store_true", help="Approve low-risk refresh_card actions for apply consideration")
+    o.add_argument("--approve-importance", dest="approve_importance", action="store_true", help="Approve bounded low-risk adjust_importance_score actions for assist apply")
     o.add_argument("--approve-stale", dest="approve_stale", action="store_true", help="Approve low-risk set_stale_candidate actions for assist apply")
     o.set_defaults(func=cmd_optimize_governor_review)
 

@@ -176,11 +176,13 @@ tests/
 ### v0.3 — bounded low-risk apply (**shipped, governor-gated**)
 - shipped read/write bridge:
   - `openclaw-mem optimize evolution-review --json`
-  - `openclaw-mem optimize governor-review --approve-stale --json`
+  - `openclaw-mem optimize governor-review --approve-stale --approve-importance --json`
   - `openclaw-mem optimize assist-apply [--dry-run] --json`
 - current apply whitelist stays intentionally narrow:
   - `/lifecycle/stale_candidate`
   - `/lifecycle/stale_reason_code`
+  - `/importance/score`
+  - `/importance/label`
   - bounded `/optimization/assist` receipt metadata
 - before/after + rollback receipts are mandatory on every run
 - cap violations still abort before write

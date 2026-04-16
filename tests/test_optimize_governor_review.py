@@ -19,6 +19,7 @@ class TestOptimizeGovernorReview(unittest.TestCase):
                 "--governor",
                 "lyria",
                 "--approve-refresh",
+                "--approve-importance",
                 "--approve-stale",
             ]
         )
@@ -27,6 +28,7 @@ class TestOptimizeGovernorReview(unittest.TestCase):
         self.assertEqual(args.from_file, "/tmp/recommend.json")
         self.assertEqual(args.governor, "lyria")
         self.assertTrue(args.approve_refresh)
+        self.assertTrue(args.approve_importance)
         self.assertTrue(args.approve_stale)
 
     def test_governor_review_defaults_refresh_to_proposal_only(self):
@@ -148,6 +150,46 @@ class TestOptimizeGovernorReview(unittest.TestCase):
         self.assertEqual(out["items"][0]["decision"], "approved_for_apply")
         self.assertEqual(out["items"][0]["apply_lane"], "observations.assist")
         self.assertEqual(out["items"][0]["recommended_action"], "set_stale_candidate")
+        conn.close()
+
+    def test_governor_review_can_approve_importance_adjustment(self):
+        conn = _connect(":memory:")
+        packet = {
+            "kind": "openclaw-mem.optimize.evolution-review.v0",
+            "items": [
+                {
+                    "candidate_id": "importance-downshift-12",
+                    "action": "adjust_importance_score",
+                    "risk_level": "low",
+                    "target": {"observationId": 12, "recordRef": "obs:12"},
+                    "patch": {"importance": {"score": 0.3, "label": "ignore", "delta": -0.1, "reason_code": "stale_pressure"}},
+                    "evidence_refs": ["obs:12"],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "evolution.json"
+            path.write_text(json.dumps(packet), encoding="utf-8")
+            args = type(
+                "Args",
+                (),
+                {
+                    "from_file": str(path),
+                    "governor": "lyria",
+                    "approve_refresh": False,
+                    "approve_importance": True,
+                    "approve_stale": False,
+                    "json": True,
+                },
+            )()
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_optimize_governor_review(conn, args)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["counts"]["approvedForApply"], 1)
+        self.assertEqual(out["items"][0]["decision"], "approved_for_apply")
+        self.assertEqual(out["items"][0]["apply_lane"], "observations.assist")
+        self.assertEqual(out["items"][0]["recommended_action"], "adjust_importance_score")
         conn.close()
 
 

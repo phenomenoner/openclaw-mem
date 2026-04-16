@@ -21,6 +21,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 "--operator",
                 "lyria",
                 "--allow-apply",
+                "--no-approve-importance",
                 "--scope",
                 "team/alpha",
                 "--limit",
@@ -42,6 +43,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         )
         self.assertEqual(args.python, "python3")
         self.assertTrue(args.allow_apply)
+        self.assertFalse(args.approve_importance)
         self.assertEqual(args.scope, "team/alpha")
         self.assertEqual(args.max_rows_per_run, 2)
         self.assertTrue(args.json)
@@ -54,6 +56,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 runner_root=td,
                 operator="lyria",
                 allow_apply=False,
+                approve_importance=True,
                 approve_stale=True,
                 scope="team/alpha",
                 limit=100,
@@ -98,6 +101,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertTrue((run_dir / "governor.json").exists())
             self.assertTrue((run_dir / "assist-after.json").exists())
             self.assertIn("--dry-run", out["commands"]["assist_apply"])
+            self.assertIn("--approve-importance", out["commands"]["governor_review"])
 
     def test_run_pipeline_raises_on_invalid_json(self):
         with tempfile.TemporaryDirectory() as td:
@@ -107,6 +111,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 runner_root=td,
                 operator="lyria",
                 allow_apply=False,
+                approve_importance=True,
                 approve_stale=True,
                 scope=None,
                 limit=100,

@@ -89,20 +89,22 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifa
 
 Current shipped path:
 - `openclaw-mem optimize review` — zero-write health signals
-- `openclaw-mem optimize evolution-review` — packetizes low-risk stale-candidate updates
+- `openclaw-mem optimize evolution-review` — packetizes low-risk stale-candidate and bounded importance-adjustment updates
 - `openclaw-mem optimize governor-review` — emits explicit decisions
 - `openclaw-mem optimize assist-apply` — applies only governor-approved low-risk observation updates with before/after + rollback receipts
 
 The first bounded write class is intentionally narrow:
 - update `observations.detail_json.lifecycle.stale_candidate`
 - update `observations.detail_json.lifecycle.stale_reason_code`
+- update `observations.detail_json.importance.score`
+- update `observations.detail_json.importance.label`
 - add bounded `observations.detail_json.optimization.assist` metadata
 
 Example dry rehearsal:
 
 ```bash
 uv run --python 3.13 --frozen -- python -m openclaw_mem optimize evolution-review --json > evolution.json
-uv run --python 3.13 --frozen -- python -m openclaw_mem optimize governor-review --from-file evolution.json --approve-stale --json > governor.json
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize governor-review --from-file evolution.json --approve-stale --approve-importance --json > governor.json
 uv run --python 3.13 --frozen -- python -m openclaw_mem optimize assist-apply --from-file governor.json --dry-run --json
 ```
 

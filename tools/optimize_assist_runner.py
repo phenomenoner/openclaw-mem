@@ -66,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--runner-root", default=DEFAULT_RUNNER_ROOT, help="Root directory for runner receipts and packet files")
     p.add_argument("--operator", default="openclaw-cron", help="Operator label recorded in assist receipts")
     p.add_argument("--allow-apply", dest="allow_apply", action="store_true", help="Allow bounded apply instead of dry-run")
+    p.add_argument("--approve-importance", dest="approve_importance", action="store_true", default=True, help="Approve bounded low-risk importance adjustments at governor stage (default: true)")
+    p.add_argument("--no-approve-importance", dest="approve_importance", action="store_false", help="Keep low-risk importance adjustments as proposal_only")
     p.add_argument("--approve-stale", dest="approve_stale", action="store_true", default=True, help="Approve stale candidates at governor stage (default: true)")
     p.add_argument("--no-approve-stale", dest="approve_stale", action="store_false", help="Keep stale candidates as proposal_only")
     p.add_argument("--scope", default=None, help="Optional normalized detail.scope filter")
@@ -119,6 +121,8 @@ def _build_governor_cmd(args: argparse.Namespace, evolution_path: Path) -> list[
         args.operator,
         "--json",
     ]
+    if args.approve_importance:
+        cmd.append("--approve-importance")
     if args.approve_stale:
         cmd.append("--approve-stale")
     return cmd
