@@ -112,6 +112,14 @@ Example bounded write run:
 uv run --python 3.13 --frozen -- python -m openclaw_mem optimize assist-apply --from-file governor.json --json
 ```
 
+Scheduled worker form:
+
+```bash
+uv run --python 3.13 --frozen -- python tools/optimize_assist_runner.py --json
+```
+
+That runner keeps the full packet chain in one bounded scheduled surface and stays dry-run unless `--allow-apply` is set.
+
 Receipts are written under `~/.openclaw/memory/openclaw-mem/optimize-assist/` by default.
 If the packet is malformed, unapproved, duplicated, or exceeds caps, the run aborts before write.
 

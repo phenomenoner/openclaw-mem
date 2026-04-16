@@ -11,11 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added a governed optimization bridge for low-risk observation lifecycle maintenance: `optimize evolution-review` now packetizes stale-candidate updates, `optimize governor-review` can approve them explicitly, and `optimize assist-apply` can execute the bounded write with before/after + rollback receipts.
 - Narrowed the first shipped apply whitelist to lifecycle stale-candidate fields plus bounded `optimization.assist` metadata so the write lane stays auditable and rollbackable.
+- Added `tools/optimize_assist_runner.py` as the dedicated scheduled-worker surface for the governed optimize-assist lane, plus deployable OpenClaw/systemd enablement docs and snippet assets.
 - Updated README, deployment guidance, optimization specs, and public skill-card docs so the shipped apply lane is described in external-safe product language.
 
 ### Testing
 
 - Added CLI/parser + mutation-path coverage in `tests/test_optimize_evolution_review.py`, `tests/test_optimize_assist_apply.py`, and `tests/test_optimize_governor_review.py`.
+- Added runner coverage in `tests/test_optimize_assist_runner.py`.
 - Re-ran the optimize review/governor/apply suite plus policy/consolidation regression coverage.
 
 ## [1.6.0] - 2026-04-15

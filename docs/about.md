@@ -105,5 +105,6 @@ The local-first posture keeps the base layer simple:
 - [Quickstart](quickstart.md)
 - [Reality check & status](reality-check.md)
 - [Deployment guide](deployment.md)
+- [Governed optimize assist lane](optimize-assist.md)
 - [Ecosystem fit](ecosystem-fit.md)
 - [Mem Engine reference](mem-engine.md)

@@ -25,6 +25,7 @@ If you are starting cold, the GitHub README is the shortest funnel. If you are a
 
 - [Install paths](install-modes.md)
 - [Deployment guide](deployment.md)
+- [Governed optimize assist lane](optimize-assist.md)
 - [Auto-capture plugin](auto-capture.md)
 - [Mem Engine reference](mem-engine.md)
 - [Proactive Pack](proactive-pack.md)

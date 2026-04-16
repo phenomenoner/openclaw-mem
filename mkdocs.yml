@@ -33,6 +33,7 @@ nav:
   - Proactive Pack: proactive-pack.md
   - Choose an install path: install-modes.md
   - Quickstart: quickstart.md
+  - Governed optimize assist: optimize-assist.md
   - Reality check & status: reality-check.md
   - Showcase:
       - Trust-aware pack proof: showcase/trust-aware-context-pack-proof.md
@@ -49,6 +50,7 @@ nav:
   - Reference:
       - Ecosystem fit: ecosystem-fit.md
       - Deployment: deployment.md
+      - Governed optimize assist: optimize-assist.md
       - Proactive Pack: proactive-pack.md
       - Auto-capture (sidecar plugin): auto-capture.md
       - Mem Engine (slot backend): mem-engine.md

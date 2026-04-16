@@ -74,6 +74,16 @@ Current pilot sequencing (2026-02):
 - Not enabled.
 - Promotion (if any) must be explicit + reviewed + reversible.
 
+### Governed optimize assist lane
+- The runner surface now exists:
+  - `python tools/optimize_assist_runner.py`
+- It packages:
+  - `optimize evolution-review`
+  - `optimize governor-review`
+  - `optimize assist-apply`
+- Default posture remains **dry-run**.
+- It is documented and schedulable, but is **not auto-wired by default** on this host until an operator enables the cron/timer lane.
+
 ### Graph semantic memory
 - Implemented as a bounded **v0** slice.
 - Shipped commands:

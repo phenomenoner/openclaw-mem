@@ -237,11 +237,9 @@ crontab -e
 ## 2A. Optional governed optimization assist lane
 
 If you want a bounded maintenance write lane, keep it separate from heartbeat/healthcheck jobs.
-The recommended shape is a small scheduled worker that runs the full packet chain:
+The recommended shape is a small scheduled worker that runs the full packet chain through the dedicated runner:
 
-1. `optimize evolution-review`
-2. `optimize governor-review`
-3. `optimize assist-apply`
+- `python tools/optimize_assist_runner.py`
 
 Start with `--dry-run` until you have reviewed receipts on fixture or low-risk real data.
 
@@ -260,7 +258,7 @@ Start with `--dry-run` until you have reviewed receipts on fixture or low-risk r
           "kind": "agentTurn",
           "model": "google-antigravity/gemini-3-flash",
           "thinking": "minimal",
-          "message": "Run exactly these commands, then output ONLY NO_REPLY:\n\ncd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem optimize evolution-review --json > /tmp/openclaw-mem-evolution.json && uv run --python 3.13 -- python -m openclaw_mem optimize governor-review --from-file /tmp/openclaw-mem-evolution.json --approve-stale --json > /tmp/openclaw-mem-governor.json && uv run --python 3.13 -- python -m openclaw_mem optimize assist-apply --from-file /tmp/openclaw-mem-governor.json --dry-run --json"
+          "message": "Run exactly one exec, then output ONLY NO_REPLY:\n\ncd /opt/openclaw-mem && uv run --python 3.13 -- python tools/optimize_assist_runner.py --json"
         },
         "delivery": { "mode": "none" }
       }
@@ -269,12 +267,49 @@ Start with `--dry-run` until you have reviewed receipts on fixture or low-risk r
 }
 ```
 
+Ready-to-paste snippet file:
+- `docs/snippets/openclaw-cron.optimize-assist-canary.json`
+
 ### Promotion rules
 
 - Keep the job **isolated** from watchdog/healthcheck lanes.
 - Keep `assist-apply` on **approved packets only**.
-- Remove `--dry-run` only after you have verified before/after + rollback receipts and you are comfortable with the row/day caps.
+- Remove dry-run only after you have verified before/after + rollback receipts and you are comfortable with the row/day caps. With the runner, that means adding `--allow-apply`.
 - Do not use this lane for config mutation, routing changes, or broad memory gardening.
+
+### Systemd example
+
+Create `~/.config/systemd/user/openclaw-mem-optimize-assist.service`:
+
+```ini
+[Unit]
+Description=OpenClaw Memory governed optimize assist lane
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/YOUR_USER/openclaw-mem
+Environment="PATH=/home/YOUR_USER/.local/bin:/usr/bin:/bin"
+ExecStart=/usr/bin/uv run --python 3.13 -- python tools/optimize_assist_runner.py --json
+
+[Install]
+WantedBy=default.target
+```
+
+Create `~/.config/systemd/user/openclaw-mem-optimize-assist.timer`:
+
+```ini
+[Unit]
+Description=Run OpenClaw Memory optimize assist lane every 6 hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
 
 ## 2B. Episodic auto-mode ingestion (new)
 

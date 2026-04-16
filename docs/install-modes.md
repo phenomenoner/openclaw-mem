@@ -72,6 +72,7 @@ Read:
 
 - [Quickstart](quickstart.md)
 - [Deployment guide](deployment.md)
+- [Governed optimize assist lane](optimize-assist.md)
 - [Auto-capture plugin](auto-capture.md)
 - [Agent memory skill (SOP)](agent-memory-skill.md) (recommended agent prompt contract)
 
