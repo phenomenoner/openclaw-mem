@@ -27,6 +27,10 @@ class TestOptimizeAssistApply(unittest.TestCase):
                 "3",
                 "--max-rows-per-24h",
                 "9",
+                "--max-importance-adjustments-per-run",
+                "2",
+                "--max-importance-adjustments-per-24h",
+                "7",
                 "--dry-run",
             ]
         )
@@ -38,6 +42,8 @@ class TestOptimizeAssistApply(unittest.TestCase):
         self.assertEqual(args.run_dir, "/tmp/assist-runs")
         self.assertEqual(args.max_rows_per_run, 3)
         self.assertEqual(args.max_rows_per_24h, 9)
+        self.assertEqual(args.max_importance_adjustments_per_run, 2)
+        self.assertEqual(args.max_importance_adjustments_per_24h, 7)
         self.assertTrue(args.dry_run)
 
     def test_assist_apply_updates_importance_score_and_label(self):
@@ -91,6 +97,7 @@ class TestOptimizeAssistApply(unittest.TestCase):
             out = json.loads(buf.getvalue())
             self.assertEqual(out["result"], "applied")
             self.assertEqual(out["applied_rows"], 1)
+            self.assertEqual(out["applied_action_counts"]["adjust_importance_score"], 1)
             self.assertTrue(any(x["path"] == "/importance/score" for x in out["diff_summary"]))
             self.assertTrue(any(x["path"] == "/importance/label" for x in out["diff_summary"]))
             self.assertTrue(Path(out["artifacts"]["effect_ref"]).exists())
@@ -287,6 +294,67 @@ class TestOptimizeAssistApply(unittest.TestCase):
         self.assertEqual(first["result"], "dry_run")
         self.assertEqual(second["result"], "aborted")
         self.assertIn("max_retries_per_packet_exceeded", second["blocked_by_caps"])
+        conn.close()
+
+    def test_assist_apply_blocks_when_importance_family_cap_is_exceeded(self):
+        conn = _connect(":memory:")
+        stale_ts = (datetime.now(timezone.utc) - timedelta(days=120)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        obs_ids = [
+            _insert_observation(
+                conn,
+                {
+                    "ts": stale_ts,
+                    "kind": "note",
+                    "tool_name": "memory_store",
+                    "summary": f"Candidate memory {i}",
+                    "detail": {"scope": "team/alpha", "importance": {"score": 0.42, "label": "ignore"}},
+                },
+            )
+            for i in range(4)
+        ]
+        packet = {
+            "kind": "openclaw-mem.optimize.governor-review.v0",
+            "items": [
+                {
+                    "candidate_id": f"importance-downshift-{obs_id}",
+                    "recommended_action": "adjust_importance_score",
+                    "decision": "approved_for_apply",
+                    "apply_lane": "observations.assist",
+                    "target": {"observationId": obs_id, "recordRef": f"obs:{obs_id}"},
+                    "patch": {"importance": {"score": 0.32, "label": "ignore", "delta": -0.1, "reason_code": "stale_pressure"}},
+                    "evidence_refs": [f"obs:{obs_id}"],
+                }
+                for obs_id in obs_ids
+            ],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "governor.json"
+            path.write_text(json.dumps(packet), encoding="utf-8")
+            args = type(
+                "Args",
+                (),
+                {
+                    "from_file": str(path),
+                    "operator": "lyria",
+                    "lane": "observations.assist",
+                    "run_dir": td,
+                    "max_rows_per_run": 5,
+                    "max_rows_per_24h": 20,
+                    "max_importance_adjustments_per_run": 3,
+                    "max_importance_adjustments_per_24h": 10,
+                    "dry_run": False,
+                    "db": ":memory:",
+                    "json": True,
+                },
+            )()
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_optimize_assist_apply(conn, args)
+            out = json.loads(buf.getvalue())
+
+        self.assertEqual(out["result"], "aborted")
+        self.assertIn("max_importance_adjustments_per_run_exceeded", out["blocked_by_caps"])
+        self.assertEqual(out["applied_action_counts"]["adjust_importance_score"], 0)
         conn.close()
 
 

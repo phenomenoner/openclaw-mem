@@ -36,6 +36,10 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 "2",
                 "--max-rows-per-24h",
                 "6",
+                "--max-importance-adjustments-per-run",
+                "1",
+                "--max-importance-adjustments-per-24h",
+                "4",
                 "--lane",
                 "observations.assist",
                 "--json",
@@ -46,6 +50,8 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         self.assertFalse(args.approve_importance)
         self.assertEqual(args.scope, "team/alpha")
         self.assertEqual(args.max_rows_per_run, 2)
+        self.assertEqual(args.max_importance_adjustments_per_run, 1)
+        self.assertEqual(args.max_importance_adjustments_per_24h, 4)
         self.assertTrue(args.json)
 
     def test_run_pipeline_writes_packet_files_and_summary(self):
@@ -65,6 +71,8 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 top=5,
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
+                max_importance_adjustments_per_run=3,
+                max_importance_adjustments_per_24h=10,
                 lane="observations.assist",
                 json=True,
             )
@@ -101,6 +109,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertTrue((run_dir / "governor.json").exists())
             self.assertTrue((run_dir / "assist-after.json").exists())
             self.assertIn("--dry-run", out["commands"]["assist_apply"])
+            self.assertIn("--max-importance-adjustments-per-run", out["commands"]["assist_apply"])
             self.assertIn("--approve-importance", out["commands"]["governor_review"])
 
     def test_run_pipeline_raises_on_invalid_json(self):
@@ -120,6 +129,8 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 top=5,
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
+                max_importance_adjustments_per_run=3,
+                max_importance_adjustments_per_24h=10,
                 lane="observations.assist",
                 json=True,
             )

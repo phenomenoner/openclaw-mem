@@ -1918,6 +1918,8 @@ def _optimize_governor_review_item(
     evidence_refs: List[str] = [str(x) for x in list(item.get('evidence_refs') or []) if str(x)]
     apply_lane = None
     risk_level = str(item.get('risk_level') or 'low').strip() or 'low'
+    risk_reasons: List[str] = [str(x) for x in list(item.get('risk_reasons') or []) if str(x)]
+    auto_apply_eligible = bool(item.get('auto_apply_eligible', item.get('safe_for_auto_apply', risk_level == 'low')))
     decision = 'proposal_only'
     decision_reasons: List[str] = []
 
@@ -1942,8 +1944,13 @@ def _optimize_governor_review_item(
             if not evidence_refs:
                 evidence_refs = [f'obs:{obs_id}']
             apply_lane = 'observations.assist'
-            risk_level = 'low'
-            if approve_stale:
+            if risk_level == 'high':
+                decision = 'blocked_high_risk'
+                decision_reasons = ['classifier_blocked_auto_apply']
+            elif risk_level != 'low' or not auto_apply_eligible:
+                decision = 'proposal_only'
+                decision_reasons = ['classifier_requires_review']
+            elif approve_stale:
                 decision = 'approved_for_apply'
                 decision_reasons = ['stale_patch_valid', 'approve_stale_enabled']
             else:
@@ -1989,8 +1996,13 @@ def _optimize_governor_review_item(
             if not evidence_refs:
                 evidence_refs = [f'obs:{obs_id}']
             apply_lane = 'observations.assist'
-            risk_level = 'low'
-            if approve_importance:
+            if risk_level == 'high':
+                decision = 'blocked_high_risk'
+                decision_reasons = ['classifier_blocked_auto_apply']
+            elif risk_level != 'low' or not auto_apply_eligible:
+                decision = 'proposal_only'
+                decision_reasons = ['classifier_requires_review']
+            elif approve_importance:
                 decision = 'approved_for_apply'
                 decision_reasons = ['importance_patch_valid', 'approve_importance_enabled']
             else:
@@ -2042,9 +2054,11 @@ def _optimize_governor_review_item(
         'reasons': decision_reasons,
         'evidence_refs': evidence_refs,
         'risk_level': risk_level,
+        'risk_reasons': risk_reasons,
         'apply_lane': apply_lane,
         'judged_by': governor,
-        'safe_for_auto_apply': bool(item.get('safe_for_auto_apply')),
+        'auto_apply_eligible': auto_apply_eligible,
+        'safe_for_auto_apply': auto_apply_eligible,
         'target': target,
         'patch': patch,
         'evidence': evidence,
@@ -2099,6 +2113,29 @@ def _optimize_assist_recent_applied_rows(run_dir: Path, *, since_ts: datetime) -
         if str(payload.get('result') or '') != 'applied':
             continue
         total += _optimize_policy_int(payload.get('applied_rows'), 0, min_value=0)
+    return total
+
+
+def _optimize_assist_recent_applied_action_count(run_dir: Path, *, since_ts: datetime, action: str) -> int:
+    if not run_dir.exists() or not action:
+        return 0
+    total = 0
+    for path in run_dir.rglob('*.after.json'):
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get('kind') or '') != 'openclaw-mem.optimize.assist.after.v1':
+            continue
+        ts_value = _parse_iso_utc(payload.get('ts'))
+        if ts_value is None or ts_value < since_ts:
+            continue
+        if str(payload.get('result') or '') != 'applied':
+            continue
+        action_counts = payload.get('applied_action_counts') if isinstance(payload.get('applied_action_counts'), dict) else {}
+        total += _optimize_policy_int(action_counts.get(action), 0, min_value=0)
     return total
 
 
@@ -2280,6 +2317,8 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
     dry_run = bool(getattr(args, 'dry_run', False))
     max_rows_per_run = _optimize_policy_int(getattr(args, 'max_rows_per_run', 5), 5, min_value=1)
     max_rows_per_24h = _optimize_policy_int(getattr(args, 'max_rows_per_24h', 20), 20, min_value=1)
+    max_importance_per_run = _optimize_policy_int(getattr(args, 'max_importance_adjustments_per_run', 3), 3, min_value=1)
+    max_importance_per_24h = _optimize_policy_int(getattr(args, 'max_importance_adjustments_per_24h', 10), 10, min_value=1)
     run_root = Path(os.path.expanduser(str(getattr(args, 'run_dir', None) or DEFAULT_OPTIMIZE_ASSIST_RUN_DIR)))
     run_dir = run_root / datetime.now(timezone.utc).strftime('%Y-%m-%d')
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -2294,6 +2333,7 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
 
     target_rows = [int((item.get('target') or {}).get('observationId') or 0) for item in approved_items]
     unique_target_rows = sorted({row_id for row_id in target_rows if row_id > 0})
+    approved_importance_count = sum(1 for item in approved_items if str(item.get('recommended_action') or '') == 'adjust_importance_score')
     blocked_reasons: List[str] = []
     if not approved_items:
         blocked_reasons.append('no_approved_candidates')
@@ -2301,6 +2341,8 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
         blocked_reasons.append('duplicate_target_rows')
     if len(unique_target_rows) > max_rows_per_run:
         blocked_reasons.append('max_rows_per_run_exceeded')
+    if approved_importance_count > max_importance_per_run:
+        blocked_reasons.append('max_importance_adjustments_per_run_exceeded')
 
     recent_rows_24h = _optimize_assist_recent_applied_rows(
         run_root,
@@ -2308,6 +2350,13 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
     )
     if recent_rows_24h + len(unique_target_rows) > max_rows_per_24h:
         blocked_reasons.append('max_rows_per_24h_exceeded')
+    recent_importance_24h = _optimize_assist_recent_applied_action_count(
+        run_root,
+        since_ts=datetime.now(timezone.utc) - timedelta(hours=24),
+        action='adjust_importance_score',
+    )
+    if recent_importance_24h + approved_importance_count > max_importance_per_24h:
+        blocked_reasons.append('max_importance_adjustments_per_24h_exceeded')
 
     run_id = str(uuid.uuid4())
     ts_now = _utcnow_iso()
@@ -2354,6 +2403,8 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
         'caps': {
             'max_rows_per_apply_run': max_rows_per_run,
             'max_rows_per_24h': max_rows_per_24h,
+            'max_importance_adjustments_per_run': max_importance_per_run,
+            'max_importance_adjustments_per_24h': max_importance_per_24h,
             'max_retries_per_packet': 1,
         },
         'target_rows': unique_target_rows,
@@ -2384,6 +2435,10 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
     after_hashes: Dict[str, str] = {}
     diff_summary: List[Dict[str, Any]] = []
     effect_receipts: List[Dict[str, Any]] = []
+    applied_action_counts: Dict[str, int] = {
+        'set_stale_candidate': 0,
+        'adjust_importance_score': 0,
+    }
 
     if blocked_reasons:
         result = 'aborted'
@@ -2403,6 +2458,9 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
                         applied_at=ts_now,
                     )
                     applied_rows += 1
+                    action_name = str(item.get('recommended_action') or '')
+                    if action_name in applied_action_counts:
+                        applied_action_counts[action_name] += 1
                     after_hashes[str(mutation['observation_id'])] = mutation['after_sha256']
                     diff_summary.extend(mutation['diff_summary'])
                     effect_receipts.append(
@@ -2463,6 +2521,7 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
         'applied_rows': applied_rows,
         'skipped_rows': skipped_rows,
         'blocked_by_caps': sorted(set(blocked_reasons)),
+        'applied_action_counts': applied_action_counts,
         'after_hashes': after_hashes,
         'rollback_ref': str(rollback_path),
         'diff_summary': diff_summary,
@@ -13991,6 +14050,8 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--run-dir", dest="run_dir", default=DEFAULT_OPTIMIZE_ASSIST_RUN_DIR, help="Directory for before/after/rollback receipts (default: ~/.openclaw/memory/openclaw-mem/optimize-assist)")
     o.add_argument("--max-rows-per-run", dest="max_rows_per_run", type=int, default=5, help="Abort before write if approved target rows exceed this cap (default: 5)")
     o.add_argument("--max-rows-per-24h", dest="max_rows_per_24h", type=int, default=20, help="Abort before write if the rolling 24h cap would be exceeded (default: 20)")
+    o.add_argument("--max-importance-adjustments-per-run", dest="max_importance_adjustments_per_run", type=int, default=3, help="Abort before write if approved importance adjustments exceed this cap (default: 3)")
+    o.add_argument("--max-importance-adjustments-per-24h", dest="max_importance_adjustments_per_24h", type=int, default=10, help="Abort before write if the rolling 24h importance-adjustment cap would be exceeded (default: 10)")
     o.add_argument("--dry-run", action="store_true", help="Validate packet, emit receipts, and skip writes")
     o.set_defaults(func=cmd_optimize_assist_apply)
 

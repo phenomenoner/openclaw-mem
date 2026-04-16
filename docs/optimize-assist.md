@@ -23,6 +23,14 @@ The shipped write whitelist is currently limited to:
 - `detail_json.importance.label`
 - bounded `detail_json.optimization.assist` metadata
 
+The candidate packets now also carry bounded classifier metadata:
+- `risk_level` (`low | medium | high`)
+- `risk_reasons[]`
+- `auto_apply_eligible`
+
+This metadata does not create a new write path by itself.
+It exists so unattended low-risk promotion can be measured and fail closed later.
+
 ## Default posture
 
 The recommended deployment posture is:
@@ -45,6 +53,7 @@ python tools/optimize_assist_runner.py --json
 Default behavior:
 - runs the full packet chain
 - keeps stale candidates and bounded importance adjustments as the approved low-risk action classes
+- respects the packet classifier, so medium/high-risk candidates remain proposal-only even when approval flags are enabled
 - runs `assist-apply` in **dry-run** mode unless `--allow-apply` is set
 - writes runner packet artifacts under `~/.openclaw/memory/openclaw-mem/optimize-assist-runner/`
 
@@ -64,6 +73,8 @@ python tools/optimize_assist_runner.py --allow-apply --json
 - `--stale-days 60`
 - `--max-rows-per-run 5`
 - `--max-rows-per-24h 20`
+- `--max-importance-adjustments-per-run 3`
+- `--max-importance-adjustments-per-24h 10`
 - `--no-approve-importance`
 - `--no-approve-stale`
 

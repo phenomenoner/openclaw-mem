@@ -50,6 +50,12 @@ Exit criteria:
 - sampled manual review precision meets threshold
 - low-risk eligibility is deterministic and auditable
 
+Implementation note:
+- classifier foundation is now shipped in the governed optimize-assist lane
+- evolution packets carry `risk_level`, `risk_reasons`, and `auto_apply_eligible`
+- governor approval flags still fail closed when classifier output is not `low` + eligible
+- broader unattended apply remains a later phase
+
 ### Phase 3 - unattended low-risk apply
 Goal: let narrow low-risk classes self-apply without a human in the loop.
 
@@ -61,6 +67,11 @@ Ship:
 Exit criteria:
 - rollback replay stays green
 - canary receipts show bounded unattended writes without cap drift
+
+Implementation note:
+- family-cap foundation is now shipped for bounded importance adjustments
+- assist apply enforces per-run and rolling-24h caps for `adjust_importance_score`
+- broader unattended default-on posture still waits for controller/watchdog phases
 
 ### Phase 4 - autonomy controller + watchdog
 Goal: promote the command chain into a controller that can pause itself.

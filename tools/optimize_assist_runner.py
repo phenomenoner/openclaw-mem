@@ -77,6 +77,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top", type=int, default=10, help="Max governed candidates emitted")
     p.add_argument("--max-rows-per-run", type=int, default=5, help="Assist apply cap per run")
     p.add_argument("--max-rows-per-24h", type=int, default=20, help="Assist apply rolling 24h cap")
+    p.add_argument("--max-importance-adjustments-per-run", type=int, default=3, help="Assist apply importance-adjustment cap per run")
+    p.add_argument("--max-importance-adjustments-per-24h", type=int, default=10, help="Assist apply rolling 24h importance-adjustment cap")
     p.add_argument("--lane", default="observations.assist", help="Assist apply lane label")
     p.add_argument("--json", action="store_true", help="Emit machine-readable runner summary")
     return p
@@ -149,6 +151,10 @@ def _build_assist_cmd(args: argparse.Namespace, governor_path: Path) -> list[str
         str(args.max_rows_per_run),
         "--max-rows-per-24h",
         str(args.max_rows_per_24h),
+        "--max-importance-adjustments-per-run",
+        str(args.max_importance_adjustments_per_run),
+        "--max-importance-adjustments-per-24h",
+        str(args.max_importance_adjustments_per_24h),
         "--json",
     ]
     if not args.allow_apply:

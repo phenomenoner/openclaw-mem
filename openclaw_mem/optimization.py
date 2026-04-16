@@ -1579,6 +1579,146 @@ def build_evolution_review(
     items: List[Dict[str, Any]] = []
 
     threshold_days = int(stale.get("threshold_days") or stale_days)
+
+    def classify_candidate(
+        *,
+        action: str,
+        target: Dict[str, Any],
+        patch: Dict[str, Any],
+        evidence: Dict[str, Any],
+        safe_for_auto_apply: bool,
+    ) -> Dict[str, Any]:
+        obs_id = int(target.get("observationId") or 0)
+        risk_level = "low"
+        risk_reasons: List[str] = []
+
+        if obs_id <= 0:
+            return {
+                "risk_level": "high",
+                "risk_reasons": ["missing_observation_id"],
+                "auto_apply_eligible": False,
+                "safe_for_auto_apply": False,
+            }
+
+        if action == "set_stale_candidate":
+            lifecycle_patch = patch.get("lifecycle") if isinstance(patch.get("lifecycle"), dict) else {}
+            age_days = evidence.get("age_days")
+            recent_use_count = int(evidence.get("recent_use_count") or 0)
+            threshold = evidence.get("threshold_days")
+            if lifecycle_patch.get("stale_candidate") is not True or str(lifecycle_patch.get("stale_reason_code") or "") not in {
+                "age_threshold",
+                "repeated_miss_pressure",
+                "duplicate_cluster",
+                "operator_override",
+            }:
+                return {
+                    "risk_level": "high",
+                    "risk_reasons": ["invalid_lifecycle_patch"],
+                    "auto_apply_eligible": False,
+                    "safe_for_auto_apply": False,
+                }
+            risk_reasons.extend(["bounded_lifecycle_patch", "age_threshold_signal_present"])
+            if age_days is None or threshold is None:
+                risk_level = "medium"
+                risk_reasons.append("staleness_evidence_incomplete")
+            elif int(age_days) < int(threshold):
+                risk_level = "medium"
+                risk_reasons.append("below_staleness_threshold")
+            else:
+                risk_reasons.append("age_threshold_met")
+            if recent_use_count > 0:
+                risk_level = "medium"
+                risk_reasons.append("recent_use_conflict")
+            else:
+                risk_reasons.append("no_recent_use_conflict")
+        elif action == "adjust_importance_score":
+            importance_patch = patch.get("importance") if isinstance(patch.get("importance"), dict) else {}
+            try:
+                current_score = round(float(evidence.get("current_score")), 4)
+                next_score = round(float(importance_patch.get("score")), 4)
+                delta = round(float(importance_patch.get("delta")), 4)
+            except Exception:
+                return {
+                    "risk_level": "high",
+                    "risk_reasons": ["invalid_importance_patch"],
+                    "auto_apply_eligible": False,
+                    "safe_for_auto_apply": False,
+                }
+            next_label = label_from_score(next_score)
+            patch_label = str(importance_patch.get("label") or "").strip()
+            reason_code = str(importance_patch.get("reason_code") or "").strip()
+            age_days = evidence.get("age_days")
+            threshold = evidence.get("threshold_days")
+            recent_use_count = int(evidence.get("recent_use_count") or 0)
+            if patch_label != next_label:
+                return {
+                    "risk_level": "high",
+                    "risk_reasons": ["importance_label_mismatch"],
+                    "auto_apply_eligible": False,
+                    "safe_for_auto_apply": False,
+                }
+            if reason_code not in {"stale_pressure", "reuse_signal", "label_alignment"}:
+                return {
+                    "risk_level": "high",
+                    "risk_reasons": ["invalid_importance_reason_code"],
+                    "auto_apply_eligible": False,
+                    "safe_for_auto_apply": False,
+                }
+            risk_reasons.extend(["importance_patch_parseable", "score_label_aligned"])
+            if round(next_score - current_score, 4) != delta:
+                return {
+                    "risk_level": "high",
+                    "risk_reasons": ["importance_delta_mismatch"],
+                    "auto_apply_eligible": False,
+                    "safe_for_auto_apply": False,
+                }
+            if abs(delta) > 0.10:
+                risk_level = "medium"
+                risk_reasons.append("importance_delta_exceeds_auto_apply_cap")
+            else:
+                risk_reasons.append("bounded_importance_delta")
+            if reason_code == "stale_pressure":
+                risk_reasons.append("stale_pressure_signal_present")
+                if age_days is None or threshold is None or int(age_days) < int(threshold):
+                    risk_level = "medium"
+                    risk_reasons.append("staleness_evidence_weak")
+                else:
+                    risk_reasons.append("age_threshold_met")
+                if recent_use_count > 0:
+                    risk_level = "medium"
+                    risk_reasons.append("recent_use_conflict")
+                else:
+                    risk_reasons.append("no_recent_use_conflict")
+                if current_score >= 0.50:
+                    risk_level = "medium"
+                    risk_reasons.append("higher_value_memory_requires_review")
+            elif reason_code == "reuse_signal":
+                if recent_use_count < 2:
+                    risk_level = "medium"
+                    risk_reasons.append("reuse_signal_not_strong_enough")
+                else:
+                    risk_reasons.append("reuse_signal_confirmed")
+            else:
+                if delta != 0.0:
+                    risk_level = "medium"
+                    risk_reasons.append("label_alignment_should_not_move_score")
+                else:
+                    risk_reasons.append("label_alignment_only")
+        else:
+            return {
+                "risk_level": "high",
+                "risk_reasons": ["unsupported_action_class"],
+                "auto_apply_eligible": False,
+                "safe_for_auto_apply": False,
+            }
+
+        auto_apply_eligible = bool(safe_for_auto_apply and risk_level == "low")
+        return {
+            "risk_level": risk_level,
+            "risk_reasons": risk_reasons,
+            "auto_apply_eligible": auto_apply_eligible,
+            "safe_for_auto_apply": auto_apply_eligible,
+        }
     candidate_obs_ids: Set[int] = set()
     for raw in list(stale.get("items") or [])[:top]:
         if not isinstance(raw, dict):
@@ -1587,13 +1727,10 @@ def build_evolution_review(
         if obs_id <= 0:
             continue
         candidate_obs_ids.add(obs_id)
-        items.append(
-            {
+        item = {
                 "candidate_id": f"stale-candidate-{obs_id}",
                 "action": "set_stale_candidate",
-                "risk_level": "low",
                 "confidence": 0.74,
-                "safe_for_auto_apply": True,
                 "reasons": [
                     "age_threshold",
                     "recent_use_not_observed",
@@ -1615,12 +1752,22 @@ def build_evolution_review(
                     "signal": "staleness",
                     "age_days": raw.get("age_days"),
                     "threshold_days": threshold_days,
+                    "recent_use_count": 0,
                     "importance": raw.get("importance"),
                     "summary_preview": raw.get("summary_preview"),
                     "protected_recent_use_rows": int(recent_use.get("rows_with_recent_use") or 0),
                 },
-            }
+        }
+        item.update(
+            classify_candidate(
+                action=item["action"],
+                target=item["target"],
+                patch=item["patch"],
+                evidence=item["evidence"],
+                safe_for_auto_apply=True,
+            )
         )
+        items.append(item)
 
     importance_rows: Dict[int, Dict[str, Any]] = {}
     if candidate_obs_ids:
@@ -1655,13 +1802,10 @@ def build_evolution_review(
         if next_score == current_score:
             continue
         next_label = label_from_score(next_score)
-        items.append(
-            {
+        item = {
                 "candidate_id": f"importance-downshift-{obs_id}",
                 "action": "adjust_importance_score",
-                "risk_level": "low",
                 "confidence": 0.68,
-                "safe_for_auto_apply": True,
                 "reasons": [
                     "stale_pressure",
                     "bounded_score_delta",
@@ -1685,14 +1829,24 @@ def build_evolution_review(
                     "signal": "staleness",
                     "age_days": raw.get("age_days"),
                     "threshold_days": threshold_days,
+                    "recent_use_count": 0,
                     "current_score": current_score,
                     "next_score": next_score,
                     "current_label": imp.get("label"),
                     "next_label": next_label,
                     "summary_preview": raw.get("summary_preview"),
                 },
-            }
+        }
+        item.update(
+            classify_candidate(
+                action=item["action"],
+                target=item["target"],
+                patch=item["patch"],
+                evidence=item["evidence"],
+                safe_for_auto_apply=True,
+            )
         )
+        items.append(item)
 
     deferred_actions = [
         rec for rec in recommendations if str(rec.get("type") or "") != "mark_stale_candidate"
