@@ -83,6 +83,38 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem artifact stash --from ./
 uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifact:v1:sha256:<64hex> --json
 ```
 
+## Governed optimization apply, now with a bounded write lane
+
+`openclaw-mem` now ships the full **observe -> judge -> apply** bridge for one low-risk class of maintenance updates.
+
+Current shipped path:
+- `openclaw-mem optimize review` — zero-write health signals
+- `openclaw-mem optimize evolution-review` — packetizes low-risk stale-candidate updates
+- `openclaw-mem optimize governor-review` — emits explicit decisions
+- `openclaw-mem optimize assist-apply` — applies only governor-approved low-risk observation updates with before/after + rollback receipts
+
+The first bounded write class is intentionally narrow:
+- update `observations.detail_json.lifecycle.stale_candidate`
+- update `observations.detail_json.lifecycle.stale_reason_code`
+- add bounded `observations.detail_json.optimization.assist` metadata
+
+Example dry rehearsal:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize evolution-review --json > evolution.json
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize governor-review --from-file evolution.json --approve-stale --json > governor.json
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize assist-apply --from-file governor.json --dry-run --json
+```
+
+Example bounded write run:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem optimize assist-apply --from-file governor.json --json
+```
+
+Receipts are written under `~/.openclaw/memory/openclaw-mem/optimize-assist/` by default.
+If the packet is malformed, unapproved, duplicated, or exceeds caps, the run aborts before write.
+
 ### Command-aware compaction, minimal operator path
 
 If you already use a compactor such as RTK, keep it in the Observe lane first:

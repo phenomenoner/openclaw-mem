@@ -1550,6 +1550,139 @@ def build_memory_health_review(
     return report
 
 
+def build_evolution_review(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 1000,
+    stale_days: int = 60,
+    lifecycle_limit: int = 200,
+    top: int = 10,
+    scope: Optional[str] = None,
+) -> Dict[str, Any]:
+    review = build_memory_health_review(
+        conn,
+        limit=limit,
+        stale_days=stale_days,
+        duplicate_min_count=2,
+        bloat_summary_chars=240,
+        bloat_detail_bytes=4096,
+        orphan_min_tokens=2,
+        miss_min_count=2,
+        lifecycle_limit=lifecycle_limit,
+        top=top,
+        scope=scope,
+    )
+
+    stale = ((review.get("signals") or {}).get("staleness") or {})
+    recent_use = ((review.get("signals") or {}).get("recent_use") or {})
+    recommendations = list(review.get("recommendations") or [])
+    items: List[Dict[str, Any]] = []
+
+    threshold_days = int(stale.get("threshold_days") or stale_days)
+    for raw in list(stale.get("items") or [])[:top]:
+        if not isinstance(raw, dict):
+            continue
+        obs_id = int(raw.get("id") or 0)
+        if obs_id <= 0:
+            continue
+        items.append(
+            {
+                "candidate_id": f"stale-candidate-{obs_id}",
+                "action": "set_stale_candidate",
+                "risk_level": "low",
+                "confidence": 0.74,
+                "safe_for_auto_apply": True,
+                "reasons": [
+                    "age_threshold",
+                    "recent_use_not_observed",
+                    f"older_than_{threshold_days}d",
+                ],
+                "target": {
+                    "observationId": obs_id,
+                    "recordRef": f"obs:{obs_id}",
+                    "scope": raw.get("scope"),
+                },
+                "patch": {
+                    "lifecycle": {
+                        "stale_candidate": True,
+                        "stale_reason_code": "age_threshold",
+                    }
+                },
+                "evidence_refs": [f"obs:{obs_id}"],
+                "evidence": {
+                    "signal": "staleness",
+                    "age_days": raw.get("age_days"),
+                    "threshold_days": threshold_days,
+                    "importance": raw.get("importance"),
+                    "summary_preview": raw.get("summary_preview"),
+                    "protected_recent_use_rows": int(recent_use.get("rows_with_recent_use") or 0),
+                },
+            }
+        )
+
+    deferred_actions = [
+        rec for rec in recommendations if str(rec.get("type") or "") != "mark_stale_candidate"
+    ]
+
+    return {
+        "kind": "openclaw-mem.optimize.evolution-review.v0",
+        "ts": review.get("ts"),
+        "version": review.get("version"),
+        "source": {
+            "kind": str(review.get("kind") or ""),
+            "scope": ((review.get("source") or {}).get("scope")),
+            "row_limit": int(((review.get("source") or {}).get("row_limit") or limit)),
+            "rows_scanned": int(((review.get("source") or {}).get("rows_scanned") or 0)),
+            "total_rows": int(((review.get("source") or {}).get("total_rows") or 0)),
+            "coverage_pct": ((review.get("source") or {}).get("coverage_pct")),
+            "sample_order": ((review.get("source") or {}).get("sample_order")),
+        },
+        "policy": {
+            "mode": "recommendation-first",
+            "writes_performed": 0,
+            "memory_mutation": "none",
+            "governor_required": True,
+            "supported_apply_actions": ["set_stale_candidate"],
+            "auto_apply_without_governor": False,
+        },
+        "counts": {
+            "items": len(items),
+            "lowRisk": sum(1 for item in items if str(item.get("risk_level") or "") == "low"),
+            "mediumRisk": sum(1 for item in items if str(item.get("risk_level") or "") == "medium"),
+            "highRisk": sum(1 for item in items if str(item.get("risk_level") or "") == "high"),
+            "deferredRecommendations": len(deferred_actions),
+        },
+        "items": items,
+        "deferred": {
+            "recommendation_types": [str(rec.get("type") or "") for rec in deferred_actions[:top]],
+            "items": deferred_actions[:top],
+        },
+        "warnings": list(review.get("warnings") or []),
+        "upstream_review": review,
+    }
+
+
+def render_evolution_review(report: Dict[str, Any]) -> str:
+    counts = report.get("counts") or {}
+    lines = [
+        "openclaw-mem optimize evolution-review (governed apply candidates)",
+        (
+            f"candidates={int(counts.get('items') or 0)} "
+            f"low_risk={int(counts.get('lowRisk') or 0)} "
+            f"deferred={int(counts.get('deferredRecommendations') or 0)}"
+        ),
+    ]
+    for item in list(report.get("items") or [])[:10]:
+        target = item.get("target") if isinstance(item.get("target"), dict) else {}
+        evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+        lines.append(
+            "- "
+            f"{item.get('candidate_id')} action={item.get('action')} risk={item.get('risk_level')} "
+            f"obs={target.get('observationId')} age_days={evidence.get('age_days')}"
+        )
+    return "\n".join(lines)
+
+
 def render_memory_health_review(report: Dict[str, Any]) -> str:
     src = report.get("source", {})
     sig = report.get("signals", {})

@@ -1,9 +1,9 @@
 # Spec — Self-Optimizing Memory Loop v0
 
 ## Status
-- Stage: **DONE / shadow-only review loop shipped on stable main** (closure revalidated 2026-03-31)
-- Scope: stable-main shadow/recommendation surface only; apply path remains future work
-- Posture: **shadow/recommendation-first**
+- Stage: **DONE / governed assist-apply bridge shipped on stable main**
+- Scope: review loop + governor judgment + bounded assist apply for low-risk lifecycle updates
+- Posture: **recommendation-first, governor-gated mutation**
 
 ## Problem
 Today `openclaw-mem` can capture, grade, recall, and expose receipts — but it does not yet close the loop on its own.
@@ -173,10 +173,18 @@ tests/
     - remains strict zero-write (`policy.writes_performed=0`, `memory_mutation=none`)
 - bounded recommendation budgets stay in place (`--top`, scoped miss groups)
 
-### v0.3 — bounded low-risk apply (flagged; **not shipped in this phase**)
-- assist-mode contract is now codified as governance-only spec: `docs/specs/self-optimizing-memory-assist-mode-contract-v1.md`
-- auto mode remains explicitly forbidden
-- future implementation must stay within the contract whitelist/caps and emit before/after + rollback receipts
+### v0.3 — bounded low-risk apply (**shipped, governor-gated**)
+- shipped read/write bridge:
+  - `openclaw-mem optimize evolution-review --json`
+  - `openclaw-mem optimize governor-review --approve-stale --json`
+  - `openclaw-mem optimize assist-apply [--dry-run] --json`
+- current apply whitelist stays intentionally narrow:
+  - `/lifecycle/stale_candidate`
+  - `/lifecycle/stale_reason_code`
+  - bounded `/optimization/assist` receipt metadata
+- before/after + rollback receipts are mandatory on every run
+- cap violations still abort before write
+- auto mode remains explicitly forbidden; unattended use must still route through an approved governor packet
 
 ## Acceptance checks
 ### 1-day check

@@ -1,13 +1,13 @@
 # Spec — Self-optimizing memory 1.5a assist-mode mutation contract (v1)
 
 ## Status
-- Stage: **governance/spec only** (no apply-path implementation in this phase)
-- Scope: `assist` mode only
+- Stage: **implemented canary apply lane**
+- Scope: `assist` mode only, governor-gated
 - Auto mode: **explicitly forbidden**
 
 ## Intent
-Define a narrow, rollbackable mutation contract for future operator-assisted apply runs.
-This document does **not** authorize autonomous mutation.
+Define the narrow, rollbackable mutation contract for operator-assisted apply runs.
+This document still does **not** authorize autonomous mutation.
 
 ## Allowed mutable fields (exact whitelist)
 Only these JSON-pointer targets inside `observations.detail_json` may change:
@@ -93,7 +93,7 @@ Required keys:
 `kind = openclaw-mem.optimize.assist.after.v1`
 Required keys:
 - `run_id`, `ts`, `operator`
-- `result` (`applied|aborted|rolled_back`)
+- `result` (`dry_run|applied|aborted|rolled_back`)
 - `applied_rows`, `skipped_rows`, `blocked_by_caps`
 - `after_hashes` (per-row detail hash)
 - `rollback_ref` (path/id to rollback artifact)
@@ -101,11 +101,13 @@ Required keys:
 
 Both receipts must include `policy.memory_mutation` and `policy.writes_performed` for parity with existing optimize reports.
 
-## Approval gate
-Before any future implementation:
-1. contract doc approved,
-2. receipt schemas reviewed,
-3. dry rehearsal packet validated,
-4. rollback replay tested on fixture DB.
+## Current shipped surface
+The current CLI bridge is:
+1. `openclaw-mem optimize evolution-review`
+2. `openclaw-mem optimize governor-review`
+3. `openclaw-mem optimize assist-apply [--dry-run]`
 
-Until then, 1.5a remains parked at recommendation/shadow posture.
+The shipped writer lane currently supports one bounded action class:
+- `set_stale_candidate`
+
+Everything else remains proposal-only until a later whitelist expansion is explicitly documented.

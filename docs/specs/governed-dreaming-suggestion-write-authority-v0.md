@@ -1,9 +1,9 @@
 # Spec — governed dreaming, suggestion judgment, and write authority v0
 
 ## Status
-- Stage: **design / governance only**
-- Scope: post-Dream-Lite maintenance governance
-- Default posture: **zero-write by default**
+- Stage: **governance + bounded writer lane shipped**
+- Scope: post-Dream-Lite maintenance governance plus one assist-apply canary lane
+- Default posture: **zero-write by default, governor-gated write for whitelisted actions only**
 
 ## Intent
 Establish a zero-write governance framework for maintenance automation after `graph synth recommend`.
@@ -128,18 +128,23 @@ Before any future autonomous apply path is implemented, it must inherit these ru
 These should fail closed for mutation and fail open for read-only recommendation surfaces.
 
 ## Current implementation surface
-Do **not** build autonomous write next.
+Shipped surfaces now follow the role split directly:
 
-The first implementation slice for this contract is now landed as a zero-write governor review surface:
-- `openclaw-mem optimize governor-review`
+- **Scout/helper lane**
+  - `openclaw-mem graph synth recommend`
+  - `openclaw-mem optimize evolution-review`
+- **Governor lane**
+  - `openclaw-mem optimize governor-review`
+- **Writer-of-record lane**
+  - `openclaw-mem optimize assist-apply`
 
-Current shape:
-- reads recommendation packet(s)
-- outputs explicit decision packet(s)
-- performs no mutation
-- keeps bounded receipts / decision ladder output
+Current writer shape:
+- accepts governor packets only
+- applies only whitelisted low-risk observation lifecycle updates
+- emits before/after + rollback receipts every run
+- aborts before write on malformed packets or cap violations
 
-The next mutation-adjacent slice, if reopened later, must still stay behind an explicit write contract and rollback posture.
+The next whitelist expansion, if reopened later, must still stay behind an explicit write contract and rollback posture.
 
 ## Acceptance criteria for this governance phase
 A reader should be able to answer:

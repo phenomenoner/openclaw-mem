@@ -19,6 +19,7 @@ class TestOptimizeGovernorReview(unittest.TestCase):
                 "--governor",
                 "lyria",
                 "--approve-refresh",
+                "--approve-stale",
             ]
         )
         self.assertEqual(args.cmd, "optimize")
@@ -26,6 +27,7 @@ class TestOptimizeGovernorReview(unittest.TestCase):
         self.assertEqual(args.from_file, "/tmp/recommend.json")
         self.assertEqual(args.governor, "lyria")
         self.assertTrue(args.approve_refresh)
+        self.assertTrue(args.approve_stale)
 
     def test_governor_review_defaults_refresh_to_proposal_only(self):
         conn = _connect(":memory:")
@@ -107,6 +109,45 @@ class TestOptimizeGovernorReview(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(ctx.exception.code, 2)
         self.assertIn("unsupported packet kind", out["error"])
+        conn.close()
+
+    def test_governor_review_can_approve_stale_candidate(self):
+        conn = _connect(":memory:")
+        packet = {
+            "kind": "openclaw-mem.optimize.evolution-review.v0",
+            "items": [
+                {
+                    "candidate_id": "stale-candidate-12",
+                    "action": "set_stale_candidate",
+                    "risk_level": "low",
+                    "target": {"observationId": 12, "recordRef": "obs:12"},
+                    "patch": {"lifecycle": {"stale_candidate": True, "stale_reason_code": "age_threshold"}},
+                    "evidence_refs": ["obs:12"],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "evolution.json"
+            path.write_text(json.dumps(packet), encoding="utf-8")
+            args = type(
+                "Args",
+                (),
+                {
+                    "from_file": str(path),
+                    "governor": "lyria",
+                    "approve_refresh": False,
+                    "approve_stale": True,
+                    "json": True,
+                },
+            )()
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_optimize_governor_review(conn, args)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["counts"]["approvedForApply"], 1)
+        self.assertEqual(out["items"][0]["decision"], "approved_for_apply")
+        self.assertEqual(out["items"][0]["apply_lane"], "observations.assist")
+        self.assertEqual(out["items"][0]["recommended_action"], "set_stale_candidate")
         conn.close()
 
 

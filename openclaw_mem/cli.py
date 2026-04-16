@@ -55,8 +55,10 @@ from openclaw_mem.docs_memory import (
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 from openclaw_mem.optimization import (
     build_consolidation_review,
+    build_evolution_review,
     build_memory_health_review,
     render_consolidation_review,
+    render_evolution_review,
     render_memory_health_review,
 )
 from openclaw_mem.graph.drift import query_drift
@@ -146,6 +148,12 @@ DEFAULT_EPISODIC_EXTRACT_STATE_PATH = os.path.join(
     "openclaw-mem",
     "episodes-extract-state.json",
 )
+DEFAULT_OPTIMIZE_ASSIST_RUN_DIR = os.path.join(
+    STATE_DIR,
+    "memory",
+    "openclaw-mem",
+    "optimize-assist",
+)
 DEFAULT_OPENCLAW_SESSIONS_ROOT = os.path.join(STATE_DIR, "sessions")
 DEFAULT_CRON_JOBS_JSON = os.path.join(STATE_DIR, "cron", "jobs.json")
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
@@ -164,6 +172,21 @@ def _utcnow_iso() -> str:
     """Return UTC timestamp in ISO format with timezone info."""
 
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_iso_utc(raw: Any) -> Optional[datetime]:
+    text = str(raw or '').strip()
+    if not text:
+        return None
+    try:
+        if text.endswith('Z'):
+            text = text[:-1] + '+00:00'
+        dt = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 EPISODIC_SCHEMA_VERSION = "openclaw-mem.episodic.v0"
@@ -1783,6 +1806,23 @@ def cmd_optimize_consolidation_review(conn: sqlite3.Connection, args: argparse.N
     print(render_consolidation_review(report))
 
 
+def cmd_optimize_evolution_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    report = build_evolution_review(
+        conn,
+        limit=int(getattr(args, "limit", 1000)),
+        stale_days=int(getattr(args, "stale_days", 60)),
+        lifecycle_limit=int(getattr(args, "lifecycle_limit", 200)),
+        top=int(getattr(args, "top", 10)),
+        scope=getattr(args, "scope", None),
+    )
+
+    if args.json:
+        _emit(report, True)
+        return
+
+    print(render_evolution_review(report))
+
+
 def _optimize_policy_int(raw: Any, default: int, *, min_value: int = 0) -> int:
     try:
         value = int(raw)
@@ -1845,7 +1885,11 @@ def _optimize_governor_review_load_packet(path_value: Optional[str]) -> Dict[str
         raise ValueError(f"invalid_json: {e}") from e
     if not isinstance(payload, dict):
         raise ValueError("packet must be a JSON object")
-    if str(payload.get('kind') or '') != 'openclaw-mem.graph.synth.recommend.v0':
+    kind = str(payload.get('kind') or '')
+    if kind not in {
+        'openclaw-mem.graph.synth.recommend.v0',
+        'openclaw-mem.optimize.evolution-review.v0',
+    }:
         raise ValueError('unsupported packet kind')
     items = payload.get('items')
     if not isinstance(items, list):
@@ -1853,19 +1897,57 @@ def _optimize_governor_review_load_packet(path_value: Optional[str]) -> Dict[str
     return payload
 
 
-def _optimize_governor_review_item(item: Dict[str, Any], *, approve_refresh: bool, governor: str, index: int) -> Dict[str, Any]:
-    action = str(item.get('action') or '').strip()
+def _optimize_governor_review_item(
+    item: Dict[str, Any],
+    *,
+    source_kind: str,
+    approve_refresh: bool,
+    approve_stale: bool,
+    governor: str,
+    index: int,
+) -> Dict[str, Any]:
+    action = str(item.get('action') or item.get('recommended_action') or '').strip()
     reasons = [str(x) for x in list(item.get('reasons') or []) if str(x)]
     target = item.get('target') if isinstance(item.get('target'), dict) else {}
     suggestion = item.get('suggestion') if isinstance(item.get('suggestion'), dict) else {}
-    candidate_id = f"candidate-{index:03d}"
-    evidence_refs: List[str] = []
+    patch = item.get('patch') if isinstance(item.get('patch'), dict) else {}
+    evidence = item.get('evidence') if isinstance(item.get('evidence'), dict) else {}
+    candidate_id = str(item.get('candidate_id') or f"candidate-{index:03d}")
+    evidence_refs: List[str] = [str(x) for x in list(item.get('evidence_refs') or []) if str(x)]
     apply_lane = None
-    risk_level = 'low'
+    risk_level = str(item.get('risk_level') or 'low').strip() or 'low'
     decision = 'proposal_only'
     decision_reasons: List[str] = []
 
-    if action == 'no_action':
+    if source_kind == 'openclaw-mem.optimize.evolution-review.v0' and action == 'set_stale_candidate':
+        obs_id = int(target.get('observationId') or 0)
+        lifecycle_patch = patch.get('lifecycle') if isinstance(patch.get('lifecycle'), dict) else {}
+        stale_reason_code = str(lifecycle_patch.get('stale_reason_code') or '').strip()
+        if obs_id <= 0:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['missing_observation_id']
+        elif lifecycle_patch.get('stale_candidate') is not True or stale_reason_code not in {
+            'age_threshold',
+            'repeated_miss_pressure',
+            'duplicate_cluster',
+            'operator_override',
+        }:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['invalid_stale_patch']
+        else:
+            if not evidence_refs:
+                evidence_refs = [f'obs:{obs_id}']
+            apply_lane = 'observations.assist'
+            risk_level = 'low'
+            if approve_stale:
+                decision = 'approved_for_apply'
+                decision_reasons = ['stale_patch_valid', 'approve_stale_enabled']
+            else:
+                decision = 'proposal_only'
+                decision_reasons = ['stale_patch_valid', 'awaiting_governor_approval']
+    elif action == 'no_action':
         decision = 'ignore'
         risk_level = 'low'
         decision_reasons = ['no_action_packet']
@@ -1913,9 +1995,334 @@ def _optimize_governor_review_item(item: Dict[str, Any], *, approve_refresh: boo
         'risk_level': risk_level,
         'apply_lane': apply_lane,
         'judged_by': governor,
+        'safe_for_auto_apply': bool(item.get('safe_for_auto_apply')),
         'target': target,
+        'patch': patch,
+        'evidence': evidence,
         'suggestion': suggestion,
     }
+
+
+def _json_sha256(value: Any) -> str:
+    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+def _utcnow_compact() -> str:
+    return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+
+
+def _optimize_assist_load_governor_packet(path_value: Optional[str]) -> Dict[str, Any]:
+    if path_value:
+        raw = Path(path_value).read_text(encoding='utf-8')
+    else:
+        raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except Exception as e:
+        raise ValueError(f'invalid_json: {e}') from e
+    if not isinstance(payload, dict):
+        raise ValueError('packet must be a JSON object')
+    if str(payload.get('kind') or '') != 'openclaw-mem.optimize.governor-review.v0':
+        raise ValueError('unsupported packet kind')
+    items = payload.get('items')
+    if not isinstance(items, list):
+        raise ValueError('packet items must be a list')
+    return payload
+
+
+def _optimize_assist_recent_applied_rows(run_dir: Path, *, since_ts: datetime) -> int:
+    if not run_dir.exists():
+        return 0
+    total = 0
+    for path in run_dir.rglob('*.after.json'):
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get('kind') or '') != 'openclaw-mem.optimize.assist.after.v1':
+            continue
+        ts_value = _parse_iso_utc(payload.get('ts'))
+        if ts_value is None or ts_value < since_ts:
+            continue
+        if str(payload.get('result') or '') != 'applied':
+            continue
+        total += _optimize_policy_int(payload.get('applied_rows'), 0, min_value=0)
+    return total
+
+
+def _optimize_assist_prior_packet_attempts(run_dir: Path, *, packet_sha256: str) -> int:
+    if not run_dir.exists() or not packet_sha256:
+        return 0
+    total = 0
+    for path in run_dir.rglob('*.before.json'):
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get('kind') or '') != 'openclaw-mem.optimize.assist.before.v1':
+            continue
+        if str(payload.get('packet_sha256') or '') != packet_sha256:
+            continue
+        total += 1
+    return total
+
+
+def _optimize_assist_diff_summary(before_detail: Dict[str, Any], after_detail: Dict[str, Any]) -> List[Dict[str, Any]]:
+    changes: List[Dict[str, Any]] = []
+    before_lifecycle = before_detail.get('lifecycle') if isinstance(before_detail.get('lifecycle'), dict) else {}
+    after_lifecycle = after_detail.get('lifecycle') if isinstance(after_detail.get('lifecycle'), dict) else {}
+    for key in ('stale_candidate', 'stale_reason_code'):
+        if before_lifecycle.get(key) != after_lifecycle.get(key):
+            changes.append({'path': f'/lifecycle/{key}', 'before': before_lifecycle.get(key), 'after': after_lifecycle.get(key)})
+    return changes
+
+
+def _optimize_assist_apply_item(
+    conn: sqlite3.Connection,
+    *,
+    item: Dict[str, Any],
+    operator: str,
+    rollback_ref: str,
+    applied_at: str,
+) -> Dict[str, Any]:
+    action = str(item.get('recommended_action') or '').strip()
+    if action != 'set_stale_candidate':
+        raise ValueError('unsupported_action_class')
+
+    target = item.get('target') if isinstance(item.get('target'), dict) else {}
+    obs_id = int(target.get('observationId') or 0)
+    if obs_id <= 0:
+        raise ValueError('missing_observation_id')
+
+    row = conn.execute(
+        'SELECT detail_json FROM observations WHERE id = ?',
+        (obs_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f'missing observation id: {obs_id}')
+
+    before_detail = _pack_parse_detail_json(row['detail_json'])
+    patch = item.get('patch') if isinstance(item.get('patch'), dict) else {}
+    lifecycle_patch = patch.get('lifecycle') if isinstance(patch.get('lifecycle'), dict) else {}
+    stale_reason_code = str(lifecycle_patch.get('stale_reason_code') or '').strip()
+    if lifecycle_patch.get('stale_candidate') is not True or stale_reason_code not in {
+        'age_threshold',
+        'repeated_miss_pressure',
+        'duplicate_cluster',
+        'operator_override',
+    }:
+        raise ValueError('invalid_stale_patch')
+
+    after_detail = json.loads(json.dumps(before_detail, ensure_ascii=False)) if before_detail else {}
+    lifecycle = after_detail.get('lifecycle') if isinstance(after_detail.get('lifecycle'), dict) else {}
+    lifecycle['stale_candidate'] = True
+    lifecycle['stale_reason_code'] = stale_reason_code
+    after_detail['lifecycle'] = lifecycle
+    after_detail['optimization'] = {
+        **(after_detail.get('optimization') if isinstance(after_detail.get('optimization'), dict) else {}),
+        'assist': {
+            'proposal_id': str(item.get('candidate_id') or ''),
+            'evidence_refs': [str(x) for x in list(item.get('evidence_refs') or []) if str(x)][:5],
+            'applied_at': applied_at,
+            'operator': operator,
+            'rollback_ref': rollback_ref,
+        },
+    }
+
+    _graph_update_observation_detail(conn, rowid=obs_id, detail=after_detail)
+    return {
+        'observation_id': obs_id,
+        'proposal_id': str(item.get('candidate_id') or ''),
+        'before_detail_json': before_detail,
+        'after_detail_json': after_detail,
+        'before_sha256': _json_sha256(before_detail),
+        'after_sha256': _json_sha256(after_detail),
+        'diff_summary': _optimize_assist_diff_summary(before_detail, after_detail),
+    }
+
+
+def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        packet = _optimize_assist_load_governor_packet(getattr(args, 'from_file', None))
+    except Exception as e:
+        _emit({'error': str(e)}, True)
+        sys.exit(2)
+
+    operator = str(getattr(args, 'operator', None) or 'operator').strip() or 'operator'
+    lane = str(getattr(args, 'lane', None) or 'observations.assist').strip() or 'observations.assist'
+    dry_run = bool(getattr(args, 'dry_run', False))
+    max_rows_per_run = _optimize_policy_int(getattr(args, 'max_rows_per_run', 5), 5, min_value=1)
+    max_rows_per_24h = _optimize_policy_int(getattr(args, 'max_rows_per_24h', 20), 20, min_value=1)
+    run_root = Path(os.path.expanduser(str(getattr(args, 'run_dir', None) or DEFAULT_OPTIMIZE_ASSIST_RUN_DIR)))
+    run_dir = run_root / datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    all_items = [item for item in list(packet.get('items') or []) if isinstance(item, dict)]
+    approved_items = [
+        item for item in all_items
+        if str(item.get('decision') or '') == 'approved_for_apply'
+        and str(item.get('apply_lane') or '') == lane
+        and str(item.get('recommended_action') or '') == 'set_stale_candidate'
+    ]
+
+    target_rows = [int((item.get('target') or {}).get('observationId') or 0) for item in approved_items]
+    unique_target_rows = sorted({row_id for row_id in target_rows if row_id > 0})
+    blocked_reasons: List[str] = []
+    if not approved_items:
+        blocked_reasons.append('no_approved_candidates')
+    if len(unique_target_rows) != len(target_rows):
+        blocked_reasons.append('duplicate_target_rows')
+    if len(unique_target_rows) > max_rows_per_run:
+        blocked_reasons.append('max_rows_per_run_exceeded')
+
+    recent_rows_24h = _optimize_assist_recent_applied_rows(
+        run_root,
+        since_ts=datetime.now(timezone.utc) - timedelta(hours=24),
+    )
+    if recent_rows_24h + len(unique_target_rows) > max_rows_per_24h:
+        blocked_reasons.append('max_rows_per_24h_exceeded')
+
+    run_id = str(uuid.uuid4())
+    ts_now = _utcnow_iso()
+    packet_sha256 = _json_sha256(packet)
+    if _optimize_assist_prior_packet_attempts(run_root, packet_sha256=packet_sha256) >= 1:
+        blocked_reasons.append('max_retries_per_packet_exceeded')
+    before_hashes: Dict[str, str] = {}
+    mutations_preview: List[Dict[str, Any]] = []
+    if unique_target_rows:
+        rows = conn.execute(
+            f"SELECT id, detail_json FROM observations WHERE id IN ({','.join(['?'] * len(unique_target_rows))})",
+            unique_target_rows,
+        ).fetchall()
+        detail_map = {int(row['id']): _pack_parse_detail_json(row['detail_json']) for row in rows}
+        missing = [row_id for row_id in unique_target_rows if row_id not in detail_map]
+        if missing:
+            blocked_reasons.append('missing_target_rows')
+        for row_id in unique_target_rows:
+            if row_id in detail_map:
+                before_hashes[str(row_id)] = _json_sha256(detail_map[row_id])
+                mutations_preview.append(
+                    {
+                        'observation_id': row_id,
+                        'before_detail_json': detail_map[row_id],
+                        'before_sha256': before_hashes[str(row_id)],
+                    }
+                )
+
+    rollback_path = run_dir / f'{_utcnow_compact()}-{run_id}.rollback.json'
+    before_path = run_dir / f'{_utcnow_compact()}-{run_id}.before.json'
+    after_path = run_dir / f'{_utcnow_compact()}-{run_id}.after.json'
+
+    before_payload = {
+        'kind': 'openclaw-mem.optimize.assist.before.v1',
+        'run_id': run_id,
+        'ts': ts_now,
+        'operator': operator,
+        'lane': lane,
+        'db': getattr(args, 'db', None) or DEFAULT_DB,
+        'scope': None,
+        'packet': packet,
+        'packet_sha256': packet_sha256,
+        'caps': {
+            'max_rows_per_apply_run': max_rows_per_run,
+            'max_rows_per_24h': max_rows_per_24h,
+            'max_retries_per_packet': 1,
+        },
+        'target_rows': unique_target_rows,
+        'before_hashes': before_hashes,
+        'dry_run': dry_run,
+        'policy': {
+            'mode': 'assist_apply',
+            'writes_performed': 0,
+            'memory_mutation': 'assist_apply_pending',
+        },
+    }
+    before_path.write_text(json.dumps(before_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+    rollback_payload = {
+        'kind': 'openclaw-mem.optimize.assist.rollback.v1',
+        'run_id': run_id,
+        'ts': ts_now,
+        'db': getattr(args, 'db', None) or DEFAULT_DB,
+        'operator': operator,
+        'packet_sha256': packet_sha256,
+        'mutations': mutations_preview,
+    }
+    rollback_path.write_text(json.dumps(rollback_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+    result = 'dry_run' if dry_run else 'applied'
+    applied_rows = 0
+    skipped_rows = 0
+    after_hashes: Dict[str, str] = {}
+    diff_summary: List[Dict[str, Any]] = []
+
+    if blocked_reasons:
+        result = 'aborted'
+        skipped_rows = len(unique_target_rows)
+    elif dry_run:
+        skipped_rows = len(unique_target_rows)
+        after_hashes = dict(before_hashes)
+    else:
+        try:
+            with conn:
+                for item in approved_items:
+                    mutation = _optimize_assist_apply_item(
+                        conn,
+                        item=item,
+                        operator=operator,
+                        rollback_ref=str(rollback_path),
+                        applied_at=ts_now,
+                    )
+                    applied_rows += 1
+                    after_hashes[str(mutation['observation_id'])] = mutation['after_sha256']
+                    diff_summary.extend(mutation['diff_summary'])
+                    for entry in rollback_payload['mutations']:
+                        if int(entry.get('observation_id') or 0) == mutation['observation_id']:
+                            entry['after_detail_json'] = mutation['after_detail_json']
+                            entry['after_sha256'] = mutation['after_sha256']
+                            break
+            rollback_path.write_text(json.dumps(rollback_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+        except Exception as e:
+            result = 'aborted'
+            blocked_reasons.append(str(e))
+            applied_rows = 0
+            skipped_rows = len(unique_target_rows)
+            after_hashes = dict(before_hashes)
+
+    after_payload = {
+        'kind': 'openclaw-mem.optimize.assist.after.v1',
+        'run_id': run_id,
+        'ts': _utcnow_iso(),
+        'operator': operator,
+        'lane': lane,
+        'result': result,
+        'packet_sha256': packet_sha256,
+        'applied_rows': applied_rows,
+        'skipped_rows': skipped_rows,
+        'blocked_by_caps': sorted(set(blocked_reasons)),
+        'after_hashes': after_hashes,
+        'rollback_ref': str(rollback_path),
+        'diff_summary': diff_summary,
+        'policy': {
+            'mode': 'assist_apply',
+            'writes_performed': applied_rows,
+            'memory_mutation': 'assist_apply' if applied_rows > 0 else 'none',
+            'governor_required': True,
+        },
+        'artifacts': {
+            'before_ref': str(before_path),
+            'after_ref': str(after_path),
+            'rollback_ref': str(rollback_path),
+        },
+    }
+    after_path.write_text(json.dumps(after_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+    _emit(after_payload, True)
 
 
 def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -1931,7 +2338,9 @@ def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namesp
     judged_items = [
         _optimize_governor_review_item(
             item if isinstance(item, dict) else {},
+            source_kind=str(packet.get('kind') or ''),
             approve_refresh=bool(getattr(args, 'approve_refresh', False)),
+            approve_stale=bool(getattr(args, 'approve_stale', False)),
             governor=governor,
             index=i + 1,
         )
@@ -1955,7 +2364,14 @@ def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namesp
         },
         'governor': {
             'lane': governor,
-            'approvalMode': 'approve_refresh' if bool(getattr(args, 'approve_refresh', False)) else 'proposal_only',
+            'approvalMode': [
+                mode
+                for mode, enabled in (
+                    ('approve_refresh', bool(getattr(args, 'approve_refresh', False))),
+                    ('approve_stale', bool(getattr(args, 'approve_stale', False))),
+                )
+                if enabled
+            ] or ['proposal_only'],
         },
         'policy': {
             'mode': 'review_only',
@@ -8686,11 +9102,7 @@ def _graph_update_observation_detail(
         "UPDATE observations SET summary = ?, detail_json = ? WHERE id = ?",
         (summary_value, detail_json, int(rowid)),
     )
-    conn.execute("DELETE FROM observations_fts WHERE rowid = ?", (int(rowid),))
-    conn.execute(
-        "INSERT INTO observations_fts (rowid, summary, summary_en, tool_name, detail_json) VALUES (?, ?, ?, ?, ?)",
-        (int(rowid), summary_value, summary_en, tool_name, detail_json),
-    )
+    conn.execute("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')")
 
 
 
@@ -13343,7 +13755,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.set_defaults(func=cmd_backend)
 
-    sp = sub.add_parser("optimize", help="Recommendation-first memory optimization helpers (zero-write)")
+    sp = sub.add_parser("optimize", help="Memory optimization review, judgment, and bounded apply helpers")
     add_common(sp)
     osub = sp.add_subparsers(dest="optimize_cmd", required=True)
 
@@ -13360,6 +13772,15 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
     o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per signal in output (default: 10)")
     o.set_defaults(func=cmd_optimize_review)
+
+    o = osub.add_parser("evolution-review", help="Emit governed apply candidates from low-risk optimization signals (no writes)")
+    add_common(o)
+    o.add_argument("--limit", type=int, default=1000, help="Max observation rows to scan (default: 1000)")
+    o.add_argument("--stale-days", type=int, default=60, help="Staleness threshold in days (default: 60)")
+    o.add_argument("--lifecycle-limit", dest="lifecycle_limit", type=int, default=200, help="Max pack_lifecycle_shadow rows scanned for recent-use protection (default: 200)")
+    o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
+    o.add_argument("--top", type=int, default=10, help="Max governed candidates in output (default: 10)")
+    o.set_defaults(func=cmd_optimize_evolution_review)
 
     o = osub.add_parser("consolidation-review", help="Review episodic consolidation/archive/link candidates (no writes)")
     add_common(o)
@@ -13397,7 +13818,19 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--from-file", dest="from_file", default=None, help="Recommendation packet JSON path (default: stdin)")
     o.add_argument("--governor", default="governor", help="Judging lane label recorded in output (default: governor)")
     o.add_argument("--approve-refresh", dest="approve_refresh", action="store_true", help="Approve low-risk refresh_card actions for apply consideration")
+    o.add_argument("--approve-stale", dest="approve_stale", action="store_true", help="Approve low-risk set_stale_candidate actions for assist apply")
     o.set_defaults(func=cmd_optimize_governor_review)
+
+    o = osub.add_parser("assist-apply", help="Apply governor-approved low-risk observation updates with receipts and rollback")
+    add_common(o)
+    o.add_argument("--from-file", dest="from_file", default=None, help="Governor packet JSON path (default: stdin)")
+    o.add_argument("--operator", default="operator", help="Operator or worker label recorded in receipts (default: operator)")
+    o.add_argument("--lane", default="observations.assist", help="Apply lane label to enforce (default: observations.assist)")
+    o.add_argument("--run-dir", dest="run_dir", default=DEFAULT_OPTIMIZE_ASSIST_RUN_DIR, help="Directory for before/after/rollback receipts (default: ~/.openclaw/memory/openclaw-mem/optimize-assist)")
+    o.add_argument("--max-rows-per-run", dest="max_rows_per_run", type=int, default=5, help="Abort before write if approved target rows exceed this cap (default: 5)")
+    o.add_argument("--max-rows-per-24h", dest="max_rows_per_24h", type=int, default=20, help="Abort before write if the rolling 24h cap would be exceeded (default: 20)")
+    o.add_argument("--dry-run", action="store_true", help="Validate packet, emit receipts, and skip writes")
+    o.set_defaults(func=cmd_optimize_assist_apply)
 
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)

@@ -145,6 +145,11 @@ Possible recommendations:
 `openclaw-mem optimize governor-review` is the next read-only review command.
 It consumes recommendation packets and emits explicit approval decisions without performing mutation.
 
+For observation maintenance, the bounded governed path is:
+- `openclaw-mem optimize evolution-review` — scout low-risk lifecycle candidates from optimization signals
+- `openclaw-mem optimize governor-review` — judge those candidates explicitly
+- `openclaw-mem optimize assist-apply` — apply only governor-approved low-risk observation updates, with before/after + rollback receipts
+
 Current decision ladder:
 - `ignore`
 - `proposal_only`

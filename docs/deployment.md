@@ -234,6 +234,48 @@ crontab -e
 */5 * * * * cd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem harvest --source $HOME/.openclaw/memory/openclaw-mem-observations.jsonl --no-embed --no-update-index --json >> $HOME/.openclaw/logs/openclaw-mem-harvest.log 2>&1
 ```
 
+## 2A. Optional governed optimization assist lane
+
+If you want a bounded maintenance write lane, keep it separate from heartbeat/healthcheck jobs.
+The recommended shape is a small scheduled worker that runs the full packet chain:
+
+1. `optimize evolution-review`
+2. `optimize governor-review`
+3. `optimize assist-apply`
+
+Start with `--dry-run` until you have reviewed receipts on fixture or low-risk real data.
+
+### OpenClaw cron example
+
+```json
+{
+  "cron": {
+    "jobs": [
+      {
+        "name": "openclaw-mem optimize assist canary (dry-run)",
+        "schedule": { "kind": "every", "everyMs": 21600000 },
+        "sessionTarget": "isolated",
+        "wakeMode": "next-heartbeat",
+        "payload": {
+          "kind": "agentTurn",
+          "model": "google-antigravity/gemini-3-flash",
+          "thinking": "minimal",
+          "message": "Run exactly these commands, then output ONLY NO_REPLY:\n\ncd /opt/openclaw-mem && uv run --python 3.13 -- python -m openclaw_mem optimize evolution-review --json > /tmp/openclaw-mem-evolution.json && uv run --python 3.13 -- python -m openclaw_mem optimize governor-review --from-file /tmp/openclaw-mem-evolution.json --approve-stale --json > /tmp/openclaw-mem-governor.json && uv run --python 3.13 -- python -m openclaw_mem optimize assist-apply --from-file /tmp/openclaw-mem-governor.json --dry-run --json"
+        },
+        "delivery": { "mode": "none" }
+      }
+    ]
+  }
+}
+```
+
+### Promotion rules
+
+- Keep the job **isolated** from watchdog/healthcheck lanes.
+- Keep `assist-apply` on **approved packets only**.
+- Remove `--dry-run` only after you have verified before/after + rollback receipts and you are comfortable with the row/day caps.
+- Do not use this lane for config mutation, routing changes, or broad memory gardening.
+
 ## 2B. Episodic auto-mode ingestion (new)
 
 When `plugins.entries["openclaw-mem"].config.episodes.enabled=true`, run extractor periodically and keep ingest in follow mode (daemon/tailer).
