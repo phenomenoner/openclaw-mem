@@ -98,6 +98,7 @@ Artifacts include:
 - `evolution.json`
 - `governor.json`
 - `assist-after.json`
+- `assist-effect.json`
 
 ### Assist apply receipts
 Under:
@@ -107,6 +108,7 @@ Artifacts include:
 - before receipt
 - after receipt
 - rollback artifact
+- effect artifact / baseline receipt for later follow-up measurement
 
 ## Promotion checklist
 

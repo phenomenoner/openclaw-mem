@@ -2136,6 +2136,41 @@ def _optimize_assist_diff_summary(before_detail: Dict[str, Any], after_detail: D
     return changes
 
 
+def _optimize_assist_effect_entry(
+    *,
+    run_id: str,
+    item: Dict[str, Any],
+    mutation: Optional[Dict[str, Any]],
+    measured_at: str,
+    effect_window: str = '24h',
+    applied: bool,
+) -> Dict[str, Any]:
+    target = item.get('target') if isinstance(item.get('target'), dict) else {}
+    evidence = item.get('evidence') if isinstance(item.get('evidence'), dict) else {}
+    effect_summary = 'insufficient_data' if applied else 'insufficient_data'
+    return {
+        'kind': 'openclaw-mem.optimize.assist.effect.v0',
+        'run_id': run_id,
+        'proposal_id': str(item.get('candidate_id') or ''),
+        'observation_id': int(target.get('observationId') or 0),
+        'measured_at': measured_at,
+        'effect_window': effect_window,
+        'effect_summary': effect_summary,
+        'measurement_mode': 'baseline_only',
+        'quality_delta': {},
+        'baseline_signals': {
+            'recent_use_count': int(evidence.get('recent_use_count') or 0),
+            'age_days': evidence.get('age_days'),
+            'threshold_days': evidence.get('threshold_days'),
+            'current_score': evidence.get('current_score'),
+            'next_score': evidence.get('next_score'),
+        },
+        'artifacts': {
+            'rollback_ref': mutation.get('rollback_ref') if isinstance(mutation, dict) else None,
+        },
+    }
+
+
 def _optimize_assist_apply_item(
     conn: sqlite3.Connection,
     *,
@@ -2211,6 +2246,13 @@ def _optimize_assist_apply_item(
             'applied_at': applied_at,
             'operator': operator,
             'rollback_ref': rollback_ref,
+            'effect': {
+                'measured_at': applied_at,
+                'effect_window': '24h',
+                'effect_summary': 'insufficient_data',
+                'quality_delta': {},
+                'measurement_mode': 'baseline_only',
+            },
         },
     }
 
@@ -2297,6 +2339,7 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
     rollback_path = run_dir / f'{_utcnow_compact()}-{run_id}.rollback.json'
     before_path = run_dir / f'{_utcnow_compact()}-{run_id}.before.json'
     after_path = run_dir / f'{_utcnow_compact()}-{run_id}.after.json'
+    effect_path = run_dir / f'{_utcnow_compact()}-{run_id}.effect.json'
 
     before_payload = {
         'kind': 'openclaw-mem.optimize.assist.before.v1',
@@ -2340,6 +2383,7 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
     skipped_rows = 0
     after_hashes: Dict[str, str] = {}
     diff_summary: List[Dict[str, Any]] = []
+    effect_receipts: List[Dict[str, Any]] = []
 
     if blocked_reasons:
         result = 'aborted'
@@ -2361,6 +2405,15 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
                     applied_rows += 1
                     after_hashes[str(mutation['observation_id'])] = mutation['after_sha256']
                     diff_summary.extend(mutation['diff_summary'])
+                    effect_receipts.append(
+                        _optimize_assist_effect_entry(
+                            run_id=run_id,
+                            item=item,
+                            mutation={**mutation, 'rollback_ref': str(rollback_path)},
+                            measured_at=ts_now,
+                            applied=True,
+                        )
+                    )
                     for entry in rollback_payload['mutations']:
                         if int(entry.get('observation_id') or 0) == mutation['observation_id']:
                             entry['after_detail_json'] = mutation['after_detail_json']
@@ -2373,6 +2426,31 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
             applied_rows = 0
             skipped_rows = len(unique_target_rows)
             after_hashes = dict(before_hashes)
+
+    if not effect_receipts:
+        effect_receipts = [
+            _optimize_assist_effect_entry(
+                run_id=run_id,
+                item=item,
+                mutation=None,
+                measured_at=ts_now,
+                applied=False,
+            )
+            for item in approved_items
+        ]
+
+    effect_payload = {
+        'kind': 'openclaw-mem.optimize.assist.effect-batch.v0',
+        'run_id': run_id,
+        'ts': _utcnow_iso(),
+        'operator': operator,
+        'lane': lane,
+        'result': result,
+        'effect_window': '24h',
+        'measurement_mode': 'baseline_only',
+        'items': effect_receipts,
+    }
+    effect_path.write_text(json.dumps(effect_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
     after_payload = {
         'kind': 'openclaw-mem.optimize.assist.after.v1',
@@ -2398,6 +2476,7 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
             'before_ref': str(before_path),
             'after_ref': str(after_path),
             'rollback_ref': str(rollback_path),
+            'effect_ref': str(effect_path),
         },
     }
     after_path.write_text(json.dumps(after_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')

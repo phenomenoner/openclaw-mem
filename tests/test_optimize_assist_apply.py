@@ -93,12 +93,17 @@ class TestOptimizeAssistApply(unittest.TestCase):
             self.assertEqual(out["applied_rows"], 1)
             self.assertTrue(any(x["path"] == "/importance/score" for x in out["diff_summary"]))
             self.assertTrue(any(x["path"] == "/importance/label" for x in out["diff_summary"]))
+            self.assertTrue(Path(out["artifacts"]["effect_ref"]).exists())
+            effect = json.loads(Path(out["artifacts"]["effect_ref"]).read_text(encoding="utf-8"))
+            self.assertEqual(effect["kind"], "openclaw-mem.optimize.assist.effect-batch.v0")
+            self.assertEqual(effect["items"][0]["effect_summary"], "insufficient_data")
 
         row = conn.execute("SELECT detail_json FROM observations WHERE id = ?", (obs_id,)).fetchone()
         detail = json.loads(row["detail_json"])
         self.assertEqual(detail["importance"]["score"], 0.42)
         self.assertEqual(detail["importance"]["label"], "ignore")
         self.assertEqual(detail["importance"]["method"], "optimize_assist")
+        self.assertEqual(detail["optimization"]["assist"]["effect"]["effect_summary"], "insufficient_data")
         conn.close()
 
     def test_assist_apply_dry_run_emits_receipts_and_skips_write(self):
@@ -157,6 +162,7 @@ class TestOptimizeAssistApply(unittest.TestCase):
             self.assertTrue(Path(out["artifacts"]["before_ref"]).exists())
             self.assertTrue(Path(out["artifacts"]["after_ref"]).exists())
             self.assertTrue(Path(out["artifacts"]["rollback_ref"]).exists())
+            self.assertTrue(Path(out["artifacts"]["effect_ref"]).exists())
 
         row = conn.execute("SELECT detail_json FROM observations WHERE id = ?", (obs_id,)).fetchone()
         detail = json.loads(row["detail_json"])

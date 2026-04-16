@@ -4,6 +4,7 @@
 - Stage: planning only
 - Scope: next bounded step after the governed assist-apply canary
 - Goal: move from "safe canary" toward "usefully autonomous" without collapsing the scout / governor / writer split
+- Execution mode: roadmap reference for `櫻花刀舞` non-stop push toward bounded full autonomy
 
 ## Verdict
 The next milestone is **not** a broad release.
@@ -22,26 +23,87 @@ Fake progress would be:
 - adding more autonomy without measurable quality gates
 - calling a conservative canary a release when it still feels mostly manual
 
+## Roadmap
+
+### Phase 1 - effect receipt foundation
+Goal: turn mutation into a measurable loop.
+
+Ship:
+- effect receipt artifact for every assist run
+- bounded `optimization.assist.effect` metadata on applied rows
+- baseline capture for later 24h follow-up measurement
+
+Exit criteria:
+- every apply run emits effect artifacts
+- missing effect receipt rate is zero
+- fixture tests prove artifact generation and receipt persistence
+
+### Phase 2 - evidence-weighted risk classifier
+Goal: classify candidates as `low | medium | high` using evidence, not just whitelists.
+
+Ship:
+- explicit classifier contract
+- packetized `risk_level`, `risk_reasons`, `auto_apply_eligible`
+- tests for edge cases and conflicting evidence families
+
+Exit criteria:
+- sampled manual review precision meets threshold
+- low-risk eligibility is deterministic and auditable
+
+### Phase 3 - unattended low-risk apply
+Goal: let narrow low-risk classes self-apply without a human in the loop.
+
+Ship:
+- unattended apply for stale mark, bounded importance delta, and score-label alignment
+- per-run / per-day family caps
+- fail-closed cap enforcement
+
+Exit criteria:
+- rollback replay stays green
+- canary receipts show bounded unattended writes without cap drift
+
+### Phase 4 - autonomy controller + watchdog
+Goal: promote the command chain into a controller that can pause itself.
+
+Ship:
+- controller state machine (`dry_run`, `canary_apply`, `auto_low_risk`, `paused_regression`)
+- regression watchdogs
+- automatic pause on missing effect receipts / quality regression / rollback replay failure
+
+Exit criteria:
+- watchdog tests pass
+- pause/resume behavior is explicit and receipted
+
+### Phase 5 - bounded fully autonomous posture
+Goal: default unattended low-risk operation with explicit promotion gates.
+
+Ship:
+- promotion checklist and thresholds
+- default unattended low-risk lane
+- medium-risk governor packet path retained, high-risk proposal-only retained
+
+Exit criteria:
+- promotion gates stay green for multiple cycles
+- the system is unattended by default only within the bounded low-risk envelope
+
 ## Recommended bounded slice
-Ship **Phase 2: auto-low-risk assist lane** as a bounded upgrade to the existing optimize assist pipeline.
+Ship **Phase 1: effect receipt foundation** first, then continue serially toward Phase 5.
 
 This slice should add exactly three things:
 
-1. **Expanded low-risk apply classes**
-   - keep current `set_stale_candidate`
-   - add bounded `adjust_importance_score`
-   - add bounded `set_importance_label`
+1. **Effect receipt artifact**
+   - emit a compact effect artifact on every assist run
+   - capture baseline signals needed for later follow-up measurement
 
-2. **Evidence-weighted risk classifier**
-   - classify candidates as `low | medium | high`
-   - allow unattended apply only for a narrow low-risk subset
-   - route medium/high through the existing governor packet path
+2. **Row-level effect metadata**
+   - write bounded `optimization.assist.effect` metadata on applied rows
+   - keep the metadata minimal and rollbackable
 
-3. **Effect receipts**
-   - compare pre/post quality signals for the target class
-   - report whether the mutation reduced miss pressure / reduced low-value resurfacing / stayed within expected recall quality bounds
+3. **Follow-up measurement hook**
+   - define the contract for later 24h quality comparison
+   - do not broaden mutation authority in this phase
 
-This slice is big enough to make the system feel more autonomous, but still small enough to verify with fixtures and dry-run canaries.
+This slice is small enough to land quickly, but real enough to prevent later unattended apply from becoming blind mutation.
 
 ## Contract / boundary rules
 

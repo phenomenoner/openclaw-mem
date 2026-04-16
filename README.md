@@ -93,6 +93,8 @@ Current shipped path:
 - `openclaw-mem optimize governor-review` — emits explicit decisions
 - `openclaw-mem optimize assist-apply` — applies only governor-approved low-risk observation updates with before/after + rollback receipts
 
+Each assist apply run now also emits a compact effect artifact so later autonomy phases can measure whether mutations helped, held steady, or regressed instead of treating writes as blind maintenance.
+
 The first bounded write class is intentionally narrow:
 - update `observations.detail_json.lifecycle.stale_candidate`
 - update `observations.detail_json.lifecycle.stale_reason_code`
