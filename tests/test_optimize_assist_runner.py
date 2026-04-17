@@ -1,10 +1,15 @@
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from openclaw_mem.cli import _connect, _insert_observation
 from tools import optimize_assist_runner as runner
 
 
@@ -24,6 +29,12 @@ def _write_native_effect_history(root: Path, *, regressed: int = 0, neutral: int
         "result": "applied",
         "artifacts": {"effect_ref": str(effect_path)},
     }), encoding="utf-8")
+
+
+def _write_rollback_receipt(root: Path, *, passed: bool = True) -> Path:
+    path = root / "rollback-replay.json"
+    path.write_text(json.dumps({"rollback_replay_pass": passed}), encoding="utf-8")
+    return path
 
 
 class TestOptimizeAssistRunner(unittest.TestCase):
@@ -264,6 +275,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
 
     def test_run_pipeline_pauses_controller_on_regressed_effect(self):
         with tempfile.TemporaryDirectory() as td:
+            rollback_receipt = _write_rollback_receipt(Path(td))
             args = SimpleNamespace(
                 python="python3",
                 db="/tmp/openclaw-mem.sqlite",
@@ -293,7 +305,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 watchdog_window_hours=24,
                 watchdog_max_missing_effect_receipts_pct=0.0,
                 watchdog_max_regressed_effect_items=0,
-                rollback_replay_receipt=None,
+                rollback_replay_receipt=str(rollback_receipt),
                 promotion_gate_receipt=None,
                 promote_when_gates_green=False,
                 promotion_min_manual_precision=0.9,
@@ -371,6 +383,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
     def test_run_pipeline_promotes_to_auto_low_risk_when_gates_are_green(self):
         with tempfile.TemporaryDirectory() as td:
             _write_native_effect_history(Path(td), regressed=0, neutral=2)
+            rollback_receipt = _write_rollback_receipt(Path(td))
             args = SimpleNamespace(
                 python="python3",
                 db="/tmp/openclaw-mem.sqlite",
@@ -400,7 +413,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 watchdog_window_hours=24,
                 watchdog_max_missing_effect_receipts_pct=0.0,
                 watchdog_max_regressed_effect_items=0,
-                rollback_replay_receipt=None,
+                rollback_replay_receipt=str(rollback_receipt),
                 promotion_gate_receipt=None,
                 promote_when_gates_green=True,
                 promotion_min_manual_precision=0.9,
@@ -429,6 +442,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
 
     def test_run_pipeline_demotes_auto_low_risk_to_canary_after_failed_promotion_gates(self):
         with tempfile.TemporaryDirectory() as td:
+            rollback_receipt = _write_rollback_receipt(Path(td))
             state_path = Path(td) / runner.DEFAULT_CONTROLLER_STATE
             state_path.write_text(json.dumps({"mode": "auto_low_risk", "soak_green_cycles": 3, "regression_strikes": 0}), encoding="utf-8")
             _write_native_effect_history(Path(td), regressed=0, neutral=2)
@@ -461,7 +475,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 watchdog_window_hours=24,
                 watchdog_max_missing_effect_receipts_pct=0.0,
                 watchdog_max_regressed_effect_items=0,
-                rollback_replay_receipt=None,
+                rollback_replay_receipt=str(rollback_receipt),
                 promotion_gate_receipt=None,
                 promote_when_gates_green=True,
                 promotion_min_manual_precision=1.1,
@@ -487,6 +501,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
     def test_run_pipeline_blocks_promotion_when_challenger_agreement_required(self):
         with tempfile.TemporaryDirectory() as td:
             _write_native_effect_history(Path(td), regressed=0, neutral=2)
+            rollback_receipt = _write_rollback_receipt(Path(td))
             args = SimpleNamespace(
                 python="python3",
                 db="/tmp/openclaw-mem.sqlite",
@@ -516,7 +531,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 watchdog_window_hours=24,
                 watchdog_max_missing_effect_receipts_pct=0.0,
                 watchdog_max_regressed_effect_items=0,
-                rollback_replay_receipt=None,
+                rollback_replay_receipt=str(rollback_receipt),
                 promotion_gate_receipt=None,
                 promote_when_gates_green=True,
                 promotion_min_manual_precision=0.9,
@@ -597,6 +612,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
     def test_run_pipeline_ignores_external_promotion_receipt_input(self):
         with tempfile.TemporaryDirectory() as td:
             _write_native_effect_history(Path(td), regressed=0, neutral=2)
+            rollback_receipt = _write_rollback_receipt(Path(td))
             bogus_path = Path(td) / "promotion.json"
             bogus_path.write_text(json.dumps({
                 "manual_review_sample_precision": 0.0,
@@ -632,7 +648,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 watchdog_window_hours=24,
                 watchdog_max_missing_effect_receipts_pct=0.0,
                 watchdog_max_regressed_effect_items=0,
-                rollback_replay_receipt=None,
+                rollback_replay_receipt=str(rollback_receipt),
                 promotion_gate_receipt=str(bogus_path),
                 promote_when_gates_green=True,
                 promotion_min_manual_precision=0.9,
@@ -656,6 +672,209 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             emitted = json.loads(bogus_path.read_text(encoding="utf-8"))
             self.assertEqual(emitted["metrics"]["manual_review_sample_precision"], 1.0)
             self.assertTrue(emitted["passed"])
+
+    def test_run_pipeline_rejects_malformed_controller_state_json(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_path = Path(td) / runner.DEFAULT_CONTROLLER_STATE
+            state_path.write_text("{not-json", encoding="utf-8")
+            args = SimpleNamespace(
+                python="python3",
+                db="/tmp/openclaw-mem.sqlite",
+                runner_root=td,
+                operator="lyria",
+                allow_apply=False,
+                approve_importance=True,
+                approve_stale=True,
+                scope=None,
+                limit=100,
+                stale_days=60,
+                lifecycle_limit=50,
+                top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
+                max_rows_per_run=5,
+                max_rows_per_24h=20,
+                max_importance_adjustments_per_run=3,
+                max_importance_adjustments_per_24h=10,
+                controller_mode=None,
+                controller_state_path=None,
+                watchdog_window_hours=24,
+                watchdog_max_missing_effect_receipts_pct=0.0,
+                watchdog_max_regressed_effect_items=0,
+                rollback_replay_receipt=None,
+                promotion_gate_receipt=None,
+                promote_when_gates_green=False,
+                promotion_min_manual_precision=0.9,
+                promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=3,
+                regression_strikes_for_demotion=2,
+                lane="observations.assist",
+                json=True,
+            )
+            with self.assertRaises(runner.RunnerError):
+                runner.run_pipeline(args)
+
+    def test_collect_watchdog_stats_counts_invalid_effect_receipts_as_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            effect_dir = Path(td) / "assist-receipts" / "2026-04-17"
+            effect_dir.mkdir(parents=True, exist_ok=True)
+            after_path = effect_dir / "history.after.json"
+            effect_path = effect_dir / "history.effect.json"
+            effect_path.write_text("{bad-json", encoding="utf-8")
+            after_path.write_text(json.dumps({
+                "kind": "openclaw-mem.optimize.assist.after.v1",
+                "ts": runner._utcnow_iso(),
+                "result": "applied",
+                "artifacts": {"effect_ref": str(effect_path)},
+            }), encoding="utf-8")
+            stats = runner._collect_watchdog_stats(Path(td), since_ts=datetime.now(timezone.utc) - timedelta(hours=24))
+
+            self.assertEqual(stats["applied_runs"], 1)
+            self.assertEqual(stats["missing_effect_receipts"], 1)
+            self.assertEqual(stats["invalid_effect_receipts"], 1)
+            self.assertEqual(stats["effect_receipt_missing_pct"], 100.0)
+
+    def test_watchdog_pauses_when_rollback_replay_receipt_missing_in_canary_apply(self):
+        with tempfile.TemporaryDirectory() as td:
+            watchdog = runner._evaluate_watchdog(
+                SimpleNamespace(
+                    watchdog_window_hours=24,
+                    watchdog_max_missing_effect_receipts_pct=0.0,
+                    watchdog_max_regressed_effect_items=0,
+                    rollback_replay_receipt=None,
+                ),
+                runner_root=Path(td),
+                controller_mode="canary_apply",
+            )
+
+            self.assertTrue(watchdog["should_pause"])
+            self.assertIn("rollback_replay_receipt_missing", watchdog["pause_reasons"])
+
+
+class TestOptimizeAssistRunnerE2E(unittest.TestCase):
+    def _seed_db(self, db_path: Path, *, importance_score: float = 0.32) -> None:
+        conn = _connect(str(db_path))
+        stale_ts = (datetime.now(timezone.utc) - timedelta(days=120)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        _insert_observation(
+            conn,
+            {
+                "ts": stale_ts,
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Candidate memory",
+                "detail": {"scope": "team/alpha", "importance": {"score": importance_score}},
+            },
+        )
+        conn.commit()
+        conn.close()
+
+    def _run_runner(self, db_path: Path, runner_root: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
+        repo_root = Path(__file__).resolve().parents[1]
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(repo_root)
+        cmd = [
+            sys.executable,
+            "tools/optimize_assist_runner.py",
+            "--db",
+            str(db_path),
+            "--runner-root",
+            str(runner_root),
+            "--scope",
+            "team/alpha",
+            "--json",
+            *extra_args,
+        ]
+        return subprocess.run(cmd, cwd=str(repo_root), capture_output=True, text=True, env=env)
+
+    def _rollback_arg(self, root: Path) -> list[str]:
+        return ["--rollback-replay-receipt", str(_write_rollback_receipt(root))]
+
+    def test_runner_subprocess_promotes_with_native_evidence(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            db_path = td_path / "mem.sqlite"
+            runner_root = td_path / "runner"
+            self._seed_db(db_path, importance_score=0.32)
+
+            proc = self._run_runner(
+                db_path,
+                runner_root,
+                "--controller-mode",
+                "canary_apply",
+                "--allow-apply",
+                "--promote-when-gates-green",
+                "--soak-cycles-for-auto-low-risk",
+                "1",
+                *self._rollback_arg(td_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = json.loads(proc.stdout)
+            self.assertTrue(out["controller"]["promotion_gates_passed"])
+            self.assertEqual(out["controller"]["next_mode"], "auto_low_risk")
+            self.assertTrue(Path(out["artifacts"]["verifier_bundle"]).exists())
+            self.assertTrue(Path(out["artifacts"]["promotion_gates"]).exists())
+            state = json.loads(Path(out["controller"]["state_ref"]).read_text(encoding="utf-8"))
+            self.assertEqual(state["mode"], "auto_low_risk")
+            self.assertEqual(state["revision"], 1)
+            self.assertTrue(state["state_digest"])
+
+    def test_runner_subprocess_pauses_on_invalid_effect_history(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            db_path = td_path / "mem.sqlite"
+            runner_root = td_path / "runner"
+            self._seed_db(db_path, importance_score=0.32)
+            history_dir = runner_root / "assist-receipts" / "2026-04-17"
+            history_dir.mkdir(parents=True, exist_ok=True)
+            (history_dir / "bad.effect.json").write_text("{bad-json", encoding="utf-8")
+            (history_dir / "bad.after.json").write_text(
+                json.dumps(
+                    {
+                        "kind": "openclaw-mem.optimize.assist.after.v1",
+                        "ts": runner._utcnow_iso(),
+                        "result": "applied",
+                        "artifacts": {"effect_ref": str(history_dir / "bad.effect.json")},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            proc = self._run_runner(
+                db_path,
+                runner_root,
+                "--controller-mode",
+                "auto_low_risk",
+                "--allow-apply",
+                *self._rollback_arg(td_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = json.loads(proc.stdout)
+            self.assertTrue(out["controller"]["paused"])
+            self.assertEqual(out["controller"]["next_mode"], "paused_regression")
+            self.assertIn("missing_effect_receipts", out["results"]["watchdog_pause_reasons"])
+
+    def test_runner_subprocess_aborts_on_malformed_controller_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            db_path = td_path / "mem.sqlite"
+            runner_root = td_path / "runner"
+            self._seed_db(db_path, importance_score=0.32)
+            runner_root.mkdir(parents=True, exist_ok=True)
+            (runner_root / runner.DEFAULT_CONTROLLER_STATE).write_text("{not-json", encoding="utf-8")
+
+            proc = self._run_runner(db_path, runner_root)
+
+            self.assertEqual(proc.returncode, 2)
+            out = json.loads(proc.stdout)
+            self.assertEqual(out["result"], "aborted")
+            self.assertIn("controller state", out["error"])
 
 
 if __name__ == "__main__":

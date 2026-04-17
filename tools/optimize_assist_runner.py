@@ -82,14 +82,22 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _load_json_file(path: Path) -> dict[str, Any]:
+def _load_json_file(path: Path, *, strict: bool = False, label: Optional[str] = None) -> dict[str, Any]:
     if not path.exists():
+        if strict:
+            raise RunnerError(f"{label or str(path)} missing")
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        if strict:
+            raise RunnerError(f"{label or str(path)} invalid JSON: {e}") from e
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        if strict:
+            raise RunnerError(f"{label or str(path)} emitted non-object JSON")
+        return {}
+    return data
 
 
 def _candidate_family(item: dict[str, Any]) -> str:
@@ -111,7 +119,9 @@ def _controller_state_digest(payload: dict[str, Any]) -> str:
 
 
 def _load_controller_state(path: Path) -> dict[str, Any]:
-    payload = _load_json_file(path)
+    if not path.exists():
+        return {}
+    payload = _load_json_file(path, strict=True, label=f"controller state {path}")
     if not payload:
         return {}
     schema_version = payload.get("schema_version")
@@ -295,10 +305,18 @@ def _collect_watchdog_stats(runner_root: Path, *, since_ts: datetime) -> dict[st
     assist_root = runner_root / "assist-receipts"
     applied_runs = 0
     missing_effect_receipts = 0
+    invalid_after_receipts = 0
+    invalid_effect_receipts = 0
     regressed_effect_items = 0
     effect_items_total = 0
     for path in assist_root.rglob("*.after.json"):
-        payload = _load_json_file(path)
+        try:
+            payload = _load_json_file(path, strict=True, label=f"assist receipt {path}")
+        except RunnerError:
+            applied_runs += 1
+            missing_effect_receipts += 1
+            invalid_after_receipts += 1
+            continue
         if str(payload.get("kind") or "") != "openclaw-mem.optimize.assist.after.v1":
             continue
         ts = _parse_iso_utc(payload.get("ts"))
@@ -313,9 +331,15 @@ def _collect_watchdog_stats(runner_root: Path, *, since_ts: datetime) -> dict[st
             missing_effect_receipts += 1
             continue
         effect_path = Path(effect_ref).expanduser()
-        effect_payload = _load_json_file(effect_path)
+        try:
+            effect_payload = _load_json_file(effect_path, strict=True, label=f"effect receipt {effect_path}")
+        except RunnerError:
+            missing_effect_receipts += 1
+            invalid_effect_receipts += 1
+            continue
         if str(effect_payload.get("kind") or "") != "openclaw-mem.optimize.assist.effect-batch.v0":
             missing_effect_receipts += 1
+            invalid_effect_receipts += 1
             continue
         items = effect_payload.get("items") if isinstance(effect_payload.get("items"), list) else []
         effect_items_total += len(items)
@@ -323,6 +347,8 @@ def _collect_watchdog_stats(runner_root: Path, *, since_ts: datetime) -> dict[st
     return {
         "applied_runs": applied_runs,
         "missing_effect_receipts": missing_effect_receipts,
+        "invalid_after_receipts": invalid_after_receipts,
+        "invalid_effect_receipts": invalid_effect_receipts,
         "effect_items_total": effect_items_total,
         "regressed_effect_items": regressed_effect_items,
         "effect_receipt_missing_pct": round((missing_effect_receipts / applied_runs) * 100.0, 2) if applied_runs > 0 else 0.0,
@@ -462,16 +488,19 @@ def _controller_counter(raw: Any, *, default: int = 0) -> int:
         return default
 
 
-def _evaluate_watchdog(args: argparse.Namespace, *, runner_root: Path) -> dict[str, Any]:
+def _evaluate_watchdog(args: argparse.Namespace, *, runner_root: Path, controller_mode: Optional[str] = None) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     since_ts = now - timedelta(hours=_watchdog_window_hours(args))
     stats = _collect_watchdog_stats(runner_root, since_ts=since_ts)
     rollback_gate = _rollback_replay_gate(args)
     reasons: list[str] = []
+    apply_capable_mode = str(controller_mode or "").strip() in {"canary_apply", "auto_low_risk"}
     if float(stats.get("effect_receipt_missing_pct") or 0.0) > float(getattr(args, "watchdog_max_missing_effect_receipts_pct", 0.0) or 0.0):
         reasons.append("missing_effect_receipts")
     if int(stats.get("regressed_effect_items") or 0) > int(getattr(args, "watchdog_max_regressed_effect_items", 0) or 0):
         reasons.append("quality_regression_detected")
+    if apply_capable_mode and not rollback_gate.get("present"):
+        reasons.append("rollback_replay_receipt_missing")
     if rollback_gate.get("present") and rollback_gate.get("rollback_replay_pass") is False:
         reasons.append("rollback_replay_failed")
     if rollback_gate.get("present") and rollback_gate.get("rollback_replay_pass") is None:
@@ -664,7 +693,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         family_state = _resolve_family_state(args, prior_controller_state)
         allow_apply = effective_controller_mode in {"canary_apply", "auto_low_risk"}
 
-        pre_watchdog = _evaluate_watchdog(args, runner_root=runner_root)
+        pre_watchdog = _evaluate_watchdog(args, runner_root=runner_root, controller_mode=effective_controller_mode)
         if effective_controller_mode == "paused_regression":
             allow_apply = False
         elif pre_watchdog.get("should_pause"):
@@ -724,7 +753,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         verifier_path = run_dir / "verifier.json"
         _write_json(verifier_path, verifier_json)
 
-        post_watchdog = _evaluate_watchdog(args, runner_root=runner_root)
+        post_watchdog = _evaluate_watchdog(args, runner_root=runner_root, controller_mode=effective_controller_mode)
         promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog, verifier=verifier_json, challenger=challenger_json)
         _write_json(promotion_receipt_path, promotion_gates)
         promotion_gate_emit_path = str(getattr(args, "promotion_gate_receipt", "") or "").strip()
