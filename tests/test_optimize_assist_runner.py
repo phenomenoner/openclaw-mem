@@ -49,6 +49,10 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 "--promotion-gate-receipt",
                 "/tmp/promotion.json",
                 "--promote-when-gates-green",
+                "--soak-cycles-for-auto-low-risk",
+                "2",
+                "--regression-strikes-for-demotion",
+                "3",
                 "--lane",
                 "observations.assist",
                 "--json",
@@ -65,6 +69,8 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         self.assertEqual(args.watchdog_window_hours, 12)
         self.assertEqual(args.promotion_gate_receipt, "/tmp/promotion.json")
         self.assertTrue(args.promote_when_gates_green)
+        self.assertEqual(args.soak_cycles_for_auto_low_risk, 2)
+        self.assertEqual(args.regression_strikes_for_demotion, 3)
         self.assertTrue(args.json)
 
     def test_run_pipeline_writes_packet_files_and_summary(self):
@@ -96,6 +102,8 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 promote_when_gates_green=False,
                 promotion_min_manual_precision=0.9,
                 promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=3,
+                regression_strikes_for_demotion=2,
                 lane="observations.assist",
                 json=True,
             )
@@ -126,6 +134,8 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertEqual(out["mode"], "dry_run")
             self.assertEqual(out["controller"]["effective_mode"], "dry_run")
             self.assertEqual(out["controller"]["next_mode"], "dry_run")
+            self.assertEqual(out["controller"]["soak_green_cycles"], 0)
+            self.assertEqual(out["controller"]["regression_strikes"], 0)
             self.assertEqual(out["counts"]["evolution_candidates"], 2)
             self.assertEqual(out["counts"]["governor_approved"], 1)
             self.assertEqual(out["results"]["assist_result"], "dry_run")
@@ -167,6 +177,8 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 promote_when_gates_green=False,
                 promotion_min_manual_precision=0.9,
                 promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=3,
+                regression_strikes_for_demotion=2,
                 lane="observations.assist",
                 json=True,
             )
@@ -206,6 +218,8 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 promote_when_gates_green=False,
                 promotion_min_manual_precision=0.9,
                 promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=3,
+                regression_strikes_for_demotion=2,
                 lane="observations.assist",
                 json=True,
             )
@@ -257,6 +271,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
 
             self.assertTrue(out["controller"]["paused"])
             self.assertEqual(out["controller"]["next_mode"], "paused_regression")
+            self.assertEqual(out["controller"]["regression_strikes"], 1)
             self.assertIn("quality_regression_detected", out["results"]["watchdog_pause_reasons"])
             state = json.loads(Path(out["controller"]["state_ref"]).read_text(encoding="utf-8"))
             self.assertEqual(state["mode"], "paused_regression")
@@ -296,6 +311,8 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 promote_when_gates_green=True,
                 promotion_min_manual_precision=0.9,
                 promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=1,
+                regression_strikes_for_demotion=2,
                 lane="observations.assist",
                 json=True,
             )
@@ -310,8 +327,62 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertEqual(out["controller"]["effective_mode"], "canary_apply")
             self.assertEqual(out["controller"]["next_mode"], "auto_low_risk")
             self.assertTrue(out["controller"]["promotion_gates_passed"])
+            self.assertEqual(out["controller"]["soak_green_cycles"], 1)
             state = json.loads(Path(out["controller"]["state_ref"]).read_text(encoding="utf-8"))
             self.assertEqual(state["mode"], "auto_low_risk")
+
+    def test_run_pipeline_demotes_auto_low_risk_to_canary_after_failed_promotion_gates(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_path = Path(td) / runner.DEFAULT_CONTROLLER_STATE
+            state_path.write_text(json.dumps({"mode": "auto_low_risk", "soak_green_cycles": 3, "regression_strikes": 0}), encoding="utf-8")
+            promotion_path = Path(td) / "promotion.json"
+            promotion_path.write_text(json.dumps({
+                "manual_review_sample_precision": 0.50,
+                "repeated_miss_regression_pct": 20.0,
+                "rollback_replay_pass": True,
+            }), encoding="utf-8")
+            args = SimpleNamespace(
+                python="python3",
+                db="/tmp/openclaw-mem.sqlite",
+                runner_root=td,
+                operator="lyria",
+                allow_apply=True,
+                approve_importance=True,
+                approve_stale=True,
+                scope=None,
+                limit=100,
+                stale_days=60,
+                lifecycle_limit=50,
+                top=5,
+                max_rows_per_run=5,
+                max_rows_per_24h=20,
+                max_importance_adjustments_per_run=3,
+                max_importance_adjustments_per_24h=10,
+                controller_mode=None,
+                controller_state_path=None,
+                watchdog_window_hours=24,
+                watchdog_max_missing_effect_receipts_pct=0.0,
+                watchdog_max_regressed_effect_items=0,
+                rollback_replay_receipt=None,
+                promotion_gate_receipt=str(promotion_path),
+                promote_when_gates_green=True,
+                promotion_min_manual_precision=0.9,
+                promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=3,
+                regression_strikes_for_demotion=2,
+                lane="observations.assist",
+                json=True,
+            )
+            outputs = [
+                runner.CommandResult(argv=["evolution"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.evolution-review.v0", "counts": {"items": 1}}), stderr=""),
+                runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
+                runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "applied", "applied_rows": 1, "skipped_rows": 0, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
+            ]
+            with patch.object(runner, "_run", side_effect=outputs):
+                out = runner.run_pipeline(args)
+
+            self.assertEqual(out["controller"]["effective_mode"], "auto_low_risk")
+            self.assertEqual(out["controller"]["next_mode"], "canary_apply")
 
 
 if __name__ == "__main__":

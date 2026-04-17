@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
 from openclaw_mem import __version__
-from openclaw_mem.importance import is_parseable_importance, label_from_score, parse_importance_score
+from openclaw_mem.importance import is_parseable_importance, label_from_score, normalize_label, parse_importance_score
 from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
 
 
@@ -1784,7 +1784,54 @@ def build_evolution_review(
             importance_rows[int(row["id"])] = {
                 "score": score,
                 "label": label_from_score(score),
+                "stored_label": normalize_label(importance.get('label')) if isinstance(importance, dict) else None,
             }
+
+    for obs_id, imp in list(importance_rows.items()):
+        stored_label = imp.get('stored_label')
+        expected_label = imp.get('label')
+        if not stored_label or stored_label == expected_label:
+            continue
+        matching_raw = next((raw for raw in list(stale.get('items') or [])[:top] if int(raw.get('id') or 0) == obs_id), None)
+        items.append(
+            {
+                "candidate_id": f"importance-label-alignment-{obs_id}",
+                "action": "adjust_importance_score",
+                "risk_level": "low",
+                "risk_reasons": ["score_label_alignment_only", "no_score_change"],
+                "auto_apply_eligible": True,
+                "safe_for_auto_apply": True,
+                "confidence": 0.72,
+                "reasons": [
+                    "label_alignment",
+                    "score_label_mismatch",
+                ],
+                "target": {
+                    "observationId": obs_id,
+                    "recordRef": f"obs:{obs_id}",
+                    "scope": matching_raw.get("scope") if isinstance(matching_raw, dict) else None,
+                },
+                "patch": {
+                    "importance": {
+                        "score": float(imp.get('score') or 0.0),
+                        "label": expected_label,
+                        "delta": 0.0,
+                        "reason_code": "label_alignment",
+                    }
+                },
+                "evidence_refs": [f"obs:{obs_id}"],
+                "evidence": {
+                    "signal": "importance_consistency",
+                    "current_score": float(imp.get('score') or 0.0),
+                    "current_label": stored_label,
+                    "next_score": float(imp.get('score') or 0.0),
+                    "next_label": expected_label,
+                    "age_days": matching_raw.get('age_days') if isinstance(matching_raw, dict) else None,
+                    "threshold_days": threshold_days,
+                    "recent_use_count": 0,
+                },
+            }
+        )
 
     for raw in list(stale.get("items") or [])[:top]:
         if not isinstance(raw, dict):

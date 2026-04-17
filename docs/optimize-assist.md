@@ -23,6 +23,11 @@ The shipped write whitelist is currently limited to:
 - `detail_json.importance.label`
 - bounded `detail_json.optimization.assist` metadata
 
+Current bounded low-risk families include:
+- stale lifecycle marking
+- bounded importance downshift
+- score-label alignment with `delta = 0`
+
 The candidate packets now also carry bounded classifier metadata:
 - `risk_level` (`low | medium | high`)
 - `risk_reasons[]`

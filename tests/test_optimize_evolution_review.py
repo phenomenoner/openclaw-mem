@@ -127,6 +127,47 @@ class TestOptimizeEvolutionReview(unittest.TestCase):
         self.assertFalse(importance_items[0]["auto_apply_eligible"])
         conn.close()
 
+    def test_evolution_review_emits_label_alignment_candidate(self):
+        conn = _connect(":memory:")
+        stale_ts = (datetime.now(timezone.utc) - timedelta(days=120)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        obs_id = _insert_observation(
+            conn,
+            {
+                "ts": stale_ts,
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Old scoped memory with inconsistent importance label",
+                "detail": {
+                    "scope": "team/alpha",
+                    "importance": {"score": 0.32, "label": "nice_to_have"},
+                },
+            },
+        )
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 1000,
+                "stale_days": 60,
+                "lifecycle_limit": 50,
+                "scope": "team/alpha",
+                "top": 5,
+                "json": True,
+            },
+        )()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_evolution_review(conn, args)
+
+        out = json.loads(buf.getvalue())
+        alignment_items = [item for item in out["items"] if item["candidate_id"] == f"importance-label-alignment-{obs_id}"]
+        self.assertEqual(len(alignment_items), 1)
+        self.assertEqual(alignment_items[0]["patch"]["importance"]["delta"], 0.0)
+        self.assertEqual(alignment_items[0]["patch"]["importance"]["reason_code"], "label_alignment")
+        self.assertEqual(alignment_items[0]["patch"]["importance"]["label"], "ignore")
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

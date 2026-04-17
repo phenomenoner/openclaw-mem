@@ -226,6 +226,13 @@ def _evaluate_promotion_gates(args: argparse.Namespace, *, watchdog: dict[str, A
     }
 
 
+def _controller_counter(raw: Any, *, default: int = 0) -> int:
+    try:
+        return max(0, int(raw))
+    except Exception:
+        return default
+
+
 def _evaluate_watchdog(args: argparse.Namespace, *, runner_root: Path) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     since_ts = now - timedelta(hours=_watchdog_window_hours(args))
@@ -280,6 +287,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--promote-when-gates-green", action="store_true", help="Promote next controller mode to auto_low_risk when promotion gates are green")
     p.add_argument("--promotion-min-manual-precision", type=float, default=0.9, help="Promotion gate threshold for manual review precision (default: 0.9)")
     p.add_argument("--promotion-max-repeated-miss-regression-pct", type=float, default=5.0, help="Promotion gate threshold for repeated miss regression pct (default: 5)")
+    p.add_argument("--soak-cycles-for-auto-low-risk", type=int, default=3, help="Promotion requires at least this many consecutive green soak cycles (default: 3)")
+    p.add_argument("--regression-strikes-for-demotion", type=int, default=2, help="Demote active modes when regression strikes reach this threshold (default: 2)")
     p.add_argument("--lane", default="observations.assist", help="Assist apply lane label")
     p.add_argument("--json", action="store_true", help="Emit machine-readable runner summary")
     return p
@@ -412,11 +421,29 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
     post_watchdog = _evaluate_watchdog(args, runner_root=runner_root)
     promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog)
+    prior_soak_green_cycles = _controller_counter(prior_controller_state.get('soak_green_cycles'))
+    prior_regression_strikes = _controller_counter(prior_controller_state.get('regression_strikes'))
+    if post_watchdog.get('should_pause'):
+        soak_green_cycles = 0
+        regression_strikes = prior_regression_strikes + 1
+    elif promotion_gates.get('passed'):
+        soak_green_cycles = prior_soak_green_cycles + 1
+        regression_strikes = max(0, prior_regression_strikes - 1)
+    else:
+        soak_green_cycles = 0
+        regression_strikes = prior_regression_strikes
     next_controller_mode = effective_controller_mode
     if post_watchdog.get("should_pause"):
         next_controller_mode = "paused_regression"
-    elif bool(getattr(args, "promote_when_gates_green", False)) and promotion_gates.get("passed"):
+    elif regression_strikes >= int(getattr(args, 'regression_strikes_for_demotion', 2) or 2):
+        if effective_controller_mode == 'auto_low_risk':
+            next_controller_mode = 'canary_apply'
+        elif effective_controller_mode == 'canary_apply':
+            next_controller_mode = 'dry_run'
+    elif bool(getattr(args, "promote_when_gates_green", False)) and promotion_gates.get("passed") and soak_green_cycles >= int(getattr(args, 'soak_cycles_for_auto_low_risk', 3) or 3):
         next_controller_mode = "auto_low_risk"
+    elif effective_controller_mode == 'auto_low_risk' and not promotion_gates.get('passed'):
+        next_controller_mode = 'canary_apply'
 
     controller_state = {
         "kind": "openclaw-mem.optimize.assist.controller-state.v0",
@@ -425,6 +452,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "previous_mode": str(prior_controller_state.get("mode") or "") or None,
         "requested_mode": str(getattr(args, "controller_mode", None) or "") or None,
         "effective_mode": effective_controller_mode,
+        'soak_green_cycles': soak_green_cycles,
+        'regression_strikes': regression_strikes,
         "watchdog": post_watchdog,
         "promotion_gates": promotion_gates,
         "last_run": {
@@ -443,6 +472,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "effective_mode": effective_controller_mode,
         "next_mode": next_controller_mode,
         "allow_apply": allow_apply,
+        'soak_green_cycles': soak_green_cycles,
+        'regression_strikes': regression_strikes,
         "pre_watchdog": pre_watchdog,
         "post_watchdog": post_watchdog,
         "promotion_gates": promotion_gates,
@@ -465,6 +496,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "receipt_ref": str(controller_receipt_path),
             "paused": next_controller_mode == "paused_regression",
             "promotion_gates_passed": bool(promotion_gates.get("passed")),
+            'soak_green_cycles': soak_green_cycles,
+            'regression_strikes': regression_strikes,
         },
         "artifacts": {
             "run_dir": str(run_dir),

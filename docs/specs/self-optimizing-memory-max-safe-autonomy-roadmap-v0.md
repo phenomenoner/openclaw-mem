@@ -169,6 +169,11 @@ Exit criteria:
 Recommended first slice:
 - add controller substate for `soak_green_cycles` and `regression_strikes`
 
+Implementation note:
+- runner now carries controller counters for `soak_green_cycles` and `regression_strikes`
+- promotion to `auto_low_risk` can require consecutive green cycles instead of one-shot green receipts
+- active `auto_low_risk` mode can demote back to `canary_apply` when gates fail
+
 ### Phase 11 — near-ceiling safe autonomy posture
 Goal: approach the safe ceiling without claiming unbounded autonomy.
 
