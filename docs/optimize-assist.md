@@ -66,6 +66,22 @@ This command:
 - runs rollback replay simulation on a temporary DB clone when the current row state still matches the recorded after hashes
 - emits a compact verifier bundle without mutating memory rows
 
+## Challenger review
+
+Phase 8 now starts with a read-only challenger surface:
+
+```bash
+python -m openclaw_mem optimize challenger-review \
+  --from-file /path/to/evolution.json \
+  --json
+```
+
+This command:
+- reads governed `evolution-review` output
+- compares the current primary risk classification to a stricter shadow challenger policy
+- emits disagreement receipts without changing governor or writer behavior
+- keeps the challenger lane advisory-only in this first slice
+
 ## Default posture
 
 The recommended deployment posture is:

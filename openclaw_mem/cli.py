@@ -2313,6 +2313,75 @@ def _optimize_verifier_rollback_replay(conn: sqlite3.Connection, rollback_payloa
         temp_conn.close()
 
 
+def _optimize_challenger_load_packet(path_value: Optional[str]) -> Dict[str, Any]:
+    if path_value:
+        raw = Path(path_value).read_text(encoding='utf-8')
+    else:
+        raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except Exception as e:
+        raise ValueError(f'invalid_json: {e}') from e
+    if not isinstance(payload, dict):
+        raise ValueError('packet must be a JSON object')
+    if str(payload.get('kind') or '') != 'openclaw-mem.optimize.evolution-review.v0':
+        raise ValueError('unsupported packet kind')
+    items = payload.get('items')
+    if not isinstance(items, list):
+        raise ValueError('packet items must be a list')
+    return payload
+
+
+def _optimize_challenger_review_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    action = str(item.get('action') or '').strip()
+    primary_risk = str(item.get('risk_level') or 'low').strip() or 'low'
+    evidence = item.get('evidence') if isinstance(item.get('evidence'), dict) else {}
+    patch = item.get('patch') if isinstance(item.get('patch'), dict) else {}
+    challenger_risk = primary_risk
+    challenger_reasons: List[str] = []
+
+    if action == 'adjust_importance_score':
+        importance_patch = patch.get('importance') if isinstance(patch.get('importance'), dict) else {}
+        try:
+            current_score = float(evidence.get('current_score'))
+        except Exception:
+            current_score = None
+        try:
+            delta = abs(float(importance_patch.get('delta')))
+        except Exception:
+            delta = None
+        recent_use_count = int(evidence.get('recent_use_count') or 0)
+        if current_score is not None and current_score >= 0.50:
+            challenger_risk = 'medium'
+            challenger_reasons.append('higher_value_memory_requires_review')
+        if delta is not None and delta >= 0.10:
+            challenger_risk = 'medium'
+            challenger_reasons.append('delta_at_edge_of_low_risk_cap')
+        if recent_use_count > 0:
+            challenger_risk = 'medium'
+            challenger_reasons.append('recent_use_conflict_present')
+    elif action == 'set_stale_candidate':
+        age_days = evidence.get('age_days')
+        threshold_days = evidence.get('threshold_days')
+        try:
+            if age_days is not None and threshold_days is not None and int(age_days) < int(threshold_days) + 14:
+                challenger_risk = 'medium'
+                challenger_reasons.append('near_threshold_stale_candidate')
+        except Exception:
+            challenger_reasons.append('threshold_comparison_unavailable')
+
+    disagreement = challenger_risk != primary_risk
+    return {
+        'candidate_id': str(item.get('candidate_id') or ''),
+        'action': action or None,
+        'primary_risk_level': primary_risk,
+        'challenger_risk_level': challenger_risk,
+        'disagreement': disagreement,
+        'challenger_reasons': challenger_reasons,
+        'target': item.get('target') if isinstance(item.get('target'), dict) else {},
+    }
+
+
 def _optimize_assist_recent_applied_rows(run_dir: Path, *, since_ts: datetime) -> int:
     if not run_dir.exists():
         return 0
@@ -2879,6 +2948,45 @@ def cmd_optimize_verifier_bundle(conn: sqlite3.Connection, args: argparse.Namesp
             'rollback_replay_pass': all(item.get('rollback_replay_pass') is True for item in items if item.get('rollback_replay_pass') is not None) if any(item.get('rollback_replay_pass') is not None for item in items) else None,
         },
         'items': items,
+    }
+    _emit(out, True)
+
+
+def cmd_optimize_challenger_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    try:
+        packet = _optimize_challenger_load_packet(getattr(args, 'from_file', None))
+    except Exception as e:
+        _emit({'error': str(e)}, True)
+        sys.exit(2)
+
+    top = _optimize_policy_int(getattr(args, 'top', 50), 50, min_value=1)
+    items = [item for item in list(packet.get('items') or []) if isinstance(item, dict)]
+    reviewed = [_optimize_challenger_review_item(item) for item in items[:top]]
+    disagreements = [item for item in reviewed if bool(item.get('disagreement'))]
+
+    out = {
+        'kind': 'openclaw-mem.optimize.challenger-review.v0',
+        'ts': _utcnow_iso(),
+        'version': {'openclaw_mem': __version__, 'schema': 'v0'},
+        'source': {
+            'kind': str(packet.get('kind') or ''),
+            'reviewed_items': len(reviewed),
+        },
+        'policy': {
+            'mode': 'challenger_review',
+            'writes_performed': 0,
+            'memory_mutation': 'none',
+            'read_only': True,
+        },
+        'counts': {
+            'items': len(reviewed),
+            'disagreements': len(disagreements),
+            'challengerMediumRisk': sum(1 for item in reviewed if str(item.get('challenger_risk_level') or '') == 'medium'),
+            'challengerHighRisk': sum(1 for item in reviewed if str(item.get('challenger_risk_level') or '') == 'high'),
+        },
+        'items': reviewed,
+        'disagreements': disagreements,
     }
     _emit(out, True)
 
@@ -14408,6 +14516,12 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--window-hours", dest="window_hours", type=int, default=24, help="Recent receipt window inspected by the verifier bundle (default: 24)")
     o.add_argument("--top", type=int, default=20, help="Max after receipts to verify (default: 20)")
     o.set_defaults(func=cmd_optimize_verifier_bundle)
+
+    o = osub.add_parser("challenger-review", help="Compare a shadow challenger policy against evolution-review output (no writes)")
+    add_common(o)
+    o.add_argument("--from-file", dest="from_file", default=None, help="Evolution-review packet JSON path (default: stdin)")
+    o.add_argument("--top", type=int, default=50, help="Max candidates to compare (default: 50)")
+    o.set_defaults(func=cmd_optimize_challenger_review)
 
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)
