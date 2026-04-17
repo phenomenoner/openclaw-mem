@@ -37,6 +37,11 @@ def _write_rollback_receipt(root: Path, *, passed: bool = True) -> Path:
     return path
 
 
+def _write_signed_controller_state(path: Path, payload: dict[str, object], *, prior_state: dict[str, object] | None = None) -> None:
+    prepared = runner._prepare_controller_state(payload, prior_state=prior_state or {})
+    path.write_text(json.dumps(prepared), encoding="utf-8")
+
+
 class TestOptimizeAssistRunner(unittest.TestCase):
     def test_build_parser_parses_apply_flags(self):
         args = runner.build_parser().parse_args(
@@ -82,6 +87,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 "4",
                 "--controller-mode",
                 "auto_low_risk",
+                "--migrate-unsigned-controller-state",
                 "--watchdog-window-hours",
                 "12",
                 "--watchdog-max-regressed-effect-items",
@@ -444,7 +450,10 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             rollback_receipt = _write_rollback_receipt(Path(td))
             state_path = Path(td) / runner.DEFAULT_CONTROLLER_STATE
-            state_path.write_text(json.dumps({"mode": "auto_low_risk", "soak_green_cycles": 3, "regression_strikes": 0}), encoding="utf-8")
+            _write_signed_controller_state(
+                state_path,
+                {"kind": "openclaw-mem.optimize.assist.controller-state.v0", "mode": "auto_low_risk", "soak_green_cycles": 3, "regression_strikes": 0},
+            )
             _write_native_effect_history(Path(td), regressed=0, neutral=2)
             args = SimpleNamespace(
                 python="python3",
@@ -719,6 +728,22 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             with self.assertRaises(runner.RunnerError):
                 runner.run_pipeline(args)
 
+    def test_load_controller_state_rejects_unsigned_legacy_without_migration(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / runner.DEFAULT_CONTROLLER_STATE
+            path.write_text(json.dumps({"mode": "auto_low_risk", "soak_green_cycles": 3, "regression_strikes": 0}), encoding="utf-8")
+            with self.assertRaises(runner.RunnerError):
+                runner._load_controller_state(path)
+
+    def test_load_controller_state_allows_unsigned_legacy_for_migration(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / runner.DEFAULT_CONTROLLER_STATE
+            path.write_text(json.dumps({"mode": "auto_low_risk", "soak_green_cycles": 3, "regression_strikes": 0}), encoding="utf-8")
+            payload = runner._load_controller_state(path, allow_unsigned_legacy=True)
+
+            self.assertEqual(payload["mode"], "auto_low_risk")
+            self.assertNotIn("schema_version", payload)
+
     def test_collect_watchdog_stats_counts_invalid_effect_receipts_as_missing(self):
         with tempfile.TemporaryDirectory() as td:
             effect_dir = Path(td) / "assist-receipts" / "2026-04-17"
@@ -773,10 +798,12 @@ class TestOptimizeAssistRunnerE2E(unittest.TestCase):
         conn.commit()
         conn.close()
 
-    def _run_runner(self, db_path: Path, runner_root: Path, *extra_args: str) -> subprocess.CompletedProcess[str]:
+    def _run_runner(self, db_path: Path, runner_root: Path, *extra_args: str, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         repo_root = Path(__file__).resolve().parents[1]
         env = os.environ.copy()
         env["PYTHONPATH"] = str(repo_root)
+        if extra_env:
+            env.update(extra_env)
         cmd = [
             sys.executable,
             "tools/optimize_assist_runner.py",
@@ -875,6 +902,94 @@ class TestOptimizeAssistRunnerE2E(unittest.TestCase):
             out = json.loads(proc.stdout)
             self.assertEqual(out["result"], "aborted")
             self.assertIn("controller state", out["error"])
+
+    def test_runner_subprocess_rejects_unsigned_legacy_controller_state_without_migration(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            db_path = td_path / "mem.sqlite"
+            runner_root = td_path / "runner"
+            self._seed_db(db_path, importance_score=0.32)
+            runner_root.mkdir(parents=True, exist_ok=True)
+            (runner_root / runner.DEFAULT_CONTROLLER_STATE).write_text(
+                json.dumps({"mode": "auto_low_risk", "soak_green_cycles": 3, "regression_strikes": 0}),
+                encoding="utf-8",
+            )
+
+            proc = self._run_runner(db_path, runner_root)
+
+            self.assertEqual(proc.returncode, 2)
+            out = json.loads(proc.stdout)
+            self.assertIn("migrate-unsigned-controller-state", out["error"])
+
+    def test_runner_subprocess_migrates_unsigned_legacy_controller_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            db_path = td_path / "mem.sqlite"
+            runner_root = td_path / "runner"
+            self._seed_db(db_path, importance_score=0.32)
+            runner_root.mkdir(parents=True, exist_ok=True)
+            state_path = runner_root / runner.DEFAULT_CONTROLLER_STATE
+            state_path.write_text(
+                json.dumps({"mode": "auto_low_risk", "soak_green_cycles": 3, "regression_strikes": 0}),
+                encoding="utf-8",
+            )
+
+            proc = self._run_runner(
+                db_path,
+                runner_root,
+                "--migrate-unsigned-controller-state",
+                *self._rollback_arg(td_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = json.loads(proc.stdout)
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertTrue(state["legacy_unsigned_state_migrated"])
+            self.assertEqual(state["schema_version"], runner.CONTROLLER_STATE_SCHEMA_VERSION)
+            self.assertTrue(state["state_digest"])
+            self.assertGreaterEqual(state["revision"], 1)
+            self.assertTrue(Path(out["controller"]["state_ref"]).exists())
+
+    def test_runner_subprocess_serializes_overlapping_controller_revisions(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            db_path = td_path / "mem.sqlite"
+            runner_root = td_path / "runner"
+            self._seed_db(db_path, importance_score=0.32)
+
+            repo_root = Path(__file__).resolve().parents[1]
+            env1 = os.environ.copy()
+            env1["PYTHONPATH"] = str(repo_root)
+            env1["OPENCLAW_MEM_TEST_CONTROLLER_LOCK_HOLD_SECS"] = "1.0"
+            env2 = os.environ.copy()
+            env2["PYTHONPATH"] = str(repo_root)
+            cmd = [
+                sys.executable,
+                "tools/optimize_assist_runner.py",
+                "--db",
+                str(db_path),
+                "--runner-root",
+                str(runner_root),
+                "--scope",
+                "team/alpha",
+                "--json",
+            ]
+
+            proc1 = subprocess.Popen(cmd, cwd=str(repo_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env1)
+            proc2 = subprocess.Popen(cmd, cwd=str(repo_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env2)
+            stdout1, stderr1 = proc1.communicate(timeout=30)
+            stdout2, stderr2 = proc2.communicate(timeout=30)
+
+            self.assertEqual(proc1.returncode, 0, stderr1)
+            self.assertEqual(proc2.returncode, 0, stderr2)
+            out1 = json.loads(stdout1)
+            out2 = json.loads(stdout2)
+            receipt1 = json.loads(Path(out1["artifacts"]["controller"]).read_text(encoding="utf-8"))
+            receipt2 = json.loads(Path(out2["artifacts"]["controller"]).read_text(encoding="utf-8"))
+            self.assertEqual(sorted([receipt1["controller_state_revision"], receipt2["controller_state_revision"]]), [1, 2])
+            final_state = json.loads((runner_root / runner.DEFAULT_CONTROLLER_STATE).read_text(encoding="utf-8"))
+            self.assertEqual(final_state["revision"], 2)
+            self.assertTrue(final_state["state_digest"])
 
 
 if __name__ == "__main__":

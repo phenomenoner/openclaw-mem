@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a controller-gated OpenClaw cron snippet for optimize assist dry-run bring-up: `docs/snippets/openclaw-cron.optimize-assist-controller-dry-run.json`.
 - Added `docs/specs/optimize-assist-nine-point-hardening-roadmap-v0.md` to define the shortest hardening-first path from the current ~5.5-6/10 posture toward a truthful 9/10 near-ceiling safe-autonomy claim.
 - Landed the first hardening trio for optimize assist: challenger and runner now share a canonical family taxonomy, controller state writes are lock-serialized with digest-checked atomic persistence, and promotion truth is now computed from native runner/verifier/challenger receipts instead of trusting external promotion-receipt input.
-- Hardened the optimize-assist controller for Blade D+E: recent malformed assist/effect receipts now degrade fail-closed through watchdog accounting, malformed persisted controller state aborts instead of silently resetting, apply-capable modes now pause when rollback replay evidence is missing, and the runner path is now covered by real subprocess end-to-end proofs.
+- Hardened the optimize-assist controller for Blade D+E: recent malformed assist/effect receipts now degrade fail-closed through watchdog accounting, malformed persisted controller state aborts instead of silently resetting, unsigned legacy controller state is now rejected by default with an explicit one-shot migration path, apply-capable modes now pause when rollback replay evidence is missing, and the runner path is now covered by real subprocess end-to-end proofs.
 
 ### Testing
 
@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added evolution-review coverage for score-label alignment candidates.
 - Added runner coverage for soak-based promotion counters and demotion from `auto_low_risk`.
 - Added parser + posture verdict coverage in `tests/test_optimize_posture_review.py`.
-- Expanded `tests/test_optimize_assist_runner.py` with malformed-state / malformed-receipt fail-closed coverage, missing-rollback gating coverage, and real subprocess end-to-end runner proofs for promotion, pause, and abort paths.
+- Expanded `tests/test_optimize_assist_runner.py` with malformed-state / malformed-receipt fail-closed coverage, unsigned-legacy migration coverage, missing-rollback gating coverage, and real subprocess end-to-end runner proofs for promotion, pause, abort, and concurrent controller revision serialization paths.
 
 ## [1.6.0] - 2026-04-15
 

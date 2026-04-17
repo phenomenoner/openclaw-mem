@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -118,7 +119,7 @@ def _controller_state_digest(payload: dict[str, Any]) -> str:
     return hashlib.sha256(_canonical_json_bytes(raw)).hexdigest()
 
 
-def _load_controller_state(path: Path) -> dict[str, Any]:
+def _load_controller_state(path: Path, *, allow_unsigned_legacy: bool = False) -> dict[str, Any]:
     if not path.exists():
         return {}
     payload = _load_json_file(path, strict=True, label=f"controller state {path}")
@@ -127,6 +128,8 @@ def _load_controller_state(path: Path) -> dict[str, Any]:
     schema_version = payload.get("schema_version")
     digest = str(payload.get("state_digest") or "").strip()
     if schema_version in (None, "") and not digest:
+        if not allow_unsigned_legacy:
+            raise RunnerError("controller state missing schema_version/state_digest; rerun with --migrate-unsigned-controller-state to adopt legacy state once")
         return payload
     try:
         schema_version_int = int(schema_version or 0)
@@ -165,13 +168,21 @@ def _prepare_controller_state(payload: dict[str, Any], *, prior_state: dict[str,
 
 
 @contextmanager
-def _locked_controller_state(path: Path):
+def _locked_controller_state(path: Path, *, allow_unsigned_legacy: bool = False):
     lock_path = _controller_state_lock_path(path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a+", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
-            yield _load_controller_state(path)
+            hold_secs_raw = str(os.getenv("OPENCLAW_MEM_TEST_CONTROLLER_LOCK_HOLD_SECS", "") or "").strip()
+            if hold_secs_raw:
+                try:
+                    hold_secs = float(hold_secs_raw)
+                except Exception:
+                    hold_secs = 0.0
+                if hold_secs > 0:
+                    time.sleep(hold_secs)
+            yield _load_controller_state(path, allow_unsigned_legacy=allow_unsigned_legacy)
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
@@ -564,6 +575,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-importance-adjustments-per-24h", type=int, default=10, help="Assist apply rolling 24h importance-adjustment cap")
     p.add_argument("--controller-mode", choices=CONTROLLER_MODES, default=None, help="Controller state machine mode override")
     p.add_argument("--controller-state-path", default=None, help="JSON path for persisted controller state (default: <runner-root>/controller-state.json)")
+    p.add_argument("--migrate-unsigned-controller-state", action="store_true", help="One-time adoption path for unsigned legacy controller state; rewrites state with schema+digest")
     p.add_argument("--watchdog-window-hours", type=int, default=24, help="Recent receipt window inspected by watchdog (default: 24)")
     p.add_argument("--watchdog-max-missing-effect-receipts-pct", type=float, default=0.0, help="Pause when missing effect receipt rate exceeds this pct (default: 0)")
     p.add_argument("--watchdog-max-regressed-effect-items", type=int, default=0, help="Pause when regressed effect items exceed this count (default: 0)")
@@ -688,7 +700,11 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     controller_receipt_path = run_dir / "controller.json"
     promotion_receipt_path = run_dir / "promotion-gates.json"
 
-    with _locked_controller_state(controller_state_path) as prior_controller_state:
+    with _locked_controller_state(
+        controller_state_path,
+        allow_unsigned_legacy=bool(getattr(args, "migrate_unsigned_controller_state", False)),
+    ) as prior_controller_state:
+        legacy_unsigned_state_loaded = bool(prior_controller_state) and prior_controller_state.get("schema_version") in (None, "") and not str(prior_controller_state.get("state_digest") or "").strip()
         effective_controller_mode = _resolve_controller_mode(args, prior_controller_state)
         family_state = _resolve_family_state(args, prior_controller_state)
         allow_apply = effective_controller_mode in {"canary_apply", "auto_low_risk"}
@@ -817,6 +833,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         controller_state = {
             "kind": "openclaw-mem.optimize.assist.controller-state.v0",
             "updated_at": _utcnow_iso(),
+            "legacy_unsigned_state_migrated": legacy_unsigned_state_loaded,
             "mode": next_controller_mode,
             "previous_mode": str(prior_controller_state.get("mode") or "") or None,
             "requested_mode": str(getattr(args, "controller_mode", None) or "") or None,
@@ -930,7 +947,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "verifier_bundle": verifier_cmd,
         },
         }
-    return payload
+        return payload
 
 
 def main(argv: Optional[list[str]] = None) -> int:
