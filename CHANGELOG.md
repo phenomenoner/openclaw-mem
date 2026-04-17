@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Closed the remaining Phase 8-10 controller gaps for optimize assist: the runner now writes `governor-filtered.json`, can enforce challenger-driven quarantine before assist apply, persists family-level enable/disable/quarantine state, and runs native `verifier-bundle` each cycle for first-party gating.
 - Added the Phase 11 posture surface for optimize assist: `optimize posture-review` now reads native runner receipts and emits a bounded `near_ceiling_ready` verdict.
 - Added a controller-gated OpenClaw cron snippet for optimize assist dry-run bring-up: `docs/snippets/openclaw-cron.optimize-assist-controller-dry-run.json`.
+- Added `docs/specs/optimize-assist-nine-point-hardening-roadmap-v0.md` to define the shortest hardening-first path from the current ~5.5-6/10 posture toward a truthful 9/10 near-ceiling safe-autonomy claim.
 
 ### Testing
 
