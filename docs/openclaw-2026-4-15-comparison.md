@@ -1,8 +1,10 @@
 # openclaw-mem and OpenClaw 2026.4.15
 
-OpenClaw 2026.4.15 added several memory and prompt-time capabilities that align with areas `openclaw-mem` has been investing in for a while.
+By OpenClaw 2026.4.15, several native memory and prompt-time capabilities had become strong enough to make this comparison especially worth doing. Those capabilities align with areas `openclaw-mem` has been investing in for a while.
 
 We are genuinely happy to see that direction mature. It makes the ecosystem healthier, lowers the cost of good memory operations, and gives operators better native defaults.
+
+This page uses OpenClaw 2026.4.15 as a review point, not as a claim that every capability first appeared in that release.
 
 It also makes the role of `openclaw-mem` clearer, not smaller.
 
@@ -13,9 +15,9 @@ Our view is simple:
 - `openclaw-mem` should keep its product shape instead of shrinking into a thin wrapper around native features.
 - The opportunity now is to do the same family of work with clearer boundaries, better explanations, and better day-to-day usability.
 
-## What became stronger in OpenClaw 2026.4.15
+## What had become stronger by OpenClaw 2026.4.15
 
-At a high level, the newer OpenClaw runtime makes a few things much more explicit:
+At a high level, OpenClaw's recent releases made a few things much more explicit:
 
 - memory tools are becoming more operator-facing
 - prompt-time integration is clearer, especially around `before_prompt_build`

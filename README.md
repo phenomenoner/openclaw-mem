@@ -85,7 +85,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifa
 
 ## OpenClaw 2026.4.15 and `openclaw-mem`
 
-OpenClaw 2026.4.15 brought stronger native memory and prompt-time integration features. We are genuinely happy to see that direction mature.
+By OpenClaw 2026.4.15, the native memory and prompt-time integration experience had become noticeably stronger. We are genuinely happy to see that direction mature.
 
 That is good for the ecosystem, good for operators, and good for `openclaw-mem` too.
 A stronger foundation makes it easier to keep our own work focused on what matters most: better packs, clearer evidence, and safer memory maintenance.

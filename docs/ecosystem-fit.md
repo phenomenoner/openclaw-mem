@@ -29,9 +29,9 @@ The short version:
   - does **not** replace the sidecar ledger (SQLite remains for audit/ops)
   - (when enabled) it **does** own the canonical backend tools for the active slot
 
-## A note after OpenClaw 2026.4.15
+## A note at the OpenClaw 2026.4.15 review point
 
-OpenClaw's newer memory and runtime surfaces are moving in a direction we genuinely like.
+Across recent updates, OpenClaw's memory and runtime surfaces have been moving in a direction we genuinely like.
 That gives everyone a healthier base layer to build on.
 
 Our stance is not to reduce `openclaw-mem` to a thin wrapper around native memory.
