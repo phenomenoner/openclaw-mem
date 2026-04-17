@@ -32,6 +32,13 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 "80",
                 "--top",
                 "4",
+                "--challenger-policy-mode",
+                "strict_v1",
+                "--challenger-max-disagreement-clusters",
+                "6",
+                "--challenger-require-agreement-for-promotion",
+                "--challenger-max-disagreements-for-promotion",
+                "0",
                 "--max-rows-per-run",
                 "2",
                 "--max-rows-per-24h",
@@ -62,6 +69,10 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         self.assertTrue(args.allow_apply)
         self.assertFalse(args.approve_importance)
         self.assertEqual(args.scope, "team/alpha")
+        self.assertEqual(args.challenger_policy_mode, "strict_v1")
+        self.assertEqual(args.challenger_max_disagreement_clusters, 6)
+        self.assertTrue(args.challenger_require_agreement_for_promotion)
+        self.assertEqual(args.challenger_max_disagreements_for_promotion, 0)
         self.assertEqual(args.max_rows_per_run, 2)
         self.assertEqual(args.max_importance_adjustments_per_run, 1)
         self.assertEqual(args.max_importance_adjustments_per_24h, 4)
@@ -88,6 +99,10 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 stale_days=60,
                 lifecycle_limit=50,
                 top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -121,6 +136,12 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                     stderr="",
                 ),
                 runner.CommandResult(
+                    argv=["challenger"],
+                    returncode=0,
+                    stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}),
+                    stderr="",
+                ),
+                runner.CommandResult(
                     argv=["assist"],
                     returncode=0,
                     stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "result": "dry_run", "applied_rows": 0, "skipped_rows": 1, "blocked_by_caps": []}),
@@ -142,11 +163,13 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             run_dir = Path(out["artifacts"]["run_dir"])
             self.assertTrue((run_dir / "evolution.json").exists())
             self.assertTrue((run_dir / "governor.json").exists())
+            self.assertTrue((run_dir / "challenger.json").exists())
             self.assertTrue((run_dir / "assist-after.json").exists())
             self.assertTrue((run_dir / "controller.json").exists())
             self.assertIn("--dry-run", out["commands"]["assist_apply"])
             self.assertIn("--max-importance-adjustments-per-run", out["commands"]["assist_apply"])
             self.assertIn("--approve-importance", out["commands"]["governor_review"])
+            self.assertIn("--policy-mode", out["commands"]["challenger_review"])
 
     def test_run_pipeline_raises_on_invalid_json(self):
         with tempfile.TemporaryDirectory() as td:
@@ -163,6 +186,10 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 stale_days=60,
                 lifecycle_limit=50,
                 top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -204,6 +231,10 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 stale_days=60,
                 lifecycle_limit=50,
                 top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -252,6 +283,12 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                     stderr="",
                 ),
                 runner.CommandResult(
+                    argv=["challenger"],
+                    returncode=0,
+                    stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}),
+                    stderr="",
+                ),
+                runner.CommandResult(
                     argv=["assist"],
                     returncode=0,
                     stdout=json.dumps({
@@ -297,6 +334,10 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 stale_days=60,
                 lifecycle_limit=50,
                 top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -319,6 +360,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             outputs = [
                 runner.CommandResult(argv=["evolution"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.evolution-review.v0", "counts": {"items": 1}}), stderr=""),
                 runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
+                runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}), stderr=""),
                 runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "applied", "applied_rows": 1, "skipped_rows": 0, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
             ]
             with patch.object(runner, "_run", side_effect=outputs):
@@ -354,6 +396,10 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 stale_days=60,
                 lifecycle_limit=50,
                 top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -376,6 +422,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             outputs = [
                 runner.CommandResult(argv=["evolution"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.evolution-review.v0", "counts": {"items": 1}}), stderr=""),
                 runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
+                runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}), stderr=""),
                 runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "applied", "applied_rows": 1, "skipped_rows": 0, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
             ]
             with patch.object(runner, "_run", side_effect=outputs):
@@ -383,6 +430,65 @@ class TestOptimizeAssistRunner(unittest.TestCase):
 
             self.assertEqual(out["controller"]["effective_mode"], "auto_low_risk")
             self.assertEqual(out["controller"]["next_mode"], "canary_apply")
+
+    def test_run_pipeline_blocks_promotion_when_challenger_agreement_required(self):
+        with tempfile.TemporaryDirectory() as td:
+            promotion_path = Path(td) / "promotion.json"
+            promotion_path.write_text(json.dumps({
+                "manual_review_sample_precision": 0.95,
+                "repeated_miss_regression_pct": 0.0,
+                "rollback_replay_pass": True,
+            }), encoding="utf-8")
+            args = SimpleNamespace(
+                python="python3",
+                db="/tmp/openclaw-mem.sqlite",
+                runner_root=td,
+                operator="lyria",
+                allow_apply=True,
+                approve_importance=True,
+                approve_stale=True,
+                scope=None,
+                limit=100,
+                stale_days=60,
+                lifecycle_limit=50,
+                top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_require_agreement_for_promotion=True,
+                challenger_max_disagreements_for_promotion=0,
+                max_rows_per_run=5,
+                max_rows_per_24h=20,
+                max_importance_adjustments_per_run=3,
+                max_importance_adjustments_per_24h=10,
+                controller_mode="canary_apply",
+                controller_state_path=None,
+                watchdog_window_hours=24,
+                watchdog_max_missing_effect_receipts_pct=0.0,
+                watchdog_max_regressed_effect_items=0,
+                rollback_replay_receipt=None,
+                promotion_gate_receipt=str(promotion_path),
+                promote_when_gates_green=True,
+                promotion_min_manual_precision=0.9,
+                promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=1,
+                regression_strikes_for_demotion=2,
+                lane="observations.assist",
+                json=True,
+            )
+            outputs = [
+                runner.CommandResult(argv=["evolution"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.evolution-review.v0", "counts": {"items": 1}}), stderr=""),
+                runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
+                runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 1}, "summary": {"agreement_pass": False, "promotion_ready": False, "quarantine_recommended": True}}), stderr=""),
+                runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "applied", "applied_rows": 1, "skipped_rows": 0, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
+            ]
+
+            with patch.object(runner, "_run", side_effect=outputs):
+                out = runner.run_pipeline(args)
+
+            self.assertEqual(out["controller"]["next_mode"], "canary_apply")
+            self.assertFalse(out["controller"]["promotion_gates_passed"])
+            self.assertEqual(out["counts"]["challenger_disagreements"], 1)
+            self.assertIn("challenger_agreement_required", out["results"]["promotion_gate_reasons"])
 
 
 if __name__ == "__main__":

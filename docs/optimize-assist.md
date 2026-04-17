@@ -73,7 +73,7 @@ This command:
 
 ## Challenger review
 
-Phase 8 now starts with a read-only challenger surface:
+Phase 8 is now wired as a read-only challenger lane:
 
 ```bash
 python -m openclaw_mem optimize challenger-review \
@@ -84,8 +84,8 @@ python -m openclaw_mem optimize challenger-review \
 This command:
 - reads governed `evolution-review` output
 - compares the current primary risk classification to a stricter shadow challenger policy
-- emits disagreement receipts without changing governor or writer behavior
-- keeps the challenger lane advisory-only in this first slice
+- emits disagreement receipts plus bounded disagreement clusters without changing governor or writer behavior
+- keeps the challenger lane read-only while letting the controller require challenger agreement before promotion
 
 ## Default posture
 
@@ -108,6 +108,7 @@ python tools/optimize_assist_runner.py --json
 
 Default behavior:
 - runs the full packet chain
+- runs `challenger-review` on the same evolution packet before assist apply
 - keeps stale candidates and bounded importance adjustments as the approved low-risk action classes
 - respects the packet classifier, so medium/high-risk candidates remain proposal-only even when approval flags are enabled
 - runs `assist-apply` in **dry-run** mode unless `--allow-apply` is set
@@ -142,6 +143,7 @@ Expected promotion receipt keys:
 - `rollback_replay_pass`
 
 When all thresholds are green, the controller promotes its persisted next mode to `auto_low_risk`.
+If `--challenger-require-agreement-for-promotion` is set, promotion also fails closed when the challenger lane reports disagreements above the configured threshold.
 
 ### Allow bounded apply
 
@@ -164,6 +166,9 @@ python tools/optimize_assist_runner.py --allow-apply --json
 - `--no-approve-importance`
 - `--no-approve-stale`
 - `--controller-mode canary_apply`
+- `--challenger-policy-mode strict_v1`
+- `--challenger-require-agreement-for-promotion`
+- `--challenger-max-disagreements-for-promotion 0`
 - `--promotion-gate-receipt /path/to/promotion-gates.json`
 - `--promote-when-gates-green`
 
@@ -197,6 +202,7 @@ Under:
 Artifacts include:
 - `evolution.json`
 - `governor.json`
+- `challenger.json`
 - `assist-after.json`
 - `assist-effect.json`
 

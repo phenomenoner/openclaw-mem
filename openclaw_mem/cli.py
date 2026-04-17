@@ -2332,51 +2332,79 @@ def _optimize_challenger_load_packet(path_value: Optional[str]) -> Dict[str, Any
     return payload
 
 
-def _optimize_challenger_review_item(item: Dict[str, Any]) -> Dict[str, Any]:
+def _optimize_challenger_action_family(action: str) -> str:
+    if action == 'adjust_importance_score':
+        return 'importance'
+    if action == 'set_stale_candidate':
+        return 'stale_candidate'
+    return 'unknown'
+
+
+
+def _optimize_challenger_review_item(item: Dict[str, Any], *, policy_mode: str = 'strict_v1') -> Dict[str, Any]:
     action = str(item.get('action') or '').strip()
+    action_family = _optimize_challenger_action_family(action)
     primary_risk = str(item.get('risk_level') or 'low').strip() or 'low'
+    primary_auto_apply_eligible = bool(item.get('auto_apply_eligible', item.get('safe_for_auto_apply', primary_risk == 'low')))
     evidence = item.get('evidence') if isinstance(item.get('evidence'), dict) else {}
     patch = item.get('patch') if isinstance(item.get('patch'), dict) else {}
     challenger_risk = primary_risk
     challenger_reasons: List[str] = []
 
-    if action == 'adjust_importance_score':
-        importance_patch = patch.get('importance') if isinstance(patch.get('importance'), dict) else {}
-        try:
-            current_score = float(evidence.get('current_score'))
-        except Exception:
-            current_score = None
-        try:
-            delta = abs(float(importance_patch.get('delta')))
-        except Exception:
-            delta = None
-        recent_use_count = int(evidence.get('recent_use_count') or 0)
-        if current_score is not None and current_score >= 0.50:
-            challenger_risk = 'medium'
-            challenger_reasons.append('higher_value_memory_requires_review')
-        if delta is not None and delta >= 0.10:
-            challenger_risk = 'medium'
-            challenger_reasons.append('delta_at_edge_of_low_risk_cap')
-        if recent_use_count > 0:
-            challenger_risk = 'medium'
-            challenger_reasons.append('recent_use_conflict_present')
-    elif action == 'set_stale_candidate':
-        age_days = evidence.get('age_days')
-        threshold_days = evidence.get('threshold_days')
-        try:
-            if age_days is not None and threshold_days is not None and int(age_days) < int(threshold_days) + 14:
+    if policy_mode == 'strict_v1':
+        if action == 'adjust_importance_score':
+            importance_patch = patch.get('importance') if isinstance(patch.get('importance'), dict) else {}
+            try:
+                current_score = float(evidence.get('current_score'))
+            except Exception:
+                current_score = None
+            try:
+                delta = abs(float(importance_patch.get('delta')))
+            except Exception:
+                delta = None
+            recent_use_count = int(evidence.get('recent_use_count') or 0)
+            if current_score is not None and current_score >= 0.50:
                 challenger_risk = 'medium'
-                challenger_reasons.append('near_threshold_stale_candidate')
-        except Exception:
-            challenger_reasons.append('threshold_comparison_unavailable')
+                challenger_reasons.append('higher_value_memory_requires_review')
+            if delta is not None and delta >= 0.10:
+                challenger_risk = 'medium'
+                challenger_reasons.append('delta_at_edge_of_low_risk_cap')
+            if recent_use_count > 0:
+                challenger_risk = 'medium'
+                challenger_reasons.append('recent_use_conflict_present')
+        elif action == 'set_stale_candidate':
+            age_days = evidence.get('age_days')
+            threshold_days = evidence.get('threshold_days')
+            try:
+                if age_days is not None and threshold_days is not None and int(age_days) < int(threshold_days) + 14:
+                    challenger_risk = 'medium'
+                    challenger_reasons.append('near_threshold_stale_candidate')
+            except Exception:
+                challenger_reasons.append('threshold_comparison_unavailable')
 
-    disagreement = challenger_risk != primary_risk
+    challenger_auto_apply_eligible = challenger_risk == 'low' and not challenger_reasons
+    disagreement = challenger_risk != primary_risk or challenger_auto_apply_eligible != primary_auto_apply_eligible
+    disagreement_kind = 'none'
+    if disagreement:
+        if primary_risk == 'low' and challenger_risk in {'medium', 'high'}:
+            disagreement_kind = 'risk_upgrade'
+        elif primary_auto_apply_eligible and not challenger_auto_apply_eligible:
+            disagreement_kind = 'eligibility_veto'
+        else:
+            disagreement_kind = 'policy_delta'
+
     return {
         'candidate_id': str(item.get('candidate_id') or ''),
         'action': action or None,
+        'action_family': action_family,
+        'policy_mode': policy_mode,
         'primary_risk_level': primary_risk,
         'challenger_risk_level': challenger_risk,
+        'primary_auto_apply_eligible': primary_auto_apply_eligible,
+        'challenger_auto_apply_eligible': challenger_auto_apply_eligible,
         'disagreement': disagreement,
+        'disagreement_kind': disagreement_kind,
+        'quarantine_recommended': disagreement and not challenger_auto_apply_eligible,
         'challenger_reasons': challenger_reasons,
         'target': item.get('target') if isinstance(item.get('target'), dict) else {},
     }
@@ -2961,9 +2989,40 @@ def cmd_optimize_challenger_review(conn: sqlite3.Connection, args: argparse.Name
         sys.exit(2)
 
     top = _optimize_policy_int(getattr(args, 'top', 50), 50, min_value=1)
+    policy_mode = str(getattr(args, 'policy_mode', 'strict_v1') or 'strict_v1').strip() or 'strict_v1'
+    max_clusters = _optimize_policy_int(getattr(args, 'max_disagreement_clusters', 10), 10, min_value=1)
     items = [item for item in list(packet.get('items') or []) if isinstance(item, dict)]
-    reviewed = [_optimize_challenger_review_item(item) for item in items[:top]]
+    reviewed = [_optimize_challenger_review_item(item, policy_mode=policy_mode) for item in items[:top]]
     disagreements = [item for item in reviewed if bool(item.get('disagreement'))]
+
+    cluster_index: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for item in disagreements:
+        reasons = list(item.get('challenger_reasons') or [])
+        cluster_key = (
+            str(item.get('action_family') or 'unknown'),
+            reasons[0] if reasons else str(item.get('disagreement_kind') or 'policy_delta'),
+        )
+        cluster = cluster_index.setdefault(
+            cluster_key,
+            {
+                'action_family': cluster_key[0],
+                'reason': cluster_key[1],
+                'count': 0,
+                'candidate_ids': [],
+                'quarantine_recommended': False,
+            },
+        )
+        cluster['count'] += 1
+        candidate_id = str(item.get('candidate_id') or '')
+        if candidate_id and len(cluster['candidate_ids']) < 5:
+            cluster['candidate_ids'].append(candidate_id)
+        if bool(item.get('quarantine_recommended')):
+            cluster['quarantine_recommended'] = True
+
+    disagreement_clusters = sorted(
+        cluster_index.values(),
+        key=lambda entry: (-int(entry.get('count') or 0), str(entry.get('action_family') or ''), str(entry.get('reason') or '')),
+    )[:max_clusters]
 
     out = {
         'kind': 'openclaw-mem.optimize.challenger-review.v0',
@@ -2975,6 +3034,7 @@ def cmd_optimize_challenger_review(conn: sqlite3.Connection, args: argparse.Name
         },
         'policy': {
             'mode': 'challenger_review',
+            'policy_mode': policy_mode,
             'writes_performed': 0,
             'memory_mutation': 'none',
             'read_only': True,
@@ -2982,11 +3042,19 @@ def cmd_optimize_challenger_review(conn: sqlite3.Connection, args: argparse.Name
         'counts': {
             'items': len(reviewed),
             'disagreements': len(disagreements),
+            'disagreementClusters': len(disagreement_clusters),
+            'quarantineRecommended': sum(1 for item in disagreements if bool(item.get('quarantine_recommended'))),
             'challengerMediumRisk': sum(1 for item in reviewed if str(item.get('challenger_risk_level') or '') == 'medium'),
             'challengerHighRisk': sum(1 for item in reviewed if str(item.get('challenger_risk_level') or '') == 'high'),
         },
+        'summary': {
+            'agreement_pass': len(disagreements) == 0,
+            'promotion_ready': len(disagreements) == 0,
+            'quarantine_recommended': any(bool(item.get('quarantine_recommended')) for item in disagreements),
+        },
         'items': reviewed,
         'disagreements': disagreements,
+        'disagreement_clusters': disagreement_clusters,
     }
     _emit(out, True)
 
@@ -14520,6 +14588,8 @@ def build_parser() -> argparse.ArgumentParser:
     o = osub.add_parser("challenger-review", help="Compare a shadow challenger policy against evolution-review output (no writes)")
     add_common(o)
     o.add_argument("--from-file", dest="from_file", default=None, help="Evolution-review packet JSON path (default: stdin)")
+    o.add_argument("--policy-mode", dest="policy_mode", default="strict_v1", help="Shadow challenger policy mode (default: strict_v1)")
+    o.add_argument("--max-disagreement-clusters", dest="max_disagreement_clusters", type=int, default=10, help="Max disagreement clusters summarized in output (default: 10)")
     o.add_argument("--top", type=int, default=50, help="Max candidates to compare (default: 50)")
     o.set_defaults(func=cmd_optimize_challenger_review)
 

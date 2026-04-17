@@ -16,6 +16,10 @@ class TestOptimizeChallengerReview(unittest.TestCase):
                 "challenger-review",
                 "--from-file",
                 "/tmp/evolution.json",
+                "--policy-mode",
+                "strict_v1",
+                "--max-disagreement-clusters",
+                "4",
                 "--top",
                 "7",
             ]
@@ -23,6 +27,8 @@ class TestOptimizeChallengerReview(unittest.TestCase):
         self.assertEqual(args.cmd, "optimize")
         self.assertEqual(args.optimize_cmd, "challenger-review")
         self.assertEqual(args.from_file, "/tmp/evolution.json")
+        self.assertEqual(args.policy_mode, "strict_v1")
+        self.assertEqual(args.max_disagreement_clusters, 4)
         self.assertEqual(args.top, 7)
 
     def test_challenger_review_emits_disagreement_for_higher_value_importance_candidate(self):
@@ -46,7 +52,7 @@ class TestOptimizeChallengerReview(unittest.TestCase):
             args = type(
                 "Args",
                 (),
-                {"from_file": str(path), "top": 10, "json": True},
+                {"from_file": str(path), "policy_mode": "strict_v1", "max_disagreement_clusters": 10, "top": 10, "json": True},
             )()
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -54,8 +60,15 @@ class TestOptimizeChallengerReview(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["kind"], "openclaw-mem.optimize.challenger-review.v0")
         self.assertEqual(out["counts"]["disagreements"], 1)
+        self.assertEqual(out["counts"]["disagreementClusters"], 1)
         self.assertEqual(out["items"][0]["challenger_risk_level"], "medium")
+        self.assertEqual(out["items"][0]["action_family"], "importance")
+        self.assertEqual(out["items"][0]["disagreement_kind"], "risk_upgrade")
+        self.assertTrue(out["items"][0]["quarantine_recommended"])
         self.assertIn("higher_value_memory_requires_review", out["items"][0]["challenger_reasons"])
+        self.assertFalse(out["summary"]["agreement_pass"])
+        self.assertTrue(out["summary"]["quarantine_recommended"])
+        self.assertEqual(out["disagreement_clusters"][0]["action_family"], "importance")
         conn.close()
 
 

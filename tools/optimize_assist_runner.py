@@ -173,7 +173,12 @@ def _rollback_replay_gate(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _evaluate_promotion_gates(args: argparse.Namespace, *, watchdog: dict[str, Any]) -> dict[str, Any]:
+def _evaluate_promotion_gates(
+    args: argparse.Namespace,
+    *,
+    watchdog: dict[str, Any],
+    challenger: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     path_value = str(getattr(args, "promotion_gate_receipt", "") or "").strip()
     payload = _load_json_file(Path(path_value).expanduser()) if path_value else {}
     manual_precision = payload.get("manual_review_sample_precision")
@@ -206,7 +211,20 @@ def _evaluate_promotion_gates(args: argparse.Namespace, *, watchdog: dict[str, A
     if not effect_missing_ok:
         reasons.append("effect_receipt_missing_pct_exceeded")
 
-    passed = precision_ok and repeated_miss_ok and rollback_ok and effect_missing_ok
+    challenger_counts = (challenger or {}).get("counts") if isinstance((challenger or {}).get("counts"), dict) else {}
+    challenger_summary = (challenger or {}).get("summary") if isinstance((challenger or {}).get("summary"), dict) else {}
+    challenger_disagreements = int(challenger_counts.get("disagreements") or 0)
+    challenger_max_disagreements = int(getattr(args, "challenger_max_disagreements_for_promotion", 0) or 0)
+    challenger_required = bool(getattr(args, "challenger_require_agreement_for_promotion", False))
+    challenger_ok = True
+    if challenger_required:
+        challenger_ok = challenger_disagreements <= challenger_max_disagreements and bool(challenger_summary.get("agreement_pass", challenger_disagreements == 0))
+        if challenger_disagreements > challenger_max_disagreements:
+            reasons.append("challenger_disagreement_threshold_exceeded")
+        if not bool(challenger_summary.get("agreement_pass", challenger_disagreements == 0)):
+            reasons.append("challenger_agreement_required")
+
+    passed = precision_ok and repeated_miss_ok and rollback_ok and effect_missing_ok and challenger_ok
     return {
         "receipt_present": bool(path_value),
         "receipt_path": str(Path(path_value).expanduser()) if path_value else None,
@@ -215,11 +233,22 @@ def _evaluate_promotion_gates(args: argparse.Namespace, *, watchdog: dict[str, A
             "repeated_miss_regression_pct": repeated_miss_regression_pct,
             "rollback_replay_pass": rollback_replay_pass,
             "effect_receipt_missing_pct": effect_missing_pct,
+            "challenger_disagreements": challenger_disagreements,
+            "challenger_agreement_pass": bool(challenger_summary.get("agreement_pass", challenger_disagreements == 0)),
         },
         "thresholds": {
             "manual_review_sample_precision_gte": float(getattr(args, "promotion_min_manual_precision", 0.9) or 0.9),
             "repeated_miss_regression_pct_lte": float(getattr(args, "promotion_max_repeated_miss_regression_pct", 5.0) or 5.0),
             "effect_receipt_missing_pct_lte": float(getattr(args, "watchdog_max_missing_effect_receipts_pct", 0.0) or 0.0),
+            "challenger_disagreements_lte": challenger_max_disagreements,
+        },
+        "challenger": {
+            "required_for_promotion": challenger_required,
+            "receipt_present": challenger is not None,
+            "agreement_pass": bool(challenger_summary.get("agreement_pass", challenger_disagreements == 0)),
+            "promotion_ready": bool(challenger_summary.get("promotion_ready", challenger_disagreements == 0)),
+            "disagreements": challenger_disagreements,
+            "quarantine_recommended": bool(challenger_summary.get("quarantine_recommended", False)),
         },
         "passed": passed,
         "reasons": sorted(set(reasons)),
@@ -273,6 +302,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--stale-days", type=int, default=60, help="Staleness threshold in days")
     p.add_argument("--lifecycle-limit", type=int, default=200, help="Max lifecycle-shadow rows scanned")
     p.add_argument("--top", type=int, default=10, help="Max governed candidates emitted")
+    p.add_argument("--challenger-policy-mode", default="strict_v1", help="Shadow challenger policy mode (default: strict_v1)")
+    p.add_argument("--challenger-max-disagreement-clusters", type=int, default=10, help="Max disagreement clusters written into challenger receipts (default: 10)")
+    p.add_argument("--challenger-require-agreement-for-promotion", action="store_true", help="Require challenger agreement before promotion can pass")
+    p.add_argument("--challenger-max-disagreements-for-promotion", type=int, default=0, help="Promotion fails when challenger disagreements exceed this count (default: 0)")
     p.add_argument("--max-rows-per-run", type=int, default=5, help="Assist apply cap per run")
     p.add_argument("--max-rows-per-24h", type=int, default=20, help="Assist apply rolling 24h cap")
     p.add_argument("--max-importance-adjustments-per-run", type=int, default=3, help="Assist apply importance-adjustment cap per run")
@@ -338,6 +371,27 @@ def _build_governor_cmd(args: argparse.Namespace, evolution_path: Path) -> list[
     if args.approve_stale:
         cmd.append("--approve-stale")
     return cmd
+
+
+def _build_challenger_cmd(args: argparse.Namespace, evolution_path: Path) -> list[str]:
+    return [
+        args.python,
+        "-m",
+        "openclaw_mem",
+        "optimize",
+        "challenger-review",
+        "--db",
+        args.db,
+        "--from-file",
+        str(evolution_path),
+        "--policy-mode",
+        str(getattr(args, "challenger_policy_mode", "strict_v1") or "strict_v1"),
+        "--max-disagreement-clusters",
+        str(int(getattr(args, "challenger_max_disagreement_clusters", 10) or 10)),
+        "--top",
+        str(args.top),
+        "--json",
+    ]
 
 
 def _build_assist_cmd(args: argparse.Namespace, governor_path: Path) -> list[str]:
@@ -407,6 +461,14 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     governor_path = run_dir / "governor.json"
     _write_json(governor_path, governor_json)
 
+    challenger_cmd = _build_challenger_cmd(args, evolution_path)
+    challenger_res = _run(challenger_cmd)
+    if challenger_res.returncode != 0:
+        raise RunnerError(f"challenger-review failed: {challenger_res.stderr.strip() or challenger_res.stdout.strip()}")
+    challenger_json = _load_json_text("challenger-review", challenger_res.stdout)
+    challenger_path = run_dir / "challenger.json"
+    _write_json(challenger_path, challenger_json)
+
     assist_cmd = _build_assist_cmd(args, governor_path)
     if allow_apply:
         assist_cmd = [arg for arg in assist_cmd if arg != "--dry-run"]
@@ -420,7 +482,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     _write_json(assist_path, assist_json)
 
     post_watchdog = _evaluate_watchdog(args, runner_root=runner_root)
-    promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog)
+    promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog, challenger=challenger_json)
     prior_soak_green_cycles = _controller_counter(prior_controller_state.get('soak_green_cycles'))
     prior_regression_strikes = _controller_counter(prior_controller_state.get('regression_strikes'))
     if post_watchdog.get('should_pause'):
@@ -456,6 +518,12 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         'regression_strikes': regression_strikes,
         "watchdog": post_watchdog,
         "promotion_gates": promotion_gates,
+        "challenger": {
+            "policy_mode": str(getattr(args, "challenger_policy_mode", "strict_v1") or "strict_v1"),
+            "receipt_ref": str(challenger_path),
+            "summary": challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {},
+            "counts": challenger_json.get("counts") if isinstance(challenger_json.get("counts"), dict) else {},
+        },
         "last_run": {
             "run_id": run_id,
             "run_dir": str(run_dir),
@@ -477,6 +545,12 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "pre_watchdog": pre_watchdog,
         "post_watchdog": post_watchdog,
         "promotion_gates": promotion_gates,
+        "challenger": {
+            "policy_mode": str(getattr(args, "challenger_policy_mode", "strict_v1") or "strict_v1"),
+            "receipt_ref": str(challenger_path),
+            "summary": challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {},
+            "counts": challenger_json.get("counts") if isinstance(challenger_json.get("counts"), dict) else {},
+        },
         "controller_state_ref": str(controller_state_path),
     }
     _write_json(controller_receipt_path, controller_receipt)
@@ -503,27 +577,32 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "run_dir": str(run_dir),
             "evolution_packet": str(evolution_path),
             "governor_packet": str(governor_path),
+            "challenger_packet": str(challenger_path),
             "assist_after": str(assist_path),
             "controller": str(controller_receipt_path),
         },
         "counts": {
             "evolution_candidates": int(((evolution_json.get("counts") or {}).get("items") or 0)),
             "governor_approved": int(((governor_json.get("counts") or {}).get("approvedForApply") or 0)),
+            "challenger_disagreements": int(((challenger_json.get("counts") or {}).get("disagreements") or 0)),
             "assist_applied_rows": int(assist_json.get("applied_rows") or 0),
             "assist_skipped_rows": int(assist_json.get("skipped_rows") or 0),
         },
         "results": {
             "evolution_kind": evolution_json.get("kind"),
             "governor_kind": governor_json.get("kind"),
+            "challenger_kind": challenger_json.get("kind"),
             "assist_kind": assist_json.get("kind"),
             "assist_result": assist_json.get("result"),
             "blocked_by_caps": list(assist_json.get("blocked_by_caps") or []),
             "watchdog_pause_reasons": list((post_watchdog.get("pause_reasons") or [])),
             "promotion_gate_reasons": list((promotion_gates.get("reasons") or [])),
+            "challenger_quarantine_recommended": bool(((challenger_json.get("summary") or {}).get("quarantine_recommended"))),
         },
         "commands": {
             "evolution_review": evolution_cmd,
             "governor_review": governor_cmd,
+            "challenger_review": challenger_cmd,
             "assist_apply": assist_cmd,
         },
     }

@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `docs/specs/self-optimizing-memory-max-safe-autonomy-roadmap-v0.md` as the post-Phase-5 blade map for pushing from bounded low-risk autonomy toward a near-ceiling safe autonomy system without collapsing governor boundaries.
 - Added the first Phase 6 blade for optimize assist: `optimize effect-followup` now ingests prior effect-batch receipts, compares them to current observation/recent-use state, and emits delayed read-only follow-up effect judgments.
 - Added the first Phase 7 blade for optimize assist: `optimize verifier-bundle` now scans recent assist receipts, checks effect-receipt completeness + cap integrity, and runs rollback replay simulation on a temporary DB clone.
-- Added the first Phase 8 blade for optimize assist: `optimize challenger-review` now compares evolution-review output against a stricter shadow challenger policy and emits disagreement packets without mutating memory.
+- Completed Phase 8 for optimize assist: `optimize challenger-review` now emits auditable disagreement clusters and quarantine recommendations, and the scheduled runner can require challenger agreement before promotion gates pass.
 - Added the first Phase 9 blade for optimize assist: evolution-review can now emit bounded score-label alignment candidates (`delta = 0`, `reason_code = label_alignment`) as a separately-bounded low-risk family.
 - Added the first Phase 10 blade for optimize assist: runner controller state now tracks `soak_green_cycles` and `regression_strikes`, supports soak-based promotion, and can demote `auto_low_risk` back to `canary_apply` when gates fail.
 
@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added parser + follow-up effect coverage in `tests/test_optimize_effect_followup.py`.
 - Added parser + verifier bundle coverage in `tests/test_optimize_verifier_bundle.py`.
 - Added parser + challenger review coverage in `tests/test_optimize_challenger_review.py`.
+- Expanded runner coverage so challenger receipts are written every cycle and promotion can fail closed on challenger disagreement.
 - Added evolution-review coverage for score-label alignment candidates.
 - Added runner coverage for soak-based promotion counters and demotion from `auto_low_risk`.
 
