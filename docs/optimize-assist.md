@@ -140,25 +140,27 @@ If watchdog gates trip, the controller moves itself to `paused_regression` and f
 
 ### Promotion to unattended low-risk
 
-You can now promote the lane into default unattended low-risk mode with an explicit promotion receipt:
+You can now promote the lane into default unattended low-risk mode with native in-run promotion truth:
 
 ```bash
 python tools/optimize_assist_runner.py \
   --controller-mode canary_apply \
-  --promotion-gate-receipt /path/to/promotion-gates.json \
   --promote-when-gates-green \
+  --promotion-gate-receipt /path/to/emitted-promotion-gates.json \
   --json
 ```
 
-Expected promotion receipt keys:
-- `manual_review_sample_precision`
-- `repeated_miss_regression_pct`
-- `rollback_replay_pass`
+The runner now computes promotion metrics from first-party receipts produced in the same control loop, including:
+- native effect precision proxy from recent effect receipts
+- native regression-rate percentage from recent effect receipts
+- `rollback_replay_pass` from `verifier-bundle`
+- challenger agreement status when challenger agreement is required
+
+`--promotion-gate-receipt` is now an **output path only**.
+It emits the runner-computed promotion-gate artifact and is no longer accepted as authoritative input.
 
 When all thresholds are green, the controller promotes its persisted next mode to `auto_low_risk`.
 If `--challenger-require-agreement-for-promotion` is set, promotion also fails closed when the challenger lane reports disagreements above the configured threshold.
-
-Promotion now prefers native verifier evidence from `verifier-bundle` when available, rather than relying only on operator-fed rollback receipts.
 
 ### Allow bounded apply
 

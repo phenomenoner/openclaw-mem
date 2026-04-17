@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the Phase 11 posture surface for optimize assist: `optimize posture-review` now reads native runner receipts and emits a bounded `near_ceiling_ready` verdict.
 - Added a controller-gated OpenClaw cron snippet for optimize assist dry-run bring-up: `docs/snippets/openclaw-cron.optimize-assist-controller-dry-run.json`.
 - Added `docs/specs/optimize-assist-nine-point-hardening-roadmap-v0.md` to define the shortest hardening-first path from the current ~5.5-6/10 posture toward a truthful 9/10 near-ceiling safe-autonomy claim.
+- Landed the first hardening trio for optimize assist: challenger and runner now share a canonical family taxonomy, controller state writes are lock-serialized with digest-checked atomic persistence, and promotion truth is now computed from native runner/verifier/challenger receipts instead of trusting external promotion-receipt input.
 
 ### Testing
 

@@ -8,6 +8,24 @@ from unittest.mock import patch
 from tools import optimize_assist_runner as runner
 
 
+def _write_native_effect_history(root: Path, *, regressed: int = 0, neutral: int = 1) -> None:
+    effect_dir = root / "assist-receipts" / "2026-04-17"
+    effect_dir.mkdir(parents=True, exist_ok=True)
+    effect_path = effect_dir / "history.effect.json"
+    after_path = effect_dir / "history.after.json"
+    items = ([{"effect_summary": "regressed"}] * regressed) + ([{"effect_summary": "neutral"}] * neutral)
+    effect_path.write_text(json.dumps({
+        "kind": "openclaw-mem.optimize.assist.effect-batch.v0",
+        "items": items,
+    }), encoding="utf-8")
+    after_path.write_text(json.dumps({
+        "kind": "openclaw-mem.optimize.assist.after.v1",
+        "ts": runner._utcnow_iso(),
+        "result": "applied",
+        "artifacts": {"effect_ref": str(effect_path)},
+    }), encoding="utf-8")
+
+
 class TestOptimizeAssistRunner(unittest.TestCase):
     def test_build_parser_parses_apply_flags(self):
         args = runner.build_parser().parse_args(
@@ -93,6 +111,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
 
     def test_run_pipeline_writes_packet_files_and_summary(self):
         with tempfile.TemporaryDirectory() as td:
+            _write_native_effect_history(Path(td), regressed=0, neutral=2)
             args = SimpleNamespace(
                 python="python3",
                 db="/tmp/openclaw-mem.sqlite",
@@ -183,12 +202,17 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertTrue((run_dir / "governor-filtered.json").exists())
             self.assertTrue((run_dir / "assist-after.json").exists())
             self.assertTrue((run_dir / "verifier.json").exists())
+            self.assertTrue((run_dir / "promotion-gates.json").exists())
             self.assertTrue((run_dir / "controller.json").exists())
             self.assertIn("--dry-run", out["commands"]["assist_apply"])
             self.assertIn("--max-importance-adjustments-per-run", out["commands"]["assist_apply"])
             self.assertIn("--approve-importance", out["commands"]["governor_review"])
             self.assertIn("--policy-mode", out["commands"]["challenger_review"])
             self.assertIn("verifier_bundle", out["commands"])
+            state = json.loads(Path(out["controller"]["state_ref"]).read_text(encoding="utf-8"))
+            self.assertEqual(state["schema_version"], runner.CONTROLLER_STATE_SCHEMA_VERSION)
+            self.assertEqual(state["revision"], 1)
+            self.assertTrue(state["state_digest"])
 
     def test_run_pipeline_raises_on_invalid_json(self):
         with tempfile.TemporaryDirectory() as td:
@@ -346,12 +370,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
 
     def test_run_pipeline_promotes_to_auto_low_risk_when_gates_are_green(self):
         with tempfile.TemporaryDirectory() as td:
-            promotion_path = Path(td) / "promotion.json"
-            promotion_path.write_text(json.dumps({
-                "manual_review_sample_precision": 0.95,
-                "repeated_miss_regression_pct": 0.0,
-                "rollback_replay_pass": True,
-            }), encoding="utf-8")
+            _write_native_effect_history(Path(td), regressed=0, neutral=2)
             args = SimpleNamespace(
                 python="python3",
                 db="/tmp/openclaw-mem.sqlite",
@@ -382,7 +401,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 watchdog_max_missing_effect_receipts_pct=0.0,
                 watchdog_max_regressed_effect_items=0,
                 rollback_replay_receipt=None,
-                promotion_gate_receipt=str(promotion_path),
+                promotion_gate_receipt=None,
                 promote_when_gates_green=True,
                 promotion_min_manual_precision=0.9,
                 promotion_max_repeated_miss_regression_pct=5.0,
@@ -412,12 +431,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             state_path = Path(td) / runner.DEFAULT_CONTROLLER_STATE
             state_path.write_text(json.dumps({"mode": "auto_low_risk", "soak_green_cycles": 3, "regression_strikes": 0}), encoding="utf-8")
-            promotion_path = Path(td) / "promotion.json"
-            promotion_path.write_text(json.dumps({
-                "manual_review_sample_precision": 0.50,
-                "repeated_miss_regression_pct": 20.0,
-                "rollback_replay_pass": True,
-            }), encoding="utf-8")
+            _write_native_effect_history(Path(td), regressed=0, neutral=2)
             args = SimpleNamespace(
                 python="python3",
                 db="/tmp/openclaw-mem.sqlite",
@@ -448,9 +462,9 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 watchdog_max_missing_effect_receipts_pct=0.0,
                 watchdog_max_regressed_effect_items=0,
                 rollback_replay_receipt=None,
-                promotion_gate_receipt=str(promotion_path),
+                promotion_gate_receipt=None,
                 promote_when_gates_green=True,
-                promotion_min_manual_precision=0.9,
+                promotion_min_manual_precision=1.1,
                 promotion_max_repeated_miss_regression_pct=5.0,
                 soak_cycles_for_auto_low_risk=3,
                 regression_strikes_for_demotion=2,
@@ -472,12 +486,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
 
     def test_run_pipeline_blocks_promotion_when_challenger_agreement_required(self):
         with tempfile.TemporaryDirectory() as td:
-            promotion_path = Path(td) / "promotion.json"
-            promotion_path.write_text(json.dumps({
-                "manual_review_sample_precision": 0.95,
-                "repeated_miss_regression_pct": 0.0,
-                "rollback_replay_pass": True,
-            }), encoding="utf-8")
+            _write_native_effect_history(Path(td), regressed=0, neutral=2)
             args = SimpleNamespace(
                 python="python3",
                 db="/tmp/openclaw-mem.sqlite",
@@ -508,7 +517,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 watchdog_max_missing_effect_receipts_pct=0.0,
                 watchdog_max_regressed_effect_items=0,
                 rollback_replay_receipt=None,
-                promotion_gate_receipt=str(promotion_path),
+                promotion_gate_receipt=None,
                 promote_when_gates_green=True,
                 promotion_min_manual_precision=0.9,
                 promotion_max_repeated_miss_regression_pct=5.0,
@@ -532,6 +541,121 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertFalse(out["controller"]["promotion_gates_passed"])
             self.assertEqual(out["counts"]["challenger_disagreements"], 1)
             self.assertIn("challenger_agreement_required", out["results"]["promotion_gate_reasons"])
+
+    def test_filter_governor_packet_quarantines_entire_importance_family(self):
+        governor_json = {
+            "items": [
+                {
+                    "candidate_id": "importance-downshift-1",
+                    "action": "adjust_importance_score",
+                    "patch": {"importance": {"score": 0.25, "label": "reference", "delta": -0.05, "reason_code": "stale_pressure"}},
+                    "decision": "approved_for_apply",
+                    "reasons": [],
+                }
+            ],
+            "counts": {"approvedForApply": 1},
+        }
+        challenger_json = {
+            "disagreements": [
+                {
+                    "candidate_id": "different-candidate",
+                    "action_family": "importance_downshift",
+                    "quarantine_recommended": True,
+                }
+            ]
+        }
+        filtered, blocked_by_family, challenger_filter = runner._filter_governor_packet(
+            governor_json,
+            challenger_json,
+            family_state={
+                "stale_candidate": {"enabled": True, "mode": "enabled", "reasons": []},
+                "importance_downshift": {"enabled": True, "mode": "enabled", "reasons": []},
+                "score_label_alignment": {"enabled": True, "mode": "enabled", "reasons": []},
+            },
+            enforce_quarantine=True,
+        )
+        self.assertEqual(blocked_by_family["importance_downshift"], 0)
+        self.assertEqual(challenger_filter["blocked_by_quarantine"], 1)
+        self.assertEqual(filtered["counts"]["approvedForApply"], 0)
+        self.assertEqual(filtered["items"][0]["decision"], "proposal_only")
+        self.assertIn("challenger_quarantine:importance_downshift", filtered["items"][0]["reasons"])
+
+    def test_load_controller_state_rejects_digest_mismatch(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / runner.DEFAULT_CONTROLLER_STATE
+            payload = {
+                "kind": "openclaw-mem.optimize.assist.controller-state.v0",
+                "schema_version": runner.CONTROLLER_STATE_SCHEMA_VERSION,
+                "revision": 1,
+                "mode": "dry_run",
+                "state_digest": "bogus",
+            }
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaises(runner.RunnerError):
+                runner._load_controller_state(path)
+
+    def test_run_pipeline_ignores_external_promotion_receipt_input(self):
+        with tempfile.TemporaryDirectory() as td:
+            _write_native_effect_history(Path(td), regressed=0, neutral=2)
+            bogus_path = Path(td) / "promotion.json"
+            bogus_path.write_text(json.dumps({
+                "manual_review_sample_precision": 0.0,
+                "repeated_miss_regression_pct": 99.0,
+                "rollback_replay_pass": False,
+            }), encoding="utf-8")
+            args = SimpleNamespace(
+                python="python3",
+                db="/tmp/openclaw-mem.sqlite",
+                runner_root=td,
+                operator="lyria",
+                allow_apply=True,
+                approve_importance=True,
+                approve_stale=True,
+                scope=None,
+                limit=100,
+                stale_days=60,
+                lifecycle_limit=50,
+                top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
+                max_rows_per_run=5,
+                max_rows_per_24h=20,
+                max_importance_adjustments_per_run=3,
+                max_importance_adjustments_per_24h=10,
+                controller_mode="canary_apply",
+                controller_state_path=None,
+                watchdog_window_hours=24,
+                watchdog_max_missing_effect_receipts_pct=0.0,
+                watchdog_max_regressed_effect_items=0,
+                rollback_replay_receipt=None,
+                promotion_gate_receipt=str(bogus_path),
+                promote_when_gates_green=True,
+                promotion_min_manual_precision=0.9,
+                promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=1,
+                regression_strikes_for_demotion=2,
+                lane="observations.assist",
+                json=True,
+            )
+            outputs = [
+                runner.CommandResult(argv=["evolution"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.evolution-review.v0", "counts": {"items": 1}}), stderr=""),
+                runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
+                runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}), stderr=""),
+                runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "applied", "applied_rows": 1, "skipped_rows": 0, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
+                runner.CommandResult(argv=["verifier"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.verifier-bundle.v0", "summary": {"effect_receipt_missing_pct": 0.0, "cap_integrity_pass": True, "rollback_replay_pass": True}}), stderr=""),
+            ]
+            with patch.object(runner, "_run", side_effect=outputs):
+                out = runner.run_pipeline(args)
+
+            self.assertTrue(out["controller"]["promotion_gates_passed"])
+            emitted = json.loads(bogus_path.read_text(encoding="utf-8"))
+            self.assertEqual(emitted["metrics"]["manual_review_sample_precision"], 1.0)
+            self.assertTrue(emitted["passed"])
 
 
 if __name__ == "__main__":

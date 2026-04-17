@@ -89,6 +89,7 @@ from openclaw_mem.provenance_trust_schema import (
 from openclaw_mem.task_markers import summary_has_task_marker as _summary_has_task_marker_impl
 from openclaw_mem.capsule import add_capsule_parser_to_cli
 from openclaw_mem.importance import label_from_score, make_importance, parse_importance_score
+from openclaw_mem.optimize_assist_families import action_family_from_action_patch
 
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
@@ -2332,22 +2333,13 @@ def _optimize_challenger_load_packet(path_value: Optional[str]) -> Dict[str, Any
     return payload
 
 
-def _optimize_challenger_action_family(action: str) -> str:
-    if action == 'adjust_importance_score':
-        return 'importance'
-    if action == 'set_stale_candidate':
-        return 'stale_candidate'
-    return 'unknown'
-
-
-
 def _optimize_challenger_review_item(item: Dict[str, Any], *, policy_mode: str = 'strict_v1') -> Dict[str, Any]:
     action = str(item.get('action') or '').strip()
-    action_family = _optimize_challenger_action_family(action)
+    patch = item.get('patch') if isinstance(item.get('patch'), dict) else {}
+    action_family = action_family_from_action_patch(action, patch)
     primary_risk = str(item.get('risk_level') or 'low').strip() or 'low'
     primary_auto_apply_eligible = bool(item.get('auto_apply_eligible', item.get('safe_for_auto_apply', primary_risk == 'low')))
     evidence = item.get('evidence') if isinstance(item.get('evidence'), dict) else {}
-    patch = item.get('patch') if isinstance(item.get('patch'), dict) else {}
     challenger_risk = primary_risk
     challenger_reasons: List[str] = []
 
