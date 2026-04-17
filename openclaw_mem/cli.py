@@ -54,6 +54,7 @@ from openclaw_mem.docs_memory import (
 )
 from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine, rank_rrf
 from openclaw_mem.optimization import (
+    _recent_use_from_lifecycle,
     build_consolidation_review,
     build_evolution_review,
     build_memory_health_review,
@@ -2094,6 +2095,145 @@ def _optimize_assist_load_governor_packet(path_value: Optional[str]) -> Dict[str
     return payload
 
 
+def _optimize_effect_followup_load_packet(path_value: Optional[str]) -> Dict[str, Any]:
+    if path_value:
+        raw = Path(path_value).read_text(encoding='utf-8')
+    else:
+        raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except Exception as e:
+        raise ValueError(f'invalid_json: {e}') from e
+    if not isinstance(payload, dict):
+        raise ValueError('packet must be a JSON object')
+    if str(payload.get('kind') or '') != 'openclaw-mem.optimize.assist.effect-batch.v0':
+        raise ValueError('unsupported packet kind')
+    items = payload.get('items')
+    if not isinstance(items, list):
+        raise ValueError('packet items must be a list')
+    return payload
+
+
+def _optimize_effect_followup_action_family(item: Dict[str, Any]) -> str:
+    proposal_id = str(item.get('proposal_id') or '')
+    if proposal_id.startswith('stale-candidate-'):
+        return 'set_stale_candidate'
+    if proposal_id.startswith('importance-downshift-') or proposal_id.startswith('importance-upshift-'):
+        return 'adjust_importance_score'
+    return 'unknown'
+
+
+def _optimize_effect_followup_item(
+    conn: sqlite3.Connection,
+    *,
+    item: Dict[str, Any],
+    recent_use_index: Dict[int, Dict[str, Any]],
+    followup_measured_at: str,
+) -> Dict[str, Any]:
+    observation_id = int(item.get('observation_id') or 0)
+    baseline = item.get('baseline_signals') if isinstance(item.get('baseline_signals'), dict) else {}
+    baseline_recent_use_count = int(baseline.get('recent_use_count') or 0)
+    baseline_next_score = baseline.get('next_score')
+    family = _optimize_effect_followup_action_family(item)
+    current_signals: Dict[str, Any] = {}
+    quality_delta: Dict[str, Any] = {}
+    reasons: List[str] = []
+
+    if observation_id <= 0:
+        return {
+            'kind': 'openclaw-mem.optimize.assist.effect-followup.v0',
+            'proposal_id': str(item.get('proposal_id') or ''),
+            'observation_id': observation_id,
+            'effect_summary': 'insufficient_data',
+            'measurement_mode': 'followup_v0',
+            'effect_window': str(item.get('effect_window') or '24h'),
+            'measured_at': followup_measured_at,
+            'family': family,
+            'quality_delta': {},
+            'baseline_signals': baseline,
+            'current_signals': {},
+            'reasons': ['missing_observation_id'],
+        }
+
+    row = conn.execute('SELECT detail_json FROM observations WHERE id = ?', (observation_id,)).fetchone()
+    if row is None:
+        return {
+            'kind': 'openclaw-mem.optimize.assist.effect-followup.v0',
+            'proposal_id': str(item.get('proposal_id') or ''),
+            'observation_id': observation_id,
+            'effect_summary': 'insufficient_data',
+            'measurement_mode': 'followup_v0',
+            'effect_window': str(item.get('effect_window') or '24h'),
+            'measured_at': followup_measured_at,
+            'family': family,
+            'quality_delta': {},
+            'baseline_signals': baseline,
+            'current_signals': {},
+            'reasons': ['missing_observation_row'],
+        }
+
+    detail = _pack_parse_detail_json(row['detail_json'])
+    lifecycle = detail.get('lifecycle') if isinstance(detail.get('lifecycle'), dict) else {}
+    recent_use_slot = recent_use_index.get(observation_id, {})
+    current_recent_use_count = int(recent_use_slot.get('count') or 0)
+    quality_delta['recent_use_count'] = current_recent_use_count - baseline_recent_use_count
+    current_signals['recent_use_count'] = current_recent_use_count
+    current_signals['recent_use_last_ts'] = recent_use_slot.get('last_selected_ts')
+
+    if family == 'set_stale_candidate':
+        current_signals['stale_candidate'] = bool(lifecycle.get('stale_candidate'))
+        if current_recent_use_count > baseline_recent_use_count:
+            effect_summary = 'regressed'
+            reasons.append('recent_use_resurfaced_after_stale_mark')
+        elif lifecycle.get('stale_candidate') is True:
+            effect_summary = 'neutral'
+            reasons.append('stale_mark_persisted_without_recent_use')
+        else:
+            effect_summary = 'insufficient_data'
+            reasons.append('stale_mark_not_present')
+    elif family == 'adjust_importance_score':
+        importance = detail.get('importance') if isinstance(detail.get('importance'), dict) else detail.get('importance')
+        current_score = round(parse_importance_score(importance), 4)
+        current_label = detail.get('importance', {}).get('label') if isinstance(detail.get('importance'), dict) else None
+        current_signals['current_score'] = current_score
+        current_signals['current_label'] = current_label
+        try:
+            baseline_next_score_value = round(float(baseline_next_score), 4)
+            quality_delta['score_delta_vs_followup_target'] = round(current_score - baseline_next_score_value, 4)
+        except Exception:
+            baseline_next_score_value = None
+            reasons.append('baseline_next_score_unavailable')
+        if current_recent_use_count > baseline_recent_use_count:
+            effect_summary = 'regressed'
+            reasons.append('recent_use_resurfaced_after_importance_adjustment')
+        elif baseline_next_score_value is not None and current_score <= baseline_next_score_value:
+            effect_summary = 'improved'
+            reasons.append('score_change_held_without_recent_use_regression')
+        elif baseline_next_score_value is not None:
+            effect_summary = 'neutral'
+            reasons.append('score_rebounded_without_recent_use_signal')
+        else:
+            effect_summary = 'insufficient_data'
+    else:
+        effect_summary = 'insufficient_data'
+        reasons.append('unknown_action_family')
+
+    return {
+        'kind': 'openclaw-mem.optimize.assist.effect-followup.v0',
+        'proposal_id': str(item.get('proposal_id') or ''),
+        'observation_id': observation_id,
+        'effect_summary': effect_summary,
+        'measurement_mode': 'followup_v0',
+        'effect_window': str(item.get('effect_window') or '24h'),
+        'measured_at': followup_measured_at,
+        'family': family,
+        'quality_delta': quality_delta,
+        'baseline_signals': baseline,
+        'current_signals': current_signals,
+        'reasons': reasons,
+    }
+
+
 def _optimize_assist_recent_applied_rows(run_dir: Path, *, since_ts: datetime) -> int:
     if not run_dir.exists():
         return 0
@@ -2541,6 +2681,60 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
     after_path.write_text(json.dumps(after_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
     _emit(after_payload, True)
+
+
+def cmd_optimize_effect_followup(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        packet = _optimize_effect_followup_load_packet(getattr(args, 'from_file', None))
+    except Exception as e:
+        _emit({'error': str(e)}, True)
+        sys.exit(2)
+
+    lifecycle_limit = _optimize_policy_int(getattr(args, 'lifecycle_limit', 200), 200, min_value=1)
+    top = _optimize_policy_int(getattr(args, 'top', 50), 50, min_value=1)
+    recent_use_meta = _recent_use_from_lifecycle(conn, lifecycle_limit=lifecycle_limit)
+    recent_use_index = recent_use_meta.get('by_obs_id', {}) if isinstance(recent_use_meta, dict) else {}
+    followup_measured_at = _utcnow_iso()
+
+    effect_items = [item for item in list(packet.get('items') or []) if isinstance(item, dict)]
+    followups = [
+        _optimize_effect_followup_item(
+            conn,
+            item=item,
+            recent_use_index=recent_use_index,
+            followup_measured_at=followup_measured_at,
+        )
+        for item in effect_items[:top]
+    ]
+
+    out = {
+        'kind': 'openclaw-mem.optimize.effect-followup.v0',
+        'ts': followup_measured_at,
+        'version': {'openclaw_mem': __version__, 'schema': 'v0'},
+        'source': {
+            'kind': str(packet.get('kind') or ''),
+            'effect_items': len(effect_items),
+            'followed_items': len(followups),
+            'lifecycle_rows_scanned': int(recent_use_meta.get('lifecycle_rows_scanned') or 0),
+            'selection_events': int(recent_use_meta.get('selection_events') or 0),
+        },
+        'policy': {
+            'mode': 'effect_followup',
+            'writes_performed': 0,
+            'memory_mutation': 'none',
+            'governor_required': False,
+            'read_only': True,
+        },
+        'counts': {
+            'items': len(followups),
+            'improved': sum(1 for item in followups if str(item.get('effect_summary') or '') == 'improved'),
+            'neutral': sum(1 for item in followups if str(item.get('effect_summary') or '') == 'neutral'),
+            'regressed': sum(1 for item in followups if str(item.get('effect_summary') or '') == 'regressed'),
+            'insufficientData': sum(1 for item in followups if str(item.get('effect_summary') or '') == 'insufficient_data'),
+        },
+        'items': followups,
+    }
+    _emit(out, True)
 
 
 def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -14054,6 +14248,13 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--max-importance-adjustments-per-24h", dest="max_importance_adjustments_per_24h", type=int, default=10, help="Abort before write if the rolling 24h importance-adjustment cap would be exceeded (default: 10)")
     o.add_argument("--dry-run", action="store_true", help="Validate packet, emit receipts, and skip writes")
     o.set_defaults(func=cmd_optimize_assist_apply)
+
+    o = osub.add_parser("effect-followup", help="Measure delayed optimize-assist effect receipts against current state (no writes)")
+    add_common(o)
+    o.add_argument("--from-file", dest="from_file", default=None, help="Effect batch JSON path (default: stdin)")
+    o.add_argument("--lifecycle-limit", dest="lifecycle_limit", type=int, default=200, help="Max pack_lifecycle_shadow rows scanned for recent-use follow-up signals (default: 200)")
+    o.add_argument("--top", type=int, default=50, help="Max effect items to follow up per run (default: 50)")
+    o.set_defaults(func=cmd_optimize_effect_followup)
 
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)

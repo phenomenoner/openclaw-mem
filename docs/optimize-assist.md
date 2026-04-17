@@ -31,6 +31,23 @@ The candidate packets now also carry bounded classifier metadata:
 This metadata does not create a new write path by itself.
 It exists so unattended low-risk promotion can be measured and fail closed later.
 
+## Follow-up effect measurement
+
+Phase 6 now starts with a read-only follow-up surface:
+
+```bash
+python -m openclaw_mem optimize effect-followup \
+  --db /path/to/openclaw-mem.sqlite \
+  --from-file /path/to/assist-effect.json \
+  --json
+```
+
+This command:
+- reads a prior `openclaw-mem.optimize.assist.effect-batch.v0` receipt
+- compares baseline signals to current observation state + recent-use signals
+- emits delayed `improved | neutral | regressed | insufficient_data` follow-up judgments
+- performs **no writes**
+
 ## Default posture
 
 The recommended deployment posture is:

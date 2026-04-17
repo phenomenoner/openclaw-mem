@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the Phase 4 controller/watchdog lane for optimize assist: the scheduled runner now persists controller state, emits controller receipts, and pauses itself on missing effect receipts, regressed effect summaries, or rollback replay failure receipts.
 - Added the Phase 5 promotion-gate lane for optimize assist: the runner now accepts explicit promotion gate receipts and can promote persisted mode to `auto_low_risk` when thresholds stay green.
 - Added `docs/specs/self-optimizing-memory-max-safe-autonomy-roadmap-v0.md` as the post-Phase-5 blade map for pushing from bounded low-risk autonomy toward a near-ceiling safe autonomy system without collapsing governor boundaries.
+- Added the first Phase 6 blade for optimize assist: `optimize effect-followup` now ingests prior effect-batch receipts, compares them to current observation/recent-use state, and emits delayed read-only follow-up effect judgments.
 
 ### Testing
 
@@ -32,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added classifier coverage for low-vs-medium importance candidates and fail-closed governor behavior on medium-risk packets.
 - Added assist-apply and runner coverage for importance-family caps and propagated cap flags.
 - Added runner coverage for controller pause behavior and promotion-gate driven `auto_low_risk` promotion.
+- Added parser + follow-up effect coverage in `tests/test_optimize_effect_followup.py`.
 
 ## [1.6.0] - 2026-04-15
 
