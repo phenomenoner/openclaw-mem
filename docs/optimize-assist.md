@@ -48,6 +48,24 @@ This command:
 - emits delayed `improved | neutral | regressed | insufficient_data` follow-up judgments
 - performs **no writes**
 
+## Verifier bundle
+
+Phase 7 now starts with a read-only verifier surface:
+
+```bash
+python -m openclaw_mem optimize verifier-bundle \
+  --db /path/to/openclaw-mem.sqlite \
+  --run-dir ~/.openclaw/memory/openclaw-mem/optimize-assist \
+  --json
+```
+
+This command:
+- scans recent assist apply receipts
+- checks effect-receipt completeness
+- checks cap integrity against before receipts
+- runs rollback replay simulation on a temporary DB clone when the current row state still matches the recorded after hashes
+- emits a compact verifier bundle without mutating memory rows
+
 ## Default posture
 
 The recommended deployment posture is:

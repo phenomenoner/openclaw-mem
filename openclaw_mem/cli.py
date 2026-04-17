@@ -2234,6 +2234,85 @@ def _optimize_effect_followup_item(
     }
 
 
+def _optimize_verifier_load_json(path: Path) -> Dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _optimize_verifier_recent_after_receipts(run_root: Path, *, since_ts: datetime) -> List[Dict[str, Any]]:
+    if not run_root.exists():
+        return []
+    out: List[Dict[str, Any]] = []
+    for path in run_root.rglob('*.after.json'):
+        payload = _optimize_verifier_load_json(path)
+        if str(payload.get('kind') or '') != 'openclaw-mem.optimize.assist.after.v1':
+            continue
+        ts_value = _parse_iso_utc(payload.get('ts'))
+        if ts_value is None or ts_value < since_ts:
+            continue
+        payload['_path'] = str(path)
+        out.append(payload)
+    out.sort(key=lambda x: str(x.get('ts') or ''), reverse=True)
+    return out
+
+
+def _optimize_verifier_cap_integrity(after_payload: Dict[str, Any], before_payload: Dict[str, Any]) -> Dict[str, Any]:
+    caps = before_payload.get('caps') if isinstance(before_payload.get('caps'), dict) else {}
+    applied_rows = int(after_payload.get('applied_rows') or 0)
+    applied_action_counts = after_payload.get('applied_action_counts') if isinstance(after_payload.get('applied_action_counts'), dict) else {}
+    reasons: List[str] = []
+    if applied_rows > int(caps.get('max_rows_per_apply_run') or 0):
+        reasons.append('max_rows_per_apply_run_exceeded')
+    if int(applied_action_counts.get('adjust_importance_score') or 0) > int(caps.get('max_importance_adjustments_per_run') or 0):
+        reasons.append('max_importance_adjustments_per_run_exceeded')
+    return {
+        'pass': len(reasons) == 0,
+        'reasons': reasons,
+    }
+
+
+def _optimize_verifier_rollback_replay(conn: sqlite3.Connection, rollback_payload: Dict[str, Any], after_payload: Dict[str, Any]) -> Dict[str, Any]:
+    mutations = rollback_payload.get('mutations') if isinstance(rollback_payload.get('mutations'), list) else []
+    if not mutations:
+        return {'rollback_replay_pass': None, 'reason': 'no_mutations'}
+    temp_conn = sqlite3.connect(':memory:')
+    temp_conn.row_factory = sqlite3.Row
+    try:
+        conn.backup(temp_conn)
+        after_hashes = after_payload.get('after_hashes') if isinstance(after_payload.get('after_hashes'), dict) else {}
+        for mutation in mutations:
+            if not isinstance(mutation, dict):
+                return {'rollback_replay_pass': False, 'reason': 'invalid_mutation_entry'}
+            obs_id = int(mutation.get('observation_id') or 0)
+            if obs_id <= 0:
+                return {'rollback_replay_pass': False, 'reason': 'invalid_observation_id'}
+            row = temp_conn.execute('SELECT detail_json FROM observations WHERE id = ?', (obs_id,)).fetchone()
+            if row is None:
+                return {'rollback_replay_pass': False, 'reason': 'missing_observation_row'}
+            current_detail = _pack_parse_detail_json(row['detail_json'])
+            current_hash = _json_sha256(current_detail)
+            expected_after_hash = str(after_hashes.get(str(obs_id)) or mutation.get('after_sha256') or '')
+            if expected_after_hash and current_hash != expected_after_hash:
+                return {'rollback_replay_pass': None, 'reason': 'state_drifted_since_apply'}
+        for mutation in mutations:
+            obs_id = int(mutation.get('observation_id') or 0)
+            before_detail = mutation.get('before_detail_json') if isinstance(mutation.get('before_detail_json'), dict) else {}
+            _graph_update_observation_detail(temp_conn, rowid=obs_id, detail=before_detail)
+            row = temp_conn.execute('SELECT detail_json FROM observations WHERE id = ?', (obs_id,)).fetchone()
+            if row is None:
+                return {'rollback_replay_pass': False, 'reason': 'missing_observation_after_replay'}
+            replayed_detail = _pack_parse_detail_json(row['detail_json'])
+            replayed_hash = _json_sha256(replayed_detail)
+            if replayed_hash != str(mutation.get('before_sha256') or ''):
+                return {'rollback_replay_pass': False, 'reason': 'before_hash_mismatch_after_replay'}
+        return {'rollback_replay_pass': True, 'reason': 'replay_verified'}
+    finally:
+        temp_conn.close()
+
+
 def _optimize_assist_recent_applied_rows(run_dir: Path, *, since_ts: datetime) -> int:
     if not run_dir.exists():
         return 0
@@ -2733,6 +2812,73 @@ def cmd_optimize_effect_followup(conn: sqlite3.Connection, args: argparse.Namesp
             'insufficientData': sum(1 for item in followups if str(item.get('effect_summary') or '') == 'insufficient_data'),
         },
         'items': followups,
+    }
+    _emit(out, True)
+
+
+def cmd_optimize_verifier_bundle(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    run_root = Path(os.path.expanduser(str(getattr(args, 'run_dir', None) or DEFAULT_OPTIMIZE_ASSIST_RUN_DIR)))
+    window_hours = _optimize_policy_int(getattr(args, 'window_hours', 24), 24, min_value=1)
+    top = _optimize_policy_int(getattr(args, 'top', 20), 20, min_value=1)
+    since_ts = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+    receipts = _optimize_verifier_recent_after_receipts(run_root, since_ts=since_ts)[:top]
+
+    items: List[Dict[str, Any]] = []
+    for after_payload in receipts:
+        artifacts = after_payload.get('artifacts') if isinstance(after_payload.get('artifacts'), dict) else {}
+        before_ref = str(artifacts.get('before_ref') or '').strip()
+        rollback_ref = str(artifacts.get('rollback_ref') or '').strip()
+        effect_ref = str(artifacts.get('effect_ref') or '').strip()
+        before_payload = _optimize_verifier_load_json(Path(before_ref).expanduser()) if before_ref else {}
+        rollback_payload = _optimize_verifier_load_json(Path(rollback_ref).expanduser()) if rollback_ref else {}
+        effect_payload = _optimize_verifier_load_json(Path(effect_ref).expanduser()) if effect_ref else {}
+        effect_receipt_present = str(effect_payload.get('kind') or '') == 'openclaw-mem.optimize.assist.effect-batch.v0'
+        cap_integrity = _optimize_verifier_cap_integrity(after_payload, before_payload) if before_payload else {'pass': False, 'reasons': ['missing_before_receipt']}
+        rollback_replay = _optimize_verifier_rollback_replay(conn, rollback_payload, after_payload) if rollback_payload else {'rollback_replay_pass': None, 'reason': 'missing_rollback_receipt'}
+        item = {
+            'run_id': str(after_payload.get('run_id') or ''),
+            'ts': after_payload.get('ts'),
+            'result': str(after_payload.get('result') or ''),
+            'after_ref': after_payload.get('_path'),
+            'effect_receipt_present': effect_receipt_present,
+            'cap_integrity_pass': bool(cap_integrity.get('pass')),
+            'cap_integrity_reasons': list(cap_integrity.get('reasons') or []),
+            'rollback_replay_pass': rollback_replay.get('rollback_replay_pass'),
+            'rollback_replay_reason': rollback_replay.get('reason'),
+            'applied_rows': int(after_payload.get('applied_rows') or 0),
+            'blocked_by_caps': list(after_payload.get('blocked_by_caps') or []),
+        }
+        items.append(item)
+
+    out = {
+        'kind': 'openclaw-mem.optimize.verifier-bundle.v0',
+        'ts': _utcnow_iso(),
+        'version': {'openclaw_mem': __version__, 'schema': 'v0'},
+        'source': {
+            'run_root': str(run_root),
+            'window_hours': window_hours,
+            'receipts_scanned': len(receipts),
+        },
+        'policy': {
+            'mode': 'verifier_bundle',
+            'writes_performed': 0,
+            'memory_mutation': 'none',
+            'read_only': True,
+        },
+        'counts': {
+            'items': len(items),
+            'effectReceiptPresent': sum(1 for item in items if item.get('effect_receipt_present')),
+            'capIntegrityPass': sum(1 for item in items if item.get('cap_integrity_pass')),
+            'rollbackReplayPass': sum(1 for item in items if item.get('rollback_replay_pass') is True),
+            'rollbackReplayInconclusive': sum(1 for item in items if item.get('rollback_replay_pass') is None),
+            'rollbackReplayFail': sum(1 for item in items if item.get('rollback_replay_pass') is False),
+        },
+        'summary': {
+            'effect_receipt_missing_pct': round(((sum(1 for item in items if not item.get('effect_receipt_present')) / len(items)) * 100.0), 2) if items else 0.0,
+            'cap_integrity_pass': all(bool(item.get('cap_integrity_pass')) for item in items) if items else True,
+            'rollback_replay_pass': all(item.get('rollback_replay_pass') is True for item in items if item.get('rollback_replay_pass') is not None) if any(item.get('rollback_replay_pass') is not None for item in items) else None,
+        },
+        'items': items,
     }
     _emit(out, True)
 
@@ -14255,6 +14401,13 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--lifecycle-limit", dest="lifecycle_limit", type=int, default=200, help="Max pack_lifecycle_shadow rows scanned for recent-use follow-up signals (default: 200)")
     o.add_argument("--top", type=int, default=50, help="Max effect items to follow up per run (default: 50)")
     o.set_defaults(func=cmd_optimize_effect_followup)
+
+    o = osub.add_parser("verifier-bundle", help="Generate a read-only verifier bundle from optimize-assist receipts")
+    add_common(o)
+    o.add_argument("--run-dir", dest="run_dir", default=DEFAULT_OPTIMIZE_ASSIST_RUN_DIR, help="Directory for optimize-assist receipts (default: ~/.openclaw/memory/openclaw-mem/optimize-assist)")
+    o.add_argument("--window-hours", dest="window_hours", type=int, default=24, help="Recent receipt window inspected by the verifier bundle (default: 24)")
+    o.add_argument("--top", type=int, default=20, help="Max after receipts to verify (default: 20)")
+    o.set_defaults(func=cmd_optimize_verifier_bundle)
 
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)
