@@ -36,6 +36,10 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 "strict_v1",
                 "--challenger-max-disagreement-clusters",
                 "6",
+                "--disable-family",
+                "score_label_alignment",
+                "--enable-family",
+                "score_label_alignment",
                 "--challenger-require-agreement-for-promotion",
                 "--challenger-max-disagreements-for-promotion",
                 "0",
@@ -71,6 +75,9 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         self.assertEqual(args.scope, "team/alpha")
         self.assertEqual(args.challenger_policy_mode, "strict_v1")
         self.assertEqual(args.challenger_max_disagreement_clusters, 6)
+        self.assertTrue(args.challenger_enforce_quarantine)
+        self.assertEqual(args.disable_family, ["score_label_alignment"])
+        self.assertEqual(args.enable_family, ["score_label_alignment"])
         self.assertTrue(args.challenger_require_agreement_for_promotion)
         self.assertEqual(args.challenger_max_disagreements_for_promotion, 0)
         self.assertEqual(args.max_rows_per_run, 2)
@@ -101,8 +108,11 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 top=5,
                 challenger_policy_mode="strict_v1",
                 challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
                 challenger_require_agreement_for_promotion=False,
                 challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -147,6 +157,12 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                     stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "result": "dry_run", "applied_rows": 0, "skipped_rows": 1, "blocked_by_caps": []}),
                     stderr="",
                 ),
+                runner.CommandResult(
+                    argv=["verifier"],
+                    returncode=0,
+                    stdout=json.dumps({"kind": "openclaw-mem.optimize.verifier-bundle.v0", "summary": {"effect_receipt_missing_pct": 0.0, "cap_integrity_pass": True, "rollback_replay_pass": True}}),
+                    stderr="",
+                ),
             ]
 
             with patch.object(runner, "_run", side_effect=outputs):
@@ -164,12 +180,15 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertTrue((run_dir / "evolution.json").exists())
             self.assertTrue((run_dir / "governor.json").exists())
             self.assertTrue((run_dir / "challenger.json").exists())
+            self.assertTrue((run_dir / "governor-filtered.json").exists())
             self.assertTrue((run_dir / "assist-after.json").exists())
+            self.assertTrue((run_dir / "verifier.json").exists())
             self.assertTrue((run_dir / "controller.json").exists())
             self.assertIn("--dry-run", out["commands"]["assist_apply"])
             self.assertIn("--max-importance-adjustments-per-run", out["commands"]["assist_apply"])
             self.assertIn("--approve-importance", out["commands"]["governor_review"])
             self.assertIn("--policy-mode", out["commands"]["challenger_review"])
+            self.assertIn("verifier_bundle", out["commands"])
 
     def test_run_pipeline_raises_on_invalid_json(self):
         with tempfile.TemporaryDirectory() as td:
@@ -188,8 +207,11 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 top=5,
                 challenger_policy_mode="strict_v1",
                 challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
                 challenger_require_agreement_for_promotion=False,
                 challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -233,8 +255,11 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 top=5,
                 challenger_policy_mode="strict_v1",
                 challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
                 challenger_require_agreement_for_promotion=False,
                 challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -302,6 +327,12 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                     }),
                     stderr="",
                 ),
+                runner.CommandResult(
+                    argv=["verifier"],
+                    returncode=0,
+                    stdout=json.dumps({"kind": "openclaw-mem.optimize.verifier-bundle.v0", "summary": {"effect_receipt_missing_pct": 0.0, "cap_integrity_pass": True, "rollback_replay_pass": True}}),
+                    stderr="",
+                ),
             ]
             with patch.object(runner, "_run", side_effect=outputs):
                 out = runner.run_pipeline(args)
@@ -336,8 +367,11 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 top=5,
                 challenger_policy_mode="strict_v1",
                 challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
                 challenger_require_agreement_for_promotion=False,
                 challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -362,6 +396,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
                 runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}), stderr=""),
                 runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "applied", "applied_rows": 1, "skipped_rows": 0, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
+                runner.CommandResult(argv=["verifier"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.verifier-bundle.v0", "summary": {"effect_receipt_missing_pct": 0.0, "cap_integrity_pass": True, "rollback_replay_pass": True}}), stderr=""),
             ]
             with patch.object(runner, "_run", side_effect=outputs):
                 out = runner.run_pipeline(args)
@@ -398,8 +433,11 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 top=5,
                 challenger_policy_mode="strict_v1",
                 challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
                 challenger_require_agreement_for_promotion=False,
                 challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -424,6 +462,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
                 runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}), stderr=""),
                 runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "applied", "applied_rows": 1, "skipped_rows": 0, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
+                runner.CommandResult(argv=["verifier"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.verifier-bundle.v0", "summary": {"effect_receipt_missing_pct": 0.0, "cap_integrity_pass": True, "rollback_replay_pass": True}}), stderr=""),
             ]
             with patch.object(runner, "_run", side_effect=outputs):
                 out = runner.run_pipeline(args)
@@ -454,8 +493,11 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 top=5,
                 challenger_policy_mode="strict_v1",
                 challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
                 challenger_require_agreement_for_promotion=True,
                 challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
                 max_rows_per_run=5,
                 max_rows_per_24h=20,
                 max_importance_adjustments_per_run=3,
@@ -478,8 +520,9 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             outputs = [
                 runner.CommandResult(argv=["evolution"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.evolution-review.v0", "counts": {"items": 1}}), stderr=""),
                 runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
-                runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 1}, "summary": {"agreement_pass": False, "promotion_ready": False, "quarantine_recommended": True}}), stderr=""),
-                runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "applied", "applied_rows": 1, "skipped_rows": 0, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
+                runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 1}, "summary": {"agreement_pass": False, "promotion_ready": False, "quarantine_recommended": True}, "disagreements": [{"candidate_id": "importance-downshift-1", "action_family": "importance_downshift", "quarantine_recommended": True}]}), stderr=""),
+                runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "dry_run", "applied_rows": 0, "skipped_rows": 1, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
+                runner.CommandResult(argv=["verifier"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.verifier-bundle.v0", "summary": {"effect_receipt_missing_pct": 0.0, "cap_integrity_pass": True, "rollback_replay_pass": True}}), stderr=""),
             ]
 
             with patch.object(runner, "_run", side_effect=outputs):

@@ -23,6 +23,7 @@ DEFAULT_DB = os.path.join(DEFAULT_STATE_DIR, "memory", "openclaw-mem.sqlite")
 DEFAULT_RUNNER_ROOT = os.path.join(DEFAULT_STATE_DIR, "memory", "openclaw-mem", "optimize-assist-runner")
 DEFAULT_CONTROLLER_STATE = "controller-state.json"
 CONTROLLER_MODES = ("dry_run", "canary_apply", "auto_low_risk", "paused_regression")
+FAMILY_NAMES = ("stale_candidate", "importance_downshift", "score_label_alignment")
 
 
 @dataclass
@@ -84,6 +85,114 @@ def _load_json_file(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _candidate_family(item: dict[str, Any]) -> str:
+    action = str(item.get("recommended_action") or item.get("action") or "").strip()
+    patch = item.get("patch") if isinstance(item.get("patch"), dict) else {}
+    if action == "set_stale_candidate":
+        return "stale_candidate"
+    if action == "adjust_importance_score":
+        importance_patch = patch.get("importance") if isinstance(patch.get("importance"), dict) else {}
+        reason_code = str(importance_patch.get("reason_code") or "").strip()
+        if reason_code == "label_alignment":
+            return "score_label_alignment"
+        return "importance_downshift"
+    return "unknown"
+
+
+def _resolve_family_state(args: argparse.Namespace, prior_state: dict[str, Any]) -> dict[str, Any]:
+    prior_family_state = prior_state.get("family_state") if isinstance(prior_state.get("family_state"), dict) else {}
+    disable_families = {str(x).strip() for x in list(getattr(args, "disable_family", []) or []) if str(x).strip()}
+    enable_families = {str(x).strip() for x in list(getattr(args, "enable_family", []) or []) if str(x).strip()}
+    out: dict[str, Any] = {}
+    for family in FAMILY_NAMES:
+        previous = prior_family_state.get(family) if isinstance(prior_family_state.get(family), dict) else {}
+        enabled = bool(previous.get("enabled", True))
+        mode = str(previous.get("mode") or ("enabled" if enabled else "disabled")).strip() or ("enabled" if enabled else "disabled")
+        reasons = [str(x) for x in list(previous.get("reasons") or []) if str(x)]
+        if family in disable_families:
+            enabled = False
+            mode = "disabled"
+            reasons = sorted(set(reasons + ["disabled_by_flag"]))
+        if family in enable_families:
+            enabled = True
+            mode = "enabled"
+            reasons = [reason for reason in reasons if reason != "disabled_by_flag"]
+        out[family] = {
+            "enabled": enabled,
+            "mode": mode,
+            "reasons": reasons,
+        }
+    return out
+
+
+def _filter_governor_packet(
+    governor_json: dict[str, Any],
+    challenger_json: dict[str, Any],
+    *,
+    family_state: dict[str, Any],
+    enforce_quarantine: bool,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    out = json.loads(json.dumps(governor_json, ensure_ascii=False))
+    items = out.get("items") if isinstance(out.get("items"), list) else []
+    disagreements = challenger_json.get("disagreements") if isinstance(challenger_json.get("disagreements"), list) else []
+    quarantined_candidate_ids = {
+        str(item.get("candidate_id") or "")
+        for item in disagreements
+        if isinstance(item, dict) and bool(item.get("quarantine_recommended")) and str(item.get("candidate_id") or "")
+    }
+    challenged_families = {
+        str(item.get("action_family") or "").strip()
+        for item in disagreements
+        if isinstance(item, dict) and bool(item.get("quarantine_recommended"))
+    }
+
+    blocked_by_family: dict[str, int] = {family: 0 for family in FAMILY_NAMES}
+    blocked_by_quarantine = 0
+    approved_after_filter = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        family = _candidate_family(item)
+        item["action_family"] = family
+        reasons = [str(x) for x in list(item.get("reasons") or []) if str(x)]
+        family_slot = family_state.get(family) if isinstance(family_state.get(family), dict) else {}
+        candidate_id = str(item.get("candidate_id") or "")
+        family_quarantined = enforce_quarantine and family in challenged_families
+        candidate_quarantined = enforce_quarantine and candidate_id in quarantined_candidate_ids
+        if family in blocked_by_family and not bool(family_slot.get("enabled", True)):
+            item["decision"] = "proposal_only"
+            item["reasons"] = sorted(set(reasons + [f"family_disabled:{family}"]))
+            blocked_by_family[family] += 1
+            continue
+        if family_quarantined or candidate_quarantined:
+            item["decision"] = "proposal_only"
+            quarantine_reason = f"challenger_quarantine:{family}" if family_quarantined else "challenger_quarantine:candidate"
+            item["reasons"] = sorted(set(reasons + [quarantine_reason]))
+            blocked_by_quarantine += 1
+            continue
+        if str(item.get("decision") or "") == "approved_for_apply":
+            approved_after_filter += 1
+
+    counts = out.get("counts") if isinstance(out.get("counts"), dict) else {}
+    counts["approvedForApply"] = approved_after_filter
+    counts["proposalOnly"] = sum(1 for item in items if isinstance(item, dict) and str(item.get("decision") or "") == "proposal_only")
+    counts["blockedByFamily"] = sum(blocked_by_family.values())
+    counts["blockedByChallengerQuarantine"] = blocked_by_quarantine
+    out["counts"] = counts
+    out["family_policy"] = {
+        "state": family_state,
+        "challenger_enforce_quarantine": bool(enforce_quarantine),
+        "challenged_families": sorted(x for x in challenged_families if x),
+        "quarantined_candidate_ids": sorted(x for x in quarantined_candidate_ids if x),
+    }
+    return out, blocked_by_family, {
+        "challenged_families": sorted(x for x in challenged_families if x),
+        "quarantined_candidate_ids": sorted(x for x in quarantined_candidate_ids if x),
+        "blocked_by_quarantine": blocked_by_quarantine,
+        "approved_after_filter": approved_after_filter,
+    }
 
 
 def _controller_state_path(args: argparse.Namespace) -> Path:
@@ -177,13 +286,17 @@ def _evaluate_promotion_gates(
     args: argparse.Namespace,
     *,
     watchdog: dict[str, Any],
+    verifier: Optional[dict[str, Any]] = None,
     challenger: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     path_value = str(getattr(args, "promotion_gate_receipt", "") or "").strip()
     payload = _load_json_file(Path(path_value).expanduser()) if path_value else {}
     manual_precision = payload.get("manual_review_sample_precision")
     repeated_miss_regression_pct = payload.get("repeated_miss_regression_pct")
+    verifier_summary = verifier.get("summary") if isinstance((verifier or {}).get("summary"), dict) else {}
     rollback_replay_pass = payload.get("rollback_replay_pass")
+    if rollback_replay_pass is None:
+        rollback_replay_pass = verifier_summary.get("rollback_replay_pass")
     reasons: list[str] = []
 
     try:
@@ -206,10 +319,14 @@ def _evaluate_promotion_gates(
         if not rollback_ok:
             reasons.append("rollback_replay_failed")
 
-    effect_missing_pct = float(((watchdog.get("stats") or {}).get("effect_receipt_missing_pct") or 0.0))
+    effect_missing_pct = float(verifier_summary.get("effect_receipt_missing_pct") if verifier_summary.get("effect_receipt_missing_pct") is not None else ((watchdog.get("stats") or {}).get("effect_receipt_missing_pct") or 0.0))
     effect_missing_ok = effect_missing_pct <= float(getattr(args, "watchdog_max_missing_effect_receipts_pct", 0.0) or 0.0)
     if not effect_missing_ok:
         reasons.append("effect_receipt_missing_pct_exceeded")
+
+    cap_integrity_pass = verifier_summary.get("cap_integrity_pass")
+    if cap_integrity_pass is False:
+        reasons.append("verifier_cap_integrity_failed")
 
     challenger_counts = (challenger or {}).get("counts") if isinstance((challenger or {}).get("counts"), dict) else {}
     challenger_summary = (challenger or {}).get("summary") if isinstance((challenger or {}).get("summary"), dict) else {}
@@ -233,6 +350,7 @@ def _evaluate_promotion_gates(
             "repeated_miss_regression_pct": repeated_miss_regression_pct,
             "rollback_replay_pass": rollback_replay_pass,
             "effect_receipt_missing_pct": effect_missing_pct,
+            "cap_integrity_pass": cap_integrity_pass,
             "challenger_disagreements": challenger_disagreements,
             "challenger_agreement_pass": bool(challenger_summary.get("agreement_pass", challenger_disagreements == 0)),
         },
@@ -250,7 +368,8 @@ def _evaluate_promotion_gates(
             "disagreements": challenger_disagreements,
             "quarantine_recommended": bool(challenger_summary.get("quarantine_recommended", False)),
         },
-        "passed": passed,
+        "native_verifier_present": verifier is not None,
+        "passed": passed and cap_integrity_pass is not False,
         "reasons": sorted(set(reasons)),
     }
 
@@ -286,6 +405,25 @@ def _evaluate_watchdog(args: argparse.Namespace, *, runner_root: Path) -> dict[s
     }
 
 
+def _build_verifier_cmd(args: argparse.Namespace) -> list[str]:
+    return [
+        args.python,
+        "-m",
+        "openclaw_mem",
+        "optimize",
+        "verifier-bundle",
+        "--db",
+        args.db,
+        "--run-dir",
+        str(Path(args.runner_root) / "assist-receipts"),
+        "--window-hours",
+        str(max(1, int(getattr(args, "watchdog_window_hours", 24) or 24))),
+        "--top",
+        str(max(1, int(args.top))),
+        "--json",
+    ]
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run openclaw-mem optimize assist pipeline as one scheduled worker")
     p.add_argument("--python", default=sys.executable, help="Python executable to use (default: current interpreter)")
@@ -304,8 +442,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top", type=int, default=10, help="Max governed candidates emitted")
     p.add_argument("--challenger-policy-mode", default="strict_v1", help="Shadow challenger policy mode (default: strict_v1)")
     p.add_argument("--challenger-max-disagreement-clusters", type=int, default=10, help="Max disagreement clusters written into challenger receipts (default: 10)")
+    p.add_argument("--challenger-enforce-quarantine", dest="challenger_enforce_quarantine", action="store_true", default=True, help="Fail closed by quarantining challenger-disagreed families/candidates before assist apply (default: true)")
+    p.add_argument("--no-challenger-enforce-quarantine", dest="challenger_enforce_quarantine", action="store_false", help="Keep challenger lane advisory-only for apply filtering")
     p.add_argument("--challenger-require-agreement-for-promotion", action="store_true", help="Require challenger agreement before promotion can pass")
     p.add_argument("--challenger-max-disagreements-for-promotion", type=int, default=0, help="Promotion fails when challenger disagreements exceed this count (default: 0)")
+    p.add_argument("--disable-family", action="append", choices=FAMILY_NAMES, default=[], help="Disable a bounded apply family at the controller level (repeatable)")
+    p.add_argument("--enable-family", action="append", choices=FAMILY_NAMES, default=[], help="Re-enable a bounded apply family at the controller level (repeatable)")
     p.add_argument("--max-rows-per-run", type=int, default=5, help="Assist apply cap per run")
     p.add_argument("--max-rows-per-24h", type=int, default=20, help="Assist apply rolling 24h cap")
     p.add_argument("--max-importance-adjustments-per-run", type=int, default=3, help="Assist apply importance-adjustment cap per run")
@@ -435,6 +577,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     controller_state_path = _controller_state_path(args)
     prior_controller_state = _load_json_file(controller_state_path)
     effective_controller_mode = _resolve_controller_mode(args, prior_controller_state)
+    family_state = _resolve_family_state(args, prior_controller_state)
     allow_apply = effective_controller_mode in {"canary_apply", "auto_low_risk"}
     controller_receipt_path = run_dir / "controller.json"
 
@@ -469,7 +612,16 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     challenger_path = run_dir / "challenger.json"
     _write_json(challenger_path, challenger_json)
 
-    assist_cmd = _build_assist_cmd(args, governor_path)
+    filtered_governor_json, blocked_by_family, challenger_filter = _filter_governor_packet(
+        governor_json,
+        challenger_json,
+        family_state=family_state,
+        enforce_quarantine=bool(getattr(args, "challenger_enforce_quarantine", True)),
+    )
+    filtered_governor_path = run_dir / "governor-filtered.json"
+    _write_json(filtered_governor_path, filtered_governor_json)
+
+    assist_cmd = _build_assist_cmd(args, filtered_governor_path)
     if allow_apply:
         assist_cmd = [arg for arg in assist_cmd if arg != "--dry-run"]
     elif "--dry-run" not in assist_cmd:
@@ -481,8 +633,16 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     assist_path = run_dir / "assist-after.json"
     _write_json(assist_path, assist_json)
 
+    verifier_cmd = _build_verifier_cmd(args)
+    verifier_res = _run(verifier_cmd)
+    if verifier_res.returncode != 0:
+        raise RunnerError(f"verifier-bundle failed: {verifier_res.stderr.strip() or verifier_res.stdout.strip()}")
+    verifier_json = _load_json_text("verifier-bundle", verifier_res.stdout)
+    verifier_path = run_dir / "verifier.json"
+    _write_json(verifier_path, verifier_json)
+
     post_watchdog = _evaluate_watchdog(args, runner_root=runner_root)
-    promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog, challenger=challenger_json)
+    promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog, verifier=verifier_json, challenger=challenger_json)
     prior_soak_green_cycles = _controller_counter(prior_controller_state.get('soak_green_cycles'))
     prior_regression_strikes = _controller_counter(prior_controller_state.get('regression_strikes'))
     if post_watchdog.get('should_pause'):
@@ -507,6 +667,32 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     elif effective_controller_mode == 'auto_low_risk' and not promotion_gates.get('passed'):
         next_controller_mode = 'canary_apply'
 
+    verifier_summary = verifier_json.get("summary") if isinstance(verifier_json.get("summary"), dict) else {}
+    challenger_summary = challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {}
+    horizons = {
+        "short": {
+            "status": "green" if not post_watchdog.get("should_pause") else "red",
+            "pause_reasons": list(post_watchdog.get("pause_reasons") or []),
+        },
+        "medium": {
+            "status": "green" if verifier_summary.get("cap_integrity_pass", True) and verifier_summary.get("rollback_replay_pass") is not False and bool(challenger_summary.get("agreement_pass", True)) else "red",
+            "verifier": verifier_summary,
+            "challenger": challenger_summary,
+        },
+        "soak": {
+            "status": "green" if bool(promotion_gates.get("passed")) and soak_green_cycles >= int(getattr(args, 'soak_cycles_for_auto_low_risk', 3) or 3) else "hold",
+            "soak_green_cycles": soak_green_cycles,
+            "required_cycles": int(getattr(args, 'soak_cycles_for_auto_low_risk', 3) or 3),
+        },
+    }
+
+    updated_family_state = json.loads(json.dumps(family_state, ensure_ascii=False))
+    for family in challenger_filter.get("challenged_families", []):
+        if family in updated_family_state and bool(getattr(args, "challenger_enforce_quarantine", True)):
+            updated_family_state[family]["enabled"] = False
+            updated_family_state[family]["mode"] = "quarantined"
+            updated_family_state[family]["reasons"] = sorted(set(list(updated_family_state[family].get("reasons") or []) + ["challenger_quarantine"]))
+
     controller_state = {
         "kind": "openclaw-mem.optimize.assist.controller-state.v0",
         "updated_at": _utcnow_iso(),
@@ -514,8 +700,10 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "previous_mode": str(prior_controller_state.get("mode") or "") or None,
         "requested_mode": str(getattr(args, "controller_mode", None) or "") or None,
         "effective_mode": effective_controller_mode,
+        "family_state": updated_family_state,
         'soak_green_cycles': soak_green_cycles,
         'regression_strikes': regression_strikes,
+        "horizons": horizons,
         "watchdog": post_watchdog,
         "promotion_gates": promotion_gates,
         "challenger": {
@@ -523,6 +711,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "receipt_ref": str(challenger_path),
             "summary": challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {},
             "counts": challenger_json.get("counts") if isinstance(challenger_json.get("counts"), dict) else {},
+            "quarantine_filter": challenger_filter,
         },
         "last_run": {
             "run_id": run_id,
@@ -540,16 +729,20 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "effective_mode": effective_controller_mode,
         "next_mode": next_controller_mode,
         "allow_apply": allow_apply,
+        "family_state": updated_family_state,
         'soak_green_cycles': soak_green_cycles,
         'regression_strikes': regression_strikes,
+        "horizons": horizons,
         "pre_watchdog": pre_watchdog,
         "post_watchdog": post_watchdog,
+        "verifier": verifier_json,
         "promotion_gates": promotion_gates,
         "challenger": {
             "policy_mode": str(getattr(args, "challenger_policy_mode", "strict_v1") or "strict_v1"),
             "receipt_ref": str(challenger_path),
             "summary": challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {},
             "counts": challenger_json.get("counts") if isinstance(challenger_json.get("counts"), dict) else {},
+            "quarantine_filter": challenger_filter,
         },
         "controller_state_ref": str(controller_state_path),
     }
@@ -577,13 +770,16 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "run_dir": str(run_dir),
             "evolution_packet": str(evolution_path),
             "governor_packet": str(governor_path),
+            "governor_filtered_packet": str(filtered_governor_path),
             "challenger_packet": str(challenger_path),
             "assist_after": str(assist_path),
+            "verifier_bundle": str(verifier_path),
             "controller": str(controller_receipt_path),
         },
         "counts": {
             "evolution_candidates": int(((evolution_json.get("counts") or {}).get("items") or 0)),
             "governor_approved": int(((governor_json.get("counts") or {}).get("approvedForApply") or 0)),
+            "governor_approved_after_family_filter": int(((filtered_governor_json.get("counts") or {}).get("approvedForApply") or 0)),
             "challenger_disagreements": int(((challenger_json.get("counts") or {}).get("disagreements") or 0)),
             "assist_applied_rows": int(assist_json.get("applied_rows") or 0),
             "assist_skipped_rows": int(assist_json.get("skipped_rows") or 0),
@@ -593,8 +789,10 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "governor_kind": governor_json.get("kind"),
             "challenger_kind": challenger_json.get("kind"),
             "assist_kind": assist_json.get("kind"),
+            "verifier_kind": verifier_json.get("kind"),
             "assist_result": assist_json.get("result"),
             "blocked_by_caps": list(assist_json.get("blocked_by_caps") or []),
+            "blocked_by_family": blocked_by_family,
             "watchdog_pause_reasons": list((post_watchdog.get("pause_reasons") or [])),
             "promotion_gate_reasons": list((promotion_gates.get("reasons") or [])),
             "challenger_quarantine_recommended": bool(((challenger_json.get("summary") or {}).get("quarantine_recommended"))),
@@ -604,6 +802,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "governor_review": governor_cmd,
             "challenger_review": challenger_cmd,
             "assist_apply": assist_cmd,
+            "verifier_bundle": verifier_cmd,
         },
     }
 

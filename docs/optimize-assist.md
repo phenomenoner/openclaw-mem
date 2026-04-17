@@ -87,6 +87,11 @@ This command:
 - emits disagreement receipts plus bounded disagreement clusters without changing governor or writer behavior
 - keeps the challenger lane read-only while letting the controller require challenger agreement before promotion
 
+The scheduled runner now also supports a bounded **quarantine/veto** posture:
+- challenger disagreement can fail closed before `assist-apply`
+- quarantine can block a candidate or an entire bounded family from the current run
+- the filtered governor packet is written as `governor-filtered.json` for auditability
+
 ## Default posture
 
 The recommended deployment posture is:
@@ -109,6 +114,7 @@ python tools/optimize_assist_runner.py --json
 Default behavior:
 - runs the full packet chain
 - runs `challenger-review` on the same evolution packet before assist apply
+- runs `verifier-bundle` after assist apply so promotion/watchdog gates can consume first-party verifier output
 - keeps stale candidates and bounded importance adjustments as the approved low-risk action classes
 - respects the packet classifier, so medium/high-risk candidates remain proposal-only even when approval flags are enabled
 - runs `assist-apply` in **dry-run** mode unless `--allow-apply` is set
@@ -122,6 +128,13 @@ The runner now supports a bounded controller lane:
 - `canary_apply`
 - `auto_low_risk`
 - `paused_regression`
+
+It also persists bounded family-level state:
+- `stale_candidate`
+- `importance_downshift`
+- `score_label_alignment`
+
+Families can now be independently enabled, disabled, or quarantined without code surgery.
 
 If watchdog gates trip, the controller moves itself to `paused_regression` and future runs fail closed into dry-run posture until an operator explicitly changes mode.
 
@@ -145,6 +158,8 @@ Expected promotion receipt keys:
 When all thresholds are green, the controller promotes its persisted next mode to `auto_low_risk`.
 If `--challenger-require-agreement-for-promotion` is set, promotion also fails closed when the challenger lane reports disagreements above the configured threshold.
 
+Promotion now prefers native verifier evidence from `verifier-bundle` when available, rather than relying only on operator-fed rollback receipts.
+
 ### Allow bounded apply
 
 ```bash
@@ -167,10 +182,28 @@ python tools/optimize_assist_runner.py --allow-apply --json
 - `--no-approve-stale`
 - `--controller-mode canary_apply`
 - `--challenger-policy-mode strict_v1`
+- `--challenger-enforce-quarantine`
 - `--challenger-require-agreement-for-promotion`
 - `--challenger-max-disagreements-for-promotion 0`
+- `--disable-family score_label_alignment`
+- `--enable-family score_label_alignment`
 - `--promotion-gate-receipt /path/to/promotion-gates.json`
 - `--promote-when-gates-green`
+
+## Near-ceiling posture review
+
+Phase 11 now has a native read-only posture surface:
+
+```bash
+python -m openclaw_mem optimize posture-review \
+  --runner-root ~/.openclaw/memory/openclaw-mem/optimize-assist-runner \
+  --json
+```
+
+This command:
+- reads controller state plus recent controller / verifier / challenger / assist receipts
+- summarizes whether Phase 8, 9, 10 surfaces are actually live
+- emits a bounded `near_ceiling_ready` verdict without changing memory state
 
 ## OpenClaw cron enablement
 
@@ -202,7 +235,9 @@ Under:
 Artifacts include:
 - `evolution.json`
 - `governor.json`
+- `governor-filtered.json`
 - `challenger.json`
+- `verifier.json`
 - `assist-after.json`
 - `assist-effect.json`
 

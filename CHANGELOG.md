@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Completed Phase 8 for optimize assist: `optimize challenger-review` now emits auditable disagreement clusters and quarantine recommendations, and the scheduled runner can require challenger agreement before promotion gates pass.
 - Added the first Phase 9 blade for optimize assist: evolution-review can now emit bounded score-label alignment candidates (`delta = 0`, `reason_code = label_alignment`) as a separately-bounded low-risk family.
 - Added the first Phase 10 blade for optimize assist: runner controller state now tracks `soak_green_cycles` and `regression_strikes`, supports soak-based promotion, and can demote `auto_low_risk` back to `canary_apply` when gates fail.
+- Closed the remaining Phase 8-10 controller gaps for optimize assist: the runner now writes `governor-filtered.json`, can enforce challenger-driven quarantine before assist apply, persists family-level enable/disable/quarantine state, and runs native `verifier-bundle` each cycle for first-party gating.
+- Added the Phase 11 posture surface for optimize assist: `optimize posture-review` now reads native runner receipts and emits a bounded `near_ceiling_ready` verdict.
 
 ### Testing
 
@@ -43,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded runner coverage so challenger receipts are written every cycle and promotion can fail closed on challenger disagreement.
 - Added evolution-review coverage for score-label alignment candidates.
 - Added runner coverage for soak-based promotion counters and demotion from `auto_low_risk`.
+- Added parser + posture verdict coverage in `tests/test_optimize_posture_review.py`.
 
 ## [1.6.0] - 2026-04-15
 

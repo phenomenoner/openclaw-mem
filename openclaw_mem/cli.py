@@ -3059,6 +3059,134 @@ def cmd_optimize_challenger_review(conn: sqlite3.Connection, args: argparse.Name
     _emit(out, True)
 
 
+def _optimize_posture_recent_packets(runner_root: Path, name: str, *, since_ts: datetime, top: int) -> List[Dict[str, Any]]:
+    if not runner_root.exists():
+        return []
+    out: List[Dict[str, Any]] = []
+    for path in runner_root.rglob(name):
+        payload = _optimize_verifier_load_json(path)
+        ts_value = _parse_iso_utc(payload.get('ts') or payload.get('updated_at'))
+        if ts_value is None or ts_value < since_ts:
+            continue
+        payload['_path'] = str(path)
+        out.append(payload)
+    out.sort(key=lambda x: str(x.get('ts') or x.get('updated_at') or ''), reverse=True)
+    return out[:top]
+
+
+def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    runner_root = Path(os.path.expanduser(str(getattr(args, 'runner_root', None) or DEFAULT_OPTIMIZE_ASSIST_RUN_DIR + '-runner')))
+    window_hours = _optimize_policy_int(getattr(args, 'window_hours', 72), 72, min_value=1)
+    top = _optimize_policy_int(getattr(args, 'top', 20), 20, min_value=1)
+    since_ts = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+
+    controller_state = _optimize_verifier_load_json(runner_root / 'controller-state.json')
+    controller_packets = _optimize_posture_recent_packets(runner_root, 'controller.json', since_ts=since_ts, top=top)
+    verifier_packets = _optimize_posture_recent_packets(runner_root, 'verifier.json', since_ts=since_ts, top=top)
+    challenger_packets = _optimize_posture_recent_packets(runner_root, 'challenger.json', since_ts=since_ts, top=top)
+    assist_packets = _optimize_posture_recent_packets(runner_root, 'assist-after.json', since_ts=since_ts, top=top)
+
+    family_state = controller_state.get('family_state') if isinstance(controller_state.get('family_state'), dict) else {}
+    enabled_families = sorted(
+        family for family, slot in family_state.items()
+        if isinstance(slot, dict) and bool(slot.get('enabled', False))
+    )
+    quarantined_families = sorted(
+        family for family, slot in family_state.items()
+        if isinstance(slot, dict) and str(slot.get('mode') or '') == 'quarantined'
+    )
+
+    verifier_green = sum(
+        1 for packet in verifier_packets
+        if isinstance(packet.get('summary'), dict)
+        and bool(packet['summary'].get('cap_integrity_pass', False))
+        and packet['summary'].get('rollback_replay_pass') is not False
+        and float(packet['summary'].get('effect_receipt_missing_pct') or 0.0) <= 0.0
+    )
+    challenger_green = sum(
+        1 for packet in challenger_packets
+        if isinstance(packet.get('summary'), dict) and bool(packet['summary'].get('agreement_pass', False))
+    )
+    auto_apply_cycles = sum(1 for packet in controller_packets if str(packet.get('next_mode') or '') == 'auto_low_risk')
+    applied_cycles = sum(1 for packet in assist_packets if str(packet.get('result') or '') == 'applied')
+
+    current_mode = str(controller_state.get('mode') or 'dry_run').strip() or 'dry_run'
+    soak_green_cycles = int(controller_state.get('soak_green_cycles') or 0)
+    regression_strikes = int(controller_state.get('regression_strikes') or 0)
+    near_ceiling_ready = (
+        current_mode == 'auto_low_risk'
+        and len(enabled_families) >= 2
+        and not quarantined_families
+        and verifier_green >= 1
+        and challenger_green >= 1
+        and soak_green_cycles >= 1
+        and regression_strikes == 0
+    )
+
+    out = {
+        'kind': 'openclaw-mem.optimize.posture-review.v0',
+        'ts': _utcnow_iso(),
+        'version': {'openclaw_mem': __version__, 'schema': 'v0'},
+        'source': {
+            'runner_root': str(runner_root),
+            'window_hours': window_hours,
+            'controller_packets': len(controller_packets),
+            'verifier_packets': len(verifier_packets),
+            'challenger_packets': len(challenger_packets),
+            'assist_packets': len(assist_packets),
+        },
+        'policy': {
+            'mode': 'posture_review',
+            'writes_performed': 0,
+            'memory_mutation': 'none',
+            'read_only': True,
+        },
+        'controller': {
+            'mode': current_mode,
+            'soak_green_cycles': soak_green_cycles,
+            'regression_strikes': regression_strikes,
+            'horizons': controller_state.get('horizons') if isinstance(controller_state.get('horizons'), dict) else {},
+        },
+        'families': {
+            'enabled': enabled_families,
+            'quarantined': quarantined_families,
+            'state': family_state,
+        },
+        'counts': {
+            'enabledFamilies': len(enabled_families),
+            'quarantinedFamilies': len(quarantined_families),
+            'verifierGreenRuns': verifier_green,
+            'challengerGreenRuns': challenger_green,
+            'autoLowRiskCycles': auto_apply_cycles,
+            'appliedCycles': applied_cycles,
+        },
+        'summary': {
+            'near_ceiling_ready': near_ceiling_ready,
+            'phase8_challenger_live': len(challenger_packets) > 0,
+            'phase9_family_level_control_live': bool(family_state),
+            'phase10_multi_horizon_live': isinstance(controller_state.get('horizons'), dict),
+            'phase11_posture_review_live': True,
+        },
+        'reasons': [] if near_ceiling_ready else sorted(set([
+            'mode_not_auto_low_risk' if current_mode != 'auto_low_risk' else '',
+            'insufficient_enabled_families' if len(enabled_families) < 2 else '',
+            'family_quarantine_active' if quarantined_families else '',
+            'native_verifier_not_green' if verifier_green == 0 else '',
+            'challenger_not_green' if challenger_green == 0 else '',
+            'soak_not_green' if soak_green_cycles < 1 else '',
+            'regression_strikes_present' if regression_strikes > 0 else '',
+        ]) - {''}),
+        'artifacts': {
+            'controller_state_ref': str(runner_root / 'controller-state.json'),
+            'latest_controller_ref': controller_packets[0].get('_path') if controller_packets else None,
+            'latest_verifier_ref': verifier_packets[0].get('_path') if verifier_packets else None,
+            'latest_challenger_ref': challenger_packets[0].get('_path') if challenger_packets else None,
+        },
+    }
+    _emit(out, True)
+
+
 def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _ = conn
     try:
@@ -14592,6 +14720,13 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--max-disagreement-clusters", dest="max_disagreement_clusters", type=int, default=10, help="Max disagreement clusters summarized in output (default: 10)")
     o.add_argument("--top", type=int, default=50, help="Max candidates to compare (default: 50)")
     o.set_defaults(func=cmd_optimize_challenger_review)
+
+    o = osub.add_parser("posture-review", help="Review near-ceiling safe-autonomy posture from native runner receipts (no writes)")
+    add_common(o)
+    o.add_argument("--runner-root", dest="runner_root", default=DEFAULT_OPTIMIZE_ASSIST_RUN_DIR + "-runner", help="Runner root carrying controller/verifier/challenger receipts (default: ~/.openclaw/memory/openclaw-mem/optimize-assist-runner)")
+    o.add_argument("--window-hours", dest="window_hours", type=int, default=72, help="Recent receipt window inspected for posture review (default: 72)")
+    o.add_argument("--top", type=int, default=20, help="Max recent receipts to inspect per receipt family (default: 20)")
+    o.set_defaults(func=cmd_optimize_posture_review)
 
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)
