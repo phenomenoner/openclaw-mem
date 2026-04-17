@@ -270,6 +270,33 @@ Start with `--dry-run` until you have reviewed receipts on fixture or low-risk r
 Ready-to-paste snippet file:
 - `docs/snippets/openclaw-cron.optimize-assist-canary.json`
 
+Recommended next-step controller packet after Phase 8-11 code lands, while live receipts are still empty:
+
+```json
+{
+  "cron": {
+    "jobs": [
+      {
+        "name": "openclaw-mem optimize assist controller (dry-run, challenger-gated)",
+        "schedule": { "kind": "every", "everyMs": 21600000 },
+        "sessionTarget": "isolated",
+        "wakeMode": "next-heartbeat",
+        "payload": {
+          "kind": "agentTurn",
+          "model": "google-antigravity/gemini-3-flash",
+          "thinking": "minimal",
+          "message": "Run exactly one exec, then output ONLY NO_REPLY:\n\ncd /opt/openclaw-mem && uv run --python 3.13 -- python tools/optimize_assist_runner.py --controller-mode dry_run --challenger-enforce-quarantine --challenger-require-agreement-for-promotion --challenger-max-disagreements-for-promotion 0 --json"
+        },
+        "delivery": { "mode": "none" }
+      }
+    ]
+  }
+}
+```
+
+Ready-to-paste snippet file:
+- `docs/snippets/openclaw-cron.optimize-assist-controller-dry-run.json`
+
 ### Promotion rules
 
 - Keep the job **isolated** from watchdog/healthcheck lanes.

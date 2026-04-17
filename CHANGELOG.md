@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the first Phase 10 blade for optimize assist: runner controller state now tracks `soak_green_cycles` and `regression_strikes`, supports soak-based promotion, and can demote `auto_low_risk` back to `canary_apply` when gates fail.
 - Closed the remaining Phase 8-10 controller gaps for optimize assist: the runner now writes `governor-filtered.json`, can enforce challenger-driven quarantine before assist apply, persists family-level enable/disable/quarantine state, and runs native `verifier-bundle` each cycle for first-party gating.
 - Added the Phase 11 posture surface for optimize assist: `optimize posture-review` now reads native runner receipts and emits a bounded `near_ceiling_ready` verdict.
+- Added a controller-gated OpenClaw cron snippet for optimize assist dry-run bring-up: `docs/snippets/openclaw-cron.optimize-assist-controller-dry-run.json`.
 
 ### Testing
 

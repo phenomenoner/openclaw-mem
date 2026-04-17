@@ -1,0 +1,13 @@
+{
+  "name": "openclaw-mem optimize assist controller (dry-run, challenger-gated)",
+  "schedule": { "kind": "every", "everyMs": 21600000 },
+  "sessionTarget": "isolated",
+  "wakeMode": "next-heartbeat",
+  "payload": {
+    "kind": "agentTurn",
+    "model": "google-antigravity/gemini-3-flash",
+    "thinking": "minimal",
+    "message": "Run exactly one exec, then output ONLY NO_REPLY:\n\ncd /opt/openclaw-mem && uv run --python 3.13 -- python tools/optimize_assist_runner.py --controller-mode dry_run --challenger-enforce-quarantine --challenger-require-agreement-for-promotion --challenger-max-disagreements-for-promotion 0 --json"
+  },
+  "delivery": { "mode": "none" }
+}

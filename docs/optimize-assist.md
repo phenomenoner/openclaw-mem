@@ -216,6 +216,17 @@ Run exactly one exec, then output ONLY NO_REPLY:
 cd /opt/openclaw-mem && uv run --python 3.13 -- python tools/optimize_assist_runner.py --json
 ```
 
+For the new controller/challenger-gated dry-run posture, prefer this packet body instead:
+
+```text
+Run exactly one exec, then output ONLY NO_REPLY:
+
+cd /opt/openclaw-mem && uv run --python 3.13 -- python tools/optimize_assist_runner.py --controller-mode dry_run --challenger-enforce-quarantine --challenger-require-agreement-for-promotion --challenger-max-disagreements-for-promotion 0 --json
+```
+
+Ready-to-paste snippet:
+- `docs/snippets/openclaw-cron.optimize-assist-controller-dry-run.json`
+
 For bounded live writes, switch to:
 
 ```text
