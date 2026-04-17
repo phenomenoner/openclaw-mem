@@ -85,6 +85,11 @@ Exit criteria:
 - watchdog tests pass
 - pause/resume behavior is explicit and receipted
 
+Implementation note:
+- runner now persists a bounded controller state machine with `dry_run | canary_apply | auto_low_risk | paused_regression`
+- watchdog receipts now pause the controller on missing effect receipts, regressed effect summaries, or explicit rollback replay failure receipts
+- controller receipts are emitted per run and state persists under the runner root
+
 ### Phase 5 - bounded fully autonomous posture
 Goal: default unattended low-risk operation with explicit promotion gates.
 
@@ -96,6 +101,11 @@ Ship:
 Exit criteria:
 - promotion gates stay green for multiple cycles
 - the system is unattended by default only within the bounded low-risk envelope
+
+Implementation note:
+- runner now supports promotion-gate receipts with explicit thresholds for manual review precision, repeated-miss regression pct, and rollback replay pass
+- when `--promote-when-gates-green` is enabled and gates pass, the controller promotes persisted next mode to `auto_low_risk`
+- medium-risk governor packet path and high-risk proposal-only posture remain unchanged
 
 ## Recommended bounded slice
 Ship **Phase 1: effect receipt foundation** first, then continue serially toward Phase 5.

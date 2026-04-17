@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Phase 1 effect-receipt foundation for optimize assist: applied rows now carry bounded `optimization.assist.effect` metadata and assist runs emit a dedicated effect artifact as the baseline measurement surface for later autonomy phases.
 - Added the Phase 2 classifier foundation for optimize assist: evolution packets now emit evidence-backed `risk_level`, `risk_reasons`, and `auto_apply_eligible`, and governor approval flags fail closed when a candidate is no longer low-risk eligible.
 - Added the first Phase 3 family-cap foundation for optimize assist: assist apply now enforces bounded per-run / rolling-24h caps for `adjust_importance_score`, and after receipts summarize applied action counts for cap replay.
+- Added the Phase 4 controller/watchdog lane for optimize assist: the scheduled runner now persists controller state, emits controller receipts, and pauses itself on missing effect receipts, regressed effect summaries, or rollback replay failure receipts.
+- Added the Phase 5 promotion-gate lane for optimize assist: the runner now accepts explicit promotion gate receipts and can promote persisted mode to `auto_low_risk` when thresholds stay green.
 
 ### Testing
 
@@ -28,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added assist-apply coverage for effect artifact emission and persisted row-level effect metadata.
 - Added classifier coverage for low-vs-medium importance candidates and fail-closed governor behavior on medium-risk packets.
 - Added assist-apply and runner coverage for importance-family caps and propagated cap flags.
+- Added runner coverage for controller pause behavior and promotion-gate driven `auto_low_risk` promotion.
 
 ## [1.6.0] - 2026-04-15
 

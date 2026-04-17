@@ -56,6 +56,36 @@ Default behavior:
 - respects the packet classifier, so medium/high-risk candidates remain proposal-only even when approval flags are enabled
 - runs `assist-apply` in **dry-run** mode unless `--allow-apply` is set
 - writes runner packet artifacts under `~/.openclaw/memory/openclaw-mem/optimize-assist-runner/`
+- persists controller state under `~/.openclaw/memory/openclaw-mem/optimize-assist-runner/controller-state.json`
+
+### Controller state machine
+
+The runner now supports a bounded controller lane:
+- `dry_run`
+- `canary_apply`
+- `auto_low_risk`
+- `paused_regression`
+
+If watchdog gates trip, the controller moves itself to `paused_regression` and future runs fail closed into dry-run posture until an operator explicitly changes mode.
+
+### Promotion to unattended low-risk
+
+You can now promote the lane into default unattended low-risk mode with an explicit promotion receipt:
+
+```bash
+python tools/optimize_assist_runner.py \
+  --controller-mode canary_apply \
+  --promotion-gate-receipt /path/to/promotion-gates.json \
+  --promote-when-gates-green \
+  --json
+```
+
+Expected promotion receipt keys:
+- `manual_review_sample_precision`
+- `repeated_miss_regression_pct`
+- `rollback_replay_pass`
+
+When all thresholds are green, the controller promotes its persisted next mode to `auto_low_risk`.
 
 ### Allow bounded apply
 
@@ -77,6 +107,9 @@ python tools/optimize_assist_runner.py --allow-apply --json
 - `--max-importance-adjustments-per-24h 10`
 - `--no-approve-importance`
 - `--no-approve-stale`
+- `--controller-mode canary_apply`
+- `--promotion-gate-receipt /path/to/promotion-gates.json`
+- `--promote-when-gates-green`
 
 ## OpenClaw cron enablement
 
