@@ -1,9 +1,10 @@
 # Spec — optimize-assist nine-point hardening roadmap v0
 
 ## Status
-- Stage: execution planning
+- Stage: execution in progress
 - Scope: shortest-path non-stop push from ~5.5-6/10 toward ~9/10 for `openclaw-mem` optimize-assist safe autonomy posture
 - Mode: hardening-first, fail-closed, verifier-backed
+- 2026-04-17 execution note: quarantine-path true E2E, deterministic rerun proof, overlap serialization proof, timeout containment proof, and atomic receipt-surface hardening/tests landed in the active runner slice; topology unchanged.
 
 ## Verdict
 Do not chase 9/10 by widening mutation breadth first.

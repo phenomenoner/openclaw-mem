@@ -64,6 +64,7 @@ If asked to “remember” routine logs/OK checks:
 - Do not promote a synthesis card itself into durable memory by default; use it as a provenance-carrying reference surface.
 - For maintenance triage, `openclaw-mem graph synth recommend` is the preferred zero-write review surface.
 - Read-only/helper lanes may inspect and packetize these recommendations, but judgment/write authority remains with the primary operator or designated maintainer.
+- The same split applies to optimization maintenance: read-only lanes may scout with `openclaw-mem optimize evolution-review`, but must not run `openclaw-mem optimize assist-apply`.
 
 ## Runtime enforcement (recommended)
 This card is a *prompt-layer contract*. When possible, also enforce it at runtime:

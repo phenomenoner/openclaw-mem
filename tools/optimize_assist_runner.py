@@ -10,6 +10,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import signal
 import os
 import subprocess
 import sys
@@ -30,6 +31,8 @@ DEFAULT_RUNNER_ROOT = os.path.join(DEFAULT_STATE_DIR, "memory", "openclaw-mem", 
 DEFAULT_CONTROLLER_STATE = "controller-state.json"
 CONTROLLER_MODES = ("dry_run", "canary_apply", "auto_low_risk", "paused_regression")
 CONTROLLER_STATE_SCHEMA_VERSION = 1
+DEFAULT_SUBPROCESS_TIMEOUT_SECS = 300
+_ACTIVE_SUBPROCESS_TIMEOUT_SECS: Optional[int] = DEFAULT_SUBPROCESS_TIMEOUT_SECS
 
 
 @dataclass
@@ -64,8 +67,27 @@ def _parse_iso_utc(raw: Any) -> Optional[datetime]:
 
 
 def _run(argv: list[str]) -> CommandResult:
-    proc = subprocess.run(argv, capture_output=True, text=True)
-    return CommandResult(argv=argv, returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
+    proc = subprocess.Popen(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=_ACTIVE_SUBPROCESS_TIMEOUT_SECS)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "", ""
+        timeout_secs = _ACTIVE_SUBPROCESS_TIMEOUT_SECS if _ACTIVE_SUBPROCESS_TIMEOUT_SECS is not None else "configured"
+        raise RunnerError(f"subprocess timed out after {timeout_secs}s: {' '.join(argv)}")
+    return CommandResult(argv=argv, returncode=proc.returncode, stdout=stdout, stderr=stderr)
 
 
 def _load_json_text(label: str, raw: str) -> dict[str, Any]:
@@ -148,11 +170,19 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    with open(tmp_path, "w", encoding="utf-8") as handle:
-        handle.write(encoded)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp_path, path)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def _prepare_controller_state(payload: dict[str, Any], *, prior_state: dict[str, Any]) -> dict[str, Any]:
@@ -310,6 +340,13 @@ def _watchdog_window_hours(args: argparse.Namespace) -> int:
         return max(1, int(getattr(args, "watchdog_window_hours", 24) or 24))
     except Exception:
         return 24
+
+
+def _subprocess_timeout_secs(args: argparse.Namespace) -> int:
+    try:
+        return max(1, int(getattr(args, "subprocess_timeout_secs", DEFAULT_SUBPROCESS_TIMEOUT_SECS) or DEFAULT_SUBPROCESS_TIMEOUT_SECS))
+    except Exception:
+        return DEFAULT_SUBPROCESS_TIMEOUT_SECS
 
 
 def _collect_watchdog_stats(runner_root: Path, *, since_ts: datetime) -> dict[str, Any]:
@@ -577,6 +614,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--controller-state-path", default=None, help="JSON path for persisted controller state (default: <runner-root>/controller-state.json)")
     p.add_argument("--migrate-unsigned-controller-state", action="store_true", help="One-time adoption path for unsigned legacy controller state; rewrites state with schema+digest")
     p.add_argument("--watchdog-window-hours", type=int, default=24, help="Recent receipt window inspected by watchdog (default: 24)")
+    p.add_argument("--subprocess-timeout-secs", type=int, default=DEFAULT_SUBPROCESS_TIMEOUT_SECS, help="Kill child optimize commands that exceed this runtime (default: 300)")
     p.add_argument("--watchdog-max-missing-effect-receipts-pct", type=float, default=0.0, help="Pause when missing effect receipt rate exceeds this pct (default: 0)")
     p.add_argument("--watchdog-max-regressed-effect-items", type=int, default=0, help="Pause when regressed effect items exceed this count (default: 0)")
     p.add_argument("--rollback-replay-receipt", default=None, help="Optional JSON receipt path with rollback_replay_pass bool for watchdog gating")
@@ -691,267 +729,274 @@ def _build_assist_cmd(args: argparse.Namespace, governor_path: Path) -> list[str
 
 
 def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
-    run_id = str(uuid.uuid4())
-    ts = _utcnow_iso()
-    runner_root = Path(args.runner_root).expanduser()
-    run_dir = runner_root / datetime.now(timezone.utc).strftime("%Y-%m-%d") / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    controller_state_path = _controller_state_path(args)
-    controller_receipt_path = run_dir / "controller.json"
-    promotion_receipt_path = run_dir / "promotion-gates.json"
+    global _ACTIVE_SUBPROCESS_TIMEOUT_SECS
+    previous_subprocess_timeout_secs = _ACTIVE_SUBPROCESS_TIMEOUT_SECS
+    _ACTIVE_SUBPROCESS_TIMEOUT_SECS = _subprocess_timeout_secs(args)
+    try:
+        run_id = str(uuid.uuid4())
+        ts = _utcnow_iso()
+        runner_root = Path(args.runner_root).expanduser()
+        run_dir = runner_root / datetime.now(timezone.utc).strftime("%Y-%m-%d") / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        controller_state_path = _controller_state_path(args)
+        controller_receipt_path = run_dir / "controller.json"
+        promotion_receipt_path = run_dir / "promotion-gates.json"
 
-    with _locked_controller_state(
-        controller_state_path,
-        allow_unsigned_legacy=bool(getattr(args, "migrate_unsigned_controller_state", False)),
-    ) as prior_controller_state:
-        legacy_unsigned_state_loaded = bool(prior_controller_state) and prior_controller_state.get("schema_version") in (None, "") and not str(prior_controller_state.get("state_digest") or "").strip()
-        effective_controller_mode = _resolve_controller_mode(args, prior_controller_state)
-        family_state = _resolve_family_state(args, prior_controller_state)
-        allow_apply = effective_controller_mode in {"canary_apply", "auto_low_risk"}
+        with _locked_controller_state(
+            controller_state_path,
+            allow_unsigned_legacy=bool(getattr(args, "migrate_unsigned_controller_state", False)),
+        ) as prior_controller_state:
+            legacy_unsigned_state_loaded = bool(prior_controller_state) and prior_controller_state.get("schema_version") in (None, "") and not str(prior_controller_state.get("state_digest") or "").strip()
+            effective_controller_mode = _resolve_controller_mode(args, prior_controller_state)
+            family_state = _resolve_family_state(args, prior_controller_state)
+            allow_apply = effective_controller_mode in {"canary_apply", "auto_low_risk"}
 
-        pre_watchdog = _evaluate_watchdog(args, runner_root=runner_root, controller_mode=effective_controller_mode)
-        if effective_controller_mode == "paused_regression":
-            allow_apply = False
-        elif pre_watchdog.get("should_pause"):
-            effective_controller_mode = "paused_regression"
-            allow_apply = False
+            pre_watchdog = _evaluate_watchdog(args, runner_root=runner_root, controller_mode=effective_controller_mode)
+            if effective_controller_mode == "paused_regression":
+                allow_apply = False
+            elif pre_watchdog.get("should_pause"):
+                effective_controller_mode = "paused_regression"
+                allow_apply = False
 
-        evolution_cmd = _build_evolution_cmd(args)
-        evolution_res = _run(evolution_cmd)
-        if evolution_res.returncode != 0:
-            raise RunnerError(f"evolution-review failed: {evolution_res.stderr.strip() or evolution_res.stdout.strip()}")
-        evolution_json = _load_json_text("evolution-review", evolution_res.stdout)
-        evolution_path = run_dir / "evolution.json"
-        _write_json(evolution_path, evolution_json)
+            evolution_cmd = _build_evolution_cmd(args)
+            evolution_res = _run(evolution_cmd)
+            if evolution_res.returncode != 0:
+                raise RunnerError(f"evolution-review failed: {evolution_res.stderr.strip() or evolution_res.stdout.strip()}")
+            evolution_json = _load_json_text("evolution-review", evolution_res.stdout)
+            evolution_path = run_dir / "evolution.json"
+            _atomic_write_json(evolution_path, evolution_json)
 
-        governor_cmd = _build_governor_cmd(args, evolution_path)
-        governor_res = _run(governor_cmd)
-        if governor_res.returncode != 0:
-            raise RunnerError(f"governor-review failed: {governor_res.stderr.strip() or governor_res.stdout.strip()}")
-        governor_json = _load_json_text("governor-review", governor_res.stdout)
-        governor_path = run_dir / "governor.json"
-        _write_json(governor_path, governor_json)
+            governor_cmd = _build_governor_cmd(args, evolution_path)
+            governor_res = _run(governor_cmd)
+            if governor_res.returncode != 0:
+                raise RunnerError(f"governor-review failed: {governor_res.stderr.strip() or governor_res.stdout.strip()}")
+            governor_json = _load_json_text("governor-review", governor_res.stdout)
+            governor_path = run_dir / "governor.json"
+            _atomic_write_json(governor_path, governor_json)
 
-        challenger_cmd = _build_challenger_cmd(args, evolution_path)
-        challenger_res = _run(challenger_cmd)
-        if challenger_res.returncode != 0:
-            raise RunnerError(f"challenger-review failed: {challenger_res.stderr.strip() or challenger_res.stdout.strip()}")
-        challenger_json = _load_json_text("challenger-review", challenger_res.stdout)
-        challenger_path = run_dir / "challenger.json"
-        _write_json(challenger_path, challenger_json)
+            challenger_cmd = _build_challenger_cmd(args, evolution_path)
+            challenger_res = _run(challenger_cmd)
+            if challenger_res.returncode != 0:
+                raise RunnerError(f"challenger-review failed: {challenger_res.stderr.strip() or challenger_res.stdout.strip()}")
+            challenger_json = _load_json_text("challenger-review", challenger_res.stdout)
+            challenger_path = run_dir / "challenger.json"
+            _atomic_write_json(challenger_path, challenger_json)
 
-        filtered_governor_json, blocked_by_family, challenger_filter = _filter_governor_packet(
-            governor_json,
-            challenger_json,
-            family_state=family_state,
-            enforce_quarantine=bool(getattr(args, "challenger_enforce_quarantine", True)),
-        )
-        filtered_governor_path = run_dir / "governor-filtered.json"
-        _write_json(filtered_governor_path, filtered_governor_json)
+            filtered_governor_json, blocked_by_family, challenger_filter = _filter_governor_packet(
+                governor_json,
+                challenger_json,
+                family_state=family_state,
+                enforce_quarantine=bool(getattr(args, "challenger_enforce_quarantine", True)),
+            )
+            filtered_governor_path = run_dir / "governor-filtered.json"
+            _atomic_write_json(filtered_governor_path, filtered_governor_json)
 
-        assist_cmd = _build_assist_cmd(args, filtered_governor_path)
-        if allow_apply:
-            assist_cmd = [arg for arg in assist_cmd if arg != "--dry-run"]
-        elif "--dry-run" not in assist_cmd:
-            assist_cmd.append("--dry-run")
-        assist_res = _run(assist_cmd)
-        if assist_res.returncode != 0:
-            raise RunnerError(f"assist-apply failed: {assist_res.stderr.strip() or assist_res.stdout.strip()}")
-        assist_json = _load_json_text("assist-apply", assist_res.stdout)
-        assist_path = run_dir / "assist-after.json"
-        _write_json(assist_path, assist_json)
+            assist_cmd = _build_assist_cmd(args, filtered_governor_path)
+            if allow_apply:
+                assist_cmd = [arg for arg in assist_cmd if arg != "--dry-run"]
+            elif "--dry-run" not in assist_cmd:
+                assist_cmd.append("--dry-run")
+            assist_res = _run(assist_cmd)
+            if assist_res.returncode != 0:
+                raise RunnerError(f"assist-apply failed: {assist_res.stderr.strip() or assist_res.stdout.strip()}")
+            assist_json = _load_json_text("assist-apply", assist_res.stdout)
+            assist_path = run_dir / "assist-after.json"
+            _atomic_write_json(assist_path, assist_json)
 
-        verifier_cmd = _build_verifier_cmd(args)
-        verifier_res = _run(verifier_cmd)
-        if verifier_res.returncode != 0:
-            raise RunnerError(f"verifier-bundle failed: {verifier_res.stderr.strip() or verifier_res.stdout.strip()}")
-        verifier_json = _load_json_text("verifier-bundle", verifier_res.stdout)
-        verifier_path = run_dir / "verifier.json"
-        _write_json(verifier_path, verifier_json)
+            verifier_cmd = _build_verifier_cmd(args)
+            verifier_res = _run(verifier_cmd)
+            if verifier_res.returncode != 0:
+                raise RunnerError(f"verifier-bundle failed: {verifier_res.stderr.strip() or verifier_res.stdout.strip()}")
+            verifier_json = _load_json_text("verifier-bundle", verifier_res.stdout)
+            verifier_path = run_dir / "verifier.json"
+            _atomic_write_json(verifier_path, verifier_json)
 
-        post_watchdog = _evaluate_watchdog(args, runner_root=runner_root, controller_mode=effective_controller_mode)
-        promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog, verifier=verifier_json, challenger=challenger_json)
-        _write_json(promotion_receipt_path, promotion_gates)
-        promotion_gate_emit_path = str(getattr(args, "promotion_gate_receipt", "") or "").strip()
-        if promotion_gate_emit_path:
-            _write_json(Path(promotion_gate_emit_path).expanduser(), promotion_gates)
-        promotion_gates["receipt_present"] = True
-        promotion_gates["receipt_path"] = str(promotion_receipt_path)
-        if promotion_gate_emit_path:
-            promotion_gates["emitted_receipt_path"] = str(Path(promotion_gate_emit_path).expanduser())
+            post_watchdog = _evaluate_watchdog(args, runner_root=runner_root, controller_mode=effective_controller_mode)
+            promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog, verifier=verifier_json, challenger=challenger_json)
+            _atomic_write_json(promotion_receipt_path, promotion_gates)
+            promotion_gate_emit_path = str(getattr(args, "promotion_gate_receipt", "") or "").strip()
+            if promotion_gate_emit_path:
+                _atomic_write_json(Path(promotion_gate_emit_path).expanduser(), promotion_gates)
+            promotion_gates["receipt_present"] = True
+            promotion_gates["receipt_path"] = str(promotion_receipt_path)
+            if promotion_gate_emit_path:
+                promotion_gates["emitted_receipt_path"] = str(Path(promotion_gate_emit_path).expanduser())
 
-        prior_soak_green_cycles = _controller_counter(prior_controller_state.get('soak_green_cycles'))
-        prior_regression_strikes = _controller_counter(prior_controller_state.get('regression_strikes'))
-        if post_watchdog.get('should_pause'):
-            soak_green_cycles = 0
-            regression_strikes = prior_regression_strikes + 1
-        elif promotion_gates.get('passed') and effective_controller_mode in {'canary_apply', 'auto_low_risk'}:
-            soak_green_cycles = prior_soak_green_cycles + 1
-            regression_strikes = max(0, prior_regression_strikes - 1)
-        else:
-            soak_green_cycles = 0
-            regression_strikes = prior_regression_strikes
-        next_controller_mode = effective_controller_mode
-        if post_watchdog.get("should_pause"):
-            next_controller_mode = "paused_regression"
-        elif regression_strikes >= int(getattr(args, 'regression_strikes_for_demotion', 2) or 2):
-            if effective_controller_mode == 'auto_low_risk':
-                next_controller_mode = 'canary_apply'
-            elif effective_controller_mode == 'canary_apply':
-                next_controller_mode = 'dry_run'
-        elif bool(getattr(args, "promote_when_gates_green", False)) and promotion_gates.get("passed") and soak_green_cycles >= int(getattr(args, 'soak_cycles_for_auto_low_risk', 3) or 3):
-            next_controller_mode = "auto_low_risk"
-        elif effective_controller_mode == 'auto_low_risk' and not promotion_gates.get('passed'):
-            next_controller_mode = 'canary_apply'
+            prior_soak_green_cycles = _controller_counter(prior_controller_state.get("soak_green_cycles"))
+            prior_regression_strikes = _controller_counter(prior_controller_state.get("regression_strikes"))
+            if post_watchdog.get("should_pause"):
+                soak_green_cycles = 0
+                regression_strikes = prior_regression_strikes + 1
+            elif promotion_gates.get("passed") and effective_controller_mode in {"canary_apply", "auto_low_risk"}:
+                soak_green_cycles = prior_soak_green_cycles + 1
+                regression_strikes = max(0, prior_regression_strikes - 1)
+            else:
+                soak_green_cycles = 0
+                regression_strikes = prior_regression_strikes
+            next_controller_mode = effective_controller_mode
+            if post_watchdog.get("should_pause"):
+                next_controller_mode = "paused_regression"
+            elif regression_strikes >= int(getattr(args, "regression_strikes_for_demotion", 2) or 2):
+                if effective_controller_mode == "auto_low_risk":
+                    next_controller_mode = "canary_apply"
+                elif effective_controller_mode == "canary_apply":
+                    next_controller_mode = "dry_run"
+            elif bool(getattr(args, "promote_when_gates_green", False)) and promotion_gates.get("passed") and soak_green_cycles >= int(getattr(args, "soak_cycles_for_auto_low_risk", 3) or 3):
+                next_controller_mode = "auto_low_risk"
+            elif effective_controller_mode == "auto_low_risk" and not promotion_gates.get("passed"):
+                next_controller_mode = "canary_apply"
 
-        verifier_summary = verifier_json.get("summary") if isinstance(verifier_json.get("summary"), dict) else {}
-        challenger_summary = challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {}
-        horizons = {
-            "short": {
-                "status": "green" if not post_watchdog.get("should_pause") else "red",
-                "pause_reasons": list(post_watchdog.get("pause_reasons") or []),
-            },
-            "medium": {
-                "status": "green" if verifier_summary.get("cap_integrity_pass") is True and verifier_summary.get("rollback_replay_pass") is True and bool(challenger_summary.get("agreement_pass")) else "red",
-                "verifier": verifier_summary,
-                "challenger": challenger_summary,
-            },
-            "soak": {
-                "status": "green" if bool(promotion_gates.get("passed")) and soak_green_cycles >= int(getattr(args, 'soak_cycles_for_auto_low_risk', 3) or 3) else "hold",
+            verifier_summary = verifier_json.get("summary") if isinstance(verifier_json.get("summary"), dict) else {}
+            challenger_summary = challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {}
+            horizons = {
+                "short": {
+                    "status": "green" if not post_watchdog.get("should_pause") else "red",
+                    "pause_reasons": list(post_watchdog.get("pause_reasons") or []),
+                },
+                "medium": {
+                    "status": "green" if verifier_summary.get("cap_integrity_pass") is True and verifier_summary.get("rollback_replay_pass") is True and bool(challenger_summary.get("agreement_pass")) else "red",
+                    "verifier": verifier_summary,
+                    "challenger": challenger_summary,
+                },
+                "soak": {
+                    "status": "green" if bool(promotion_gates.get("passed")) and soak_green_cycles >= int(getattr(args, "soak_cycles_for_auto_low_risk", 3) or 3) else "hold",
+                    "soak_green_cycles": soak_green_cycles,
+                    "required_cycles": int(getattr(args, "soak_cycles_for_auto_low_risk", 3) or 3),
+                },
+            }
+
+            updated_family_state = json.loads(json.dumps(family_state, ensure_ascii=False))
+            for family in challenger_filter.get("challenged_families", []):
+                if family in updated_family_state and bool(getattr(args, "challenger_enforce_quarantine", True)):
+                    updated_family_state[family]["enabled"] = False
+                    updated_family_state[family]["mode"] = "quarantined"
+                    updated_family_state[family]["reasons"] = sorted(set(list(updated_family_state[family].get("reasons") or []) + ["challenger_quarantine"]))
+
+            controller_state = {
+                "kind": "openclaw-mem.optimize.assist.controller-state.v0",
+                "updated_at": _utcnow_iso(),
+                "legacy_unsigned_state_migrated": legacy_unsigned_state_loaded,
+                "mode": next_controller_mode,
+                "previous_mode": str(prior_controller_state.get("mode") or "") or None,
+                "requested_mode": str(getattr(args, "controller_mode", None) or "") or None,
+                "effective_mode": effective_controller_mode,
+                "family_state": updated_family_state,
                 "soak_green_cycles": soak_green_cycles,
-                "required_cycles": int(getattr(args, 'soak_cycles_for_auto_low_risk', 3) or 3),
-            },
-        }
-
-        updated_family_state = json.loads(json.dumps(family_state, ensure_ascii=False))
-        for family in challenger_filter.get("challenged_families", []):
-            if family in updated_family_state and bool(getattr(args, "challenger_enforce_quarantine", True)):
-                updated_family_state[family]["enabled"] = False
-                updated_family_state[family]["mode"] = "quarantined"
-                updated_family_state[family]["reasons"] = sorted(set(list(updated_family_state[family].get("reasons") or []) + ["challenger_quarantine"]))
-
-        controller_state = {
-            "kind": "openclaw-mem.optimize.assist.controller-state.v0",
-            "updated_at": _utcnow_iso(),
-            "legacy_unsigned_state_migrated": legacy_unsigned_state_loaded,
-            "mode": next_controller_mode,
-            "previous_mode": str(prior_controller_state.get("mode") or "") or None,
-            "requested_mode": str(getattr(args, "controller_mode", None) or "") or None,
-            "effective_mode": effective_controller_mode,
-            "family_state": updated_family_state,
-            'soak_green_cycles': soak_green_cycles,
-            'regression_strikes': regression_strikes,
-            "horizons": horizons,
-            "watchdog": post_watchdog,
-            "promotion_gates": promotion_gates,
-            "challenger": {
-                "policy_mode": str(getattr(args, "challenger_policy_mode", "strict_v1") or "strict_v1"),
-                "receipt_ref": str(challenger_path),
-                "summary": challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {},
-                "counts": challenger_json.get("counts") if isinstance(challenger_json.get("counts"), dict) else {},
-                "quarantine_filter": challenger_filter,
-            },
-            "last_run": {
+                "regression_strikes": regression_strikes,
+                "horizons": horizons,
+                "watchdog": post_watchdog,
+                "promotion_gates": promotion_gates,
+                "challenger": {
+                    "policy_mode": str(getattr(args, "challenger_policy_mode", "strict_v1") or "strict_v1"),
+                    "receipt_ref": str(challenger_path),
+                    "summary": challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {},
+                    "counts": challenger_json.get("counts") if isinstance(challenger_json.get("counts"), dict) else {},
+                    "quarantine_filter": challenger_filter,
+                },
+                "last_run": {
+                    "run_id": run_id,
+                    "run_dir": str(run_dir),
+                    "assist_result": assist_json.get("result"),
+                },
+            }
+            controller_state = _prepare_controller_state(controller_state, prior_state=prior_controller_state)
+            _atomic_write_json(controller_state_path, controller_state)
+            controller_receipt = {
+                "kind": "openclaw-mem.optimize.assist.controller.v0",
+                "ts": _utcnow_iso(),
                 "run_id": run_id,
-                "run_dir": str(run_dir),
-                "assist_result": assist_json.get("result"),
-            },
-        }
-        controller_state = _prepare_controller_state(controller_state, prior_state=prior_controller_state)
-        _atomic_write_json(controller_state_path, controller_state)
-        controller_receipt = {
-            "kind": "openclaw-mem.optimize.assist.controller.v0",
-            "ts": _utcnow_iso(),
-            "run_id": run_id,
-            "requested_mode": str(getattr(args, "controller_mode", None) or "") or None,
-            "previous_mode": str(prior_controller_state.get("mode") or "") or None,
-            "effective_mode": effective_controller_mode,
-            "next_mode": next_controller_mode,
-            "allow_apply": allow_apply,
-            "family_state": updated_family_state,
-            'soak_green_cycles': soak_green_cycles,
-            'regression_strikes': regression_strikes,
-            "horizons": horizons,
-            "pre_watchdog": pre_watchdog,
-            "post_watchdog": post_watchdog,
-            "verifier": verifier_json,
-            "promotion_gates": promotion_gates,
-            "challenger": {
-                "policy_mode": str(getattr(args, "challenger_policy_mode", "strict_v1") or "strict_v1"),
-                "receipt_ref": str(challenger_path),
-                "summary": challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {},
-                "counts": challenger_json.get("counts") if isinstance(challenger_json.get("counts"), dict) else {},
-                "quarantine_filter": challenger_filter,
-            },
-            "controller_state_ref": str(controller_state_path),
-            "controller_state_revision": controller_state.get("revision"),
-            "controller_state_digest": controller_state.get("state_digest"),
-        }
-        _write_json(controller_receipt_path, controller_receipt)
+                "requested_mode": str(getattr(args, "controller_mode", None) or "") or None,
+                "previous_mode": str(prior_controller_state.get("mode") or "") or None,
+                "effective_mode": effective_controller_mode,
+                "next_mode": next_controller_mode,
+                "allow_apply": allow_apply,
+                "family_state": updated_family_state,
+                "soak_green_cycles": soak_green_cycles,
+                "regression_strikes": regression_strikes,
+                "horizons": horizons,
+                "pre_watchdog": pre_watchdog,
+                "post_watchdog": post_watchdog,
+                "verifier": verifier_json,
+                "promotion_gates": promotion_gates,
+                "challenger": {
+                    "policy_mode": str(getattr(args, "challenger_policy_mode", "strict_v1") or "strict_v1"),
+                    "receipt_ref": str(challenger_path),
+                    "summary": challenger_json.get("summary") if isinstance(challenger_json.get("summary"), dict) else {},
+                    "counts": challenger_json.get("counts") if isinstance(challenger_json.get("counts"), dict) else {},
+                    "quarantine_filter": challenger_filter,
+                },
+                "controller_state_ref": str(controller_state_path),
+                "controller_state_revision": controller_state.get("revision"),
+                "controller_state_digest": controller_state.get("state_digest"),
+            }
+            _atomic_write_json(controller_receipt_path, controller_receipt)
 
-        payload = {
-        "kind": "openclaw-mem.optimize.assist-runner.v0",
-        "ts": ts,
-        "run_id": run_id,
-        "mode": "apply" if allow_apply else "dry_run",
-        "operator": args.operator,
-        "db": args.db,
-        "runner_root": str(runner_root),
-        "controller": {
-            "effective_mode": effective_controller_mode,
-            "next_mode": next_controller_mode,
-            "state_ref": str(controller_state_path),
-            "receipt_ref": str(controller_receipt_path),
-            "paused": next_controller_mode == "paused_regression",
-            "promotion_gates_passed": bool(promotion_gates.get("passed")),
-            'soak_green_cycles': soak_green_cycles,
-            'regression_strikes': regression_strikes,
-        },
-        "artifacts": {
-            "run_dir": str(run_dir),
-            "evolution_packet": str(evolution_path),
-            "governor_packet": str(governor_path),
-            "governor_filtered_packet": str(filtered_governor_path),
-            "challenger_packet": str(challenger_path),
-            "assist_after": str(assist_path),
-            "verifier_bundle": str(verifier_path),
-            "promotion_gates": str(promotion_receipt_path),
-            "controller": str(controller_receipt_path),
-        },
-        "counts": {
-            "evolution_candidates": int(((evolution_json.get("counts") or {}).get("items") or 0)),
-            "governor_approved": int(((governor_json.get("counts") or {}).get("approvedForApply") or 0)),
-            "governor_approved_after_family_filter": int(((filtered_governor_json.get("counts") or {}).get("approvedForApply") or 0)),
-            "challenger_disagreements": int(((challenger_json.get("counts") or {}).get("disagreements") or 0)),
-            "assist_applied_rows": int(assist_json.get("applied_rows") or 0),
-            "assist_skipped_rows": int(assist_json.get("skipped_rows") or 0),
-        },
-        "results": {
-            "evolution_kind": evolution_json.get("kind"),
-            "governor_kind": governor_json.get("kind"),
-            "challenger_kind": challenger_json.get("kind"),
-            "assist_kind": assist_json.get("kind"),
-            "verifier_kind": verifier_json.get("kind"),
-            "assist_result": assist_json.get("result"),
-            "blocked_by_caps": list(assist_json.get("blocked_by_caps") or []),
-            "blocked_by_family": blocked_by_family,
-            "watchdog_pause_reasons": list((post_watchdog.get("pause_reasons") or [])),
-            "promotion_gate_reasons": list((promotion_gates.get("reasons") or [])),
-            "challenger_quarantine_recommended": bool(((challenger_json.get("summary") or {}).get("quarantine_recommended"))),
-        },
-        "commands": {
-            "evolution_review": evolution_cmd,
-            "governor_review": governor_cmd,
-            "challenger_review": challenger_cmd,
-            "assist_apply": assist_cmd,
-            "verifier_bundle": verifier_cmd,
-        },
-        }
-        return payload
-
+            payload = {
+                "kind": "openclaw-mem.optimize.assist-runner.v0",
+                "ts": ts,
+                "run_id": run_id,
+                "mode": "apply" if allow_apply else "dry_run",
+                "operator": args.operator,
+                "db": args.db,
+                "runner_root": str(runner_root),
+                "controller": {
+                    "effective_mode": effective_controller_mode,
+                    "next_mode": next_controller_mode,
+                    "state_ref": str(controller_state_path),
+                    "receipt_ref": str(controller_receipt_path),
+                    "paused": next_controller_mode == "paused_regression",
+                    "promotion_gates_passed": bool(promotion_gates.get("passed")),
+                    "soak_green_cycles": soak_green_cycles,
+                    "regression_strikes": regression_strikes,
+                },
+                "artifacts": {
+                    "run_dir": str(run_dir),
+                    "evolution_packet": str(evolution_path),
+                    "governor_packet": str(governor_path),
+                    "governor_filtered_packet": str(filtered_governor_path),
+                    "challenger_packet": str(challenger_path),
+                    "assist_after": str(assist_path),
+                    "verifier_bundle": str(verifier_path),
+                    "promotion_gates": str(promotion_receipt_path),
+                    "controller": str(controller_receipt_path),
+                },
+                "counts": {
+                    "evolution_candidates": int(((evolution_json.get("counts") or {}).get("items") or 0)),
+                    "governor_approved": int(((governor_json.get("counts") or {}).get("approvedForApply") or 0)),
+                    "governor_approved_after_family_filter": int(((filtered_governor_json.get("counts") or {}).get("approvedForApply") or 0)),
+                    "challenger_disagreements": int(((challenger_json.get("counts") or {}).get("disagreements") or 0)),
+                    "assist_applied_rows": int(assist_json.get("applied_rows") or 0),
+                    "assist_skipped_rows": int(assist_json.get("skipped_rows") or 0),
+                },
+                "results": {
+                    "evolution_kind": evolution_json.get("kind"),
+                    "governor_kind": governor_json.get("kind"),
+                    "challenger_kind": challenger_json.get("kind"),
+                    "assist_kind": assist_json.get("kind"),
+                    "verifier_kind": verifier_json.get("kind"),
+                    "assist_result": assist_json.get("result"),
+                    "blocked_by_caps": list(assist_json.get("blocked_by_caps") or []),
+                    "blocked_by_family": blocked_by_family,
+                    "watchdog_pause_reasons": list((post_watchdog.get("pause_reasons") or [])),
+                    "promotion_gate_reasons": list((promotion_gates.get("reasons") or [])),
+                    "challenger_quarantine_recommended": bool(((challenger_json.get("summary") or {}).get("quarantine_recommended"))),
+                },
+                "commands": {
+                    "evolution_review": evolution_cmd,
+                    "governor_review": governor_cmd,
+                    "challenger_review": challenger_cmd,
+                    "assist_apply": assist_cmd,
+                    "verifier_bundle": verifier_cmd,
+                },
+            }
+            return payload
+    finally:
+        _ACTIVE_SUBPROCESS_TIMEOUT_SECS = previous_subprocess_timeout_secs
 
 def main(argv: Optional[list[str]] = None) -> int:
+    global _ACTIVE_SUBPROCESS_TIMEOUT_SECS
     args = build_parser().parse_args(argv)
+    _ACTIVE_SUBPROCESS_TIMEOUT_SECS = _subprocess_timeout_secs(args)
     try:
         payload = run_pipeline(args)
     except RunnerError as e:

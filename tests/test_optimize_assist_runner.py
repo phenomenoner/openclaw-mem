@@ -1,13 +1,15 @@
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import shutil
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from openclaw_mem.cli import _connect, _insert_observation
 from tools import optimize_assist_runner as runner
@@ -120,6 +122,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         self.assertEqual(args.max_importance_adjustments_per_24h, 4)
         self.assertEqual(args.controller_mode, "auto_low_risk")
         self.assertEqual(args.watchdog_window_hours, 12)
+        self.assertEqual(args.subprocess_timeout_secs, runner.DEFAULT_SUBPROCESS_TIMEOUT_SECS)
         self.assertEqual(args.promotion_gate_receipt, "/tmp/promotion.json")
         self.assertTrue(args.promote_when_gates_green)
         self.assertEqual(args.soak_cycles_for_auto_low_risk, 2)
@@ -278,6 +281,106 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             with patch.object(runner, "_run", side_effect=outputs):
                 with self.assertRaises(runner.RunnerError):
                     runner.run_pipeline(args)
+
+    def test_run_pipeline_releases_controller_lock_after_timeout_abort(self):
+        with tempfile.TemporaryDirectory() as td:
+            _write_native_effect_history(Path(td), regressed=0, neutral=2)
+            args = SimpleNamespace(
+                python="python3",
+                db="/tmp/openclaw-mem.sqlite",
+                runner_root=td,
+                operator="lyria",
+                allow_apply=False,
+                approve_importance=True,
+                approve_stale=True,
+                scope=None,
+                limit=100,
+                stale_days=60,
+                lifecycle_limit=50,
+                top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
+                max_rows_per_run=5,
+                max_rows_per_24h=20,
+                max_importance_adjustments_per_run=3,
+                max_importance_adjustments_per_24h=10,
+                controller_mode=None,
+                controller_state_path=None,
+                watchdog_window_hours=24,
+                watchdog_max_missing_effect_receipts_pct=0.0,
+                watchdog_max_regressed_effect_items=0,
+                rollback_replay_receipt=None,
+                promotion_gate_receipt=None,
+                promote_when_gates_green=False,
+                promotion_min_manual_precision=0.9,
+                promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=3,
+                regression_strikes_for_demotion=2,
+                lane="observations.assist",
+                json=True,
+            )
+
+            with patch.object(runner, "_run", side_effect=runner.RunnerError("subprocess timed out after 300s: evolution-review")):
+                with self.assertRaises(runner.RunnerError):
+                    runner.run_pipeline(args)
+
+            outputs = [
+                runner.CommandResult(argv=["evolution"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.evolution-review.v0", "counts": {"items": 1}}), stderr=""),
+                runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 0}}), stderr=""),
+                runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}), stderr=""),
+                runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "result": "dry_run", "applied_rows": 0, "skipped_rows": 0, "blocked_by_caps": []}), stderr=""),
+                runner.CommandResult(argv=["verifier"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.verifier-bundle.v0", "summary": {"effect_receipt_missing_pct": 0.0, "cap_integrity_pass": True, "rollback_replay_pass": True}}), stderr=""),
+            ]
+            with patch.object(runner, "_run", side_effect=outputs):
+                out = runner.run_pipeline(args)
+
+            self.assertEqual(out["controller"]["effective_mode"], "dry_run")
+            state = json.loads(Path(out["controller"]["state_ref"]).read_text(encoding="utf-8"))
+            self.assertEqual(state["revision"], 1)
+
+    def test_run_aborts_when_subprocess_times_out(self):
+        popen = Mock()
+        popen.pid = 4321
+        popen.communicate.side_effect = [subprocess.TimeoutExpired(cmd=["python3", "-m", "openclaw_mem"], timeout=7), ("", "")]
+        popen.returncode = -signal.SIGKILL
+        with patch.object(runner.subprocess, "Popen", return_value=popen), patch.object(runner.os, "killpg") as killpg:
+            with self.assertRaises(runner.RunnerError) as ctx:
+                runner._run(["python3", "-m", "openclaw_mem"])
+
+        self.assertIn("subprocess timed out", str(ctx.exception))
+        killpg.assert_called_once_with(4321, signal.SIGKILL)
+
+    def test_run_timeout_second_communicate_does_not_hang(self):
+        popen = Mock()
+        popen.pid = 4321
+        popen.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd=["python3", "-m", "openclaw_mem"], timeout=7),
+            subprocess.TimeoutExpired(cmd=["python3", "-m", "openclaw_mem"], timeout=5),
+        ]
+        popen.returncode = -signal.SIGKILL
+        with patch.object(runner.subprocess, "Popen", return_value=popen), patch.object(runner.os, "killpg") as killpg:
+            with self.assertRaises(runner.RunnerError) as ctx:
+                runner._run(["python3", "-m", "openclaw_mem"])
+
+        self.assertIn("subprocess timed out", str(ctx.exception))
+        killpg.assert_called_once_with(4321, signal.SIGKILL)
+        self.assertEqual(popen.communicate.call_count, 2)
+
+    def test_run_timeout_handles_permission_error_from_killpg(self):
+        popen = Mock()
+        popen.pid = 4321
+        popen.communicate.side_effect = [subprocess.TimeoutExpired(cmd=["python3", "-m", "openclaw_mem"], timeout=7), ("", "")]
+        popen.returncode = -signal.SIGKILL
+        with patch.object(runner.subprocess, "Popen", return_value=popen), patch.object(runner.os, "killpg", side_effect=PermissionError("denied")):
+            with self.assertRaises(runner.RunnerError) as ctx:
+                runner._run(["python3", "-m", "openclaw_mem"])
+
+        self.assertIn("subprocess timed out", str(ctx.exception))
 
     def test_run_pipeline_pauses_controller_on_regressed_effect(self):
         with tempfile.TemporaryDirectory() as td:
@@ -618,6 +721,175 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             with self.assertRaises(runner.RunnerError):
                 runner._load_controller_state(path)
 
+    def test_atomic_write_json_cleans_tmp_on_replace_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "receipt.json"
+            tmp_path = target.with_name(".receipt.json.deadbeef.tmp")
+            with patch.object(runner.uuid, "uuid4", return_value=SimpleNamespace(hex="deadbeef")), patch.object(
+                runner.os, "replace", side_effect=OSError("replace failed")
+            ):
+                with self.assertRaises(OSError):
+                    runner._atomic_write_json(target, {"ok": True})
+
+            self.assertFalse(target.exists())
+            self.assertFalse(tmp_path.exists())
+
+    def test_atomic_write_json_preserves_replace_error_when_tmp_cleanup_also_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "receipt.json"
+            tmp_path = target.with_name(".receipt.json.deadbeef.tmp")
+            real_exists = Path.exists
+            real_unlink = Path.unlink
+
+            def fake_exists(path: Path) -> bool:
+                if path == tmp_path:
+                    return True
+                return real_exists(path)
+
+            def fake_unlink(path: Path, missing_ok: bool = False) -> None:
+                if path == tmp_path:
+                    raise PermissionError("cleanup denied")
+                return real_unlink(path, missing_ok=missing_ok)
+
+            with patch.object(runner.uuid, "uuid4", return_value=SimpleNamespace(hex="deadbeef")), patch.object(
+                runner.os, "replace", side_effect=OSError("replace failed")
+            ), patch.object(Path, "exists", fake_exists), patch.object(Path, "unlink", fake_unlink):
+                with self.assertRaises(OSError) as ctx:
+                    runner._atomic_write_json(target, {"ok": True})
+
+            self.assertIn("replace failed", str(ctx.exception))
+
+    def test_run_pipeline_uses_atomic_writes_for_cross_process_receipts(self):
+        with tempfile.TemporaryDirectory() as td:
+            _write_native_effect_history(Path(td), regressed=0, neutral=2)
+            args = SimpleNamespace(
+                python="python3",
+                db="/tmp/openclaw-mem.sqlite",
+                runner_root=td,
+                operator="lyria",
+                allow_apply=False,
+                approve_importance=True,
+                approve_stale=True,
+                scope="team/alpha",
+                limit=100,
+                stale_days=60,
+                lifecycle_limit=50,
+                top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
+                max_rows_per_run=5,
+                max_rows_per_24h=20,
+                max_importance_adjustments_per_run=3,
+                max_importance_adjustments_per_24h=10,
+                controller_mode=None,
+                controller_state_path=None,
+                watchdog_window_hours=24,
+                watchdog_max_missing_effect_receipts_pct=0.0,
+                watchdog_max_regressed_effect_items=0,
+                rollback_replay_receipt=None,
+                promotion_gate_receipt=None,
+                promote_when_gates_green=False,
+                promotion_min_manual_precision=0.9,
+                promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=3,
+                regression_strikes_for_demotion=2,
+                lane="observations.assist",
+                json=True,
+            )
+            outputs = [
+                runner.CommandResult(argv=["evolution"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.evolution-review.v0", "counts": {"items": 2}}), stderr=""),
+                runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
+                runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}), stderr=""),
+                runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "result": "dry_run", "applied_rows": 0, "skipped_rows": 1, "blocked_by_caps": []}), stderr=""),
+                runner.CommandResult(argv=["verifier"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.verifier-bundle.v0", "summary": {"effect_receipt_missing_pct": 0.0, "cap_integrity_pass": True, "rollback_replay_pass": True}}), stderr=""),
+            ]
+            seen_paths: list[str] = []
+            real_atomic_write = runner._atomic_write_json
+
+            def recording_atomic_write(path: Path, payload: dict[str, object]) -> None:
+                seen_paths.append(path.name)
+                real_atomic_write(path, payload)
+
+            with patch.object(runner, "_run", side_effect=outputs), patch.object(runner, "_atomic_write_json", side_effect=recording_atomic_write):
+                runner.run_pipeline(args)
+
+            self.assertTrue(
+                {
+                    "evolution.json",
+                    "governor.json",
+                    "challenger.json",
+                    "governor-filtered.json",
+                    "assist-after.json",
+                    "verifier.json",
+                    "promotion-gates.json",
+                    "controller.json",
+                    runner.DEFAULT_CONTROLLER_STATE,
+                }.issubset(set(seen_paths))
+            )
+
+    def test_run_pipeline_atomic_receipts_leave_no_tmp_files(self):
+        with tempfile.TemporaryDirectory() as td:
+            _write_native_effect_history(Path(td), regressed=0, neutral=2)
+            emit_path = Path(td) / "emitted-promotion.json"
+            args = SimpleNamespace(
+                python="python3",
+                db="/tmp/openclaw-mem.sqlite",
+                runner_root=td,
+                operator="lyria",
+                allow_apply=True,
+                approve_importance=True,
+                approve_stale=True,
+                scope="team/alpha",
+                limit=100,
+                stale_days=60,
+                lifecycle_limit=50,
+                top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
+                max_rows_per_run=5,
+                max_rows_per_24h=20,
+                max_importance_adjustments_per_run=3,
+                max_importance_adjustments_per_24h=10,
+                controller_mode="canary_apply",
+                controller_state_path=None,
+                watchdog_window_hours=24,
+                watchdog_max_missing_effect_receipts_pct=0.0,
+                watchdog_max_regressed_effect_items=0,
+                rollback_replay_receipt=str(_write_rollback_receipt(Path(td))),
+                promotion_gate_receipt=str(emit_path),
+                promote_when_gates_green=True,
+                promotion_min_manual_precision=0.9,
+                promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=1,
+                regression_strikes_for_demotion=2,
+                lane="observations.assist",
+                json=True,
+            )
+            outputs = [
+                runner.CommandResult(argv=["evolution"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.evolution-review.v0", "counts": {"items": 1}}), stderr=""),
+                runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
+                runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}), stderr=""),
+                runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "applied", "applied_rows": 1, "skipped_rows": 0, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
+                runner.CommandResult(argv=["verifier"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.verifier-bundle.v0", "summary": {"effect_receipt_missing_pct": 0.0, "cap_integrity_pass": True, "rollback_replay_pass": True}}), stderr=""),
+            ]
+
+            with patch.object(runner, "_run", side_effect=outputs):
+                out = runner.run_pipeline(args)
+
+            self.assertEqual(json.loads(emit_path.read_text(encoding="utf-8"))["passed"], True)
+            self.assertEqual(json.loads(Path(out["artifacts"]["promotion_gates"]).read_text(encoding="utf-8"))["passed"], True)
+            self.assertEqual(list(Path(td).rglob("*.tmp")), [])
+
     def test_run_pipeline_ignores_external_promotion_receipt_input(self):
         with tempfile.TemporaryDirectory() as td:
             _write_native_effect_history(Path(td), regressed=0, neutral=2)
@@ -821,6 +1093,79 @@ class TestOptimizeAssistRunnerE2E(unittest.TestCase):
     def _rollback_arg(self, root: Path) -> list[str]:
         return ["--rollback-replay-receipt", str(_write_rollback_receipt(root))]
 
+    def _normalized_json(self, path: Path) -> dict:
+        def normalize(value):
+            if isinstance(value, dict):
+                out = {}
+                for key, inner in value.items():
+                    if key in {
+                        "ts",
+                        "updated_at",
+                        "run_id",
+                        "run_dir",
+                        "run_root",
+                        "fromFile",
+                        "state_ref",
+                        "receipt_ref",
+                        "receipt_path",
+                        "emitted_receipt_path",
+                        "controller_state_ref",
+                        "evolution_packet",
+                        "governor_packet",
+                        "governor_filtered_packet",
+                        "challenger_packet",
+                        "assist_after",
+                        "verifier_bundle",
+                        "promotion_gates",
+                        "controller",
+                    } or key.endswith("_path") or key.endswith("_ref") or key.endswith("_at"):
+                        continue
+                    out[key] = normalize(inner)
+                return out
+            if isinstance(value, list):
+                return [normalize(item) for item in value]
+            return value
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return normalize(payload)
+
+    def _write_python_shim(self, root: Path, *, challenger_stdout: dict | None = None) -> Path:
+        shim = root / "python-shim.py"
+        payload = repr(challenger_stdout) if challenger_stdout is not None else "None"
+        shim.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            "import subprocess\n"
+            "import sys\n"
+            f"CHALLENGER = {payload}\n"
+            "if CHALLENGER is not None and sys.argv[1:5] == ['-m', 'openclaw_mem', 'optimize', 'challenger-review']:\n"
+            "    print(json.dumps(CHALLENGER))\n"
+            "    raise SystemExit(0)\n"
+            f"proc = subprocess.run([{json.dumps(sys.executable)}, *sys.argv[1:]])\n"
+            "raise SystemExit(proc.returncode)\n",
+            encoding="utf-8",
+        )
+        shim.chmod(0o755)
+        return shim
+
+    def _write_sleeping_python_shim(self, root: Path, *, sleep_on_subcommand: str, seconds: int) -> Path:
+        shim = root / f"python-sleep-{sleep_on_subcommand}.py"
+        shim.write_text(
+            "#!/usr/bin/env python3\n"
+            "import subprocess\n"
+            "import sys\n"
+            "import time\n"
+            f"TARGET = {sleep_on_subcommand!r}\n"
+            f"SECONDS = {seconds!r}\n"
+            "if len(sys.argv) >= 5 and sys.argv[1:4] == ['-m', 'openclaw_mem', 'optimize'] and sys.argv[4] == TARGET:\n"
+            "    time.sleep(SECONDS)\n"
+            f"proc = subprocess.run([{json.dumps(sys.executable)}, *sys.argv[1:]])\n"
+            "raise SystemExit(proc.returncode)\n",
+            encoding="utf-8",
+        )
+        shim.chmod(0o755)
+        return shim
+
     def test_runner_subprocess_promotes_with_native_evidence(self):
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
@@ -850,6 +1195,36 @@ class TestOptimizeAssistRunnerE2E(unittest.TestCase):
             self.assertEqual(state["mode"], "auto_low_risk")
             self.assertEqual(state["revision"], 1)
             self.assertTrue(state["state_digest"])
+
+    def test_runner_subprocess_atomic_receipts_leave_no_tmp_files(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            db_path = td_path / "mem.sqlite"
+            runner_root = td_path / "runner"
+            emit_path = td_path / "promotion-out.json"
+            self._seed_db(db_path, importance_score=0.32)
+
+            proc = self._run_runner(
+                db_path,
+                runner_root,
+                "--controller-mode",
+                "canary_apply",
+                "--allow-apply",
+                "--promote-when-gates-green",
+                "--soak-cycles-for-auto-low-risk",
+                "1",
+                "--promotion-gate-receipt",
+                str(emit_path),
+                *self._rollback_arg(td_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = json.loads(proc.stdout)
+            self.assertTrue(emit_path.exists())
+            self.assertEqual(list(runner_root.rglob("*.tmp")), [])
+            self.assertEqual(list(td_path.rglob("*.tmp")), [])
+            self.assertTrue(Path(out["artifacts"]["controller"]).exists())
+            self.assertTrue(Path(out["artifacts"]["promotion_gates"]).exists())
 
     def test_runner_subprocess_pauses_on_invalid_effect_history(self):
         with tempfile.TemporaryDirectory() as td:
@@ -886,6 +1261,140 @@ class TestOptimizeAssistRunnerE2E(unittest.TestCase):
             self.assertTrue(out["controller"]["paused"])
             self.assertEqual(out["controller"]["next_mode"], "paused_regression")
             self.assertIn("missing_effect_receipts", out["results"]["watchdog_pause_reasons"])
+
+    def test_runner_subprocess_quarantines_importance_family_on_challenger_disagreement(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            db_path = td_path / "mem.sqlite"
+            runner_root = td_path / "runner"
+            self._seed_db(db_path, importance_score=0.32)
+            shim = self._write_python_shim(
+                td_path,
+                challenger_stdout={
+                    "kind": "openclaw-mem.optimize.challenger-review.v0",
+                    "counts": {"items": 2, "disagreements": 1, "disagreementClusters": 1, "quarantineRecommended": 1},
+                    "summary": {"agreement_pass": False, "promotion_ready": False, "quarantine_recommended": True},
+                    "disagreements": [
+                        {
+                            "candidate_id": "synthetic-importance-review",
+                            "action_family": "importance_downshift",
+                            "quarantine_recommended": True,
+                        }
+                    ],
+                    "disagreement_clusters": [
+                        {
+                            "action_family": "importance_downshift",
+                            "reason": "higher_value_memory_requires_review",
+                            "count": 1,
+                            "candidate_ids": ["synthetic-importance-review"],
+                            "quarantine_recommended": True,
+                        }
+                    ],
+                    "items": [],
+                },
+            )
+
+            proc = self._run_runner(
+                db_path,
+                runner_root,
+                "--python",
+                str(shim),
+                "--controller-mode",
+                "canary_apply",
+                "--allow-apply",
+                *self._rollback_arg(td_path),
+            )
+
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            out = json.loads(proc.stdout)
+            self.assertEqual(out["counts"]["challenger_disagreements"], 1)
+            self.assertTrue(out["results"]["challenger_quarantine_recommended"])
+            self.assertEqual(out["results"]["blocked_by_family"]["importance_downshift"], 0)
+
+            filtered = json.loads(Path(out["artifacts"]["governor_filtered_packet"]).read_text(encoding="utf-8"))
+            importance_item = next(item for item in filtered["items"] if item.get("action_family") == "importance_downshift")
+            self.assertEqual(importance_item["decision"], "proposal_only")
+            self.assertIn("challenger_quarantine:importance_downshift", importance_item["reasons"])
+            self.assertEqual(filtered["counts"]["blockedByChallengerQuarantine"], 1)
+
+            state = json.loads(Path(out["controller"]["state_ref"]).read_text(encoding="utf-8"))
+            self.assertEqual(state["family_state"]["importance_downshift"]["mode"], "quarantined")
+            self.assertIn("challenger_quarantine", state["family_state"]["importance_downshift"]["reasons"])
+
+    def test_runner_subprocess_honors_small_timeout_flag(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            db_path = td_path / "mem.sqlite"
+            runner_root = td_path / "runner"
+            self._seed_db(db_path, importance_score=0.32)
+            shim = self._write_sleeping_python_shim(td_path, sleep_on_subcommand="evolution-review", seconds=5)
+
+            proc = self._run_runner(
+                db_path,
+                runner_root,
+                "--python",
+                str(shim),
+                "--subprocess-timeout-secs",
+                "1",
+            )
+
+            self.assertEqual(proc.returncode, 2)
+            out = json.loads(proc.stdout)
+            self.assertEqual(out["result"], "aborted")
+            self.assertIn("subprocess timed out after 1s", out["error"])
+
+    def test_runner_subprocess_rerun_is_deterministic_for_stable_artifacts(self):
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            db1 = td_path / "mem1.sqlite"
+            db2 = td_path / "mem2.sqlite"
+            runner1 = td_path / "runner1"
+            runner2 = td_path / "runner2"
+            self._seed_db(db1, importance_score=0.32)
+            shutil.copyfile(db1, db2)
+
+            proc1 = self._run_runner(
+                db1,
+                runner1,
+                "--controller-mode",
+                "canary_apply",
+                "--allow-apply",
+                "--promote-when-gates-green",
+                "--soak-cycles-for-auto-low-risk",
+                "1",
+                *self._rollback_arg(td_path),
+            )
+            proc2 = self._run_runner(
+                db2,
+                runner2,
+                "--controller-mode",
+                "canary_apply",
+                "--allow-apply",
+                "--promote-when-gates-green",
+                "--soak-cycles-for-auto-low-risk",
+                "1",
+                *self._rollback_arg(td_path),
+            )
+
+            self.assertEqual(proc1.returncode, 0, proc1.stderr)
+            self.assertEqual(proc2.returncode, 0, proc2.stderr)
+            out1 = json.loads(proc1.stdout)
+            out2 = json.loads(proc2.stdout)
+
+            self.assertEqual(self._normalized_json(Path(out1["artifacts"]["evolution_packet"])), self._normalized_json(Path(out2["artifacts"]["evolution_packet"])))
+            self.assertEqual(self._normalized_json(Path(out1["artifacts"]["governor_packet"])), self._normalized_json(Path(out2["artifacts"]["governor_packet"])))
+            self.assertEqual(self._normalized_json(Path(out1["artifacts"]["governor_filtered_packet"])), self._normalized_json(Path(out2["artifacts"]["governor_filtered_packet"])))
+            self.assertEqual(self._normalized_json(Path(out1["artifacts"]["challenger_packet"])), self._normalized_json(Path(out2["artifacts"]["challenger_packet"])))
+            self.assertEqual(self._normalized_json(Path(out1["artifacts"]["verifier_bundle"])), self._normalized_json(Path(out2["artifacts"]["verifier_bundle"])))
+            self.assertEqual(self._normalized_json(Path(out1["artifacts"]["promotion_gates"])), self._normalized_json(Path(out2["artifacts"]["promotion_gates"])))
+
+            state1 = self._normalized_json(Path(out1["controller"]["state_ref"]))
+            state2 = self._normalized_json(Path(out2["controller"]["state_ref"]))
+            self.assertEqual(state1["mode"], state2["mode"])
+            self.assertEqual(state1["effective_mode"], state2["effective_mode"])
+            self.assertEqual(state1["family_state"], state2["family_state"])
+            self.assertEqual(state1["horizons"], state2["horizons"])
+            self.assertEqual(state1["watchdog"], state2["watchdog"])
 
     def test_runner_subprocess_aborts_on_malformed_controller_state(self):
         with tempfile.TemporaryDirectory() as td:

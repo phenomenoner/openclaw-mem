@@ -67,6 +67,12 @@ Never store:
 - For maintenance, prefer `openclaw-mem graph synth recommend` as the zero-write recommendation surface before any explicit `graph synth refresh` or new compile action.
 - Recommendation judgment and any later autonomous-write authority should stay with the primary operator or designated maintainer, not lightweight helper lanes.
 
+## Governed optimization apply note
+- For observation maintenance, helper lanes may scout with `openclaw-mem optimize evolution-review`.
+- Judgment stays explicit with `openclaw-mem optimize governor-review`.
+- Mutation, when enabled, must route through `openclaw-mem optimize assist-apply` with governor-approved packets, receipts, and rollback.
+- Do not collapse scout, governor, and writer roles into one hidden background step.
+
 ## Output behavior
 Answer using the best lane with provenance. Store only after confirmation, and store **one fact per record**.
 ```
@@ -123,6 +129,7 @@ If asked to “remember” routine logs/OK checks:
 - Do not promote a synthesis card itself into durable memory by default; use it as a provenance-carrying reference surface.
 - For maintenance triage, `openclaw-mem graph synth recommend` is the preferred zero-write review surface.
 - Read-only/helper lanes may inspect and packetize these recommendations, but judgment/write authority remains with the primary operator or designated maintainer.
+- The same split applies to optimization maintenance: read-only lanes may scout with `openclaw-mem optimize evolution-review`, but must not run `openclaw-mem optimize assist-apply`.
 
 ## Runtime enforcement (recommended)
 This card is a *prompt-layer contract*. When possible, also enforce it at runtime:
