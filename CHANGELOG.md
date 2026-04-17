@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the first Phase 3 family-cap foundation for optimize assist: assist apply now enforces bounded per-run / rolling-24h caps for `adjust_importance_score`, and after receipts summarize applied action counts for cap replay.
 - Added the Phase 4 controller/watchdog lane for optimize assist: the scheduled runner now persists controller state, emits controller receipts, and pauses itself on missing effect receipts, regressed effect summaries, or rollback replay failure receipts.
 - Added the Phase 5 promotion-gate lane for optimize assist: the runner now accepts explicit promotion gate receipts and can promote persisted mode to `auto_low_risk` when thresholds stay green.
+- Added `docs/specs/self-optimizing-memory-max-safe-autonomy-roadmap-v0.md` as the post-Phase-5 blade map for pushing from bounded low-risk autonomy toward a near-ceiling safe autonomy system without collapsing governor boundaries.
 
 ### Testing
 

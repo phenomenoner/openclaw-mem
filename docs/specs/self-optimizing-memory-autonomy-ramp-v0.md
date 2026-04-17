@@ -295,3 +295,7 @@ When this phase is implemented, close with:
 - More autonomy raises the chance of subtle retrieval drift.
 - Importance score adjustment is more powerful than lifecycle marking, so effect measurement is mandatory.
 - The sweet spot is not "no human in the loop". It is "human attention spent only on medium/high-risk mutations".
+
+## Read next
+- `docs/specs/self-optimizing-memory-max-safe-autonomy-roadmap-v0.md`
+  - post-Phase-5 blade map for pushing from bounded autonomy toward a near-ceiling safe autonomy posture
