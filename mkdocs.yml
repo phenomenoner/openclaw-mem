@@ -29,6 +29,8 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Why openclaw-mem still exists: why-openclaw-mem-still-exists.md
+  - OpenClaw 2026.4.15 comparison: openclaw-2026-4-15-comparison.md
   - About: about.md
   - Proactive Pack: proactive-pack.md
   - Choose an install path: install-modes.md

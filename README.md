@@ -12,7 +12,7 @@ When you do promote the engine, the live-turn hook is framed as **Proactive Pack
 - trust-policy controls for excluding quarantined content
 - sidecar deployment on an existing OpenClaw install
 - optional promotion to `openclaw-mem-engine` later for hybrid recall and tighter policy controls
-- optional **Proactive Pack** lane in `openclaw-mem-engine` for pre-reply bounded recall with receipts and fail-open behavior
+- optional **Proactive Pack** support in `openclaw-mem-engine` for pre-reply bounded recall with receipts and fail-open behavior
 - **Local-first by default**: JSONL + SQLite, no external database required
 - **Cheap recall loop**: `search → timeline → get` keeps routine lookups fast and inspectable
 - **Bounded packing**: `pack` emits a stable `ContextPack` contract for injection, citations, and trace-backed debugging
@@ -73,7 +73,7 @@ The product loop is simple and stable:
 2. **Pack**: run `pack` to get a bounded `bundle_text` and `context_pack` (`schema: openclaw-mem.context-pack.v1`).
 3. **Observe**: use `timeline`, `get`, and `artifact` outputs for explainability and rollback.
 
-When mem-engine is active, **Proactive Pack** is the runtime extension of the same Pack contract: a small, receipt-backed pre-reply bundle, not a separate prompt-assembly system.
+When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
 
 Example:
 
@@ -83,15 +83,29 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem artifact stash --from ./
 uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifact:v1:sha256:<64hex> --json
 ```
 
-## Governed optimization apply, now with a bounded write lane
+## OpenClaw 2026.4.15 and `openclaw-mem`
 
-`openclaw-mem` now ships the full **observe -> judge -> apply** bridge for one low-risk class of maintenance updates.
+OpenClaw 2026.4.15 brought stronger native memory and prompt-time integration features. We are genuinely happy to see that direction mature.
+
+That is good for the ecosystem, good for operators, and good for `openclaw-mem` too.
+A stronger foundation makes it easier to keep our own work focused on what matters most: better packs, clearer evidence, and safer memory maintenance.
+
+Our direction is not to shrink back into native features.
+It is to build a clearer, more opinionated product layer on top of a stronger foundation.
+
+Read more:
+- [Why openclaw-mem still exists in a stronger OpenClaw world](docs/why-openclaw-mem-still-exists.md)
+- [openclaw-mem and OpenClaw 2026.4.15](docs/openclaw-2026-4-15-comparison.md)
+
+## Governed optimization updates
+
+`openclaw-mem` now ships a review-first workflow for one low-risk class of memory maintenance updates.
 
 Current shipped path:
-- `openclaw-mem optimize review` — zero-write health signals
-- `openclaw-mem optimize evolution-review` — packetizes low-risk stale-candidate and bounded importance-adjustment updates
-- `openclaw-mem optimize governor-review` — emits explicit decisions
-- `openclaw-mem optimize assist-apply` — applies only governor-approved low-risk observation updates with before/after + rollback receipts
+- `openclaw-mem optimize review` — read-only health signals
+- `openclaw-mem optimize evolution-review` — prepares low-risk maintenance candidates
+- `openclaw-mem optimize governor-review` — records explicit decisions
+- `openclaw-mem optimize assist-apply` — applies only approved low-risk observation updates with before/after and rollback receipts
 
 Each assist apply run now also emits a compact effect artifact so later autonomy phases can measure whether mutations helped, held steady, or regressed instead of treating writes as blind maintenance.
 
@@ -129,7 +143,7 @@ If the packet is malformed, unapproved, duplicated, or exceeds caps, the run abo
 
 ### Command-aware compaction, minimal operator path
 
-If you already use a compactor such as RTK, keep it in the Observe lane first:
+If you already use a compactor such as RTK, keep it in the Observe path first:
 
 ```bash
 # 1) Produce raw + compact outputs with your own toolchain
@@ -158,6 +172,8 @@ When a compaction receipt is later selected by `pack`, the response may include:
 
 ## Start here
 
+- **Why openclaw-mem still exists:** [`docs/why-openclaw-mem-still-exists.md`](docs/why-openclaw-mem-still-exists.md)
+- **OpenClaw 2026.4.15 comparison:** [`docs/openclaw-2026-4-15-comparison.md`](docs/openclaw-2026-4-15-comparison.md)
 - **About the product:** [`docs/about.md`](docs/about.md)
 - **Proactive Pack:** [`docs/proactive-pack.md`](docs/proactive-pack.md)
 - **v2 blueprint:** [`docs/context-supply-chain-blueprint.md`](docs/context-supply-chain-blueprint.md)

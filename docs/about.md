@@ -99,6 +99,8 @@ The local-first posture keeps the base layer simple:
 
 ## Read next
 
+- [Why `openclaw-mem` still exists](why-openclaw-mem-still-exists.md)
+- [OpenClaw 2026.4.15 comparison](openclaw-2026-4-15-comparison.md)
 - [Choose an install path](install-modes.md)
 - [Proactive Pack](proactive-pack.md)
 - [v2 blueprint](context-supply-chain-blueprint.md)

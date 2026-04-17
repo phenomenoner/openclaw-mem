@@ -1,6 +1,12 @@
 # Ecosystem Fit: `openclaw-mem` + OpenClaw Native Memory
 
-This page explains how `openclaw-mem` fits with OpenClaw’s native memory stack today, and how the optional **openclaw-mem-engine** slot backend would fit without creating ownership conflicts.
+This page explains how `openclaw-mem` fits with OpenClaw’s native memory stack today, and how the optional **openclaw-mem-engine** slot backend fits without creating ownership conflicts.
+
+The short version:
+
+- OpenClaw native memory is getting stronger
+- that is good news for operators and for this project
+- `openclaw-mem` still keeps a distinct job as the layer that sharpens pack quality, visibility, and memory governance
 
 ## Who owns what
 
@@ -18,10 +24,22 @@ This page explains how `openclaw-mem` fits with OpenClaw’s native memory stack
 
 - `openclaw-mem-engine` (optional)
   - role: alternative memory slot backend (replaces `memory-lancedb` when enabled)
-  - goal: hybrid recall (FTS + vector) + scopes + auditable policies + safe M1 automation (autoRecall/autoCapture), including **Proactive Pack** for bounded pre-reply recall
+  - goal: hybrid recall (FTS + vector) + scopes + auditable policies + safe automation controls, including **Proactive Pack** for bounded pre-reply recall
   - rollback: one-line slot switch
   - does **not** replace the sidecar ledger (SQLite remains for audit/ops)
   - (when enabled) it **does** own the canonical backend tools for the active slot
+
+## A note after OpenClaw 2026.4.15
+
+OpenClaw's newer memory and runtime surfaces are moving in a direction we genuinely like.
+That gives everyone a healthier base layer to build on.
+
+Our stance is not to reduce `openclaw-mem` to a thin wrapper around native memory.
+It is to keep the product boundary sharp and build a better user-facing and maintainer-friendly layer on top of a stronger foundation.
+
+If you want the short public version of that argument, read:
+- [Why `openclaw-mem` still exists](why-openclaw-mem-still-exists.md)
+- [openclaw-mem and OpenClaw 2026.4.15](openclaw-2026-4-15-comparison.md)
 
 ## Why this split is useful
 
@@ -41,16 +59,16 @@ We track completeness against <https://github.com/win4r/memory-lancedb-pro> at t
 | Hybrid recall (FTS + vector) | ✅ | ✅ |
 | Scope-aware filtering | ✅ | ✅ |
 | Policy tiers (must/nice/unknown fallback) | ✅ | ✅ |
-| Receipts/debug top-hits (auditable) | ✅ (varies) | ✅ (`ftsTop` / `vecTop` / `fusedTop`, tier counts, skip reasons) |
-| Admin ops (list/stats/export/import) | ✅ | ✅ (tool + CLI parity layer, sanitized deterministic export, import dedupe/dry-run) |
-| Proactive Pack / AutoRecall hook (conservative) | ✅ | ✅ (M1/P0-2: skip trivial prompts, cap K, escape injection, optional receipt comment in high verbosity) |
-| AutoCapture hook (strict) | ✅ | ✅ (M1/P0-2: category allowlist + secret-skip + dedupe + caps + lifecycle receipt) |
+| Explanation and top-hit visibility | ✅ (varies) | ✅ (top-hit summaries, tier counts, and skip reasons) |
+| Admin ops (list/stats/export/import) | ✅ | ✅ (tool and CLI support, deterministic export, import dedupe, dry-run) |
+| Proactive Pack / AutoRecall support | ✅ | ✅ (skip trivial prompts, cap results, escape injection, optional detailed comments when needed) |
+| AutoCapture support | ✅ | ✅ (category allowlist, secret-skip, dedupe, caps, and lifecycle evidence) |
 | One-line rollback | ➖ | ✅ (`plugins.slots.memory` switch) |
 
-Deferred (we intentionally keep out of M1):
+Notable choices we still keep intentionally conservative:
 - UI-heavy memory management screens
-- aggressive auto-capture of everything (risk: noise + privacy)
-- mandatory rerankers (we keep deterministic fusion first)
+- aggressive auto-capture of everything
+- mandatory rerankers before the simpler deterministic path proves insufficient
 
 ## Recommended deployment patterns
 
@@ -85,18 +103,18 @@ Use when moving from `memory-core` to `memory-lancedb` in production.
 - rollback by switching slot back to `memory-core` if needed
 
 Expected value:
-- reduced blast radius
-- no data-plane blind spots during migration
+- reduced migration risk
+- no loss of visibility during migration
 
 ## Add-on value users can expect from `openclaw-mem`
 
-- A practical memory ledger (what happened, when, by which tool) you can inspect anytime.
+- A practical memory ledger you can inspect anytime.
 - Local-first recall paths that keep routine retrievals fast and inexpensive.
 - Backend-aware annotations that make failures easier to root-cause.
-- Deterministic triage for heartbeat/ops workflows, so important issues surface early.
-- Recommendation-first memory health observer (`optimize review`) for bounded cleanup proposals without mutating canonical memory rows.
+- Clearer pack discipline, with bounded bundles and explicit evidence surfaces.
+- Review-first memory hygiene for cleanup and maintenance, without turning the write path into a mystery.
 
-In short: OpenClaw backends provide the canonical memory APIs; `openclaw-mem` makes the memory system easier to operate, audit, and trust over time.
+In short: OpenClaw provides the canonical memory APIs; `openclaw-mem` helps turn them into a more inspectable, governable, and operator-friendly system over time.
 
 ## Field issue: ingestion lag (and the practical fix)
 
@@ -114,12 +132,12 @@ That is enough to make “what happened just now?” recall feel stale.
 
 Use a split pipeline:
 
-1. **Fast lane (freshness first)**
+1. **Fast path (freshness first)**
    - every 5 minutes
    - `harvest --no-embed --no-update-index`
    - keeps DB close to real-time with low local workload
 
-2. **Slow lane (quality refresh)**
+2. **Slow path (quality refresh)**
    - every hour (or slower, depending on budget)
    - `harvest --embed --update-index`
    - refreshes semantic quality without blocking freshness
@@ -133,9 +151,9 @@ Use a split pipeline:
 - Lowest-cost setup is OS-level scheduler (systemd/cron) for harvest commands.
 - OpenClaw cron `agentTurn` works and is convenient, but still spends model tokens on each run wrapper.
 
-## Upstream ops insight: heartbeat token sink and context control
+## Operational note: heartbeat token sink and context control
 
-From recent OpenClaw cost/tuning threads, one pattern repeated across operators:
+From recent OpenClaw cost and tuning discussions, one pattern repeated across operators:
 
 - **Native heartbeat can become a token sink** when each cycle carries heavy active-session context.
 - A practical mitigation is to use a **lightweight isolated heartbeat** for health checks and keep healthy runs silent (`NO_REPLY`).
@@ -146,8 +164,8 @@ How this affects `openclaw-mem` users:
 2. Avoid adding extra high-frequency cron loops when an existing heartbeat cadence can carry health checks.
 3. Keep auditability in sidecar storage, but keep routine scheduler chatter out of interactive transcripts.
 
-Longer-term architecture direction (upstream):
-- A first-class context-provider slot would complement this sidecar model by letting operators control prompt payload directly, while retaining full transcript persistence for audit/replay.
+Longer-term architecture direction:
+- A first-class context-provider slot would complement this sidecar model by letting operators control prompt payload directly, while retaining full transcript persistence for audit and replay.
 
 ## One-screen architecture diagram
 
@@ -180,10 +198,10 @@ Longer-term architecture direction (upstream):
 | .jsonl                       |
 +----------+-------------------+
            |
-           | harvest (fast lane): --no-embed --no-update-index (5m)
+           | harvest (fast path): --no-embed --no-update-index (5m)
            v
 +------------------------------+         +---------------------------+
-| openclaw-mem.sqlite (FTS)    |<------->| embed/index (slow lane)   |
+| openclaw-mem.sqlite (FTS)    |<------->| embed/index (slow path)   |
 | recall: search→timeline→get  |         | hourly / budgeted         |
 +----------+-------------------+         +---------------------------+
            |

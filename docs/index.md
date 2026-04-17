@@ -7,6 +7,8 @@ If you are starting cold, the GitHub README is the shortest funnel. If you are a
 
 ## Start here
 
+- [Why `openclaw-mem` still exists](why-openclaw-mem-still-exists.md) — the short public argument for keeping the product boundary sharp even as native OpenClaw gets stronger
+- [OpenClaw 2026.4.15 comparison](openclaw-2026-4-15-comparison.md) — where native OpenClaw got stronger, and why `openclaw-mem` still keeps its own product boundary
 - [Quickstart](quickstart.md) — fastest local proof from a fresh clone
 - [About openclaw-mem](about.md) — what the project does, who it is for, and what it is not
 - [Choose an install path](install-modes.md) — local proof vs sidecar vs memory engine
