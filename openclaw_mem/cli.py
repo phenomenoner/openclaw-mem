@@ -3680,18 +3680,21 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
     if use_graph == "off":
         return out
 
+    # Stage 1 keyword/pattern intent. We compute this before Stage 0 returns so
+    # short-but-explicit operator artifact refs (for example `docs/specs/`) can
+    # still trigger in auto mode.
+    stage1 = _pack_graph_stage1_keywords(query)
+    out["stage1"] = stage1
+
     # Stage 0
     anti = _pack_graph_stage0_anti_trigger(query)
     if anti:
         out["stage0"] = {"fired": True, "reason": anti}
-        if use_graph != "on":
+        allow_stage1_override = bool(stage1.get("hit")) and anti in {"too_short"}
+        if use_graph != "on" and not allow_stage1_override:
             out["triggered"] = False
             out["trigger_reason"] = f"anti:{anti}"
             return out
-
-    # Stage 1
-    stage1 = _pack_graph_stage1_keywords(query)
-    out["stage1"] = stage1
 
     # Forced
     if use_graph == "on":
@@ -3709,10 +3712,10 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             out["trigger_reason"] = "auto_probe_off"
             return out
 
-        probe_limit = int(max(1, int(getattr(args, "graph_probe_limit", 5) or 5)))
-        t_high = float(getattr(args, "graph_probe_t_high", -5.0) or -5.0)
-        t_marginal = float(getattr(args, "graph_probe_t_marginal", -2.0) or -2.0)
-        n_min = int(max(1, int(getattr(args, "graph_probe_n_min", 3) or 3)))
+        probe_limit = int(max(1, int(getattr(args, "graph_probe_limit", 5))))
+        t_high = float(getattr(args, "graph_probe_t_high", -5.0))
+        t_marginal = float(getattr(args, "graph_probe_t_marginal", -2.0))
+        n_min = int(max(1, int(getattr(args, "graph_probe_n_min", 3))))
 
         probe = _pack_graph_probe_observations(
             conn,
@@ -3725,11 +3728,15 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             "latency_ms": int(probe.get("latency_ms") or 0),
             "hit_count": int(probe.get("hit_count") or 0),
             "best_score": probe.get("best_score"),
+            "threshold_high": float(t_high),
+            "threshold_marginal": float(t_marginal),
+            "breadth_min": int(n_min),
         }
 
         scores = list(probe.get("scores") or [])
         best = probe.get("best_score")
         marginal_count = sum(1 for s in scores if isinstance(s, (int, float)) and float(s) <= float(t_marginal))
+        out["probe"]["marginal_count"] = int(marginal_count)
 
         if not scores:
             out["triggered"] = False
@@ -3803,6 +3810,8 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
         "trigger_reason": graph_state.get("trigger_reason"),
         "stage0": graph_state.get("stage0"),
         "stage1": graph_state.get("stage1"),
+        "stage1_hit": bool(((graph_state.get("stage1") or {}).get("hit"))),
+        "stage1_categories": list(((graph_state.get("stage1") or {}).get("categories") or [])),
         "probe": graph_state.get("probe"),
         "probe_decision": graph_state.get("probe_decision"),
         "selected_refs_count": int(graph_state.get("selection_count") or 0),

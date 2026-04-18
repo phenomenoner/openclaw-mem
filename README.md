@@ -91,6 +91,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifa
 - **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
 - **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
 - **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
+- **Pack policy contract:** [`docs/specs/context-pack-policy-v1.1.md`](docs/specs/context-pack-policy-v1.1.md)
 - **Optional Mem Engine:** [`docs/mem-engine.md`](docs/mem-engine.md)
 - **Release notes:** <https://github.com/phenomenoner/openclaw-mem/releases>
 

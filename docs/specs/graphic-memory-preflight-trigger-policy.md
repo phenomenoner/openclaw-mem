@@ -128,6 +128,11 @@ Rules:
   - `probe_ran`, `probe_best_score`, `probe_hit_count`, `probe_decision`, `probe_latency_ms`
   - `selected_refs_count`, `budget_tokens`, `fail_open`, `error_first_line` (if any)
 
+Current implementation note:
+- short-but-explicit operator artifact refs such as `docs/specs/` may bypass the generic `too_short` anti-trigger in auto mode
+- ack-like short queries still stay rejected
+- probe receipts now also carry threshold values plus `marginal_count` so breadth-trigger decisions are auditable
+
 Acceptance (MVP):
 - OFF = no behavior change.
 - AUTO = deterministic + traceable.

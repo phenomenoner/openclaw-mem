@@ -1,0 +1,17 @@
+version: v0
+scenarios:
+  - id: pack-golden-synthesis-preferred
+    query: something
+    why: prefer a covering synthesis card over a covered raw ref
+
+  - id: pack-golden-protected-tail-slot
+    query: something
+    why: reserve both tail budget and one item slot when protected tail is enabled
+
+  - id: pack-golden-auto-short-artifact-ref
+    query: docs/specs/
+    why: allow short explicit artifact refs to bypass the generic too-short anti-trigger
+
+  - id: pack-golden-auto-probe-breadth
+    query: show me the latest dependency status
+    why: expose deterministic probe breadth receipts when stage1 misses but the probe fires

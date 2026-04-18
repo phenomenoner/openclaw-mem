@@ -70,6 +70,7 @@ Acceptance criteria:
 - In `--use-graph=auto`, trigger is deterministic + traceable (`--trace` shows trigger reason).
 - Graph failures are fail-open and never break pack.
 - Ordinary `pack` can prefer a covering synthesis card over raw covered refs without requiring `--use-graph=on`.
+- Golden regression scenarios exist for pack policy, protected tail, and graph-auto trigger behavior.
 
 ### 1.7a) Graphic Memory query plane (operator-facing graph interface)
 

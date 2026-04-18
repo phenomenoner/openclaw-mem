@@ -3667,6 +3667,178 @@ class TestCliM0(unittest.TestCase):
 
         conn.close()
 
+    def test_pack_use_graph_auto_short_artifact_ref_can_bypass_too_short_antitrigger(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "plain summary",
+                    "summary_en": "plain summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args(["pack", "--query", "docs/specs/", "--json", "--trace", "--use-graph", "auto"])
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [{"recordRef": "obs:1", "id": 1, "ts": "2026-02-04T13:00:00Z", "kind": "fact", "tool_name": "memory_store", "score": -9.0, "title": "stub", "why_relevant": "fts_match"}],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\n",
+        }
+
+        fake_graph_pack_payload = {
+            "kind": "openclaw-mem.graph.pack.v0",
+            "ts": "2026-02-04T13:00:00Z",
+            "budget": {"budgetTokens": 1200, "estimatedTokens": 20},
+            "items": [{"recordRef": "obs:1", "id": 1, "ts": "2026-02-04T13:00:00Z", "kind": "fact", "tool_name": "memory_store", "summary": "plain summary"}],
+            "bundle_text": "[GRAPH_CONTEXT v0]\nItems: 1\n\n1) obs:1 :: plain summary\n",
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
+        ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["graph"]["triggered"])
+        self.assertEqual(out["graph"]["trigger_reason"], "keyword:A+E")
+        self.assertTrue(out["trace"]["extensions"]["graph"]["stage1_hit"])
+        self.assertEqual(out["trace"]["extensions"]["graph"]["stage1_categories"], ["A", "E"])
+        conn.close()
+
+    def test_pack_use_graph_auto_probe_receipts_include_thresholds_and_marginal_count(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "plain summary",
+                    "summary_en": "plain summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args([
+            "pack", "--query", "show me the latest dependency status", "--json", "--trace", "--use-graph", "auto", "--graph-probe-t-high", "-5", "--graph-probe-t-marginal", "-2", "--graph-probe-n-min", "2"
+        ])
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [{"recordRef": "obs:1", "id": 1, "ts": "2026-02-04T13:00:00Z", "kind": "fact", "tool_name": "memory_store", "score": -9.0, "title": "stub", "why_relevant": "fts_match"}],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\n",
+        }
+
+        fake_graph_pack_payload = {
+            "kind": "openclaw-mem.graph.pack.v0",
+            "ts": "2026-02-04T13:00:00Z",
+            "budget": {"budgetTokens": 1200, "estimatedTokens": 20},
+            "items": [{"recordRef": "obs:1", "id": 1, "ts": "2026-02-04T13:00:00Z", "kind": "fact", "tool_name": "memory_store", "summary": "plain summary"}],
+            "bundle_text": "[GRAPH_CONTEXT v0]\nItems: 1\n\n1) obs:1 :: plain summary\n",
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._pack_graph_probe_observations",
+            return_value={"ran": True, "latency_ms": 7, "hit_count": 3, "best_score": -2.4, "scores": [-2.4, -2.1, -1.9]},
+        ), patch("openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload), patch(
+            "openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload
+        ), patch("openclaw_mem.cli._pack_graph_stage1_keywords", return_value={"hit": False, "categories": [], "matched_keywords": []}):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["graph"]["triggered"])
+        self.assertEqual(out["graph"]["trigger_reason"], "probe_breadth")
+        self.assertEqual(out["trace"]["extensions"]["graph"]["probe"]["threshold_high"], -5.0)
+        self.assertEqual(out["trace"]["extensions"]["graph"]["probe"]["threshold_marginal"], -2.0)
+        self.assertEqual(out["trace"]["extensions"]["graph"]["probe"]["breadth_min"], 2)
+        self.assertEqual(out["trace"]["extensions"]["graph"]["probe"]["marginal_count"], 2)
+        conn.close()
+
+    def test_pack_use_graph_auto_probe_receipts_respect_explicit_zero_threshold(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1],
+            "fts_ids": {1},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.77},
+            "obs_map": {
+                1: {
+                    "summary": "plain summary",
+                    "summary_en": "plain summary",
+                    "kind": "fact",
+                    "lang": "en",
+                }
+            },
+            "candidate_limit": 12,
+        }
+
+        args = build_parser().parse_args([
+            "pack", "--query", "show me dependency state", "--json", "--trace", "--use-graph", "auto", "--graph-probe-t-marginal", "0"
+        ])
+
+        fake_index_payload = {
+            "kind": "openclaw-mem.graph.index.v0",
+            "budget": {"budgetTokens": 900, "estimatedTokens": 10},
+            "top_candidates": [{"recordRef": "obs:1", "id": 1, "ts": "2026-02-04T13:00:00Z", "kind": "fact", "tool_name": "memory_store", "score": -9.0, "title": "stub", "why_relevant": "fts_match"}],
+            "suggested_next_expansions": [],
+            "index_text": "[GRAPH_INDEX v0]\n",
+        }
+
+        fake_graph_pack_payload = {
+            "kind": "openclaw-mem.graph.pack.v0",
+            "ts": "2026-02-04T13:00:00Z",
+            "budget": {"budgetTokens": 1200, "estimatedTokens": 20},
+            "items": [{"recordRef": "obs:1", "id": 1, "ts": "2026-02-04T13:00:00Z", "kind": "fact", "tool_name": "memory_store", "summary": "plain summary"}],
+            "bundle_text": "[GRAPH_CONTEXT v0]\nItems: 1\n\n1) obs:1 :: plain summary\n",
+        }
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state), patch(
+            "openclaw_mem.cli._pack_graph_probe_observations",
+            return_value={"ran": True, "latency_ms": 7, "hit_count": 3, "best_score": -1.0, "scores": [-1.0, 0.0, 1.0]},
+        ), patch("openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload), patch(
+            "openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload
+        ), patch("openclaw_mem.cli._pack_graph_stage1_keywords", return_value={"hit": False, "categories": [], "matched_keywords": []}):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["trace"]["extensions"]["graph"]["probe"]["threshold_marginal"], 0.0)
+        self.assertEqual(out["trace"]["extensions"]["graph"]["probe"]["marginal_count"], 2)
+        conn.close()
+
     def test_pack_budget_tokens_clamped_to_minimum_one(self):
         conn = _connect(":memory:")
 

@@ -49,6 +49,8 @@ Current pack-policy behavior (v1.1 implementation posture):
 - optionally reserve a protected tail budget for caller-supplied recent turns
 - keep all of that observable in `pack --trace` via `trace.extensions.policy`
 
+Formal contract: `docs/specs/context-pack-policy-v1.1.md`
+
 ## Design principles (non-negotiable)
 
 1) **Hybrid encoding**
@@ -138,6 +140,11 @@ Behavior:
 - trace receipts expose the reserved and consumed tail budget in `trace.extensions.policy`
 
 This is inspired by LCM-style context assembly and improves continuity while keeping budgets strict.
+
+Golden regression fixture lane:
+- editable fixture: `docs/fixtures/context-pack-golden-scenarios.v0.yaml`
+- deterministic mirror: `tests/data/CONTEXT_PACK_GOLDEN_SCENARIOS.v0.jsonl`
+- verifier: `tests/test_context_pack_golden.py`
 
 ### Graph-aware synthesis preference inside pack
 
