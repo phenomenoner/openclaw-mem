@@ -155,6 +155,20 @@ Pack selection now reuses the existing synthesis-coverage logic before final adm
 
 The explicit graph preflight lane (`--use-graph=off|auto|on`) still exists for broader graph neighborhood expansion. The new behavior is the smaller, always-safe graph-aware preference inside ordinary pack selection.
 
+### Auto-graph productization guardrails
+
+`pack --use-graph=auto` is now governed by two additional product guardrails:
+- scope gate
+  - explicit `--graph-scope` always allows scoped auto-graph
+  - otherwise, auto mode only allows graph expansion when a deterministic local scope hint can be inferred
+  - unresolved scope skips graph preflight and stays baseline-only
+- latency gate
+  - `--graph-latency-soft-ms` and `--graph-latency-hard-ms` control whether auto mode may compose the graph bundle into `bundle_text_with_graph`
+  - over soft threshold: degrade to baseline-primary output while keeping receipts
+  - over hard threshold: skip graph bundle composition in auto mode while keeping fail-open baseline behavior
+
+Trace receipts in `trace.extensions.graph` now include scope and latency decisions so the operator can see why auto graph ran, degraded, or skipped.
+
 ## Ops: what to benchmark / what to log
 
 - Must-have receipts:

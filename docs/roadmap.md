@@ -68,6 +68,8 @@ Artifacts:
 Acceptance criteria:
 - `pack` behavior unchanged when graph is OFF.
 - In `--use-graph=auto`, trigger is deterministic + traceable (`--trace` shows trigger reason).
+- Auto graph scope stays conservative: unresolved scope degrades to baseline-only instead of cross-project promotion.
+- Auto graph latency is policy-governed: allow/degrade/skip is receipted and can suppress graph bundle composition.
 - Graph failures are fail-open and never break pack.
 - Ordinary `pack` can prefer a covering synthesis card over raw covered refs without requiring `--use-graph=on`.
 - Golden regression scenarios exist for pack policy, protected tail, and graph-auto trigger behavior.

@@ -10,8 +10,16 @@ scenarios:
 
   - id: pack-golden-auto-short-artifact-ref
     query: docs/specs/
-    why: allow short explicit artifact refs to bypass the generic too-short anti-trigger
+    why: allow short explicit artifact refs to bypass the generic too-short anti-trigger when scope is explicit
+
+  - id: pack-golden-auto-unresolved-scope-skip
+    query: latest dependency status
+    why: skip auto graph preflight when scope stays unresolved
 
   - id: pack-golden-auto-probe-breadth
     query: show me the latest dependency status
-    why: expose deterministic probe breadth receipts when stage1 misses but the probe fires
+    why: expose deterministic probe breadth receipts when stage1 misses but the probe fires under an explicit scope
+
+  - id: pack-golden-auto-latency-degrade
+    query: latest dependency status
+    why: degrade graph composition when auto preflight latency crosses the soft threshold

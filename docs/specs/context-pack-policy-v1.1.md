@@ -83,6 +83,15 @@ Primary policy receipt lane:
 - short-but-explicit operator artifact refs (for example `docs/specs/`, `DECISIONS`) may bypass the generic `too_short` anti-trigger
 - ack-like short messages still stay rejected
 
+Additional product guardrails:
+- scope gate
+  - explicit `--graph-scope` = `scope_source: explicit`, `scope_decision: allow`
+  - deterministic local project token match = `scope_source: inferred`, `scope_decision: allow`
+  - unresolved scope in auto mode = `scope_source: unresolved`, `scope_decision: skip`
+- latency gate
+  - `--graph-latency-soft-ms` and `--graph-latency-hard-ms` govern whether the graph bundle is composed into `bundle_text_with_graph`
+  - `allow | degrade | skip` is exposed in `trace.extensions.graph.latency`
+
 This preserves the low-noise posture while allowing real operator lookup shorthand.
 
 ## Error / fail-open rules
@@ -102,8 +111,10 @@ Minimum regression gate:
 1. graph synthesis preferred over covered raw ref
 2. protected tail reserves both token budget and item slot
 3. `--tail-file -` on TTY fails fast
-4. short artifact/path refs can still trigger `--use-graph=auto`
-5. probe receipts expose thresholds and marginal-count reasoning
+4. auto graph skips when scope stays unresolved
+5. short artifact/path refs can still trigger `--use-graph=auto` when scope is explicit or deterministically inferred
+6. probe receipts expose thresholds and marginal-count reasoning
+7. latency gate exposes allow/degrade/skip decisions and suppresses graph composition when degraded/skipped
 
 Fixture lane:
 - `docs/fixtures/context-pack-golden-scenarios.v0.yaml`

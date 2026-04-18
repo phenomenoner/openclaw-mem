@@ -126,12 +126,15 @@ Rules:
 - `trace.extensions.graph.*` (redaction-safe):
   - `triggered`, `trigger_reason`, `stage1_hit`, `stage1_categories`
   - `probe_ran`, `probe_best_score`, `probe_hit_count`, `probe_decision`, `probe_latency_ms`
+  - `scope`, `scope_source`, `scope_decision`
+  - `latency.latency_ms`, `latency.threshold_soft_ms`, `latency.threshold_hard_ms`, `latency.decision`
   - `selected_refs_count`, `budget_tokens`, `fail_open`, `error_first_line` (if any)
 
 Current implementation note:
-- short-but-explicit operator artifact refs such as `docs/specs/` may bypass the generic `too_short` anti-trigger in auto mode
+- short-but-explicit operator artifact refs such as `docs/specs/` may bypass the generic `too_short` anti-trigger in auto mode, but unresolved scope still skips graph preflight
 - ack-like short queries still stay rejected
 - probe receipts now also carry threshold values plus `marginal_count` so breadth-trigger decisions are auditable
+- auto mode now adds a conservative scope gate and latency gate before graph bundle composition is allowed into the combined output
 
 Acceptance (MVP):
 - OFF = no behavior change.

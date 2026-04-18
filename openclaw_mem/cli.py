@@ -3645,6 +3645,112 @@ def _pack_graph_probe_observations(
     }
 
 
+def _pack_graph_known_scopes(conn: sqlite3.Connection, *, limit: int = 256) -> List[str]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT json_extract(detail_json, '$.scope') AS scope
+        FROM observations
+        WHERE json_extract(detail_json, '$.scope') IS NOT NULL
+        ORDER BY scope
+        LIMIT ?
+        """,
+        (int(max(1, limit)),),
+    ).fetchall()
+    scopes: List[str] = []
+    seen = set()
+    for r in rows:
+        raw = r["scope"] if isinstance(r, sqlite3.Row) else None
+        norm = _normalize_scope_token(raw)
+        if norm and norm not in seen:
+            seen.add(norm)
+            scopes.append(norm)
+    return scopes
+
+
+def _pack_graph_resolve_scope(
+    conn: sqlite3.Connection,
+    *,
+    query: str,
+    explicit_scope: Optional[str],
+    use_graph: str,
+) -> dict:
+    explicit_norm = _normalize_scope_token(explicit_scope)
+    if explicit_norm:
+        return {
+            "resolved_scope": explicit_norm,
+            "scope_source": "explicit",
+            "scope_decision": "allow",
+            "matched_scope_hint": explicit_norm,
+        }
+
+    # Forced-on keeps fail-open behavior and may search without a scope filter.
+    if str(use_graph or "off").strip().lower() == "on":
+        return {
+            "resolved_scope": None,
+            "scope_source": "unresolved",
+            "scope_decision": "allow",
+            "matched_scope_hint": None,
+        }
+
+    q = (query or "").strip()
+    candidate_tokens = set()
+    for raw in re.findall(r"[A-Za-z0-9][A-Za-z0-9._/-]{1,}", q):
+        parts = [raw]
+        if "/" in raw:
+            parts.extend(p for p in raw.split("/") if p)
+        for part in parts:
+            norm = _normalize_scope_token(part.strip("/"))
+            if norm:
+                candidate_tokens.add(norm)
+
+    known_scopes = _pack_graph_known_scopes(conn)
+    exact_matches = sorted(candidate_tokens.intersection(known_scopes))
+    if len(exact_matches) == 1:
+        return {
+            "resolved_scope": exact_matches[0],
+            "scope_source": "inferred",
+            "scope_decision": "allow",
+            "matched_scope_hint": exact_matches[0],
+        }
+
+    return {
+        "resolved_scope": None,
+        "scope_source": "unresolved",
+        "scope_decision": "skip",
+        "matched_scope_hint": None,
+    }
+
+
+def _pack_graph_latency_gate(
+    *,
+    use_graph: str,
+    latency_ms: Optional[int],
+    args: argparse.Namespace,
+) -> dict:
+    soft_raw = getattr(args, "graph_latency_soft_ms", 150)
+    hard_raw = getattr(args, "graph_latency_hard_ms", 300)
+    soft_ms = max(0, int(150 if soft_raw is None else soft_raw))
+    hard_ms = max(soft_ms, int(300 if hard_raw is None else hard_raw))
+    out = {
+        "latency_ms": int(latency_ms or 0),
+        "threshold_soft_ms": int(soft_ms),
+        "threshold_hard_ms": int(hard_ms),
+        "decision": "allow",
+        "degraded": False,
+        "compose_graph_bundle": True,
+    }
+    if latency_ms is None:
+        out["latency_ms"] = None
+        return out
+    if str(use_graph or "off").strip().lower() != "auto":
+        return out
+    if int(latency_ms) > int(hard_ms):
+        out.update({"decision": "skip", "degraded": True, "compose_graph_bundle": False})
+    elif int(latency_ms) > int(soft_ms):
+        out.update({"decision": "degrade", "degraded": True, "compose_graph_bundle": False})
+    return out
+
+
 def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args: argparse.Namespace) -> dict:
     """Optional Graphic Memory preflight for `pack` (default OFF; fail-open).
 
@@ -3666,11 +3772,15 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
         "selection_count": 0,
         "budget_tokens": int(max(1, int(getattr(args, "graph_budget_tokens", 1200) or 1200))),
         "take": int(max(1, int(getattr(args, "graph_take", 12) or 12))),
-        "scope": (str(getattr(args, "graph_scope", "") or "").strip() or None),
+        "scope": None,
+        "scope_source": "unresolved",
+        "scope_decision": "skip",
+        "matched_scope_hint": None,
         "probe": {"ran": False},
         "stage0": {"fired": False, "reason": None},
         "stage1": {"hit": False, "categories": [], "matched_keywords": []},
         "probe_decision": None,
+        "latency": _pack_graph_latency_gate(use_graph=use_graph, latency_ms=None, args=args),
         "payload": None,
     }
 
@@ -3679,6 +3789,17 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
 
     if use_graph == "off":
         return out
+
+    scope_state = _pack_graph_resolve_scope(
+        conn,
+        query=query,
+        explicit_scope=(str(getattr(args, "graph_scope", "") or "").strip() or None),
+        use_graph=use_graph,
+    )
+    out["scope"] = scope_state.get("resolved_scope")
+    out["scope_source"] = str(scope_state.get("scope_source") or "unresolved")
+    out["scope_decision"] = str(scope_state.get("scope_decision") or "skip")
+    out["matched_scope_hint"] = scope_state.get("matched_scope_hint")
 
     # Stage 1 keyword/pattern intent. We compute this before Stage 0 returns so
     # short-but-explicit operator artifact refs (for example `docs/specs/`) can
@@ -3695,6 +3816,11 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             out["triggered"] = False
             out["trigger_reason"] = f"anti:{anti}"
             return out
+
+    if use_graph == "auto" and out.get("scope_decision") == "skip":
+        out["triggered"] = False
+        out["trigger_reason"] = "scope_unresolved"
+        return out
 
     # Forced
     if use_graph == "on":
@@ -3760,6 +3886,7 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
 
     # If triggered: run preflight (fail-open)
     try:
+        preflight_started = time.perf_counter()
         index_payload = _graph_index_payload(
             conn,
             query=query,
@@ -3789,6 +3916,8 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             "bundle_text": pack_payload.get("bundle_text", "") or "",
         }
 
+        preflight_latency_ms = int((time.perf_counter() - preflight_started) * 1000)
+        out["latency"] = _pack_graph_latency_gate(use_graph=use_graph, latency_ms=preflight_latency_ms, args=args)
         out["fail_open"] = False
     except Exception as e:
         line = (str(e).splitlines() or [str(e)])[:1][0]
@@ -3818,6 +3947,10 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
         "budget_tokens": int(graph_state.get("budget_tokens") or 0),
         "take": int(graph_state.get("take") or 0),
         "scope": graph_state.get("scope"),
+        "scope_source": graph_state.get("scope_source"),
+        "scope_decision": graph_state.get("scope_decision"),
+        "matched_scope_hint": graph_state.get("matched_scope_hint"),
+        "latency": graph_state.get("latency"),
         "fail_open": bool(graph_state.get("fail_open")),
         "error_first_line": graph_state.get("error_first_line"),
         "preflight_kind": pre.get("kind"),
@@ -4126,12 +4259,17 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "budget_tokens": int(graph_state.get("budget_tokens") or 0),
             "take": int(graph_state.get("take") or 0),
             "scope": graph_state.get("scope"),
+            "scope_source": graph_state.get("scope_source"),
+            "scope_decision": graph_state.get("scope_decision"),
+            "matched_scope_hint": graph_state.get("matched_scope_hint"),
+            "latency": graph_state.get("latency"),
             "preflight": graph_state.get("payload"),
             "consumption": graph_state.get("consumption"),
         }
 
         graph_bundle = ((graph_state.get("payload") or {}).get("bundle_text") or "").strip()
-        if graph_bundle:
+        compose_graph_bundle = bool(((graph_state.get("latency") or {}).get("compose_graph_bundle", True)))
+        if graph_bundle and compose_graph_bundle:
             l1_for_combined = [line for item, line in zip(selected_items, bundle_lines) if item.get("recordRef") not in covered_raw_set]
             l1_combined_text = "\n".join(l1_for_combined).strip()
             parts = [graph_bundle]
@@ -4209,7 +4347,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             extensions={
                 "policy": {
                     "id": "pack-policy-v1.1",
-                    "selection_order": ["trust", "importance", "rrf", "match_count", "recency"],
+                    "selection_order": ["graph_synthesis_preference", "trust", "importance", "rrf", "match_count", "recency"],
                     "primary_budget_tokens": int(primary_budget_tokens),
                     "primary_used_tokens": int(used_primary_tokens),
                     "primary_item_limit": int(primary_item_limit),
@@ -10180,6 +10318,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--graph-probe-t-high", type=float, default=-5.0, help="Probe trigger threshold for best bm25() score (default: -5.0)")
     sp.add_argument("--graph-probe-t-marginal", type=float, default=-2.0, help="Probe marginal threshold (default: -2.0)")
     sp.add_argument("--graph-probe-n-min", type=int, default=3, help="Breadth minimum count for marginal probe hits (default: 3)")
+    sp.add_argument("--graph-latency-soft-ms", type=int, default=150, help="Soft latency threshold for auto graph composition (default: 150)")
+    sp.add_argument("--graph-latency-hard-ms", type=int, default=300, help="Hard latency threshold for auto graph composition (default: 300)")
 
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)

@@ -95,6 +95,8 @@ class TestContextPackGoldenHarness(unittest.TestCase):
             patchers.append(patch("openclaw_mem.cli._graph_index_payload", return_value=row["graph_index_payload"]))
         if "graph_pack_payload" in row:
             patchers.append(patch("openclaw_mem.cli._graph_pack_payload", return_value=row["graph_pack_payload"]))
+        if "perf_counter" in row:
+            patchers.append(patch("openclaw_mem.cli.time.perf_counter", side_effect=list(row["perf_counter"])))
 
         try:
             buf = io.StringIO()
@@ -126,11 +128,18 @@ class TestContextPackGoldenHarness(unittest.TestCase):
                         self.assertEqual(graph.get("triggered"), graph_expect["triggered"])
                     if "trigger_reason" in graph_expect:
                         self.assertEqual(graph.get("trigger_reason"), graph_expect["trigger_reason"])
+                    if "scope_source" in graph_expect:
+                        self.assertEqual(trace_graph.get("scope_source"), graph_expect["scope_source"])
+                    if "scope_decision" in graph_expect:
+                        self.assertEqual(trace_graph.get("scope_decision"), graph_expect["scope_decision"])
                     if "stage1_categories" in graph_expect:
                         self.assertEqual(trace_graph.get("stage1_categories"), graph_expect["stage1_categories"])
                     if "probe" in graph_expect:
                         for key, value in dict(graph_expect.get("probe") or {}).items():
                             self.assertEqual(dict(trace_graph.get("probe") or {}).get(key), value)
+                    if "latency" in graph_expect:
+                        for key, value in dict(graph_expect.get("latency") or {}).items():
+                            self.assertEqual(dict(trace_graph.get("latency") or {}).get(key), value)
 
                 policy_expect = dict(expect.get("policy") or {})
                 if policy_expect:
