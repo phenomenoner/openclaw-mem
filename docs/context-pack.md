@@ -1,6 +1,6 @@
 # Context packing (ContextPack) — hybrid text + JSON
 
-Status: **SHIPPED** (`openclaw-mem pack` emits a stable `context_pack` object; graph-aware and protected-tail extensions remain roadmap).
+Status: **SHIPPED + EXTENDED** (`openclaw-mem pack` emits a stable `context_pack` object, supports protected-tail assembly hooks, and now applies graph-aware synthesis preference inside pack selection).
 
 ## Shipped today vs proposed next
 
@@ -14,7 +14,7 @@ For migration safety, the legacy top-level `bundle_text` / `items` / `citations`
 
 ### Planned extensions
 - stronger L0/L1/L2 packaging conventions
-- protected-tail and expand-style hooks
+- richer expand-style hooks beyond the current protected-tail contract
 
 The JSON contract below is now the shipped baseline for `context_pack`. Future additions should extend it compatibly.
 
@@ -42,6 +42,12 @@ In v0 today, `openclaw-mem pack` already outputs:
 - optional `trace` (`openclaw-mem.pack.trace.v1`, redaction-safe)
 
 This doc defines the explicit **ContextPack.v1** schema used by `openclaw-mem pack` to keep that structure stable, shallow, and easy for LLMs (and ops tooling) to consume.
+
+Current pack-policy behavior (v1.1 implementation posture):
+- prefer graph synthesis cards before raw covered refs when a deterministic coverage relationship already exists
+- rank warm candidates by graph preference, trust, importance, retrieval strength, and recency
+- optionally reserve a protected tail budget for caller-supplied recent turns
+- keep all of that observable in `pack --trace` via `trace.extensions.policy`
 
 ## Design principles (non-negotiable)
 
@@ -118,11 +124,29 @@ A minimal, stable schema optimized for LLM absorption.
 
 ### Protected tail (“fresh tail”) hook
 
-A future packer version may add:
-- a **protected recent tail** (recent turns, not evictable), and
-- an **evictable prefix** (older summaries/memories dropped first).
+`openclaw-mem pack` now supports a bounded protected tail at assembly time:
+- `--tail-text "..."` (repeatable) for caller-supplied recent turns
+- `--tail-file <path>` for plain-text or JSON-list recent turns (`-` means piped stdin)
+- `--tail-max-items N` to cap how many recent turns are considered
+- `--tail-budget-tokens N` to reserve budget for those turns
+
+Behavior:
+- tail budget is reserved before warm durable selection
+- tail slots are also reserved when tail budget is enabled, so recent continuity is not crowded out by warm hits
+- tail lines land as `L0` / `recent_turn` entries
+- when tail is enabled, the payload also exposes a `tail` summary block
+- trace receipts expose the reserved and consumed tail budget in `trace.extensions.policy`
 
 This is inspired by LCM-style context assembly and improves continuity while keeping budgets strict.
+
+### Graph-aware synthesis preference inside pack
+
+Pack selection now reuses the existing synthesis-coverage logic before final admission:
+- if a fresh synthesis card deterministically covers selected raw refs, pack prefers the card
+- raw refs remain available when not covered or when the synthesis preference does not apply
+- this is additive and fail-open, it does not require `--use-graph=on`
+
+The explicit graph preflight lane (`--use-graph=off|auto|on`) still exists for broader graph neighborhood expansion. The new behavior is the smaller, always-safe graph-aware preference inside ordinary pack selection.
 
 ## Ops: what to benchmark / what to log
 

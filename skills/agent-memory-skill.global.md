@@ -42,3 +42,5 @@ Never store:
 
 ## Output behavior
 Answer using the best lane with provenance. Store only after confirmation, and store **one fact per record**.
+
+For bounded task context, prefer `openclaw-mem pack --trace` over dumping raw history. When recent continuity matters, reserve a protected tail (`--tail-text` / `--tail-file` + `--tail-budget-tokens`) instead of promoting raw turns into durable memory.

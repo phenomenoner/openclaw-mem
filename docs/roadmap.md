@@ -55,7 +55,7 @@ Acceptance criteria:
 
 ### 1.7) Graphic Memory consumption (triggered preflight → pack integration)
 
-Status: **ROADMAP**.
+Status: **PARTIAL** (graph-aware synthesis preference now applies inside ordinary `pack`; broader triggered preflight integration remains additive).
 
 - Problem: Graphic Memory has working auto-capture and `graph preflight`, but it is not yet **routinely consumed** in doc/decision/dependency lookup flows.
 - Plan (two-step):
@@ -69,6 +69,7 @@ Acceptance criteria:
 - `pack` behavior unchanged when graph is OFF.
 - In `--use-graph=auto`, trigger is deterministic + traceable (`--trace` shows trigger reason).
 - Graph failures are fail-open and never break pack.
+- Ordinary `pack` can prefer a covering synthesis card over raw covered refs without requiring `--use-graph=on`.
 
 ### 1.7a) Graphic Memory query plane (operator-facing graph interface)
 

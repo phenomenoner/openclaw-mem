@@ -9,7 +9,7 @@ Start with a local SQLite sidecar. Keep your current OpenClaw memory backend if 
 
 - **Local-first by default** — JSONL + SQLite, no external database required.
 - **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
-- **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, and trace-backed debugging.
+- **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, graph-aware synthesis preference, protected fresh tails, and trace-backed debugging.
 - **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, and keep rollback simple.
 - **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
 
@@ -68,7 +68,7 @@ If that works, the product story is real: you already have a local memory ledger
 The product loop is simple and stable:
 
 1. **Store**: capture, ingest, and query observations with `store`/`ingest`/`search`.
-2. **Pack**: run `pack` to get a bounded `bundle_text` and `context_pack` (`schema: openclaw-mem.context-pack.v1`).
+2. **Pack**: run `pack` to get a bounded `bundle_text` and `context_pack` (`schema: openclaw-mem.context-pack.v1`), with optional protected-tail continuity and graph-aware synthesis preference.
 3. **Observe**: use `timeline`, `get`, and `artifact` outputs for explainability and rollback.
 
 Example:
