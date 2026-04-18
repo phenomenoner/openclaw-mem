@@ -64,6 +64,7 @@ Delete the test DB or the repo checkout. No OpenClaw state changed.
 - SQLite recall layer
 - backend-aware observability
 - deterministic triage / ops workflows
+- optional continuity side-car activation later without changing the active memory slot
 - no active memory-backend change
 
 ### First step
@@ -72,8 +73,10 @@ Read:
 
 - [Quickstart](quickstart.md)
 - [Deployment guide](deployment.md)
+- [Optional continuity side-car activation](deployment.md#2b-optional-governed-continuity-side-car)
 - [Governed optimize assist lane](optimize-assist.md)
 - [Auto-capture plugin](auto-capture.md)
+- [Continuity ops lane](../skills/self-model-sidecar.ops.md)
 - [Agent memory skill (SOP)](agent-memory-skill.md) (recommended agent prompt contract)
 
 ### Rollback
@@ -104,6 +107,7 @@ Disable the plugin, stop harvest jobs, remove the symlink if you added one. Your
 - operator-tunable receipts and policies
 - more explicit control over recall/capture behavior
 - optional **Proactive Pack** lane for bounded pre-reply recall during live turns
+- optional continuity side-car activation from the same checkout if you want governed derived continuity receipts
 - one-line rollback to `memory-core` or `memory-lancedb`
 
 ### First step
@@ -114,6 +118,8 @@ Read:
 - [Proactive Pack](proactive-pack.md)
 - [Ecosystem fit](ecosystem-fit.md)
 - [Deployment guide](deployment.md)
+- [Optional continuity side-car activation](deployment.md#2b-optional-governed-continuity-side-car)
+- [Continuity ops lane](../skills/self-model-sidecar.ops.md)
 - [Agent memory skill (SOP)](agent-memory-skill.md) (recommended agent prompt contract)
 - `python tools/route_auto_synthesis_smoke.py` (deterministic route-auto synthesis smoke)
 
