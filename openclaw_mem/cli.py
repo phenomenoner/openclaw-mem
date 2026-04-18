@@ -4458,6 +4458,8 @@ def cmd_self_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "control": self_model_sidecar.load_control_config(run_dir),
         "latest_snapshot_id": (latest or {}).get("snapshot_id"),
         "latest_source_digest": (latest or {}).get("source_digest"),
+        "residue": self_model_sidecar._state_residue_summary(run_dir),
+        "arbiter_policy": "openclaw-mem-memory-of-record-wins",
     }
     _emit(payload, args.json)
 

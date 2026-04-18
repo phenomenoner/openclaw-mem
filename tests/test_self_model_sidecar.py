@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
+from openclaw_mem import self_model_sidecar
 from openclaw_mem.cli import _connect, build_parser
 
 
@@ -53,6 +54,12 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             args.func(self.conn, args)
         return json.loads(buf.getvalue())
 
+    def _observation_count(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0])
+
+    def _event_count(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) FROM episodic_events").fetchone()[0])
+
     def test_parser_continuity_current(self):
         args = build_parser().parse_args(["continuity", "current", "--json"])
         self.assertEqual(args.cmd, "continuity")
@@ -62,8 +69,18 @@ class TestSelfModelSidecarCli(unittest.TestCase):
         self.assertEqual(alias.cmd, "self")
         self.assertEqual(alias.self_cmd, "current")
 
+    def test_readonly_guard_blocks_core_writes(self):
+        with self.assertRaisesRegex(Exception, "attempt to write a readonly database"):
+            with self_model_sidecar.db_readonly_guard(self.conn):
+                self.conn.execute(
+                    "INSERT INTO observations (ts, kind, summary, summary_en, lang, tool_name, detail_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("2026-04-18T08:10:00Z", "conversation.user", "blocked write", "", "en", "message", "{}"),
+                )
+
     def test_current_persist_and_attachment_map(self):
         with tempfile.TemporaryDirectory() as tmp:
+            obs_before = self._observation_count()
+            events_before = self._event_count()
             persona_path = Path(tmp) / "persona.json"
             persona_path.write_text(
                 json.dumps(
@@ -98,13 +115,22 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             self.assertTrue(current["evidence_summary"]["derived"])
             self.assertTrue(current["evidence_summary"]["non_authoritative"])
             self.assertEqual(current["evidence_summary"]["operator_surface"], "continuity")
+            self.assertTrue(current["provenance"]["query_only_enforced"])
             snapshot_path = current["persisted"]["snapshot_path"]
             amap = self._run(["continuity", "attachment-map", "--snapshot", snapshot_path, "--json"])
             self.assertEqual(amap["schema"], "openclaw-mem.self-model.attachment-map.v0")
             self.assertGreaterEqual(amap["counts"]["goal"], 1)
+            top = amap["top_attachments"][0]
+            self.assertIn(top["band"], {"low", "medium", "high"})
+            self.assertIn(top["fragility"], {"fragile", "watch", "supported", "contested"})
+            self.assertTrue(top["provenance"]["derived"])
+            self.assertEqual(obs_before, self._observation_count())
+            self.assertEqual(events_before, self._event_count())
 
     def test_release_diff_and_compare_migration(self):
         with tempfile.TemporaryDirectory() as tmp:
+            obs_before = self._observation_count()
+            events_before = self._event_count()
             baseline = Path(tmp) / "baseline.json"
             baseline.write_text(json.dumps({"style_commitments": {"warm": 1.0}}), encoding="utf-8")
             candidate = Path(tmp) / "candidate.json"
@@ -140,6 +166,8 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             self.assertEqual(diff["schema"], "openclaw-mem.self-model.diff.v0")
             changed_ids = {item["id"] for item in diff["changed"]}
             self.assertIn("goal:ship_mvp", changed_ids)
+            self.assertIn(diff["drift_class"], {"no_op", "organic", "suspicious"})
+            self.assertEqual(diff["provenance"]["arbiter_policy"], "openclaw-mem-memory-of-record-wins")
 
             compare = self._run(
                 [
@@ -163,19 +191,46 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             self.assertNotIn("latest_path", compare["baseline_paths"])
             self.assertNotIn("latest_path", compare["candidate_paths"])
             self.assertGreaterEqual(compare["diff"]["summary"]["changed"] + compare["diff"]["summary"]["added"], 1)
+            self.assertTrue(compare["provenance"]["query_only_enforced"])
 
             threat = self._run(["continuity", "threat-feed", "--snapshot", after["persisted"]["snapshot_path"], "--json"])
             self.assertEqual(threat["schema"], "openclaw-mem.self-model.threat-feed.v0")
+            self.assertIn("provenance", threat)
 
             enabled = self._run(["continuity", "enable", "--run-dir", tmp, "--cadence-seconds", "60", "--json"])
             self.assertTrue(enabled["enabled"])
+            self.assertIn("receipt_path", enabled)
             status = self._run(["continuity", "status", "--run-dir", tmp, "--json"])
             self.assertTrue(status["control"]["enabled"])
+            self.assertTrue(status["residue"]["latest_pointer_present"])
             autorun = self._run(["continuity", "auto-run", "--scope", "proj-a", "--session-id", "s1", "--run-dir", tmp, "--cycles", "1", "--json"])
             self.assertTrue(autorun["ok"])
             self.assertEqual(len(autorun["runs"]), 1)
             disabled = self._run(["continuity", "disable", "--run-dir", tmp, "--json"])
             self.assertFalse(disabled["enabled"])
+            self.assertTrue(disabled["cleared_latest_pointer"])
+            self.assertEqual(disabled["cleared_snapshot_id"], after["snapshot_id"])
+            disabled_status = self._run(["continuity", "status", "--run-dir", tmp, "--json"])
+            self.assertIsNone(disabled_status["latest_snapshot_id"])
+            self.assertFalse(disabled_status["residue"]["latest_pointer_present"])
+            self.assertEqual(obs_before, self._observation_count())
+            self.assertEqual(events_before, self._event_count())
+
+    def test_diff_marks_suspicious_large_delta(self):
+        before = {
+            "snapshot_id": "before",
+            "source_digest": "same-source",
+            "attachments": [{"id": "goal:verify", "attachment_score": 0.2, "confidence": 0.3, "fragility": "supported"}],
+        }
+        after = {
+            "snapshot_id": "after",
+            "source_digest": "different-source",
+            "attachments": [{"id": "goal:verify", "attachment_score": 0.7, "confidence": 0.8, "fragility": "fragile"}],
+        }
+        diff = self_model_sidecar.compare_snapshots(before, after)
+        self.assertEqual(diff["drift_class"], "suspicious")
+        self.assertIn("large_delta:goal:verify", diff["risk_flags"])
+        self.assertIn("fragile_claim:goal:verify", diff["risk_flags"])
 
 
 if __name__ == "__main__":
