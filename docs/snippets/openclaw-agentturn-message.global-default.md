@@ -74,5 +74,14 @@ Never store:
 - Mutation, when enabled, must route through `openclaw-mem optimize assist-apply` with governor-approved packets, receipts, and rollback.
 - Do not collapse scout, governor, and writer roles into one hidden background step.
 
+## Bounded context packing default
+When the task needs a bounded working bundle rather than a single fact lookup:
+- prefer `openclaw-mem pack --trace`
+- if the query is clearly project/repo scoped, add `--scope <project>`
+- prefer `--use-graph=auto` for repo/product queries so topology evidence can join the pack when it is both relevant and cheap
+- do **not** force `--use-graph=on` for routine chatty turns unless you explicitly want graph-only investigation
+
 ## Output behavior
 Answer using the best lane with provenance. Store only after confirmation, and store **one fact per record**.
+
+For bounded task context, prefer `openclaw-mem pack --trace` over dumping raw history. When recent continuity matters, reserve a protected tail (`--tail-text` / `--tail-file` + `--tail-budget-tokens`) instead of promoting raw turns into durable memory. For project-scoped troubleshooting, keep graph recall on `auto` unless the trace proves it is irrelevant or degrading.

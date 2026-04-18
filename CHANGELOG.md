@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-04-18
+
 ### Changed
 
+- `pack --use-graph=auto` now productizes graph participation behind explicit scope, trigger, and latency receipts, so project-scoped packs can opportunistically pull topology evidence without forcing graph-only cost on routine turns.
+- Added dedicated agent-memory skill guidance for bounded packs: prefer `openclaw-mem pack --trace`, protected tail continuity, and `--use-graph=auto` for repo/product queries.
 - Added a governed optimization bridge for low-risk observation lifecycle maintenance: `optimize evolution-review` now packetizes stale-candidate updates, `optimize governor-review` can approve them explicitly, and `optimize assist-apply` can execute the bounded write with before/after + rollback receipts.
 - Narrowed the first shipped apply whitelist to lifecycle stale-candidate fields plus bounded `optimization.assist` metadata so the write lane stays auditable and rollbackable.
 - Added `tools/optimize_assist_runner.py` as the dedicated scheduled-worker surface for the governed optimize-assist lane, plus deployable OpenClaw/systemd enablement docs and snippet assets.

@@ -66,6 +66,8 @@ If asked to “remember” routine logs/OK checks:
 - Read-only/helper lanes may inspect and packetize these recommendations, but judgment/write authority remains with the primary operator or designated maintainer.
 - The same split applies to optimization maintenance: read-only lanes may scout with `openclaw-mem optimize evolution-review`, but must not run `openclaw-mem optimize assist-apply`.
 
+If this lane needs bounded continuity for a long-running task, prefer `openclaw-mem pack --trace` with a protected tail (`--tail-text` / `--tail-file` + `--tail-budget-tokens`) instead of writing routine status chatter into durable memory. For project/repo checks, prefer `--scope <project>` plus `--use-graph=auto`; keep graph on auto so read-only watchdog lanes gain topology help without forcing slow or noisy graph-only paths.
+
 ## Runtime enforcement (recommended)
 This card is a *prompt-layer contract*. When possible, also enforce it at runtime:
 

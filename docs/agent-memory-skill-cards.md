@@ -73,8 +73,17 @@ Never store:
 - Mutation, when enabled, must route through `openclaw-mem optimize assist-apply` with governor-approved packets, receipts, and rollback.
 - Do not collapse scout, governor, and writer roles into one hidden background step.
 
+## Bounded context packing default
+When the task needs a bounded working bundle rather than a single fact lookup:
+- prefer `openclaw-mem pack --trace`
+- if the query is clearly project/repo scoped, add `--scope <project>`
+- prefer `--use-graph=auto` for repo/product queries so topology evidence can join the pack when it is both relevant and cheap
+- do **not** force `--use-graph=on` for routine chatty turns unless you explicitly want graph-only investigation
+
 ## Output behavior
 Answer using the best lane with provenance. Store only after confirmation, and store **one fact per record**.
+
+For bounded task context, prefer `openclaw-mem pack --trace` over dumping raw history. When recent continuity matters, reserve a protected tail (`--tail-text` / `--tail-file` + `--tail-budget-tokens`) instead of promoting raw turns into durable memory. For project-scoped troubleshooting, keep graph recall on `auto` unless the trace proves it is irrelevant or degrading.
 ```
 
 ## 2) Read-only carve-out card
@@ -130,6 +139,8 @@ If asked to “remember” routine logs/OK checks:
 - For maintenance triage, `openclaw-mem graph synth recommend` is the preferred zero-write review surface.
 - Read-only/helper lanes may inspect and packetize these recommendations, but judgment/write authority remains with the primary operator or designated maintainer.
 - The same split applies to optimization maintenance: read-only lanes may scout with `openclaw-mem optimize evolution-review`, but must not run `openclaw-mem optimize assist-apply`.
+
+If this lane needs bounded continuity for a long-running task, prefer `openclaw-mem pack --trace` with a protected tail (`--tail-text` / `--tail-file` + `--tail-budget-tokens`) instead of writing routine status chatter into durable memory. For project/repo checks, prefer `--scope <project>` plus `--use-graph=auto`; keep graph on auto so read-only watchdog lanes gain topology help without forcing slow or noisy graph-only paths.
 
 ## Runtime enforcement (recommended)
 This card is a *prompt-layer contract*. When possible, also enforce it at runtime:

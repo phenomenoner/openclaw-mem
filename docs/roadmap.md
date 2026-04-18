@@ -64,7 +64,7 @@ Acceptance criteria:
 
 ### 1.7) Graphic Memory consumption (triggered preflight → pack integration)
 
-Status: **DONE** (pack integration shipped on stable main; `off|auto|on` posture and traceable trigger/provenance receipts revalidated on 2026-03-31).
+Status: **DONE** (pack integration shipped on stable main; graph-aware synthesis preference and protected tail now apply inside ordinary `pack`, while triggered preflight remains additive and fail-open).
 
 - Problem: Graphic Memory had working auto-capture and `graph preflight`, but it was not yet **routinely consumed** in doc/decision/dependency lookup flows.
 - Shipped slice:
@@ -81,8 +81,12 @@ Artifacts:
 Acceptance criteria:
 - `pack` behavior unchanged when graph is OFF.
 - In `--use-graph=auto`, trigger is deterministic + traceable (`--trace` shows trigger reason).
+- Auto graph scope stays conservative: unresolved scope degrades to baseline-only instead of cross-project promotion.
+- Auto graph latency is policy-governed: allow/degrade/skip is receipted and can suppress graph bundle composition.
 - Graph failures are fail-open and never break pack.
 - Graph-derived candidate injection can consume query-plane provenance quality with deterministic include/exclude reasons (structured provenance gate + fail-open receipts).
+- Ordinary `pack` can prefer a covering synthesis card over raw covered refs without requiring `--use-graph=on`.
+- Golden regression scenarios exist for pack policy, protected tail, and graph-auto trigger behavior.
 
 ### 1.7a) Graphic Memory query plane (operator-facing graph interface)
 

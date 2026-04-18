@@ -8,15 +8,19 @@ When you do promote the engine, the live-turn hook is framed as **Proactive Pack
 
 ## What you get
 
+- **Local-first by default** — JSONL + SQLite, no external database required.
+- **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
+- **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, graph-aware synthesis preference, protected fresh tails, and trace-backed debugging.
+- **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, and keep rollback simple.
+- **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
 - compact memory packs with citations and trace receipts
 - trust-policy controls for excluding quarantined content
-- sidecar deployment on an existing OpenClaw install
-- optional promotion to `openclaw-mem-engine` later for hybrid recall and tighter policy controls
 - optional **Proactive Pack** support in `openclaw-mem-engine` for pre-reply bounded recall with receipts and fail-open behavior
-- **Local-first by default**: JSONL + SQLite, no external database required
-- **Cheap recall loop**: `search → timeline → get` keeps routine lookups fast and inspectable
-- **Bounded packing**: `pack` emits a stable `ContextPack` contract for injection, citations, and trace-backed debugging
-- **Fits real OpenClaw ops**: capture tool outcomes, retain receipts, and keep rollback simple
+- **Local-first by default** — JSONL + SQLite, no external database required.
+- **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
+- **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, graph-aware synthesis preference, protected fresh tails, and trace-backed debugging.
+- **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, and keep rollback simple.
+- **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
 
 ## Why this exists
 
@@ -70,7 +74,7 @@ Full proof path:
 The product loop is simple and stable:
 
 1. **Store**: capture, ingest, and query observations with `store`/`ingest`/`search`.
-2. **Pack**: run `pack` to get a bounded `bundle_text` and `context_pack` (`schema: openclaw-mem.context-pack.v1`).
+2. **Pack**: run `pack` to get a bounded `bundle_text` and `context_pack` (`schema: openclaw-mem.context-pack.v1`), with optional protected-tail continuity and graph-aware synthesis preference.
 3. **Observe**: use `timeline`, `get`, and `artifact` outputs for explainability and rollback.
 
 When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
@@ -184,6 +188,7 @@ When a compaction receipt is later selected by `pack`, the response may include:
 - **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
 - **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
 - **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
+- **Pack policy contract:** [`docs/specs/context-pack-policy-v1.1.md`](docs/specs/context-pack-policy-v1.1.md)
 - **Optional Mem Engine:** [`docs/mem-engine.md`](docs/mem-engine.md)
 - **Release notes:** <https://github.com/phenomenoner/openclaw-mem/releases>
 

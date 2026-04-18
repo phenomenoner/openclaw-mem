@@ -5574,6 +5574,155 @@ def _estimate_tokens(text: str) -> int:
     return max(1, (len(text) + 3) // 4)
 
 
+_PACK_TRUST_RANK = {
+    "trusted": 0,
+    "unknown": 1,
+    "untrusted": 2,
+    "quarantined": 3,
+}
+
+
+_PACK_IMPORTANCE_RANK = {
+    "must_remember": 0,
+    "nice_to_have": 1,
+    "unknown": 2,
+    "ignore": 3,
+}
+
+
+def _pack_ts_sort_value(raw: Any) -> float:
+    if not isinstance(raw, str) or not raw.strip():
+        return 0.0
+    text = raw.strip()
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return datetime.fromisoformat(text).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _pack_tail_text(raw: Any) -> str:
+    if raw is None:
+        return ""
+    text = str(raw).replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+    return " ".join(part for part in text.splitlines() if part.strip()).strip()
+
+
+def _pack_collect_tail_texts(args: argparse.Namespace) -> List[str]:
+    tail_texts: List[str] = []
+    for raw in list(getattr(args, "tail_text", None) or []):
+        text = _pack_tail_text(raw)
+        if text:
+            tail_texts.append(text)
+
+    tail_file = getattr(args, "tail_file", None)
+    if isinstance(tail_file, str) and tail_file.strip():
+        if tail_file == "-":
+            if sys.stdin.isatty():
+                raise ValueError("--tail-file - requires piped stdin")
+            source = sys.stdin.read()
+        else:
+            source = Path(tail_file).read_text(encoding="utf-8")
+        try:
+            parsed = json.loads(source)
+        except Exception:
+            parsed = None
+
+        if isinstance(parsed, list):
+            for item in parsed:
+                text = _pack_tail_text(item)
+                if text:
+                    tail_texts.append(text)
+        else:
+            for line in source.splitlines():
+                text = _pack_tail_text(line)
+                if text:
+                    tail_texts.append(text)
+
+    return tail_texts
+
+
+def _pack_policy_sort_key(candidate: Dict[str, Any]) -> Tuple[Any, ...]:
+    trust = str(candidate.get("trust") or "unknown")
+    importance = str(candidate.get("importance") or "unknown")
+    rrf = float(candidate.get("rrf") or 0.0)
+    matched_count = int(candidate.get("matched_count") or 0)
+    ts_value = float(candidate.get("ts_value") or 0.0)
+    original_index = int(candidate.get("original_index") or 0)
+    return (
+        0 if bool(candidate.get("is_graph_synthesis")) else 1,
+        int(_PACK_TRUST_RANK.get(trust, 99)),
+        int(_PACK_IMPORTANCE_RANK.get(importance, 99)),
+        -rrf,
+        -matched_count,
+        -ts_value,
+        original_index,
+    )
+
+
+def _pack_build_memory_candidates(
+    state: Dict[str, Any],
+    detail_map: Dict[int, Dict[str, Any]],
+    candidate_ids: List[int],
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen: set[int] = set()
+    for idx, rid in enumerate(candidate_ids):
+        if rid in seen:
+            continue
+        seen.add(rid)
+        row = dict(state["obs_map"].get(rid) or {})
+        detail_obj = detail_map.get(rid, {})
+        importance_label = _pack_importance_label(detail_obj)
+        trust_tier = _pack_trust_tier(detail_obj)
+        matched_fts = rid in state["fts_ids"]
+        matched_vector = rid in state["vec_ids"] or rid in state["vec_en_ids"]
+        out.append(
+            {
+                "rid": rid,
+                "recordRef": f"obs:{rid}",
+                "row": row,
+                "detail": detail_obj,
+                "text": _pack_item_text(row, detail_obj),
+                "importance": importance_label,
+                "trust": trust_tier,
+                "rrf": float(state["rrf_scores"].get(rid, 0.0)),
+                "matched_fts": matched_fts,
+                "matched_vector": matched_vector,
+                "matched_count": int(bool(matched_fts)) + int(bool(matched_vector)),
+                "ts_value": _pack_ts_sort_value(row.get("ts")),
+                "original_index": idx,
+                "is_graph_synthesis": row.get("tool_name") == "graph.synth-compile",
+            }
+        )
+    return out
+
+
+def _pack_build_tail_candidates(args: argparse.Namespace) -> List[Dict[str, Any]]:
+    tail_texts = _pack_collect_tail_texts(args)
+    tail_max_items = max(0, int(getattr(args, "tail_max_items", 0) or 0))
+    if tail_max_items:
+        tail_texts = tail_texts[-tail_max_items:]
+
+    out: List[Dict[str, Any]] = []
+    for idx, text in enumerate(tail_texts, start=1):
+        out.append(
+            {
+                "recordRef": f"tail:{idx}",
+                "text": text,
+                "token_estimate": _estimate_tokens(text),
+                "type": "recent_turn",
+                "layer": "L0",
+                "importance": "unknown",
+                "trust": "unknown",
+            }
+        )
+    return out
+
+
 
 
 _ACK_RE = re.compile(r"^(yes|no|y|n|ok|done|lgtm|k|thx|thanks|👍)$", re.IGNORECASE)
@@ -6527,6 +6676,112 @@ def _pack_graph_apply_provenance_policy(
     return _pack_graph_finalize_provenance_policy(out)
 
 
+def _pack_graph_known_scopes(conn: sqlite3.Connection, *, limit: int = 256) -> List[str]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT json_extract(detail_json, '$.scope') AS scope
+        FROM observations
+        WHERE json_extract(detail_json, '$.scope') IS NOT NULL
+        ORDER BY scope
+        LIMIT ?
+        """,
+        (int(max(1, limit)),),
+    ).fetchall()
+    scopes: List[str] = []
+    seen = set()
+    for r in rows:
+        raw = r["scope"] if isinstance(r, sqlite3.Row) else None
+        norm = _normalize_scope_token(raw)
+        if norm and norm not in seen:
+            seen.add(norm)
+            scopes.append(norm)
+    return scopes
+
+
+def _pack_graph_resolve_scope(
+    conn: sqlite3.Connection,
+    *,
+    query: str,
+    explicit_scope: Optional[str],
+    use_graph: str,
+) -> dict:
+    explicit_norm = _normalize_scope_token(explicit_scope)
+    if explicit_norm:
+        return {
+            "resolved_scope": explicit_norm,
+            "scope_source": "explicit",
+            "scope_decision": "allow",
+            "matched_scope_hint": explicit_norm,
+        }
+
+    # Forced-on keeps fail-open behavior and may search without a scope filter.
+    if str(use_graph or "off").strip().lower() == "on":
+        return {
+            "resolved_scope": None,
+            "scope_source": "unresolved",
+            "scope_decision": "allow",
+            "matched_scope_hint": None,
+        }
+
+    q = (query or "").strip()
+    candidate_tokens = set()
+    for raw in re.findall(r"[A-Za-z0-9][A-Za-z0-9._/-]{1,}", q):
+        parts = [raw]
+        if "/" in raw:
+            parts.extend(p for p in raw.split("/") if p)
+        for part in parts:
+            norm = _normalize_scope_token(part.strip("/"))
+            if norm:
+                candidate_tokens.add(norm)
+
+    known_scopes = _pack_graph_known_scopes(conn)
+    exact_matches = sorted(candidate_tokens.intersection(known_scopes))
+    if len(exact_matches) == 1:
+        return {
+            "resolved_scope": exact_matches[0],
+            "scope_source": "inferred",
+            "scope_decision": "allow",
+            "matched_scope_hint": exact_matches[0],
+        }
+
+    return {
+        "resolved_scope": None,
+        "scope_source": "unresolved",
+        "scope_decision": "skip",
+        "matched_scope_hint": None,
+    }
+
+
+def _pack_graph_latency_gate(
+    *,
+    use_graph: str,
+    latency_ms: Optional[int],
+    args: argparse.Namespace,
+) -> dict:
+    soft_raw = getattr(args, "graph_latency_soft_ms", 150)
+    hard_raw = getattr(args, "graph_latency_hard_ms", 300)
+    soft_ms = max(0, int(150 if soft_raw is None else soft_raw))
+    hard_ms = max(soft_ms, int(300 if hard_raw is None else hard_raw))
+    out = {
+        "latency_ms": int(latency_ms or 0),
+        "threshold_soft_ms": int(soft_ms),
+        "threshold_hard_ms": int(hard_ms),
+        "decision": "allow",
+        "degraded": False,
+        "compose_graph_bundle": True,
+    }
+    if latency_ms is None:
+        out["latency_ms"] = None
+        return out
+    if str(use_graph or "off").strip().lower() != "auto":
+        return out
+    if int(latency_ms) > int(hard_ms):
+        out.update({"decision": "skip", "degraded": True, "compose_graph_bundle": False})
+    elif int(latency_ms) > int(soft_ms):
+        out.update({"decision": "degrade", "degraded": True, "compose_graph_bundle": False})
+    return out
+
+
 def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args: argparse.Namespace) -> dict:
     """Optional Graphic Memory preflight for `pack` (default OFF; fail-open).
 
@@ -6549,7 +6804,10 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
         "selection_count_pre_policy": 0,
         "budget_tokens": int(max(1, int(getattr(args, "graph_budget_tokens", 1200) or 1200))),
         "take": int(max(1, int(getattr(args, "graph_take", 12) or 12))),
-        "scope": (str(getattr(args, "graph_scope", "") or "").strip() or None),
+        "scope": None,
+        "scope_source": "unresolved",
+        "scope_decision": "skip",
+        "matched_scope_hint": None,
         "probe": {"ran": False},
         "stage0": {"fired": False, "reason": None},
         "stage1": {"hit": False, "categories": [], "matched_keywords": []},
@@ -6572,6 +6830,8 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
                 "selected_refs": [],
             }
         ),
+        "latency": _pack_graph_latency_gate(use_graph=use_graph, latency_ms=None, args=args),
+        "latency": _pack_graph_latency_gate(use_graph=use_graph, latency_ms=None, args=args),
         "payload": None,
     }
 
@@ -6581,18 +6841,37 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
     if use_graph == "off":
         return out
 
+    scope_state = _pack_graph_resolve_scope(
+        conn,
+        query=query,
+        explicit_scope=(str(getattr(args, "graph_scope", "") or "").strip() or None),
+        use_graph=use_graph,
+    )
+    out["scope"] = scope_state.get("resolved_scope")
+    out["scope_source"] = str(scope_state.get("scope_source") or "unresolved")
+    out["scope_decision"] = str(scope_state.get("scope_decision") or "skip")
+    out["matched_scope_hint"] = scope_state.get("matched_scope_hint")
+
+    # Stage 1 keyword/pattern intent. We compute this before Stage 0 returns so
+    # short-but-explicit operator artifact refs (for example `docs/specs/`) can
+    # still trigger in auto mode.
+    stage1 = _pack_graph_stage1_keywords(query)
+    out["stage1"] = stage1
+
     # Stage 0
     anti = _pack_graph_stage0_anti_trigger(query)
     if anti:
         out["stage0"] = {"fired": True, "reason": anti}
-        if use_graph != "on":
+        allow_stage1_override = bool(stage1.get("hit")) and anti in {"too_short"}
+        if use_graph != "on" and not allow_stage1_override:
             out["triggered"] = False
             out["trigger_reason"] = f"anti:{anti}"
             return out
 
-    # Stage 1
-    stage1 = _pack_graph_stage1_keywords(query)
-    out["stage1"] = stage1
+    if use_graph == "auto" and out.get("scope_decision") == "skip":
+        out["triggered"] = False
+        out["trigger_reason"] = "scope_unresolved"
+        return out
 
     # Forced
     if use_graph == "on":
@@ -6610,10 +6889,10 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             out["trigger_reason"] = "auto_probe_off"
             return out
 
-        probe_limit = int(max(1, int(getattr(args, "graph_probe_limit", 5) or 5)))
-        t_high = float(getattr(args, "graph_probe_t_high", -5.0) or -5.0)
-        t_marginal = float(getattr(args, "graph_probe_t_marginal", -2.0) or -2.0)
-        n_min = int(max(1, int(getattr(args, "graph_probe_n_min", 3) or 3)))
+        probe_limit = int(max(1, int(getattr(args, "graph_probe_limit", 5))))
+        t_high = float(getattr(args, "graph_probe_t_high", -5.0))
+        t_marginal = float(getattr(args, "graph_probe_t_marginal", -2.0))
+        n_min = int(max(1, int(getattr(args, "graph_probe_n_min", 3))))
 
         probe = _pack_graph_probe_observations(
             conn,
@@ -6626,11 +6905,15 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             "latency_ms": int(probe.get("latency_ms") or 0),
             "hit_count": int(probe.get("hit_count") or 0),
             "best_score": probe.get("best_score"),
+            "threshold_high": float(t_high),
+            "threshold_marginal": float(t_marginal),
+            "breadth_min": int(n_min),
         }
 
         scores = list(probe.get("scores") or [])
         best = probe.get("best_score")
         marginal_count = sum(1 for s in scores if isinstance(s, (int, float)) and float(s) <= float(t_marginal))
+        out["probe"]["marginal_count"] = int(marginal_count)
 
         if not scores:
             out["triggered"] = False
@@ -6654,6 +6937,7 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
 
     # If triggered: run preflight (fail-open)
     try:
+        preflight_started = time.perf_counter()
         index_payload = _graph_index_payload(
             conn,
             query=query,
@@ -6698,6 +6982,8 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             "bundle_text": pack_payload.get("bundle_text", "") or "",
         }
 
+        preflight_latency_ms = int((time.perf_counter() - preflight_started) * 1000)
+        out["latency"] = _pack_graph_latency_gate(use_graph=use_graph, latency_ms=preflight_latency_ms, args=args)
         out["fail_open"] = False
     except Exception as e:
         line = (str(e).splitlines() or [str(e)])[:1][0]
@@ -6719,6 +7005,8 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
         "trigger_reason": graph_state.get("trigger_reason"),
         "stage0": graph_state.get("stage0"),
         "stage1": graph_state.get("stage1"),
+        "stage1_hit": bool(((graph_state.get("stage1") or {}).get("hit"))),
+        "stage1_categories": list(((graph_state.get("stage1") or {}).get("categories") or [])),
         "probe": graph_state.get("probe"),
         "probe_decision": graph_state.get("probe_decision"),
         "selection_count_pre_policy": int(graph_state.get("selection_count_pre_policy") or 0),
@@ -6727,6 +7015,14 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
         "take": int(graph_state.get("take") or 0),
         "scope": graph_state.get("scope"),
         "provenance_policy": _pack_graph_finalize_provenance_policy(graph_state.get("provenance_policy")),
+        "scope_source": graph_state.get("scope_source"),
+        "scope_decision": graph_state.get("scope_decision"),
+        "matched_scope_hint": graph_state.get("matched_scope_hint"),
+        "latency": graph_state.get("latency"),
+        "scope_source": graph_state.get("scope_source"),
+        "scope_decision": graph_state.get("scope_decision"),
+        "matched_scope_hint": graph_state.get("matched_scope_hint"),
+        "latency": graph_state.get("latency"),
         "fail_open": bool(graph_state.get("fail_open")),
         "error_first_line": graph_state.get("error_first_line"),
         "preflight_kind": pre.get("kind"),
@@ -6801,22 +7097,44 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         if str(item.get("recordRef") or "").strip()
     }
 
+    policy_candidate_limit = max(limit * 3, limit + 8)
+    policy_candidate_ids, synthesis_pref = _hybrid_prefer_synthesis_cards(
+        conn,
+        ordered_ids=ordered_ids,
+        limit=policy_candidate_limit,
+        obs_map=obs_map,
+        rrf_scores=state["rrf_scores"],
+    )
+    memory_candidates = _pack_build_memory_candidates(state, detail_map, policy_candidate_ids)
+    memory_candidates.sort(key=_pack_policy_sort_key)
+
+    try:
+        tail_candidates = _pack_build_tail_candidates(args)
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+    tail_requested_count = len(tail_candidates)
+    tail_budget_tokens = max(0, int(getattr(args, "tail_budget_tokens", 0) or 0))
+    reserved_tail_budget = min(budget_tokens, tail_budget_tokens) if tail_requested_count else 0
+    reserved_tail_slots = min(limit, tail_requested_count) if reserved_tail_budget > 0 else 0
+    primary_budget_tokens = max(0, budget_tokens - reserved_tail_budget)
+    primary_item_limit = max(0, limit - reserved_tail_slots)
+
     selected_items: List[Dict[str, Any]] = []
     citations: List[Dict[str, Any]] = []
     candidate_trace: List[pack_trace_v1.PackTraceV1Candidate] = []
     context_pack_items: List[context_pack_v1.ContextPackV1Item] = []
     compaction_selected: List[Dict[str, Any]] = []
 
-    used_tokens = 0
-    for rid in ordered_ids:
-        row = obs_map.get(rid)
+    used_primary_tokens = 0
+    selected_memory_count = 0
+    for candidate in memory_candidates:
+        row = candidate["row"]
+        rid = int(candidate["rid"])
+        record_ref = str(candidate["recordRef"])
+        text = str(candidate["text"] or "")
         detail_obj = detail_map.get(rid, {})
-        importance_label = _pack_importance_label(detail_obj)
-        trust_tier = _pack_trust_tier(detail_obj)
         compaction_receipt = _pack_compaction_receipt(detail_obj)
-
-        record_ref = f"obs:{rid}"
-        text = _pack_item_text(row or {}, detail_obj)
         token_estimate = _estimate_tokens(text) if text else 0
 
         include = False
@@ -6830,25 +7148,23 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 reason = str(trust_decision.get("reason") or "").strip() or "trust_unknown"
                 reasons.append(reason)
 
-        if row is None:
+        if not row:
             reasons.append("missing_row")
         elif not text:
             reasons.append("missing_summary")
         elif not trust_allowed:
-            pass
-        elif len(selected_items) >= limit:
+            reasons.append(str(trust_decision.get("reason") or "trust_quarantined_excluded") if trust_decision is not None else "trust_quarantined_excluded")
+        elif selected_memory_count >= primary_item_limit:
             reasons.append("max_items_reached")
-        elif used_tokens + token_estimate > budget_tokens:
+        elif primary_budget_tokens <= 0:
+            reasons.append("budget_tokens_exceeded")
+        elif used_primary_tokens + token_estimate > primary_budget_tokens:
             reasons.append("budget_tokens_exceeded")
         else:
             include = True
-            used_tokens += token_estimate
+            used_primary_tokens += token_estimate
+            selected_memory_count += 1
             reasons.extend(["within_item_limit", "within_budget"])
-            if rid in state["fts_ids"]:
-                reasons.append("matched_fts")
-            if rid in state["vec_ids"] or rid in state["vec_en_ids"]:
-                reasons.append("matched_vector")
-
             selected_items.append(
                 {
                     "recordRef": record_ref,
@@ -6884,12 +7200,10 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             context_pack_items.append(
                 context_pack_v1.ContextPackV1Item(
                     recordRef=record_ref,
-                    # v1 pack emits L1-only items. Keep this explicit until L0/L2
-                    # become real pack outputs rather than roadmap labels.
                     layer="L1",
                     type="memory",
-                    importance=importance_label,
-                    trust=trust_tier,
+                    importance=str(candidate["importance"]),
+                    trust=str(candidate["trust"]),
                     text=text,
                     citations=context_pack_v1.ContextPackV1ItemCitations(
                         url=None,
@@ -6902,12 +7216,85 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             pack_trace_v1.PackTraceV1Candidate(
                 id=record_ref,
                 layer="L1",
-                importance=importance_label,
-                trust=trust_tier,
+                importance=str(candidate["importance"]),
+                trust=str(candidate["trust"]),
                 scores=pack_trace_v1.PackTraceV1CandidateScores(
-                    rrf=float(state["rrf_scores"].get(rid, 0.0)),
-                    fts=float(1.0 if rid in state["fts_ids"] else 0.0),
-                    semantic=float(1.0 if (rid in state["vec_ids"] or rid in state["vec_en_ids"]) else 0.0),
+                    rrf=float(candidate["rrf"]),
+                    fts=float(1.0 if candidate["matched_fts"] else 0.0),
+                    semantic=float(1.0 if candidate["matched_vector"] else 0.0),
+                ),
+                decision=pack_trace_v1.PackTraceV1Decision(
+                    included=include,
+                    reason=list(reasons),
+                    rationale=list(reasons),
+                    caps=pack_trace_v1.PackTraceV1DecisionCaps(
+                        niceCapHit=False,
+                        l2CapHit=False,
+                    ),
+                ),
+                citations=pack_trace_v1.PackTraceV1CandidateCitations(
+                    url=None,
+                    recordRef=record_ref,
+                ),
+            )
+        )
+
+    used_tail_tokens = 0
+    selected_tail_count = 0
+    for tail in tail_candidates:
+        record_ref = str(tail["recordRef"])
+        text = str(tail["text"])
+        token_estimate = int(tail["token_estimate"])
+
+        include = False
+        reasons: List[str] = ["protected_tail"]
+
+        if selected_tail_count >= reserved_tail_slots:
+            reasons.append("max_items_reached")
+        elif reserved_tail_budget <= 0:
+            reasons.append("tail_budget_disabled")
+        elif used_tail_tokens + token_estimate > reserved_tail_budget:
+            reasons.append("tail_budget_tokens_exceeded")
+        else:
+            include = True
+            used_tail_tokens += token_estimate
+            selected_tail_count += 1
+            reasons.extend(["within_item_limit", "within_tail_budget"])
+            selected_items.append(
+                {
+                    "recordRef": record_ref,
+                    "layer": "L0",
+                    "summary": text,
+                    "kind": "recent_turn",
+                    "lang": None,
+                }
+            )
+            citations.append({"recordRef": record_ref, "url": None})
+            context_pack_items.append(
+                context_pack_v1.ContextPackV1Item(
+                    recordRef=record_ref,
+                    layer="L0",
+                    type="recent_turn",
+                    importance="unknown",
+                    trust="unknown",
+                    text=text,
+                    citations=context_pack_v1.ContextPackV1ItemCitations(
+                        url=None,
+                        recordRef=record_ref,
+                    ),
+                )
+            )
+
+        candidate_trace.append(
+            pack_trace_v1.PackTraceV1Candidate(
+                id=record_ref,
+                layer="L0",
+                importance="unknown",
+                trust="unknown",
+                scores=pack_trace_v1.PackTraceV1CandidateScores(
+                    rrf=0.0,
+                    fts=0.0,
+                    semantic=0.0,
                 ),
                 decision=pack_trace_v1.PackTraceV1Decision(
                     included=include,
@@ -6977,6 +7364,14 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if trust_policy_mode != "off":
         payload["trust_policy"] = trust_policy
 
+    if tail_requested_count:
+        payload["tail"] = {
+            "requestedCount": tail_requested_count,
+            "includedCount": selected_tail_count,
+            "budgetTokens": reserved_tail_budget,
+            "usedTokens": used_tail_tokens,
+        }
+
     # Optional graph output (kept separate for safety; consumer may choose to inject).
     if (graph_state or {}).get("use_graph") != "off":
         graph_pack = (((graph_state.get("payload") or {}).get("pack") or {}) if isinstance((graph_state.get("payload") or {}).get("pack"), dict) else {})
@@ -7007,12 +7402,21 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "take": int(graph_state.get("take") or 0),
             "scope": graph_state.get("scope"),
             "provenance_policy": graph_provenance_policy,
+            "scope_source": graph_state.get("scope_source"),
+            "scope_decision": graph_state.get("scope_decision"),
+            "matched_scope_hint": graph_state.get("matched_scope_hint"),
+            "latency": graph_state.get("latency"),
+            "scope_source": graph_state.get("scope_source"),
+            "scope_decision": graph_state.get("scope_decision"),
+            "matched_scope_hint": graph_state.get("matched_scope_hint"),
+            "latency": graph_state.get("latency"),
             "preflight": graph_state.get("payload"),
             "consumption": graph_state.get("consumption"),
         }
 
         graph_bundle = ((graph_state.get("payload") or {}).get("bundle_text") or "").strip()
-        if graph_bundle:
+        compose_graph_bundle = bool(((graph_state.get("latency") or {}).get("compose_graph_bundle", True)))
+        if graph_bundle and compose_graph_bundle:
             l1_for_combined = [line for item, line in zip(selected_items, bundle_lines) if item.get("recordRef") not in covered_raw_set]
             l1_combined_text = "\n".join(l1_for_combined).strip()
             parts = [graph_bundle]
@@ -7093,6 +7497,20 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             compaction_policy_hints = _pack_compaction_policy_hints(compaction_selected)
             if compaction_policy_hints is not None:
                 trace_extensions["compaction_policy_hints"] = compaction_policy_hints
+        trace_extensions["policy"] = {
+            "id": "pack-policy-v1.1",
+            "selection_order": ["graph_synthesis_preference", "trust", "importance", "rrf", "match_count", "recency"],
+            "primary_budget_tokens": int(primary_budget_tokens),
+            "primary_used_tokens": int(used_primary_tokens),
+            "primary_item_limit": int(primary_item_limit),
+            "tail_reserved_tokens": int(reserved_tail_budget),
+            "tail_used_tokens": int(used_tail_tokens),
+            "tail_reserved_slots": int(reserved_tail_slots),
+            "tail_requested_count": int(tail_requested_count),
+            "tail_included_count": int(selected_tail_count),
+            "graph_preferred_card_refs": list(synthesis_pref.get("preferredCardRefs") or []),
+            "graph_covered_raw_refs": list(synthesis_pref.get("coveredRawRefs") or []),
+        }
 
         trace = pack_trace_v1.PackTraceV1(
             kind=pack_trace_v1.PACK_TRACE_V1_KIND,
@@ -7113,7 +7531,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 pack_trace_v1.PackTraceV1Lane(
                     name="hot",
                     source="session/recent",
-                    searched=False,
+                    searched=bool(tail_requested_count),
                     retrievers=[],
                 ),
                 pack_trace_v1.PackTraceV1Lane(
@@ -14910,6 +15328,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--query-en", help="Optional English query for bilingual retrieval")
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
+    sp.add_argument("--tail-text", action="append", default=None, help="Protected recent-tail line to append at assembly time (repeatable)")
+    sp.add_argument("--tail-file", help="Optional file containing protected tail lines (plain text or JSON list)")
+    sp.add_argument("--tail-max-items", type=int, default=4, help="Max protected tail lines to consider (default: 4)")
+    sp.add_argument("--tail-budget-tokens", type=int, default=0, help="Reserved token budget for protected tail lines (default: 0, disabled)")
 
     # Optional: Graphic Memory preflight integration (default OFF; fail-open)
     sp.add_argument(
@@ -14965,6 +15387,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--graph-probe-t-high", type=float, default=-5.0, help="Probe trigger threshold for best bm25() score (default: -5.0)")
     sp.add_argument("--graph-probe-t-marginal", type=float, default=-2.0, help="Probe marginal threshold (default: -2.0)")
     sp.add_argument("--graph-probe-n-min", type=int, default=3, help="Breadth minimum count for marginal probe hits (default: 3)")
+    sp.add_argument("--graph-latency-soft-ms", type=int, default=150, help="Soft latency threshold for auto graph composition (default: 150)")
+    sp.add_argument("--graph-latency-hard-ms", type=int, default=300, help="Hard latency threshold for auto graph composition (default: 300)")
 
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)

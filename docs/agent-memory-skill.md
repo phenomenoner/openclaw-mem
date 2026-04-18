@@ -295,6 +295,8 @@ Rationale: cron lanes produce high-volume, low-signal observations; a store-by-d
 ### Relationship to ContextPack + importance grading
 
 - Treat **`openclaw-mem.context-pack.v1` / `pack --trace`** as the preferred *bounded* way to carry L1 state into a long-running task.
+- When continuity matters, reserve a **protected fresh tail** instead of bloating durable memory. Use `pack --tail-text ... --tail-budget-tokens ...` (or `--tail-file`) so recent turns stay bounded and visible in receipts.
+- Pack now applies a small **graph-aware synthesis preference** before final selection, so fresh synthesis cards can replace already-covered raw refs without needing full graph preflight every time.
 - When you *do* store, set an **importance score/label** (see [Importance grading](importance-grading.md)) so packing/triage can stay selective.
 
 ## Scenario fixtures (for agreement testing)

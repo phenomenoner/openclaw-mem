@@ -44,6 +44,8 @@ When you need a bounded, injection-ready result instead of another search result
 - short `bundle_text` for direct injection
 - structured items with `recordRef` citations
 - optional redaction-safe trace receipts for include/exclude debugging
+- protected-tail continuity hooks for caller-supplied recent turns
+- graph-aware synthesis preference before final raw-ref admission
 
 This keeps recall, packing, and debugging on one auditable path.
 

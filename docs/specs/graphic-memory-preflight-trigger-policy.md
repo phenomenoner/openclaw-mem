@@ -128,6 +128,7 @@ Rules:
   - trigger/probe envelope: `triggered`, `trigger_reason`, `stage0`, `stage1`, `probe`, `probe_decision`
   - bounded selection stats: `selection_count_pre_policy`, `selected_refs_count`, `budget_tokens`, `take`, `scope`
   - fail-open envelope: `fail_open`, `error_first_line`, `preflight_kind`
+  - scope + latency envelope: `scope_source`, `scope_decision`, `matched_scope_hint`, `latency.*`
   - provenance-policy contract (`openclaw-mem.pack.graph.provenance-policy.v1`):
     - top-level: `kind`, `mode`, `require_structured_provenance`, `graph_query_db_configured`, `bounds`, `checked_count`, `included_count`, `excluded_count`, `fail_open_count`, `decision_reason_counts`, `decisions`, `selected_refs`
     - each decision: `recordRef`, `included`, `reason`, `fail_open`, `error_code`, `provenance_quality`
@@ -139,6 +140,12 @@ Rules:
     - derived from real pack selection/citation/candidate decisions (not synthetic counters)
     - append-only write to bounded SQLite shadow table `pack_lifecycle_shadow_log` (retention capped by `--pack-lifecycle-log-max-rows`)
     - mutation contract is explicit `memory_mutation=none` / `auto_archive_applied=0` / `auto_mutation_applied=0` (usage evidence + receipts only)
+
+Current implementation note:
+- short-but-explicit operator artifact refs such as `docs/specs/` may bypass the generic `too_short` anti-trigger in auto mode, but unresolved scope still skips graph preflight
+- ack-like short queries still stay rejected
+- probe receipts now also carry threshold values plus `marginal_count` so breadth-trigger decisions are auditable
+- auto mode now adds a conservative scope gate and latency gate before graph bundle composition is allowed into the combined output
 
 Acceptance (MVP):
 - OFF = no behavior change.
