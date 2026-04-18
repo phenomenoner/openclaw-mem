@@ -65,6 +65,9 @@ class TestSelfModelSidecarCli(unittest.TestCase):
         self.assertEqual(args.cmd, "continuity")
         self.assertEqual(args.self_cmd, "current")
 
+        adjudication = build_parser().parse_args(["continuity", "adjudication", "--json"])
+        self.assertEqual(adjudication.self_cmd, "adjudication")
+
         alias = build_parser().parse_args(["self", "current", "--json"])
         self.assertEqual(alias.cmd, "self")
         self.assertEqual(alias.self_cmd, "current")
@@ -123,7 +126,16 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             top = amap["top_attachments"][0]
             self.assertIn(top["band"], {"low", "medium", "high"})
             self.assertIn(top["fragility"], {"fragile", "watch", "supported", "contested"})
+            self.assertIn(top["adjudication_state"], {"accepted", "tentative", "fragile", "contested", "retired", "rejected"})
             self.assertTrue(top["provenance"]["derived"])
+
+            adjudication = self._run(["continuity", "adjudication", "--snapshot", snapshot_path, "--json"])
+            self.assertEqual(adjudication["schema"], "openclaw-mem.self-model.adjudication.v0")
+            self.assertEqual(adjudication["policy_version"], self_model_sidecar.ADJUDICATION_POLICY_VERSION)
+
+            public_summary = self._run(["continuity", "public-summary", "--snapshot", snapshot_path, "--json"])
+            self.assertEqual(public_summary["schema"], "openclaw-mem.self-model.public-summary.v0")
+            self.assertTrue(public_summary["provenance"]["public_safe"])
             self.assertEqual(obs_before, self._observation_count())
             self.assertEqual(events_before, self._event_count())
 
@@ -231,6 +243,119 @@ class TestSelfModelSidecarCli(unittest.TestCase):
         self.assertEqual(diff["drift_class"], "suspicious")
         self.assertIn("large_delta:goal:verify", diff["risk_flags"])
         self.assertIn("fragile_claim:goal:verify", diff["risk_flags"])
+
+    def test_adjudication_negative_fixtures(self):
+        attachments = self_model_sidecar._with_attachment_provenance(
+            [
+                {
+                    "id": "goal:prior_only",
+                    "category": "goal",
+                    "label": "prior only",
+                    "attachment_score": 0.6,
+                    "evidence_count": 0,
+                    "evidence_ids": [],
+                    "source_classes": [],
+                    "prior_weight": 1.0,
+                    "contradiction_hits": 0,
+                    "matched_keywords": [],
+                    "release_state": "active",
+                },
+                {
+                    "id": "goal:thin_and_coherent",
+                    "category": "goal",
+                    "label": "thin and coherent",
+                    "attachment_score": 0.8,
+                    "evidence_count": 1,
+                    "evidence_ids": ["obs:1"],
+                    "source_classes": ["observation"],
+                    "prior_weight": 0.2,
+                    "contradiction_hits": 0,
+                    "matched_keywords": ["ship"],
+                    "release_state": "active",
+                },
+                {
+                    "id": "goal:contested",
+                    "category": "goal",
+                    "label": "contested",
+                    "attachment_score": 0.7,
+                    "evidence_count": 1,
+                    "evidence_ids": ["obs:2"],
+                    "source_classes": ["observation"],
+                    "prior_weight": 0.0,
+                    "contradiction_hits": 2,
+                    "matched_keywords": ["ship"],
+                    "release_state": "active",
+                },
+                {
+                    "id": "goal:revalidation_needed",
+                    "category": "goal",
+                    "label": "revalidation needed",
+                    "attachment_score": 0.9,
+                    "evidence_count": 2,
+                    "evidence_ids": ["obs:3", "evt:3"],
+                    "source_classes": ["observation", "episodic_event"],
+                    "prior_weight": 0.0,
+                    "contradiction_hits": 0,
+                    "matched_keywords": ["verify"],
+                    "release_state": "weakening",
+                },
+                {
+                    "id": "goal:unsupported",
+                    "category": "goal",
+                    "label": "unsupported",
+                    "attachment_score": 0.0,
+                    "evidence_count": 0,
+                    "evidence_ids": [],
+                    "source_classes": [],
+                    "prior_weight": 0.0,
+                    "contradiction_hits": 0,
+                    "matched_keywords": [],
+                    "release_state": "active",
+                },
+            ]
+        )
+        by_id = {item["id"]: item for item in attachments}
+        self.assertEqual(by_id["goal:prior_only"]["adjudication_state"], "tentative")
+        self.assertFalse(by_id["goal:prior_only"]["publication"]["public_visible"])
+        self.assertEqual(by_id["goal:thin_and_coherent"]["adjudication_state"], "fragile")
+        self.assertEqual(by_id["goal:contested"]["adjudication_state"], "contested")
+        self.assertEqual(by_id["goal:revalidation_needed"]["adjudication_state"], "fragile")
+        self.assertEqual(by_id["goal:unsupported"]["adjudication_state"], "rejected")
+        self.assertTrue(by_id["goal:unsupported"]["publication"]["hedge"])
+
+        report = self_model_sidecar.build_adjudication_report({"snapshot_id": "snap", "attachments": attachments, "source_digest": "digest"})
+        self.assertEqual(report["counts"]["rejected"], 1)
+        self.assertIn("goal:unsupported", {item["id"] for item in report["claims_by_state"]["rejected"]})
+
+    def test_diff_skips_state_transition_for_legacy_snapshots(self):
+        before = {
+            "snapshot_id": "before",
+            "source_digest": "legacy-source",
+            "attachments": [{"id": "goal:verify", "attachment_score": 0.4, "confidence": 0.5, "fragility": "watch"}],
+        }
+        after = {
+            "snapshot_id": "after",
+            "source_digest": "new-source",
+            "attachments": [{"id": "goal:verify", "attachment_score": 0.6, "confidence": 0.8, "fragility": "supported", "adjudication_state": "tentative"}],
+        }
+        diff = self_model_sidecar.compare_snapshots(before, after)
+        self.assertFalse(any(flag.startswith("state_transition:") for flag in diff["risk_flags"]))
+
+    def test_diff_tracks_state_transition_without_score_delta(self):
+        before = {
+            "snapshot_id": "before",
+            "source_digest": "same-source",
+            "attachments": [{"id": "goal:verify", "attachment_score": 0.6, "confidence": 0.6, "fragility": "watch", "adjudication_state": "tentative"}],
+        }
+        after = {
+            "snapshot_id": "after",
+            "source_digest": "same-source",
+            "attachments": [{"id": "goal:verify", "attachment_score": 0.6, "confidence": 0.6, "fragility": "contested", "adjudication_state": "contested"}],
+        }
+        diff = self_model_sidecar.compare_snapshots(before, after)
+        self.assertIn("state_transition:goal:verify:tentative->contested", diff["risk_flags"])
+        self.assertEqual(diff["changed"][0]["before_state"], "tentative")
+        self.assertEqual(diff["changed"][0]["after_state"], "contested")
 
 
 if __name__ == "__main__":
