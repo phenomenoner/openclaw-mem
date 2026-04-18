@@ -38,7 +38,7 @@ If asked to “remember” routine logs/OK checks:
 - Topology: repo inspection + (if available) `openclaw-mem graph query ...`
 - Store: **disabled by default** in this lane
 
-If this lane needs bounded continuity for a long-running task, prefer `openclaw-mem pack --trace` with a protected tail (`--tail-text` / `--tail-file` + `--tail-budget-tokens`) instead of writing routine status chatter into durable memory.
+If this lane needs bounded continuity for a long-running task, prefer `openclaw-mem pack --trace` with a protected tail (`--tail-text` / `--tail-file` + `--tail-budget-tokens`) instead of writing routine status chatter into durable memory. For project/repo checks, prefer `--scope <project>` plus `--use-graph=auto`; keep graph on auto so read-only watchdog lanes gain topology help without forcing slow or noisy graph-only paths.
 
 ## Runtime enforcement (recommended)
 This card is a *prompt-layer contract*. When possible, also enforce it at runtime:

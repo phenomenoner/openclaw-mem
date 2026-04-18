@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-04-18
+
 ### Changed
+
+- `pack --use-graph=auto` now productizes graph participation behind explicit scope, trigger, and latency receipts, so project-scoped packs can opportunistically pull topology evidence without forcing graph-only cost on routine turns.
+- Added dedicated agent-memory skill guidance for bounded packs: prefer `openclaw-mem pack --trace`, protected tail continuity, and `--use-graph=auto` for repo/product queries.
 
 - `graph query provenance` now supports `--source-path` filtering (path before `#anchor`) so provenance concentration checks can scope deterministically to one topology source while preserving optional anchor-level breakdowns.
 
