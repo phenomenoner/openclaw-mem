@@ -36,6 +36,7 @@ from openclaw_mem import __version__
 from openclaw_mem import defaults
 from openclaw_mem import context_pack_v1
 from openclaw_mem import pack_trace_v1
+from openclaw_mem import self_model_sidecar
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -4369,6 +4370,135 @@ def _emit(payload: Any, as_json: bool) -> None:
             print(f"{k}: {v}")
         return
     print(payload)
+
+
+def _build_self_snapshot_from_args(conn: sqlite3.Connection, args: argparse.Namespace) -> Dict[str, Any]:
+    return self_model_sidecar.build_snapshot(
+        conn,
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+        limit=int(getattr(args, "limit", 50)),
+        persona_file=getattr(args, "persona_file", None),
+        observations_file=getattr(args, "observations_file", None),
+        episodes_file=getattr(args, "episodes_file", None),
+        run_dir=getattr(args, "run_dir", None),
+    )
+
+
+def _load_or_build_self_snapshot(conn: sqlite3.Connection, args: argparse.Namespace) -> Dict[str, Any]:
+    snapshot_path = getattr(args, "snapshot", None)
+    if snapshot_path:
+        return self_model_sidecar.load_snapshot(snapshot_path)
+    return _build_self_snapshot_from_args(conn, args)
+
+
+def cmd_self_current(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _build_self_snapshot_from_args(conn, args)
+    if getattr(args, "persist", False):
+        snapshot["persisted"] = self_model_sidecar.persist_snapshot(snapshot, getattr(args, "run_dir", None))
+    _emit(snapshot, args.json)
+
+
+def cmd_self_attachment_map(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_attachment_map(snapshot)
+    _emit(payload, args.json)
+
+
+def cmd_self_threat_feed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_threat_feed(snapshot)
+    _emit(payload, args.json)
+
+
+def cmd_self_diff(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    before = self_model_sidecar.load_snapshot(args.from_snapshot)
+    after = self_model_sidecar.load_snapshot(args.to_snapshot)
+    payload = self_model_sidecar.compare_snapshots(before, after)
+    _emit(payload, args.json)
+
+
+def cmd_self_release(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = self_model_sidecar.write_release_receipt(
+        run_dir=getattr(args, "run_dir", None),
+        stance_id=args.stance,
+        reason=args.reason,
+        mode=args.mode,
+        factor=float(getattr(args, "factor", 0.5)),
+        operator=getattr(args, "operator", None),
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+    )
+    _emit(payload, args.json)
+
+
+def cmd_self_compare_migration(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = self_model_sidecar.compare_migration(
+        conn,
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+        limit=int(getattr(args, "limit", 50)),
+        baseline_persona_file=getattr(args, "baseline_persona_file", None),
+        candidate_persona_file=getattr(args, "candidate_persona_file", None),
+        observations_file=getattr(args, "observations_file", None),
+        episodes_file=getattr(args, "episodes_file", None),
+        run_dir=getattr(args, "run_dir", None),
+    )
+    if getattr(args, "persist", False):
+        payload["baseline_paths"] = self_model_sidecar.persist_snapshot(payload["baseline"], getattr(args, "run_dir", None), update_latest=False)
+        payload["candidate_paths"] = self_model_sidecar.persist_snapshot(payload["candidate"], getattr(args, "run_dir", None), update_latest=False)
+    _emit(payload, args.json)
+
+
+def cmd_self_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    run_dir = getattr(args, "run_dir", None)
+    latest = self_model_sidecar.load_latest_snapshot(run_dir)
+    payload = {
+        "schema": self_model_sidecar.CONTROL_SCHEMA,
+        "control": self_model_sidecar.load_control_config(run_dir),
+        "latest_snapshot_id": (latest or {}).get("snapshot_id"),
+        "latest_source_digest": (latest or {}).get("source_digest"),
+    }
+    _emit(payload, args.json)
+
+
+def cmd_self_enable(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    current = self_model_sidecar.load_control_config(getattr(args, "run_dir", None))
+    payload = self_model_sidecar.save_control_config(
+        getattr(args, "run_dir", None),
+        enabled=True,
+        cadence_seconds=int(getattr(args, "cadence_seconds", current.get("cadence_seconds", 0))),
+        persist_on_run=bool(getattr(args, "persist_on_run", current.get("persist_on_run", True))),
+    )
+    _emit(payload, args.json)
+
+
+def cmd_self_disable(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    current = self_model_sidecar.load_control_config(getattr(args, "run_dir", None))
+    payload = self_model_sidecar.save_control_config(
+        getattr(args, "run_dir", None),
+        enabled=False,
+        cadence_seconds=int(current.get("cadence_seconds", 0)),
+        persist_on_run=bool(current.get("persist_on_run", True)),
+    )
+    _emit(payload, args.json)
+
+
+def cmd_self_auto_run(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = self_model_sidecar.run_autonomous_cycle(
+        conn,
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+        limit=int(getattr(args, "limit", 50)),
+        persona_file=getattr(args, "persona_file", None),
+        observations_file=getattr(args, "observations_file", None),
+        episodes_file=getattr(args, "episodes_file", None),
+        run_dir=getattr(args, "run_dir", None),
+        cycles=int(getattr(args, "cycles", 1)),
+        interval_seconds=float(getattr(args, "interval_seconds", 0.0)),
+        dry_run=bool(getattr(args, "dry_run", False)),
+    )
+    _emit(payload, args.json)
 
 
 def _print_row(item: Dict[str, Any]) -> None:
@@ -15138,6 +15268,88 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--top", type=int, default=20, help="Max recent receipts to inspect per receipt family (default: 20)")
     o.set_defaults(func=cmd_optimize_posture_review)
 
+    def add_self_surface_common(s: argparse.ArgumentParser) -> None:
+        add_common(s)
+        s.add_argument("--scope", default=None, help="Optional scope filter for DB/file evidence")
+        s.add_argument("--session-id", dest="session_id", default=None, help="Optional session_id filter for DB/file evidence")
+        s.add_argument("--limit", type=int, default=50, help="Max recent observations/events used to derive the snapshot (default: 50)")
+        s.add_argument("--persona-file", dest="persona_file", default=None, help="Optional JSON file carrying persona priors (roles/goals/refusals/style_commitments/stances)")
+        s.add_argument("--observations-file", dest="observations_file", default=None, help="Optional observations JSONL file to blend into evidence")
+        s.add_argument("--episodes-file", dest="episodes_file", default=None, help="Optional episodic-events JSONL file to blend into evidence")
+        s.add_argument("--run-dir", dest="run_dir", default=self_model_sidecar.default_run_dir(), help="Side-car state root for snapshots and release receipts")
+
+    def add_continuity_family(name: str, help_text: str) -> None:
+        sp = sub.add_parser(name, help=help_text)
+        ssub = sp.add_subparsers(dest="self_cmd", required=True)
+
+        s = ssub.add_parser("current", help="Build the current derived continuity snapshot")
+        add_self_surface_common(s)
+        s.add_argument("--persist", action="store_true", help="Persist snapshot JSON under the side-car run dir")
+        s.set_defaults(func=cmd_self_current)
+
+        s = ssub.add_parser("attachment-map", help="Show ranked attachment scores for the current or persisted continuity snapshot")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.set_defaults(func=cmd_self_attachment_map)
+
+        s = ssub.add_parser("threat-feed", help="Show tensions or shocks in the current or persisted continuity snapshot")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.set_defaults(func=cmd_self_threat_feed)
+
+        s = ssub.add_parser("diff", help="Compare two persisted continuity snapshots")
+        add_common(s)
+        s.add_argument("--from", dest="from_snapshot", required=True, help="Baseline snapshot JSON path")
+        s.add_argument("--to", dest="to_snapshot", required=True, help="Candidate snapshot JSON path")
+        s.set_defaults(func=cmd_self_diff)
+
+        s = ssub.add_parser("release", help="Record a governed attachment weakening or retirement receipt")
+        add_common(s)
+        s.add_argument("--run-dir", dest="run_dir", default=self_model_sidecar.default_run_dir(), help="Side-car state root for release receipts")
+        s.add_argument("--scope", default=None, help="Optional scope boundary for the release receipt")
+        s.add_argument("--session-id", dest="session_id", default=None, help="Optional session boundary for the release receipt")
+        s.add_argument("--stance", required=True, help="Attachment/stance id to weaken or retire")
+        s.add_argument("--reason", required=True, help="Human reason for the release operation")
+        s.add_argument("--mode", choices=("weaken", "retire"), default="weaken", help="Release mode (default: weaken)")
+        s.add_argument("--factor", type=float, default=0.5, help="Score multiplier when mode=weaken (default: 0.5)")
+        s.add_argument("--operator", default=None, help="Optional operator label for the receipt")
+        s.set_defaults(func=cmd_self_release)
+
+        s = ssub.add_parser("compare-migration", help="Compare two persona-prior baselines against the same memory evidence")
+        add_self_surface_common(s)
+        s.add_argument("--baseline-persona-file", dest="baseline_persona_file", default=None, help="Baseline persona-prior JSON")
+        s.add_argument("--candidate-persona-file", dest="candidate_persona_file", default=None, help="Candidate persona-prior JSON")
+        s.add_argument("--persist", action="store_true", help="Persist both baseline and candidate snapshots")
+        s.set_defaults(func=cmd_self_compare_migration)
+
+        s = ssub.add_parser("status", help="Inspect continuity enablement state and latest persisted snapshot")
+        add_common(s)
+        s.add_argument("--run-dir", dest="run_dir", default=self_model_sidecar.default_run_dir(), help="Side-car state root for control config and snapshots")
+        s.set_defaults(func=cmd_self_status)
+
+        s = ssub.add_parser("enable", help="Enable autonomous continuity runs via control config")
+        add_common(s)
+        s.add_argument("--run-dir", dest="run_dir", default=self_model_sidecar.default_run_dir(), help="Side-car state root for control config")
+        s.add_argument("--cadence-seconds", dest="cadence_seconds", type=int, default=0, help="Advisory cadence stored in control config (default: 0)")
+        s.add_argument("--persist-on-run", dest="persist_on_run", action="store_true", default=True, help="Persist snapshots during auto-run (default: true)")
+        s.add_argument("--no-persist-on-run", dest="persist_on_run", action="store_false", help="Keep auto-run receipt-only")
+        s.set_defaults(func=cmd_self_enable)
+
+        s = ssub.add_parser("disable", help="Disable autonomous continuity runs via control config")
+        add_common(s)
+        s.add_argument("--run-dir", dest="run_dir", default=self_model_sidecar.default_run_dir(), help="Side-car state root for control config")
+        s.set_defaults(func=cmd_self_disable)
+
+        s = ssub.add_parser("auto-run", help="Run bounded autonomous continuity cycles with receipts")
+        add_self_surface_common(s)
+        s.add_argument("--cycles", type=int, default=1, help="How many bounded cycles to run (default: 1)")
+        s.add_argument("--interval-seconds", dest="interval_seconds", type=float, default=0.0, help="Sleep between cycles (default: 0)")
+        s.add_argument("--dry-run", action="store_true", help="Emit autorun receipts without persisting snapshots")
+        s.set_defaults(func=cmd_self_auto_run)
+
+    add_continuity_family("continuity", "Continuity side-car surfaces and governed release receipts")
+    add_continuity_family("self", "Compatibility alias for continuity side-car surfaces")
+
     sp = sub.add_parser("ingest", help="Ingest observations (JSONL via --file or stdin)")
     add_common(sp)
     sp.add_argument("--file", help="JSONL file path (default: stdin)")
@@ -16017,9 +16229,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    cmd = getattr(args, "cmd", None)
+    self_cmd = getattr(args, "self_cmd", None)
+    file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed"} and bool(getattr(args, "snapshot", None))
+    no_db_path = cmd == "capsule" or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "status", "enable", "disable"}) or file_only_snapshot
 
-    if getattr(args, "cmd", None) == "capsule":
-        # Capsule commands own their DB semantics (including explicit dry-run/apply guards).
+    if no_db_path:
+        # Some command families own their own file-only semantics.
         # Avoid global DB coercion + _connect side effects here.
         args.json = bool(getattr(args, "json", False) or getattr(args, "json_global", False))
         conn = sqlite3.connect(":memory:")
