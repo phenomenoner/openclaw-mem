@@ -25,6 +25,7 @@ CONTROL_SCHEMA = "openclaw-mem.self-model.control.v0"
 AUTORUN_SCHEMA = "openclaw-mem.self-model.autorun.v0"
 ADJUDICATION_SCHEMA = "openclaw-mem.self-model.adjudication.v0"
 PUBLIC_SUMMARY_SCHEMA = "openclaw-mem.self-model.public-summary.v0"
+RELEASE_HISTORY_SCHEMA = "openclaw-mem.self-model.release-history.v0"
 DERIVATION_VERSION = "self_model_sidecar_v0"
 ADJUDICATION_POLICY_VERSION = "self_model_sidecar_adjudication_v1"
 
@@ -399,6 +400,40 @@ def _active_release_map(run_dir: str, *, scope: Optional[str], session_id: Optio
     return latest
 
 
+def _control_state_from_mode(mode: str) -> str:
+    mode = str(mode or "weaken").strip() or "weaken"
+    if mode == "retire":
+        return "retired"
+    if mode == "rebind":
+        return "active"
+    return "weakening"
+
+
+def _sorted_release_receipts(run_dir: str, *, scope: Optional[str], session_id: Optional[str], stance_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    receipts: List[Dict[str, Any]] = []
+    releases_dir = Path(run_dir) / "releases"
+    if not releases_dir.exists():
+        return receipts
+    for path in sorted(releases_dir.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        receipt_scope = str(payload.get("scope") or "").strip() or None
+        receipt_session = str(payload.get("session_id") or "").strip() or None
+        receipt_stance = str(payload.get("stance_id") or "").strip() or None
+        if scope is not None and receipt_scope != scope:
+            continue
+        if session_id is not None and receipt_session != session_id:
+            continue
+        if stance_id is not None and receipt_stance != stance_id:
+            continue
+        payload["path"] = str(path)
+        receipts.append(payload)
+    receipts.sort(key=lambda item: (str(item.get("released_at") or ""), str(item.get("receipt_id") or "")))
+    return receipts
+
+
 def _collect_candidates(evidence: List[Dict[str, Any]], persona_priors: Dict[str, Dict[str, float]]) -> List[Dict[str, Any]]:
     by_id: Dict[str, Dict[str, Any]] = {}
 
@@ -493,18 +528,35 @@ def _apply_releases(attachments: List[Dict[str, Any]], release_map: Dict[str, Di
             out.append(patched)
             continue
         mode = str(release.get("mode") or "weaken").strip() or "weaken"
+        patched["latest_release_receipt_id"] = release.get("receipt_id")
+        patched["control_state_transition"] = {
+            "before": release.get("before_release_state"),
+            "after": release.get("after_release_state"),
+            "receipt_id": release.get("receipt_id"),
+        }
+        if mode == "rebind":
+            patched["release_state"] = "active"
+            patched["release"] = {
+                "mode": mode,
+                "reason": release.get("reason"),
+                "receipt_id": release.get("receipt_id"),
+                "released_at": release.get("released_at"),
+                "supersedes_receipt_id": release.get("supersedes_receipt_id"),
+            }
+            out.append(patched)
+            continue
         if mode == "retire":
             continue
         factor = float(release.get("factor") or 0.5)
         patched["attachment_score"] = round(max(0.0, min(1.0, item["attachment_score"] * factor)), 3)
         patched["release_state"] = "weakening"
-        patched["latest_release_receipt_id"] = release.get("receipt_id")
         patched["release"] = {
             "mode": mode,
             "factor": factor,
             "reason": release.get("reason"),
             "receipt_id": release.get("receipt_id"),
             "released_at": release.get("released_at"),
+            "supersedes_receipt_id": release.get("supersedes_receipt_id"),
         }
         out.append(patched)
     out.sort(key=lambda item: (-item["attachment_score"], item["id"]))
@@ -979,6 +1031,11 @@ def write_release_receipt(
     scope: Optional[str],
     session_id: Optional[str],
 ) -> Dict[str, Any]:
+    root = Path(run_dir or default_run_dir())
+    prior_receipts = _sorted_release_receipts(str(root), scope=scope, session_id=session_id, stance_id=stance_id)
+    previous = prior_receipts[-1] if prior_receipts else None
+    before_release_state = str((previous or {}).get("after_release_state") or "active")
+    after_release_state = _control_state_from_mode(mode)
     released_at = _utcnow_iso()
     receipt = {
         "schema": RELEASE_RECEIPT_SCHEMA,
@@ -991,18 +1048,54 @@ def write_release_receipt(
         "operator": operator,
         "scope": scope,
         "session_id": session_id,
+        "before_release_state": before_release_state,
+        "after_release_state": after_release_state,
+        "supersedes_receipt_id": (previous or {}).get("receipt_id"),
         "provenance": {
             "derived": False,
             "authoritative": True,
             "derivation_version": "release_receipt_v0",
         },
     }
-    releases_dir = _mkdir(Path(run_dir or default_run_dir()) / "releases")
+    releases_dir = _mkdir(root / "releases")
     fname = f"{released_at.replace(':', '').replace('+', '_').replace('-', '')}__{_slug(stance_id)}.json"
     path = releases_dir / fname
     path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     receipt["path"] = str(path)
     return receipt
+
+
+def build_release_history(
+    *,
+    run_dir: Optional[str],
+    scope: Optional[str],
+    session_id: Optional[str],
+    stance_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    root = str(Path(run_dir or default_run_dir()))
+    receipts = _sorted_release_receipts(root, scope=scope, session_id=session_id, stance_id=stance_id)
+    current_state_by_stance: Dict[str, str] = {}
+    for receipt in receipts:
+        rid = str(receipt.get("stance_id") or "")
+        if not rid:
+            continue
+        current_state_by_stance[rid] = str(receipt.get("after_release_state") or _control_state_from_mode(str(receipt.get("mode") or "weaken")))
+    return {
+        "schema": RELEASE_HISTORY_SCHEMA,
+        "generated_at": _utcnow_iso(),
+        "scope": scope,
+        "session_id": session_id,
+        "stance_id": stance_id,
+        "receipt_count": len(receipts),
+        "current_state_by_stance": dict(sorted(current_state_by_stance.items())),
+        "receipts": receipts,
+        "provenance": {
+            "derived": False,
+            "authoritative": True,
+            "derivation_version": "release_receipt_v0",
+            "run_dir": root,
+        },
+    }
 
 
 def compare_migration(
