@@ -173,6 +173,8 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             self.assertEqual(release["schema"], "openclaw-mem.self-model.release-receipt.v0")
             self.assertEqual(release["scope"], "proj-a")
             self.assertEqual(release["session_id"], "s1")
+            self.assertEqual(release["before_release_state"], "active")
+            self.assertEqual(release["after_release_state"], "weakening")
             after = self._run(["continuity", "current", "--scope", "proj-a", "--session-id", "s1", "--run-dir", tmp, "--persist", "--json"])
             diff = self._run(["continuity", "diff", "--from", before["persisted"]["snapshot_path"], "--to", after["persisted"]["snapshot_path"], "--json"])
             self.assertEqual(diff["schema"], "openclaw-mem.self-model.diff.v0")
@@ -180,6 +182,60 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             self.assertIn("goal:ship_mvp", changed_ids)
             self.assertIn(diff["drift_class"], {"no_op", "organic", "suspicious"})
             self.assertEqual(diff["provenance"]["arbiter_policy"], "openclaw-mem-memory-of-record-wins")
+
+            rebind = self._run(
+                [
+                    "continuity",
+                    "release",
+                    "--run-dir",
+                    tmp,
+                    "--scope",
+                    "proj-a",
+                    "--session-id",
+                    "s1",
+                    "--stance",
+                    "goal:ship_mvp",
+                    "--reason",
+                    "testing rebind flow",
+                    "--mode",
+                    "rebind",
+                    "--json",
+                ]
+            )
+            self.assertEqual(rebind["before_release_state"], "weakening")
+            self.assertEqual(rebind["after_release_state"], "active")
+            rebound = self._run(["continuity", "current", "--scope", "proj-a", "--session-id", "s1", "--run-dir", tmp, "--persist", "--json"])
+            rebound_goal = next(item for item in rebound["attachments"] if item["id"] == "goal:ship_mvp")
+            self.assertEqual(rebound_goal["release_state"], "active")
+
+            retire = self._run(
+                [
+                    "continuity",
+                    "release",
+                    "--run-dir",
+                    tmp,
+                    "--scope",
+                    "proj-a",
+                    "--session-id",
+                    "s1",
+                    "--stance",
+                    "goal:ship_mvp",
+                    "--reason",
+                    "testing retirement flow",
+                    "--mode",
+                    "retire",
+                    "--json",
+                ]
+            )
+            self.assertEqual(retire["before_release_state"], "active")
+            self.assertEqual(retire["after_release_state"], "retired")
+            retired = self._run(["continuity", "current", "--scope", "proj-a", "--session-id", "s1", "--run-dir", tmp, "--persist", "--json"])
+            self.assertNotIn("goal:ship_mvp", {item["id"] for item in retired["attachments"]})
+
+            history = self._run(["continuity", "release-history", "--run-dir", tmp, "--scope", "proj-a", "--session-id", "s1", "--stance", "goal:ship_mvp", "--json"])
+            self.assertEqual(history["schema"], "openclaw-mem.self-model.release-history.v0")
+            self.assertEqual(history["receipt_count"], 3)
+            self.assertEqual(history["current_state_by_stance"]["goal:ship_mvp"], "retired")
 
             compare = self._run(
                 [
@@ -221,7 +277,7 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             disabled = self._run(["continuity", "disable", "--run-dir", tmp, "--json"])
             self.assertFalse(disabled["enabled"])
             self.assertTrue(disabled["cleared_latest_pointer"])
-            self.assertEqual(disabled["cleared_snapshot_id"], after["snapshot_id"])
+            self.assertEqual(disabled["cleared_snapshot_id"], retired["snapshot_id"])
             disabled_status = self._run(["continuity", "status", "--run-dir", tmp, "--json"])
             self.assertIsNone(disabled_status["latest_snapshot_id"])
             self.assertFalse(disabled_status["residue"]["latest_pointer_present"])

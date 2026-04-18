@@ -4444,6 +4444,16 @@ def cmd_self_release(conn: sqlite3.Connection, args: argparse.Namespace) -> None
     _emit(payload, args.json)
 
 
+def cmd_self_release_history(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = self_model_sidecar.build_release_history(
+        run_dir=getattr(args, "run_dir", None),
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+        stance_id=getattr(args, "stance", None),
+    )
+    _emit(payload, args.json)
+
+
 def cmd_self_compare_migration(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     payload = self_model_sidecar.compare_migration(
         conn,
@@ -15332,12 +15342,20 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--run-dir", dest="run_dir", default=self_model_sidecar.default_run_dir(), help="Side-car state root for release receipts")
         s.add_argument("--scope", default=None, help="Optional scope boundary for the release receipt")
         s.add_argument("--session-id", dest="session_id", default=None, help="Optional session boundary for the release receipt")
-        s.add_argument("--stance", required=True, help="Attachment/stance id to weaken or retire")
+        s.add_argument("--stance", required=True, help="Attachment/stance id to weaken, retire, or rebind")
         s.add_argument("--reason", required=True, help="Human reason for the release operation")
-        s.add_argument("--mode", choices=("weaken", "retire"), default="weaken", help="Release mode (default: weaken)")
+        s.add_argument("--mode", choices=("weaken", "retire", "rebind"), default="weaken", help="Release mode (default: weaken)")
         s.add_argument("--factor", type=float, default=0.5, help="Score multiplier when mode=weaken (default: 0.5)")
         s.add_argument("--operator", default=None, help="Optional operator label for the receipt")
         s.set_defaults(func=cmd_self_release)
+
+        s = ssub.add_parser("release-history", help="Inspect governed continuity control-plane receipts")
+        add_common(s)
+        s.add_argument("--run-dir", dest="run_dir", default=self_model_sidecar.default_run_dir(), help="Side-car state root for release receipts")
+        s.add_argument("--scope", default=None, help="Optional scope boundary for receipt filtering")
+        s.add_argument("--session-id", dest="session_id", default=None, help="Optional session boundary for receipt filtering")
+        s.add_argument("--stance", default=None, help="Optional stance id to filter one continuity control lane")
+        s.set_defaults(func=cmd_self_release_history)
 
         s = ssub.add_parser("compare-migration", help="Compare two persona-prior baselines against the same memory evidence")
         add_self_surface_common(s)
