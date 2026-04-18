@@ -258,6 +258,7 @@ Start with `--dry-run` until you have reviewed receipts on fixture or low-risk r
           "kind": "agentTurn",
           "model": "google-antigravity/gemini-3-flash",
           "thinking": "minimal",
+
           "message": "Run exactly one exec, then output ONLY NO_REPLY:\n\ncd /opt/openclaw-mem && uv run --python 3.13 -- python tools/optimize_assist_runner.py --json"
         },
         "delivery": { "mode": "none" }
@@ -338,7 +339,50 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-## 2B. Episodic auto-mode ingestion (new)
+## 2B. Optional governed continuity side-car
+
+If you want derived continuity receipts on top of the normal Store/Pack/Observe flow, you can enable the `continuity` control plane from the same checkout.
+This is optional and stays derived-only. It does **not** replace your memory-of-record.
+When enabled, it starts autonomous snapshot + receipt generation on the configured cadence and writes artifacts under `~/.openclaw/memory/openclaw-mem/self-model-sidecar/`.
+
+Recommended activation path:
+
+```bash
+cd /opt/openclaw-mem
+
+# Inspect current state first
+uv run --python 3.13 -- python -m openclaw_mem continuity status --json
+
+# Enable periodic continuity snapshots + receipts
+uv run --python 3.13 -- python -m openclaw_mem continuity enable --cadence-seconds 300 --json
+
+# Verify control plane status
+uv run --python 3.13 -- python -m openclaw_mem continuity status --json
+```
+
+Recommended first operator checks after enablement:
+
+```bash
+uv run --python 3.13 -- python -m openclaw_mem continuity current --json
+uv run --python 3.13 -- python -m openclaw_mem continuity attachment-map --snapshot <snapshot.json> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity adjudication --snapshot <snapshot.json> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity public-summary --snapshot <snapshot.json> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity release-history --json
+```
+
+Operator notes:
+- `continuity adjudication` is the gate that decides how strong a continuity claim is allowed to be.
+- `continuity public-summary` is the bounded hedge-first surface for restrained external phrasing.
+- `continuity release` now supports `weaken`, `rebind`, and `retire`, and `release-history` gives you replayable receipts.
+- If you do not want autonomous continuity receipts, leave the control plane disabled and run the read surfaces ad hoc.
+
+Rollback:
+
+```bash
+uv run --python 3.13 -- python -m openclaw_mem continuity disable --json
+```
+
+## 2C. Episodic auto-mode ingestion (new)
 
 When `plugins.entries["openclaw-mem"].config.episodes.enabled=true`, run extractor periodically and keep ingest in follow mode (daemon/tailer).
 

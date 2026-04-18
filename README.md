@@ -13,14 +13,7 @@ When you do promote the engine, the live-turn hook is framed as **Proactive Pack
 - **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, graph-aware synthesis preference, protected fresh tails, and trace-backed debugging.
 - **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, and keep rollback simple.
 - **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
-- compact memory packs with citations and trace receipts
-- trust-policy controls for excluding quarantined content
-- optional **Proactive Pack** support in `openclaw-mem-engine` for pre-reply bounded recall with receipts and fail-open behavior
-- **Local-first by default** — JSONL + SQLite, no external database required.
-- **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
-- **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, graph-aware synthesis preference, protected fresh tails, and trace-backed debugging.
-- **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, and keep rollback simple.
-- **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
+- **Governed continuity side-car** — optional `continuity` surface for derived self/continuity inspection, adjudication, public-safe summaries, and explicit weaken/rebind/retire receipts.
 
 ## Why this exists
 
@@ -78,6 +71,32 @@ The product loop is simple and stable:
 3. **Observe**: use `timeline`, `get`, and `artifact` outputs for explainability and rollback.
 
 When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
+
+## Governed continuity side-car
+
+`openclaw-mem` also ships an optional derived continuity lane.
+This is not a second truth store, and it is not presented as consciousness.
+It is a governed side-car that helps operators inspect what continuity claims the system is currently making, how strong those claims are allowed to be, and when those claims should be weakened, rebound, or retired.
+
+Core operator surfaces:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity current --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity attachment-map --snapshot <snapshot.json> --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity adjudication --snapshot <snapshot.json> --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity public-summary --snapshot <snapshot.json> --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity release-history --json
+```
+
+Control-plane activation is explicit and starts autonomous snapshot + receipt generation under `~/.openclaw/memory/openclaw-mem/self-model-sidecar/` until you disable it:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity enable --cadence-seconds 300 --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity status --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity disable --json
+```
+
+Use it when you need auditable continuity receipts, migration comparison, or public-safe hedged summaries, not when you need a new source of truth. The lane stays rebuildable from memory-of-record by design.
 
 Example:
 
@@ -186,6 +205,7 @@ When a compaction receipt is later selected by `pack`, the response may include:
 - **Docs site:** <https://phenomenoner.github.io/openclaw-mem/>
 - **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
 - **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
+- **Continuity side-car ops lane:** [`skills/self-model-sidecar.ops.md`](skills/self-model-sidecar.ops.md)
 - **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
 - **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
 - **Pack policy contract:** [`docs/specs/context-pack-policy-v1.1.md`](docs/specs/context-pack-policy-v1.1.md)

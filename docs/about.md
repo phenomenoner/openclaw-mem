@@ -25,6 +25,7 @@ Most agent memory stories sound good until you need all of these in production:
 - trust-policy controls for pack selection
 - sidecar capture on top of an existing OpenClaw install
 - optional promotion to `openclaw-mem-engine` later for hybrid recall and stronger policy controls
+- optional governed continuity side-car for derived self/continuity inspection, adjudication, public-safe summaries, and explicit control-plane receipts
 
 ## How the product is split
 
@@ -70,6 +71,18 @@ Operators also need to see what the system kept, what it cut, and where large ra
 - artifact handles keep raw payloads off-prompt but retrievable
 - local files stay diffable and backup-friendly
 
+### Governed continuity side-car (optional)
+
+For operators who need a safer continuity surface, `openclaw-mem` also exposes a derived `continuity` lane.
+
+- builds inspectable current snapshots from memory-of-record
+- runs deterministic adjudication before stronger continuity phrasing is allowed
+- emits bounded public-safe summaries instead of identity theater
+- records explicit weaken / rebind / retire state transitions with replayable receipts
+
+This lane stays derived and rebuildable by design.
+It does not become a second truth owner.
+
 ## Why local-first matters
 
 A lot of memory tooling gets harder to trust as soon as it becomes harder to inspect.
@@ -112,3 +125,4 @@ The local-first posture keeps the base layer simple:
 - [Governed optimize assist lane](optimize-assist.md)
 - [Ecosystem fit](ecosystem-fit.md)
 - [Mem Engine reference](mem-engine.md)
+- [Optional continuity side-car activation](deployment.md#2b-optional-governed-continuity-side-car)

@@ -6,9 +6,12 @@ Purpose: inspect, diff, govern, and selectively release the derived self-model s
 Use this lane when you need any of the following:
 - current derived self snapshot for an agent/session/scope
 - ranked attachment map (what the agent is gripping tightly)
+- deterministic adjudication state review before you trust continuity claims
+- bounded public-safe continuity summary for restrained external/operator-facing phrasing
 - drift / migration comparison before prompt or model changes
 - threat/tension scan for persona-prior dominance or conflicting stances
-- governed weakening/retirement receipts for stale stances
+- governed weaken / rebind / retire receipts for stale or overconfident stances
+- release-history inspection for replayable control-plane audit
 
 ## Hard boundary
 - `openclaw-mem` remains memory-of-record.
@@ -18,29 +21,35 @@ Use this lane when you need any of the following:
 
 ## Default CLI surface
 ```bash
-openclaw-mem continuity current --scope <scope> --session-id <session> --json
-openclaw-mem continuity attachment-map --snapshot <path> --json
-openclaw-mem continuity threat-feed --snapshot <path> --json
-openclaw-mem continuity diff --from <snapshot-a.json> --to <snapshot-b.json> --json
-openclaw-mem continuity release --stance <id> --reason <text> --mode weaken --factor 0.5 --json
-openclaw-mem continuity compare-migration \
+uv run --python 3.13 -- python -m openclaw_mem continuity current --scope <scope> --session-id <session> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity attachment-map --snapshot <path> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity adjudication --snapshot <path> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity public-summary --snapshot <path> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity threat-feed --snapshot <path> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity diff --from <snapshot-a.json> --to <snapshot-b.json> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity release --stance <id> --reason <text> --mode weaken --factor 0.5 --json
+uv run --python 3.13 -- python -m openclaw_mem continuity release --stance <id> --reason <text> --mode rebind --json
+uv run --python 3.13 -- python -m openclaw_mem continuity release-history --scope <scope> --session-id <session> --stance <id> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity compare-migration \
   --baseline-persona-file baseline.json \
   --candidate-persona-file candidate.json \
   --scope <scope> --session-id <session> --json
-openclaw-mem continuity enable --cadence-seconds 300 --json
-openclaw-mem continuity status --json
-openclaw-mem continuity auto-run --scope <scope> --session-id <session> --cycles 1 --json
-openclaw-mem continuity disable --json
+uv run --python 3.13 -- python -m openclaw_mem continuity enable --cadence-seconds 300 --json
+uv run --python 3.13 -- python -m openclaw_mem continuity status --json
+uv run --python 3.13 -- python -m openclaw_mem continuity auto-run --scope <scope> --session-id <session> --cycles 1 --json
+uv run --python 3.13 -- python -m openclaw_mem continuity disable --json
 ```
 
 ## Recommended operating pattern
 1. Build `current` and persist it when you need an audit point.
-2. Inspect `attachment-map` before making release decisions.
+2. Inspect `attachment-map` and `adjudication` before making release decisions.
 3. Check `threat-feed` before claiming the model is stable.
-4. Use `release` only with a concrete operator reason, ideally scoped to the active scope/session.
-5. Use `compare-migration` before prompt/model/persona refreshes.
-6. Enable the control plane only when you actually want autonomous receipts.
-7. Rebuild `current` after release to verify the attachment actually loosened.
+4. Use `public-summary` only for restrained public-safe language, never as identity truth.
+5. Use `release` only with a concrete operator reason, ideally scoped to the active scope/session.
+6. Use `release-history` when you need to replay weaken -> rebind -> retire state transitions.
+7. Use `compare-migration` before prompt/model/persona refreshes.
+8. Enable the control plane only when you actually want autonomous receipts.
+9. Rebuild `current` after release to verify the attachment actually loosened, recovered, or disappeared as expected.
 
 ## Inputs
 - live `openclaw-mem` observations / episodic events DB
@@ -51,9 +60,12 @@ openclaw-mem continuity disable --json
 ## Outputs
 - current snapshot schema: `openclaw-mem.self-model.snapshot.v0`
 - attachment map schema: `openclaw-mem.self-model.attachment-map.v0`
+- adjudication report schema: `openclaw-mem.self-model.adjudication.v0`
+- public summary schema: `openclaw-mem.self-model.public-summary.v0`
 - threat feed schema: `openclaw-mem.self-model.threat-feed.v0`
 - diff schema: `openclaw-mem.self-model.diff.v0`
 - release receipt schema: `openclaw-mem.self-model.release-receipt.v0`
+- release history schema: `openclaw-mem.self-model.release-history.v0`
 - migration compare schema: `openclaw-mem.self-model.compare-migration.v0`
 
 ## Safety reminders
