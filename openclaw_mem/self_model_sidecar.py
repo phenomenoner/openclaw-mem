@@ -23,7 +23,10 @@ RELEASE_RECEIPT_SCHEMA = "openclaw-mem.self-model.release-receipt.v0"
 COMPARE_MIGRATION_SCHEMA = "openclaw-mem.self-model.compare-migration.v0"
 CONTROL_SCHEMA = "openclaw-mem.self-model.control.v0"
 AUTORUN_SCHEMA = "openclaw-mem.self-model.autorun.v0"
+ADJUDICATION_SCHEMA = "openclaw-mem.self-model.adjudication.v0"
+PUBLIC_SUMMARY_SCHEMA = "openclaw-mem.self-model.public-summary.v0"
 DERIVATION_VERSION = "self_model_sidecar_v0"
+ADJUDICATION_POLICY_VERSION = "self_model_sidecar_adjudication_v1"
 
 KEYWORD_GROUPS: Dict[str, Dict[str, Sequence[str]]] = {
     "role": {
@@ -549,6 +552,69 @@ def _fragility_label(evidence_count: int, prior_weight: float, contradiction_hit
     return "watch"
 
 
+def _adjudicate_attachment(item: Dict[str, Any]) -> Dict[str, Any]:
+    score = round(float(item.get("attachment_score") or 0.0), 3)
+    evidence_count = int(item.get("evidence_count") or 0)
+    prior_weight = round(float(item.get("prior_weight") or 0.0), 3)
+    contradiction_hits = int(item.get("contradiction_hits") or 0)
+    contradiction_pressure = round(float(item.get("contradiction_pressure") or 0.0), 3)
+    release_state = str(item.get("release_state") or "active")
+    reasons: List[str] = []
+
+    if release_state == "retired":
+        state = "retired"
+        reasons.append("release_retired")
+    elif evidence_count <= 0 and prior_weight <= 0.0:
+        state = "rejected"
+        reasons.append("no_support")
+    elif contradiction_pressure >= 0.7 or (contradiction_hits > 0 and evidence_count <= 1):
+        state = "contested"
+        reasons.append("contradiction_pressure")
+    elif prior_weight > 0.0 and evidence_count == 0:
+        state = "tentative"
+        reasons.append("prior_only")
+    elif release_state == "weakening" and evidence_count < 4:
+        state = "fragile"
+        reasons.append("released_claim_requires_revalidation")
+    elif evidence_count <= 1 and (prior_weight > 0.0 or score < 0.55):
+        state = "fragile"
+        reasons.append("thin_evidence")
+    elif contradiction_pressure > 0.0:
+        state = "fragile"
+        reasons.append("contradicted_but_not_contested")
+    elif score >= 0.75 and evidence_count >= 3:
+        state = "accepted"
+        reasons.append("strong_multi_source_support")
+    elif score >= 0.4 and evidence_count >= 1:
+        state = "tentative"
+        reasons.append("bounded_support")
+    else:
+        state = "fragile"
+        reasons.append("low_support")
+
+    public_visible = state == "accepted" or (state == "tentative" and "prior_only" not in reasons)
+
+    return {
+        "state": state,
+        "reasons": reasons,
+        "operator_visible": True,
+        "public_visible": public_visible,
+        "hedge": "derived continuity signal" if state in {"accepted", "tentative"} else "insufficient evidence",
+        "policy_version": ADJUDICATION_POLICY_VERSION,
+        "determinism_boundary": {
+            "fields": [
+                "attachment_score",
+                "evidence_count",
+                "prior_weight",
+                "contradiction_hits",
+                "contradiction_pressure",
+                "release_state",
+            ],
+            "rule_only": True,
+        },
+    }
+
+
 def _with_attachment_provenance(attachments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     enriched: List[Dict[str, Any]] = []
     for item in attachments:
@@ -565,6 +631,14 @@ def _with_attachment_provenance(attachments: List[Dict[str, Any]]) -> List[Dict[
         patched["band"] = _score_band(score)
         patched["contradiction_pressure"] = contradiction_pressure
         patched["fragility"] = fragility
+        adjudication = _adjudicate_attachment(patched)
+        patched["adjudication_state"] = adjudication["state"]
+        patched["adjudication_reasons"] = list(adjudication["reasons"])
+        patched["publication"] = {
+            "operator_visible": bool(adjudication["operator_visible"]),
+            "public_visible": bool(adjudication["public_visible"]),
+            "hedge": adjudication["hedge"],
+        }
         patched["provenance"] = {
             "derived": True,
             "authoritative": False,
@@ -573,6 +647,8 @@ def _with_attachment_provenance(attachments: List[Dict[str, Any]]) -> List[Dict[
             "source_classes": list(item.get("source_classes") or []),
             "evidence_ids": list(item.get("evidence_ids") or []),
             "prior_weight": prior_weight,
+            "adjudication_policy": adjudication["policy_version"],
+            "determinism_boundary": adjudication["determinism_boundary"],
         }
         enriched.append(patched)
     return enriched
@@ -629,6 +705,7 @@ def build_snapshot(
                 "derived": True,
                 "non_authoritative": True,
                 "operator_surface": "continuity",
+                "adjudication_policy": ADJUDICATION_POLICY_VERSION,
             },
             "provenance": {
                 "derived": True,
@@ -640,10 +717,80 @@ def build_snapshot(
                 "persona_prior_count": sum(len(bucket) for bucket in persona_priors.values()),
                 "release_receipt_count": len(release_map),
                 "query_only_enforced": True,
+                "adjudication_policy": ADJUDICATION_POLICY_VERSION,
             },
             "source_digest": source_digest,
         }
         return snapshot
+
+
+def build_adjudication_report(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    attachments = list(snapshot.get("attachments") or [])
+    by_state: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for item in attachments:
+        by_state[str(item.get("adjudication_state") or "tentative")].append(item)
+    ordered_states = ["accepted", "tentative", "fragile", "contested", "retired", "rejected"]
+    return {
+        "schema": ADJUDICATION_SCHEMA,
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "generated_at": _utcnow_iso(),
+        "policy_version": ADJUDICATION_POLICY_VERSION,
+        "counts": {state: len(by_state.get(state, [])) for state in ordered_states},
+        "claims_by_state": {state: by_state.get(state, []) for state in ordered_states if by_state.get(state)},
+        "operator_summary": {
+            "top_accepted": [item.get("id") for item in by_state.get("accepted", [])[:5]],
+            "top_fragile": [item.get("id") for item in by_state.get("fragile", [])[:5]],
+            "top_contested": [item.get("id") for item in by_state.get("contested", [])[:5]],
+        },
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "adjudication_policy": ADJUDICATION_POLICY_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+        },
+    }
+
+
+def build_public_summary(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    attachments = list(snapshot.get("attachments") or [])
+    public_claims = [item for item in attachments if bool(((item.get("publication") or {}).get("public_visible")))]
+    warnings: List[str] = []
+    if any(str(item.get("adjudication_state") or "") == "fragile" for item in attachments):
+        warnings.append("Some continuity signals remain fragile and are intentionally withheld from the public-safe summary.")
+    if any(str(item.get("adjudication_state") or "") == "contested" for item in attachments):
+        warnings.append("Some continuity signals are contested by contradictory evidence.")
+    if not public_claims:
+        summary = "Insufficient evidence to publish a stable derived continuity summary."
+    else:
+        ordered = sorted(public_claims, key=lambda item: (-float(item.get("attachment_score") or 0.0), str(item.get("id") or "")))
+        labels = [str(item.get("label") or item.get("id") or "claim") for item in ordered[:4]]
+        summary = "Derived continuity signal currently points toward " + ", ".join(labels) + "."
+    return {
+        "schema": PUBLIC_SUMMARY_SCHEMA,
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "generated_at": _utcnow_iso(),
+        "summary": summary,
+        "claims": [
+            {
+                "id": item.get("id"),
+                "label": item.get("label"),
+                "category": item.get("category"),
+                "adjudication_state": item.get("adjudication_state"),
+                "hedge": ((item.get("publication") or {}).get("hedge")),
+            }
+            for item in public_claims[:8]
+        ],
+        "warnings": warnings,
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "adjudication_policy": ADJUDICATION_POLICY_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+            "public_safe": True,
+        },
+    }
 
 
 def build_attachment_map(snapshot: Dict[str, Any]) -> Dict[str, Any]:
@@ -657,6 +804,7 @@ def build_attachment_map(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "generated_at": _utcnow_iso(),
         "narrative": snapshot.get("narrative"),
         "counts": {key: len(value) for key, value in sorted(grouped.items())},
+        "adjudication_counts": dict(sorted(Counter(str(item.get("adjudication_state") or "tentative") for item in attachments).items())),
         "attachments": attachments,
         "top_attachments": attachments[:5],
         "provenance": {
@@ -681,7 +829,7 @@ def build_threat_feed(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                     "reason": reason,
                     "attachment_ids": sorted(pair),
                     "source_signals": [
-                        {"id": item.get("id"), "confidence": item.get("confidence"), "fragility": item.get("fragility")}
+                        {"id": item.get("id"), "confidence": item.get("confidence"), "fragility": item.get("fragility"), "adjudication_state": item.get("adjudication_state")}
                         for item in attachments
                         if item.get("id") in pair
                     ],
@@ -702,6 +850,7 @@ def build_threat_feed(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                             "prior_weight": top.get("prior_weight"),
                             "evidence_count": top.get("evidence_count"),
                             "fragility": top.get("fragility"),
+                            "adjudication_state": top.get("adjudication_state"),
                         }
                     ],
                 }
@@ -741,7 +890,10 @@ def compare_snapshots(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str
     for stance_id in sorted(before_ids & after_ids):
         b = float(before_map[stance_id].get("attachment_score") or 0.0)
         a = float(after_map[stance_id].get("attachment_score") or 0.0)
-        if round(a - b, 3) != 0:
+        before_state = before_map[stance_id].get("adjudication_state")
+        after_state = after_map[stance_id].get("adjudication_state")
+        state_changed = before_state is not None and after_state is not None and before_state != after_state
+        if round(a - b, 3) != 0 or state_changed:
             delta = round(a - b, 3)
             changed.append({
                 "id": stance_id,
@@ -751,11 +903,15 @@ def compare_snapshots(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str
                 "before_confidence": before_map[stance_id].get("confidence"),
                 "after_confidence": after_map[stance_id].get("confidence"),
                 "fragility": after_map[stance_id].get("fragility") or before_map[stance_id].get("fragility"),
+                "before_state": before_map[stance_id].get("adjudication_state"),
+                "after_state": after_map[stance_id].get("adjudication_state"),
             })
             if abs(delta) >= 0.35:
                 risk_flags.append(f"large_delta:{stance_id}")
             if (after_map[stance_id].get("fragility") or before_map[stance_id].get("fragility")) == "fragile":
                 risk_flags.append(f"fragile_claim:{stance_id}")
+            if state_changed:
+                risk_flags.append(f"state_transition:{stance_id}:{before_state}->{after_state}")
     if before.get("source_digest") == after.get("source_digest") and not changed and before_ids == after_ids:
         drift_class = "no_op"
     elif any(flag.startswith("large_delta:") for flag in risk_flags):

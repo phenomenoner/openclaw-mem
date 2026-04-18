@@ -4411,6 +4411,18 @@ def cmd_self_threat_feed(conn: sqlite3.Connection, args: argparse.Namespace) -> 
     _emit(payload, args.json)
 
 
+def cmd_self_adjudication(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_adjudication_report(snapshot)
+    _emit(payload, args.json)
+
+
+def cmd_self_public_summary(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_public_summary(snapshot)
+    _emit(payload, args.json)
+
+
 def cmd_self_diff(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     before = self_model_sidecar.load_snapshot(args.from_snapshot)
     after = self_model_sidecar.load_snapshot(args.to_snapshot)
@@ -15298,6 +15310,16 @@ def build_parser() -> argparse.ArgumentParser:
         add_self_surface_common(s)
         s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
         s.set_defaults(func=cmd_self_threat_feed)
+
+        s = ssub.add_parser("adjudication", help="Show deterministic adjudication states for the current or persisted continuity snapshot")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.set_defaults(func=cmd_self_adjudication)
+
+        s = ssub.add_parser("public-summary", help="Render the public-safe derived continuity summary")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.set_defaults(func=cmd_self_public_summary)
 
         s = ssub.add_parser("diff", help="Compare two persisted continuity snapshots")
         add_common(s)
