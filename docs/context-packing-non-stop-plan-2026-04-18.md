@@ -315,6 +315,8 @@ Line-level success checks:
 
 ### Progress updates
 - 2026-04-18 08:59 Asia/Taipei - Initial non-stop execution plan landed. No code changes yet.
+- 2026-04-18 11:12 Asia/Taipei - Follow-up productization planning line opened for `--use-graph=auto`. Day-1 detailed Sakura Blade Dance plan landed at `docs/context-pack-auto-graph-productization-day1-plan-2026-04-18.md` with scope gate first, latency gate second, regression hookup third.
+- 2026-04-18 11:18 Asia/Taipei - Small Decision Meeting cross-validation completed. Validated recommendation: keep the sequence, but cut Blade 1 to explicit scope vs unresolved only for day 1; defer richer inferred-scope heuristics.
 
 ---
 
@@ -330,8 +332,7 @@ Line-level success checks:
 
 ## 11) Next action
 
-Start Blade 1 with the smallest useful artifact:
-- identify file map
-- land 1 canonical golden scenario
-- land replay/assert harness
-- define exact verifier commands
+Current next action for the productization sub-line:
+- cross-validate the day-1 scope/latency-first plan via Small Decision Meeting
+- write back the validated recommendation into the backlog artifact
+- then execute Scope Gate MVP first
