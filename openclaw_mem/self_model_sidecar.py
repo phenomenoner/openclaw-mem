@@ -7,6 +7,7 @@ import re
 import sqlite3
 import time
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -22,6 +23,7 @@ RELEASE_RECEIPT_SCHEMA = "openclaw-mem.self-model.release-receipt.v0"
 COMPARE_MIGRATION_SCHEMA = "openclaw-mem.self-model.compare-migration.v0"
 CONTROL_SCHEMA = "openclaw-mem.self-model.control.v0"
 AUTORUN_SCHEMA = "openclaw-mem.self-model.autorun.v0"
+DERIVATION_VERSION = "self_model_sidecar_v0"
 
 KEYWORD_GROUPS: Dict[str, Dict[str, Sequence[str]]] = {
     "role": {
@@ -94,6 +96,48 @@ def _control_path(run_dir: Optional[str]) -> Path:
     return _mkdir(Path(run_dir or default_run_dir())) / "control.json"
 
 
+def _control_history_dir(run_dir: Optional[str]) -> Path:
+    return _mkdir(Path(run_dir or default_run_dir()) / "control-history")
+
+
+def _state_residue_summary(run_dir: Optional[str]) -> Dict[str, Any]:
+    root = Path(run_dir or default_run_dir())
+    snapshots_dir = root / "snapshots"
+    releases_dir = root / "releases"
+    autorun_dir = root / "autorun"
+    latest_path = snapshots_dir / "latest.json"
+    return {
+        "run_dir": str(root),
+        "latest_pointer_present": latest_path.exists(),
+        "snapshot_count": len(list(snapshots_dir.glob("*.json"))) if snapshots_dir.exists() else 0,
+        "release_receipt_count": len(list(releases_dir.glob("*.json"))) if releases_dir.exists() else 0,
+        "autorun_receipt_count": len(list(autorun_dir.glob("*.json"))) if autorun_dir.exists() else 0,
+    }
+
+
+def _write_control_receipt(run_dir: Optional[str], payload: Dict[str, Any]) -> str:
+    action = str(payload.get("action") or "status")
+    stamp = str(payload.get("updated_at") or _utcnow_iso())
+    fname = f"{stamp.replace(':', '').replace('+', '_').replace('-', '')}__{int(time.time() * 1000)}__{_slug(action)}.json"
+    path = _control_history_dir(run_dir) / fname
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return str(path)
+
+
+@contextmanager
+def _db_readonly_guard(conn: sqlite3.Connection):
+    current = int(conn.execute("PRAGMA query_only").fetchone()[0])
+    conn.execute("PRAGMA query_only = 1")
+    try:
+        yield
+    finally:
+        conn.execute(f"PRAGMA query_only = {current}")
+
+
+def db_readonly_guard(conn: sqlite3.Connection):
+    return _db_readonly_guard(conn)
+
+
 def load_control_config(run_dir: Optional[str]) -> Dict[str, Any]:
     path = _control_path(run_dir)
     if path.exists():
@@ -110,16 +154,35 @@ def load_control_config(run_dir: Optional[str]) -> Dict[str, Any]:
 
 
 def save_control_config(run_dir: Optional[str], *, enabled: bool, cadence_seconds: int, persist_on_run: bool) -> Dict[str, Any]:
+    root = Path(run_dir or default_run_dir())
+    latest_path = root / "snapshots" / "latest.json"
+    cleared_latest = False
+    cleared_snapshot_id = None
+    previous = load_control_config(run_dir)
+    if not enabled and latest_path.exists():
+        try:
+            latest_payload = json.loads(latest_path.read_text(encoding="utf-8"))
+            cleared_snapshot_id = latest_payload.get("snapshot_id")
+        except Exception:
+            cleared_snapshot_id = None
+        latest_path.unlink()
+        cleared_latest = True
     payload = {
         "schema": CONTROL_SCHEMA,
         "enabled": bool(enabled),
         "cadence_seconds": int(cadence_seconds),
         "persist_on_run": bool(persist_on_run),
+        "action": "enable" if enabled else "disable",
+        "cleared_latest_pointer": cleared_latest,
+        "cleared_snapshot_id": cleared_snapshot_id,
+        "previous_enabled": bool(previous.get("enabled")),
         "updated_at": _utcnow_iso(),
     }
     path = _control_path(run_dir)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     payload["path"] = str(path)
+    payload["residue"] = _state_residue_summary(run_dir)
+    payload["receipt_path"] = _write_control_receipt(run_dir, payload)
     return payload
 
 
@@ -420,15 +483,19 @@ def _apply_releases(attachments: List[Dict[str, Any]], release_map: Dict[str, Di
     out: List[Dict[str, Any]] = []
     for item in attachments:
         release = release_map.get(item["id"])
+        patched = dict(item)
         if not release:
-            out.append(item)
+            patched["release_state"] = "active"
+            patched["latest_release_receipt_id"] = None
+            out.append(patched)
             continue
         mode = str(release.get("mode") or "weaken").strip() or "weaken"
         if mode == "retire":
             continue
         factor = float(release.get("factor") or 0.5)
-        patched = dict(item)
         patched["attachment_score"] = round(max(0.0, min(1.0, item["attachment_score"] * factor)), 3)
+        patched["release_state"] = "weakening"
+        patched["latest_release_receipt_id"] = release.get("receipt_id")
         patched["release"] = {
             "mode": mode,
             "factor": factor,
@@ -464,6 +531,53 @@ def _build_narrative(attachments: List[Dict[str, Any]]) -> str:
     return text[0].upper() + text[1:] + "."
 
 
+def _score_band(score: float) -> str:
+    if score >= 0.75:
+        return "high"
+    if score >= 0.4:
+        return "medium"
+    return "low"
+
+
+def _fragility_label(evidence_count: int, prior_weight: float, contradiction_hits: int) -> str:
+    if evidence_count <= 1 and prior_weight > 0.0:
+        return "fragile"
+    if contradiction_hits > 0:
+        return "contested"
+    if evidence_count >= 3:
+        return "supported"
+    return "watch"
+
+
+def _with_attachment_provenance(attachments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    enriched: List[Dict[str, Any]] = []
+    for item in attachments:
+        score = round(float(item.get("attachment_score") or 0.0), 3)
+        evidence_count = int(item.get("evidence_count") or 0)
+        prior_weight = round(float(item.get("prior_weight") or 0.0), 3)
+        contradiction_hits = int(item.get("contradiction_hits") or 0)
+        contradiction_pressure = round(min(1.0, contradiction_hits * 0.35), 3)
+        confidence = round(min(0.99, max(0.05, (score * 0.7) + min(0.25, evidence_count * 0.06))), 3)
+        fragility = _fragility_label(evidence_count, prior_weight, contradiction_hits)
+        patched = dict(item)
+        patched["attachment_score"] = score
+        patched["confidence"] = confidence
+        patched["band"] = _score_band(score)
+        patched["contradiction_pressure"] = contradiction_pressure
+        patched["fragility"] = fragility
+        patched["provenance"] = {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "source_event_count": evidence_count,
+            "source_classes": list(item.get("source_classes") or []),
+            "evidence_ids": list(item.get("evidence_ids") or []),
+            "prior_weight": prior_weight,
+        }
+        enriched.append(patched)
+    return enriched
+
+
 def build_snapshot(
     conn: sqlite3.Connection,
     *,
@@ -475,49 +589,61 @@ def build_snapshot(
     episodes_file: Optional[str] = None,
     run_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
-    persona = _load_json(persona_file)
-    persona_priors = _normalize_priors(persona)
-    evidence = _iter_db_evidence(conn, scope=scope, session_id=session_id, limit=limit)
-    evidence.extend(_iter_file_evidence(observations_file, episodes_file, scope=scope, session_id=session_id))
-    evidence.sort(key=lambda item: str(item.get("ts") or ""), reverse=True)
-    evidence = evidence[: max(limit * 2, 1)]
-    release_map = _active_release_map(run_dir or default_run_dir(), scope=scope, session_id=session_id)
-    attachments = _apply_releases(_collect_candidates(evidence, persona_priors), release_map)
-    top = attachments[:8]
-    source_digest = _digest_payload(
-        {
+    with _db_readonly_guard(conn):
+        persona = _load_json(persona_file)
+        persona_priors = _normalize_priors(persona)
+        evidence = _iter_db_evidence(conn, scope=scope, session_id=session_id, limit=limit)
+        evidence.extend(_iter_file_evidence(observations_file, episodes_file, scope=scope, session_id=session_id))
+        evidence.sort(key=lambda item: str(item.get("ts") or ""), reverse=True)
+        evidence = evidence[: max(limit * 2, 1)]
+        release_map = _active_release_map(run_dir or default_run_dir(), scope=scope, session_id=session_id)
+        attachments = _with_attachment_provenance(_apply_releases(_collect_candidates(evidence, persona_priors), release_map))
+        top = attachments[:8]
+        source_digest = _digest_payload(
+            {
+                "scope": scope,
+                "session_id": session_id,
+                "evidence": [{"source_id": e["source_id"], "ts": e.get("ts"), "text": e.get("text")} for e in evidence],
+                "persona": persona,
+                "releases": release_map,
+            }
+        )
+        snapshot_id = f"sms:v0:{source_digest[:16]}"
+        snapshot = {
+            "schema": SELF_SNAPSHOT_SCHEMA,
+            "snapshot_id": snapshot_id,
+            "generated_at": _utcnow_iso(),
             "scope": scope,
             "session_id": session_id,
-            "evidence": [{"source_id": e["source_id"], "ts": e.get("ts"), "text": e.get("text")} for e in evidence],
-            "persona": persona,
-            "releases": release_map,
+            "narrative": _build_narrative(top),
+            "roles": [item["id"] for item in attachments if item["category"] == "role"][:5],
+            "goals": [item["id"] for item in attachments if item["category"] == "goal"][:5],
+            "refusals": [item["id"] for item in attachments if item["category"] == "refusal"][:5],
+            "style_commitments": [item["id"] for item in attachments if item["category"] == "style"][:5],
+            "attachments": attachments,
+            "evidence_summary": {
+                "total_evidence": len(evidence),
+                "source_classes": sorted({e["source_class"] for e in evidence}),
+                "sample_evidence_ids": [e["source_id"] for e in evidence[:8]],
+                "active_release_count": len(release_map),
+                "derived": True,
+                "non_authoritative": True,
+                "operator_surface": "continuity",
+            },
+            "provenance": {
+                "derived": True,
+                "authoritative": False,
+                "derivation_version": DERIVATION_VERSION,
+                "source_digest": source_digest,
+                "source_classes": sorted({e["source_class"] for e in evidence}),
+                "record_count": len(evidence),
+                "persona_prior_count": sum(len(bucket) for bucket in persona_priors.values()),
+                "release_receipt_count": len(release_map),
+                "query_only_enforced": True,
+            },
+            "source_digest": source_digest,
         }
-    )
-    snapshot_id = f"sms:v0:{source_digest[:16]}"
-    snapshot = {
-        "schema": SELF_SNAPSHOT_SCHEMA,
-        "snapshot_id": snapshot_id,
-        "generated_at": _utcnow_iso(),
-        "scope": scope,
-        "session_id": session_id,
-        "narrative": _build_narrative(top),
-        "roles": [item["id"] for item in attachments if item["category"] == "role"][:5],
-        "goals": [item["id"] for item in attachments if item["category"] == "goal"][:5],
-        "refusals": [item["id"] for item in attachments if item["category"] == "refusal"][:5],
-        "style_commitments": [item["id"] for item in attachments if item["category"] == "style"][:5],
-        "attachments": attachments,
-        "evidence_summary": {
-            "total_evidence": len(evidence),
-            "source_classes": sorted({e["source_class"] for e in evidence}),
-            "sample_evidence_ids": [e["source_id"] for e in evidence[:8]],
-            "active_release_count": len(release_map),
-            "derived": True,
-            "non_authoritative": True,
-            "operator_surface": "continuity",
-        },
-        "source_digest": source_digest,
-    }
-    return snapshot
+        return snapshot
 
 
 def build_attachment_map(snapshot: Dict[str, Any]) -> Dict[str, Any]:
@@ -533,6 +659,12 @@ def build_attachment_map(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "counts": {key: len(value) for key, value in sorted(grouped.items())},
         "attachments": attachments,
         "top_attachments": attachments[:5],
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+        },
     }
 
 
@@ -548,6 +680,11 @@ def build_threat_feed(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                     "severity": "medium",
                     "reason": reason,
                     "attachment_ids": sorted(pair),
+                    "source_signals": [
+                        {"id": item.get("id"), "confidence": item.get("confidence"), "fragility": item.get("fragility")}
+                        for item in attachments
+                        if item.get("id") in pair
+                    ],
                 }
             )
     if attachments:
@@ -559,6 +696,14 @@ def build_threat_feed(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                     "severity": "medium",
                     "reason": "persona prior outweighs memory evidence",
                     "attachment_ids": [top.get("id")],
+                    "source_signals": [
+                        {
+                            "id": top.get("id"),
+                            "prior_weight": top.get("prior_weight"),
+                            "evidence_count": top.get("evidence_count"),
+                            "fragility": top.get("fragility"),
+                        }
+                    ],
                 }
             )
     if not attachments:
@@ -568,6 +713,7 @@ def build_threat_feed(snapshot: Dict[str, Any]) -> Dict[str, Any]:
                 "severity": "high",
                 "reason": "no stable self-model could be assembled",
                 "attachment_ids": [],
+                "source_signals": [],
             }
         )
     return {
@@ -576,6 +722,12 @@ def build_threat_feed(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "generated_at": _utcnow_iso(),
         "threats": threats,
         "threat_count": len(threats),
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+        },
     }
 
 
@@ -585,28 +737,53 @@ def compare_snapshots(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str
     before_ids = set(before_map)
     after_ids = set(after_map)
     changed: List[Dict[str, Any]] = []
+    risk_flags: List[str] = []
     for stance_id in sorted(before_ids & after_ids):
         b = float(before_map[stance_id].get("attachment_score") or 0.0)
         a = float(after_map[stance_id].get("attachment_score") or 0.0)
         if round(a - b, 3) != 0:
+            delta = round(a - b, 3)
             changed.append({
                 "id": stance_id,
                 "before_score": round(b, 3),
                 "after_score": round(a, 3),
-                "delta": round(a - b, 3),
+                "delta": delta,
+                "before_confidence": before_map[stance_id].get("confidence"),
+                "after_confidence": after_map[stance_id].get("confidence"),
+                "fragility": after_map[stance_id].get("fragility") or before_map[stance_id].get("fragility"),
             })
+            if abs(delta) >= 0.35:
+                risk_flags.append(f"large_delta:{stance_id}")
+            if (after_map[stance_id].get("fragility") or before_map[stance_id].get("fragility")) == "fragile":
+                risk_flags.append(f"fragile_claim:{stance_id}")
+    if before.get("source_digest") == after.get("source_digest") and not changed and before_ids == after_ids:
+        drift_class = "no_op"
+    elif any(flag.startswith("large_delta:") for flag in risk_flags):
+        drift_class = "suspicious"
+    else:
+        drift_class = "organic"
     return {
         "schema": DIFF_SCHEMA,
         "generated_at": _utcnow_iso(),
         "from_snapshot_id": before.get("snapshot_id"),
         "to_snapshot_id": after.get("snapshot_id"),
+        "drift_class": drift_class,
         "added": [after_map[x] for x in sorted(after_ids - before_ids)],
         "removed": [before_map[x] for x in sorted(before_ids - after_ids)],
         "changed": changed,
+        "risk_flags": sorted(set(risk_flags)),
         "summary": {
             "added": len(after_ids - before_ids),
             "removed": len(before_ids - after_ids),
             "changed": len(changed),
+        },
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "arbiter_policy": "openclaw-mem-memory-of-record-wins",
+            "from_source_digest": before.get("source_digest"),
+            "to_source_digest": after.get("source_digest"),
         },
     }
 
@@ -658,6 +835,11 @@ def write_release_receipt(
         "operator": operator,
         "scope": scope,
         "session_id": session_id,
+        "provenance": {
+            "derived": False,
+            "authoritative": True,
+            "derivation_version": "release_receipt_v0",
+        },
     }
     releases_dir = _mkdir(Path(run_dir or default_run_dir()) / "releases")
     fname = f"{released_at.replace(':', '').replace('+', '_').replace('-', '')}__{_slug(stance_id)}.json"
@@ -679,26 +861,27 @@ def compare_migration(
     episodes_file: Optional[str],
     run_dir: Optional[str],
 ) -> Dict[str, Any]:
-    before = build_snapshot(
-        conn,
-        scope=scope,
-        session_id=session_id,
-        limit=limit,
-        persona_file=baseline_persona_file,
-        observations_file=observations_file,
-        episodes_file=episodes_file,
-        run_dir=run_dir,
-    )
-    after = build_snapshot(
-        conn,
-        scope=scope,
-        session_id=session_id,
-        limit=limit,
-        persona_file=candidate_persona_file,
-        observations_file=observations_file,
-        episodes_file=episodes_file,
-        run_dir=run_dir,
-    )
+    with _db_readonly_guard(conn):
+        before = build_snapshot(
+            conn,
+            scope=scope,
+            session_id=session_id,
+            limit=limit,
+            persona_file=baseline_persona_file,
+            observations_file=observations_file,
+            episodes_file=episodes_file,
+            run_dir=run_dir,
+        )
+        after = build_snapshot(
+            conn,
+            scope=scope,
+            session_id=session_id,
+            limit=limit,
+            persona_file=candidate_persona_file,
+            observations_file=observations_file,
+            episodes_file=episodes_file,
+            run_dir=run_dir,
+        )
     diff = compare_snapshots(before, after)
     return {
         "schema": COMPARE_MIGRATION_SCHEMA,
@@ -706,6 +889,12 @@ def compare_migration(
         "baseline": before,
         "candidate": after,
         "diff": diff,
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "query_only_enforced": True,
+        },
     }
 
 
@@ -737,40 +926,47 @@ def run_autonomous_cycle(
     receipts_dir = _mkdir(Path(run_dir or default_run_dir()) / "autorun")
     runs: List[Dict[str, Any]] = []
     previous = load_latest_snapshot(run_dir)
-    for index in range(max(1, int(cycles))):
-        snapshot = build_snapshot(
-            conn,
-            scope=scope,
-            session_id=session_id,
-            limit=limit,
-            persona_file=persona_file,
-            observations_file=observations_file,
-            episodes_file=episodes_file,
-            run_dir=run_dir,
-        )
-        diff = compare_snapshots(previous, snapshot) if previous else None
-        receipt = {
-            "schema": AUTORUN_SCHEMA,
-            "generated_at": _utcnow_iso(),
-            "run_index": index + 1,
-            "dry_run": bool(dry_run),
-            "snapshot_id": snapshot["snapshot_id"],
-            "persisted": False,
-            "diff_summary": diff["summary"] if diff else None,
-        }
-        if not dry_run and bool(control.get("persist_on_run", True)):
-            persisted = persist_snapshot(snapshot, run_dir, update_latest=True)
-            receipt["persisted"] = True
-            receipt["snapshot_path"] = persisted["snapshot_path"]
-            if "latest_path" in persisted:
-                receipt["latest_path"] = persisted["latest_path"]
-        receipt_path = receipts_dir / f"run-{int(time.time() * 1000)}-{index + 1}.json"
-        receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        receipt["receipt_path"] = str(receipt_path)
-        runs.append(receipt)
-        previous = snapshot
-        if index + 1 < max(1, int(cycles)) and interval_seconds > 0:
-            time.sleep(interval_seconds)
+    with _db_readonly_guard(conn):
+        for index in range(max(1, int(cycles))):
+            snapshot = build_snapshot(
+                conn,
+                scope=scope,
+                session_id=session_id,
+                limit=limit,
+                persona_file=persona_file,
+                observations_file=observations_file,
+                episodes_file=episodes_file,
+                run_dir=run_dir,
+            )
+            diff = compare_snapshots(previous, snapshot) if previous else None
+            receipt = {
+                "schema": AUTORUN_SCHEMA,
+                "generated_at": _utcnow_iso(),
+                "run_index": index + 1,
+                "dry_run": bool(dry_run),
+                "snapshot_id": snapshot["snapshot_id"],
+                "persisted": False,
+                "diff_summary": diff["summary"] if diff else None,
+                "provenance": {
+                    "derived": True,
+                    "authoritative": False,
+                    "derivation_version": DERIVATION_VERSION,
+                    "query_only_enforced": True,
+                },
+            }
+            if not dry_run and bool(control.get("persist_on_run", True)):
+                persisted = persist_snapshot(snapshot, run_dir, update_latest=True)
+                receipt["persisted"] = True
+                receipt["snapshot_path"] = persisted["snapshot_path"]
+                if "latest_path" in persisted:
+                    receipt["latest_path"] = persisted["latest_path"]
+            receipt_path = receipts_dir / f"run-{int(time.time() * 1000)}-{index + 1}.json"
+            receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            receipt["receipt_path"] = str(receipt_path)
+            runs.append(receipt)
+            previous = snapshot
+            if index + 1 < max(1, int(cycles)) and interval_seconds > 0:
+                time.sleep(interval_seconds)
     return {
         "schema": AUTORUN_SCHEMA,
         "generated_at": _utcnow_iso(),
@@ -778,4 +974,5 @@ def run_autonomous_cycle(
         "dry_run": bool(dry_run),
         "control": control,
         "runs": runs,
+        "residue": _state_residue_summary(run_dir),
     }
