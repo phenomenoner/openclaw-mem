@@ -11,6 +11,7 @@ What it does:
 - can optionally call `openclaw-mem route auto` before recall injection and add a compact routing hint block into live turns
 - hosts the docs cold-lane ingest/search surfaces for operator-authored markdown
 - can optionally auto-run **Wei Ji memory preflight** before `memory_store` writes
+- can optionally write-through mirror each `memory_store` into a dedicated `gbrain` import root
 
 This package is the engine-role package inside the same `openclaw-mem` family:
 - **`openclaw-mem`** = sidecar capture / observability / episodic spool / operator workflows
@@ -161,6 +162,43 @@ Behavior:
 
 Receipts:
 - `memory_store.details.receipt.weiJiMemoryPreflight`
+
+## GBrain write-through mirror (optional)
+
+If you want each successful `memory_store` to also land in `gbrain`, enable `gbrainMirror`.
+
+Example host config:
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem-engine": {
+        "enabled": true,
+        "config": {
+          "gbrainMirror": {
+            "enabled": true,
+            "mirrorRoot": "~/.openclaw/memory/gbrain-mirror",
+            "command": "gbrain",
+            "timeoutMs": 12000,
+            "importOnStore": true
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Behavior:
+- engine still writes LanceDB first, as canonical memory owner
+- after `memory_store`, the plugin writes a dedicated markdown twin under `mirrorRoot/<memory-id>.md`
+- when `importOnStore=true` (default), it runs `gbrain import <mirrorRoot> --workers 1`
+- the subprocess inherits `OPENAI_API_KEY` from the engine config/env so gbrain embeddings do not silently fail on missing key
+- failures are fail-open for the canonical write path, but receipts expose whether the mirror/import actually landed
+
+Receipts:
+- `memory_store.details.receipt.gbrainMirror`
 
 ## Rollback
 

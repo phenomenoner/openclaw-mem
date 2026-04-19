@@ -282,6 +282,36 @@
       "help": "Block memory_store when Wei Ji rejects the write.",
       "advanced": true
     },
+    "gbrainMirror.enabled": {
+      "label": "GBrain Write-through Mirror",
+      "help": "Write a markdown twin for each memory_store and optionally import it into gbrain right away.",
+      "advanced": true
+    },
+    "gbrainMirror.mirrorRoot": {
+      "label": "GBrain Mirror Root",
+      "help": "Dedicated markdown mirror directory imported by gbrain.",
+      "advanced": true
+    },
+    "gbrainMirror.command": {
+      "label": "GBrain Command",
+      "help": "Executable used to invoke gbrain import.",
+      "advanced": true
+    },
+    "gbrainMirror.commandArgs": {
+      "label": "GBrain Command Args",
+      "help": "Static arguments prepended before the import subcommand.",
+      "advanced": true
+    },
+    "gbrainMirror.timeoutMs": {
+      "label": "GBrain Mirror Timeout",
+      "help": "Maximum subprocess runtime in milliseconds for the write-through import.",
+      "advanced": true
+    },
+    "gbrainMirror.importOnStore": {
+      "label": "GBrain Import On Store",
+      "help": "When true (default), run gbrain import on the dedicated mirror root after each memory_store.",
+      "advanced": true
+    },
     "autoRecall.routeAuto.enabled": {
       "label": "Route Auto Prompt Hook",
       "help": "Call openclaw-mem route auto before agent start and inject a compact synthesis-aware routing hint block.",
@@ -353,6 +383,47 @@
       "tableName": {
         "type": "string",
         "default": "memories"
+      },
+      "gbrainMirror": {
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "mirrorRoot": {
+                "type": "string",
+                "default": "~/.openclaw/memory/gbrain-mirror"
+              },
+              "command": {
+                "type": "string",
+                "default": "gbrain"
+              },
+              "commandArgs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 500,
+                "maximum": 30000,
+                "default": 12000
+              },
+              "importOnStore": {
+                "type": "boolean",
+                "default": true
+              }
+            }
+          }
+        ]
       },
       "readOnly": {
         "type": "boolean",

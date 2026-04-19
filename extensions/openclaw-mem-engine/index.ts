@@ -45,6 +45,7 @@ import { docsIngestWithCli, docsSearchWithCli } from "./docsColdLane.js";
 import { runRouteAuto } from "./routeAuto.js";
 import { runTierFirstV1, selectTierQuotaV1 } from "./tierSelection.js";
 import { runWeiJiMemoryPreflight } from "./weiJiMemoryPreflight.js";
+import { mirrorMemoryToGbrain } from "./gbrainMirror.js";
 
 // ============================================================================
 // Config
@@ -176,6 +177,15 @@ type WeiJiMemoryPreflightConfigInput = {
   failOnRejected?: boolean;
 };
 
+type GBrainMirrorConfigInput = {
+  enabled?: boolean;
+  mirrorRoot?: string;
+  command?: string;
+  commandArgs?: string[];
+  timeoutMs?: number;
+  importOnStore?: boolean;
+};
+
 type DocsColdLaneConfig = {
   enabled: boolean;
   sqlitePath: string;
@@ -214,6 +224,8 @@ type PluginConfig = {
   receipts?: boolean | ReceiptsConfigInput;
   docsColdLane?: boolean | DocsColdLaneConfigInput;
   weijiMemoryPreflight?: boolean | WeiJiMemoryPreflightConfigInput;
+  gbrainMirror?: boolean | GBrainMirrorConfigInput;
+  // only canonical durable-memory write lane
   // Hard write-path guard. When enabled, mem-engine remains the only canonical
   // durable-memory write lane for the active slot: explicit write tools are rejected,
   // sidecar/docs/graph stay read-or-observe surfaces, and autoCapture is disabled.
@@ -322,6 +334,15 @@ type WeiJiMemoryPreflightConfig = {
   failOnRejected: boolean;
 };
 
+type GBrainMirrorConfig = {
+  enabled: boolean;
+  mirrorRoot: string;
+  command: string;
+  commandArgs: string[];
+  timeoutMs: number;
+  importOnStore: boolean;
+};
+
 type AutoCaptureCategory = "preference" | "decision" | "todo";
 
 const DEFAULT_ROUTE_AUTO_CONFIG: RouteAutoConfig = {
@@ -427,6 +448,15 @@ const DEFAULT_WEIJI_MEMORY_PREFLIGHT_CONFIG: WeiJiMemoryPreflightConfig = {
   failMode: "open",
   failOnQueued: false,
   failOnRejected: false,
+};
+
+const DEFAULT_GBRAIN_MIRROR_CONFIG: GBrainMirrorConfig = {
+  enabled: false,
+  mirrorRoot: "~/.openclaw/memory/gbrain-mirror",
+  command: "gbrain",
+  commandArgs: [],
+  timeoutMs: 12_000,
+  importOnStore: true,
 };
 
 function vectorDimsForModel(model: string): number {
@@ -1087,6 +1117,41 @@ function resolveWeiJiMemoryPreflightConfig(input: PluginConfig["weijiMemoryPrefl
     failMode: raw.failMode === "closed" ? "closed" : defaults.failMode,
     failOnQueued: normalizeBoolean(raw.failOnQueued, defaults.failOnQueued),
     failOnRejected: normalizeBoolean(raw.failOnRejected, defaults.failOnRejected),
+  };
+}
+
+function resolveGBrainMirrorConfig(input: PluginConfig["gbrainMirror"]): GBrainMirrorConfig {
+  const defaults = DEFAULT_GBRAIN_MIRROR_CONFIG;
+
+  if (input === false) {
+    return { ...defaults, enabled: false };
+  }
+
+  if (input === true) {
+    return { ...defaults, enabled: true };
+  }
+
+  if (input == null || typeof input !== "object" || Array.isArray(input)) {
+    return { ...defaults };
+  }
+
+  const raw = input as GBrainMirrorConfigInput;
+  const command = typeof raw.command === "string" && raw.command.trim() ? raw.command.trim() : defaults.command;
+  const commandArgs = Array.isArray(raw.commandArgs)
+    ? raw.commandArgs.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean).slice(0, 64)
+    : defaults.commandArgs;
+
+  return {
+    enabled: normalizeBoolean(raw.enabled, defaults.enabled),
+    mirrorRoot: typeof raw.mirrorRoot === "string" && raw.mirrorRoot.trim() ? raw.mirrorRoot.trim() : defaults.mirrorRoot,
+    command,
+    commandArgs,
+    timeoutMs: normalizeNumberInRange(raw.timeoutMs, defaults.timeoutMs, {
+      min: 500,
+      max: 30_000,
+      integer: true,
+    }),
+    importOnStore: normalizeBoolean(raw.importOnStore, defaults.importOnStore),
   };
 }
 
@@ -3280,6 +3345,8 @@ const memoryEngineConfigSchema = {
         "workingSet",
         "receipts",
         "docsColdLane",
+        "weijiMemoryPreflight",
+        "gbrainMirror",
         "readOnly",
       ],
       "openclaw-mem-engine config",
@@ -3625,6 +3692,30 @@ const memoryEngineConfigSchema = {
                   failOnRejected: typeof cfg.weijiMemoryPreflight.failOnRejected === "boolean" ? cfg.weijiMemoryPreflight.failOnRejected : undefined,
                 }
               : undefined),
+      gbrainMirror:
+        cfg.gbrainMirror === false || cfg.gbrainMirror === true
+          ? cfg.gbrainMirror
+          : (cfg.gbrainMirror && typeof cfg.gbrainMirror === "object" && !Array.isArray(cfg.gbrainMirror)
+              ? (() => {
+                  const rawGbrainMirror = cfg.gbrainMirror as Record<string, unknown>;
+                  assertAllowedKeys(
+                    rawGbrainMirror,
+                    ["enabled", "mirrorRoot", "command", "commandArgs", "timeoutMs", "importOnStore"],
+                    "gbrainMirror config",
+                  );
+                  return {
+                    enabled: typeof rawGbrainMirror.enabled === "boolean" ? rawGbrainMirror.enabled : undefined,
+                    mirrorRoot: typeof rawGbrainMirror.mirrorRoot === "string" ? rawGbrainMirror.mirrorRoot : undefined,
+                    command: typeof rawGbrainMirror.command === "string" ? rawGbrainMirror.command : undefined,
+                    commandArgs: Array.isArray(rawGbrainMirror.commandArgs)
+                      ? rawGbrainMirror.commandArgs.filter((item): item is string => typeof item === "string")
+                      : undefined,
+                    timeoutMs: typeof rawGbrainMirror.timeoutMs === "number" ? rawGbrainMirror.timeoutMs : undefined,
+                    importOnStore:
+                      typeof rawGbrainMirror.importOnStore === "boolean" ? rawGbrainMirror.importOnStore : undefined,
+                  };
+                })()
+              : undefined),
       readOnly: typeof cfg.readOnly === "boolean" ? cfg.readOnly : undefined,
     };
   },
@@ -3931,6 +4022,36 @@ const memoryEngineConfigSchema = {
       help: "Block memory_store when Wei Ji rejects the write.",
       advanced: true,
     },
+    "gbrainMirror.enabled": {
+      label: "GBrain Write-through Mirror",
+      help: "Write a markdown twin for each memory_store and optionally import it into gbrain right away.",
+      advanced: true,
+    },
+    "gbrainMirror.mirrorRoot": {
+      label: "GBrain Mirror Root",
+      help: "Dedicated markdown mirror directory imported by gbrain.",
+      advanced: true,
+    },
+    "gbrainMirror.command": {
+      label: "GBrain Command",
+      help: "Executable used to invoke gbrain import.",
+      advanced: true,
+    },
+    "gbrainMirror.commandArgs": {
+      label: "GBrain Command Args",
+      help: "Static arguments prepended before the import subcommand.",
+      advanced: true,
+    },
+    "gbrainMirror.timeoutMs": {
+      label: "GBrain Mirror Timeout",
+      help: "Maximum subprocess runtime in milliseconds for the write-through import.",
+      advanced: true,
+    },
+    "gbrainMirror.importOnStore": {
+      label: "GBrain Import On Store",
+      help: "When true (default), run gbrain import on the dedicated mirror root after each memory_store.",
+      advanced: true,
+    },
   },
 };
 
@@ -3956,6 +4077,7 @@ const memoryPlugin = {
     const receiptsCfg = resolveReceiptsConfig(cfg.receipts);
     const docsColdLaneCfg = resolveDocsColdLaneConfig(cfg.docsColdLane);
     const weijiMemoryPreflightCfg = resolveWeiJiMemoryPreflightConfig(cfg.weijiMemoryPreflight);
+    const gbrainMirrorCfg = resolveGBrainMirrorConfig(cfg.gbrainMirror);
 
     const model = cfg.embedding?.model ?? DEFAULT_MODEL;
     const vectorDim = vectorDimsForModel(model);
@@ -3982,13 +4104,17 @@ const memoryPlugin = {
         ? resolveStateRelativePath(api, weijiMemoryPreflightCfg.dbPath, weijiMemoryPreflightCfg.dbPath)
         : undefined,
     };
+    const gbrainMirrorResolved: GBrainMirrorConfig = {
+      ...gbrainMirrorCfg,
+      mirrorRoot: resolveStateRelativePath(api, gbrainMirrorCfg.mirrorRoot, gbrainMirrorCfg.mirrorRoot),
+    };
 
     const db = new MemoryDB(resolvedDbPath, tableName, vectorDim);
     const embeddingClampCfg = resolveEmbeddingClampConfig(cfg.embedding);
     const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model, embeddingClampCfg) : null;
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, routeAuto=${routeAutoResolved.enabled ? `on|timeout=${routeAutoResolved.timeoutMs}|chars=${routeAutoResolved.maxChars}|graph=${routeAutoResolved.maxGraphCandidates}|episodes=${routeAutoResolved.maxTranscriptSessions}|db=${routeAutoResolved.dbPath}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, weijiMemoryPreflight=${weijiMemoryPreflightResolved.enabled ? `${weijiMemoryPreflightResolved.failOnQueued || weijiMemoryPreflightResolved.failOnRejected ? "enforced" : "advisory"}|${weijiMemoryPreflightResolved.failMode}|cmd=${weijiMemoryPreflightResolved.command}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, routeAuto=${routeAutoResolved.enabled ? `on|timeout=${routeAutoResolved.timeoutMs}|chars=${routeAutoResolved.maxChars}|graph=${routeAutoResolved.maxGraphCandidates}|episodes=${routeAutoResolved.maxTranscriptSessions}|db=${routeAutoResolved.dbPath}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, weijiMemoryPreflight=${weijiMemoryPreflightResolved.enabled ? `${weijiMemoryPreflightResolved.failOnQueued || weijiMemoryPreflightResolved.failOnRejected ? "enforced" : "advisory"}|${weijiMemoryPreflightResolved.failMode}|cmd=${weijiMemoryPreflightResolved.command}` : "off"}, gbrainMirror=${gbrainMirrorResolved.enabled ? `${gbrainMirrorResolved.importOnStore ? "write-through" : "file-only"}|timeout=${gbrainMirrorResolved.timeoutMs}|root=${gbrainMirrorResolved.mirrorRoot}|cmd=${gbrainMirrorResolved.command}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
     );
 
     const resolveAdminFilters = (input: {
@@ -5091,6 +5217,7 @@ const memoryPlugin = {
           let vector: number[];
           let embeddingSkipped = false;
           let embeddingSkipReason: RecallRejectionReason | null = null;
+          let gbrainMirrorReceipt: Record<string, unknown> | null = null;
 
           try {
             vector = await embeddings.embed(text);
@@ -5119,6 +5246,36 @@ const memoryPlugin = {
           }
 
           await db.add(row);
+
+          if (gbrainMirrorResolved.enabled) {
+            const gbrainMirror = await mirrorMemoryToGbrain({
+              memory: {
+                id,
+                text,
+                category,
+                importance: normalizedImportance,
+                importanceLabel: normalizedLabel,
+                scope,
+                createdAt,
+              },
+              config: gbrainMirrorResolved,
+              env: apiKey ? { OPENAI_API_KEY: apiKey } : undefined,
+            });
+            gbrainMirrorReceipt = (gbrainMirror.receipt ?? null) as Record<string, unknown> | null;
+
+            api.logger.info(
+              `openclaw-mem-engine:gbrainMirror ${JSON.stringify({
+                id,
+                mirrored: (gbrainMirror.receipt as { mirrored?: unknown } | undefined)?.mirrored ?? null,
+                imported: (gbrainMirror.receipt as { imported?: unknown } | undefined)?.imported ?? null,
+                importOnStore: (gbrainMirror.receipt as { importOnStore?: unknown } | undefined)?.importOnStore ?? null,
+                command: (gbrainMirror.receipt as { command?: unknown } | undefined)?.command ?? null,
+                filePath: (gbrainMirror.receipt as { filePath?: unknown } | undefined)?.filePath ?? null,
+                errorCode: (gbrainMirror.receipt as { errorCode?: unknown } | undefined)?.errorCode ?? null,
+                errorMessage: (gbrainMirror.receipt as { errorMessage?: unknown } | undefined)?.errorMessage ?? null,
+              })}`,
+            );
+          }
 
           const latencyMs = Math.round(performance.now() - t0);
 
@@ -5152,6 +5309,7 @@ const memoryPlugin = {
                 embeddingSkipped,
                 embeddingSkipReason,
                 weiJiMemoryPreflight: weiJiMemoryPreflightReceipt,
+                gbrainMirror: gbrainMirrorReceipt,
               },
             },
           };

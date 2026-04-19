@@ -83,6 +83,8 @@ That means:
 - `memory_store` / `memory_forget` / `memory_import` / `memory_docs_ingest` authority lives in the engine lane
 - the sidecar remains capture, receipts, governance, and recall support
 - graph/docs/synthesis lanes may improve recall or packing, but they do **not** become competing durable-memory writers
+- in short, helper lanes do not become competing durable-memory writers
+- if `gbrainMirror` is enabled, it is a **write-through mirror / retrieval substrate**, not a second truth owner
 
 If you need watchdog or advisory-only execution, set `readOnly: true` (or `OPENCLAW_MEM_ENGINE_READONLY=1`).
 That forces write-path rejection and disables `autoCapture`, which keeps the ownership boundary honest.
@@ -491,6 +493,37 @@ Blocking modes:
 - `failMode: "closed"` blocks on runtime/subprocess failure
 - `failOnQueued: true` blocks if Wei Ji queues review
 - `failOnRejected: true` blocks if Wei Ji rejects
+
+Rollback:
+- disable the config gate, then restart the gateway
+
+#### GBrain write-through mirror (optional)
+
+`openclaw-mem-engine` can also mirror each successful `memory_store` into a dedicated `gbrain` import root.
+
+Purpose:
+- let `gbrain` receive a live twin of canonical memory writes
+- remove the need for periodic full impose/import just to expose new memories to `gbrain`
+- keep ownership clean: engine remains writer-of-record, `gbrain` stays a retrieval substrate
+
+Config gate:
+- `plugins.entries.openclaw-mem-engine.config.gbrainMirror`
+
+Recommended host posture:
+- `enabled: true`
+- `mirrorRoot: "~/.openclaw/memory/gbrain-mirror"`
+- `importOnStore: true`
+- `timeoutMs: 12000`
+
+Behavior:
+- engine stores the canonical row in LanceDB
+- plugin writes `mirrorRoot/<memory-id>.md`
+- plugin runs `gbrain import <mirrorRoot> --workers 1`
+- plugin forwards `OPENAI_API_KEY` from the engine lane into the gbrain subprocess so embeddings do not fail only because the key lived in plugin config
+- mirror/import failures are fail-open for canonical memory writes, but they are visible in receipts
+
+Receipts surface:
+- `memory_store.details.receipt.gbrainMirror`
 
 Rollback:
 - disable the config gate, then restart the gateway

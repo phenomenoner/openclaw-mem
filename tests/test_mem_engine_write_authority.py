@@ -48,3 +48,22 @@ def test_mem_engine_docs_state_single_write_path_posture():
     assert "only canonical durable-memory write path" in doc
     assert "graph/docs/synthesis lanes may improve recall or packing" in doc
     assert "do not become competing durable-memory writers" in doc
+    assert "gbrainMirror" in doc
+    assert "write-through mirror / retrieval substrate" in doc
+
+
+def test_gbrain_write_through_markers_present_in_ts_and_schema():
+    ts = INDEX_TS.read_text("utf-8")
+    plugin = json.loads(PLUGIN_JSON.read_text("utf-8"))
+    readme = (Path(__file__).resolve().parents[1] / "extensions" / "openclaw-mem-engine" / "README.md").read_text("utf-8")
+
+    assert 'gbrainMirror?: boolean | GBrainMirrorConfigInput;' in ts
+    assert 'const gbrainMirrorResolved: GBrainMirrorConfig =' in ts
+    assert 'const gbrainMirror = await mirrorMemoryToGbrain({' in ts
+    assert 'memory_store.details.receipt.gbrainMirror' in readme
+
+    help_text = plugin["uiHints"]["gbrainMirror.enabled"]["help"]
+    assert "markdown twin" in help_text
+
+    schema = plugin["configSchema"]["properties"]["gbrainMirror"]
+    assert schema["oneOf"][1]["properties"]["importOnStore"]["default"] is True
