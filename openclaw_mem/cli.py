@@ -2162,6 +2162,8 @@ def _gbrain_sidecar_prior_packet_attempts(run_dir: Path, *, packet_sha256: str) 
             continue
         if str(payload.get('packet_sha256') or '') != packet_sha256:
             continue
+        if bool(payload.get('dry_run')):
+            continue
         total += 1
     return total
 
@@ -7272,6 +7274,18 @@ def _pack_gbrain_consult_optional(args: argparse.Namespace, query: str) -> Optio
     )
 
 
+def _pack_gbrain_bundle_text(payload: Dict[str, Any], *, bundle_text: str, gbrain_consult: Optional[Dict[str, Any]]) -> None:
+    if gbrain_consult is None:
+        return
+    gbrain_bundle = str(gbrain_consult.get("bundle_text") or "").strip()
+    if not gbrain_bundle:
+        return
+    base_bundle = str(payload.get("bundle_text_with_graph") or bundle_text).strip()
+    joined_parts = [part for part in [base_bundle, gbrain_bundle] if part]
+    if joined_parts:
+        payload["bundle_text_with_gbrain"] = "\n".join(joined_parts).strip() + "\n"
+
+
 def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Build a compact, cited L1-style bundle from hybrid retrieval."""
     query = (args.query or "").strip()
@@ -7588,12 +7602,6 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     gbrain_consult = _pack_gbrain_consult_optional(args, query)
     if gbrain_consult is not None:
         payload["gbrain"] = gbrain_consult
-        gbrain_bundle = str(gbrain_consult.get("bundle_text") or "").strip()
-        if gbrain_bundle:
-            base_bundle = str(payload.get("bundle_text_with_graph") or bundle_text).strip()
-            joined_parts = [part for part in [base_bundle, gbrain_bundle] if part]
-            if joined_parts:
-                payload["bundle_text_with_gbrain"] = "\n".join(joined_parts).strip() + "\n"
 
     if compaction_selected:
         compaction_policy_hints = _pack_compaction_policy_hints(compaction_selected)
@@ -7675,6 +7683,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             if max_chars and len(combined) > max_chars:
                 combined = combined[:max_chars].rstrip() + "\n"
             payload["bundle_text_with_graph"] = combined
+
+    _pack_gbrain_bundle_text(payload, bundle_text=bundle_text, gbrain_consult=gbrain_consult)
 
     policy_surface = _pack_compose_policy_surface(
         selected_items=selected_items,
@@ -7850,6 +7860,8 @@ def cmd_gbrain_jobs_smoke(_conn: sqlite3.Connection, args: argparse.Namespace) -
 def cmd_gbrain_jobs_submit(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
         params, _, _ = _parse_optional_json_arg(getattr(args, "params_json", None), getattr(args, "params_file", None), "params")
+        if params is not None and not isinstance(params, dict):
+            raise ValueError('params must be a JSON object')
         payload = gbrain_sidecar.submit_job(
             name=str(getattr(args, "name", "") or ""),
             data=dict(params or {}),
@@ -7946,7 +7958,8 @@ def cmd_gbrain_refresh_canary(conn: sqlite3.Connection, args: argparse.Namespace
         blocked_reasons.append('no_approved_refresh_candidates')
     if len(approved_items) > 1:
         blocked_reasons.append('max_candidates_per_run_exceeded')
-    if _gbrain_sidecar_prior_packet_attempts(run_root, packet_sha256=packet_sha256) >= 1:
+    prior_apply_attempts = _gbrain_sidecar_prior_packet_attempts(run_root, packet_sha256=packet_sha256)
+    if prior_apply_attempts >= 1:
         blocked_reasons.append('max_retries_per_packet_exceeded')
     if _gbrain_sidecar_recent_refresh_count(run_root, since_ts=datetime.now(timezone.utc) - timedelta(hours=24)) >= max_refresh_writes_per_24h:
         blocked_reasons.append('max_refresh_writes_per_24h_exceeded')
@@ -7998,6 +8011,7 @@ def cmd_gbrain_refresh_canary(conn: sqlite3.Connection, args: argparse.Namespace
             'max_retries_per_packet': 1,
             'supported_action_classes': ['refresh_card'],
         },
+        'prior_apply_attempts': prior_apply_attempts,
         'before_snapshot': before_snapshot,
         'blocked_reasons': blocked_reasons,
         'policy': {
@@ -8019,7 +8033,7 @@ def cmd_gbrain_refresh_canary(conn: sqlite3.Connection, args: argparse.Namespace
         'restore_hint': 'restore source card detail_json from before_snapshot and retire any new refresh card recorded in after payload',
     }
 
-    after_result = 'dry_run' if dry_run else 'applied'
+    after_result = 'dry_run'
     refresh_payload = None
     after_snapshot = None
     if blocked_reasons:
@@ -8040,6 +8054,7 @@ def cmd_gbrain_refresh_canary(conn: sqlite3.Connection, args: argparse.Namespace
                 'refresh_payload': refresh_payload,
             }
             rollback_payload['new_record_ref'] = new_ref or None
+            after_result = 'applied'
         except Exception as e:
             conn.rollback()
             blocked_reasons.append(str(e))

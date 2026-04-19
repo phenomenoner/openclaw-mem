@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from openclaw_mem import gbrain_sidecar
-from openclaw_mem.cli import _connect, _insert_observation, build_parser
+from openclaw_mem.cli import _connect, _insert_observation, _pack_gbrain_bundle_text, build_parser
 
 
 class TestGBrainSidecarModule(unittest.TestCase):
@@ -85,6 +85,15 @@ class TestGBrainSidecarModule(unittest.TestCase):
 
 
 class TestGBrainSidecarCLI(unittest.TestCase):
+    def test_pack_gbrain_bundle_prefers_graph_bundle_when_present(self):
+        payload = {"bundle_text_with_graph": "graph bundle\n"}
+        _pack_gbrain_bundle_text(
+            payload,
+            bundle_text="plain bundle\n",
+            gbrain_consult={"bundle_text": "gbrain bundle"},
+        )
+        self.assertEqual(payload.get("bundle_text_with_gbrain"), "graph bundle\ngbrain bundle\n")
+
     def test_pack_adds_gbrain_payload_and_trace_extension(self):
         conn = _connect(":memory:")
         args = build_parser().parse_args(
@@ -183,6 +192,27 @@ class TestGBrainSidecarCLI(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertEqual(out["phase2_allowed_job"], "embed")
         self.assertEqual((out.get("result") or {}).get("id"), 7)
+
+    def test_jobs_submit_rejects_non_object_params(self):
+        conn = _connect(":memory:")
+        args = build_parser().parse_args(
+            [
+                "gbrain-sidecar",
+                "jobs-submit",
+                "--name",
+                "embed",
+                "--params-json",
+                "[1,2]",
+            ]
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf), self.assertRaises(SystemExit) as exc:
+            args.func(conn, args)
+        out = json.loads(buf.getvalue())
+        conn.close()
+
+        self.assertEqual(exc.exception.code, 2)
+        self.assertEqual(out["error"], "params must be a JSON object")
 
     def test_recommend_refresh_emits_graph_recommend_packet(self):
         conn = _connect(":memory:")
@@ -285,6 +315,83 @@ class TestGBrainSidecarCLI(unittest.TestCase):
         self.assertEqual(out["result"], "applied")
         self.assertEqual(out["applied_count"], 1)
         self.assertEqual(old_detail["graph_synthesis"]["status"], "superseded")
+
+    def test_refresh_canary_dry_run_does_not_burn_retry_budget(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+        compile_args = build_parser().parse_args(
+            [
+                "graph",
+                "--json",
+                "synth",
+                "compile",
+                "--query",
+                "alpha",
+                "--title",
+                "Alpha synthesis",
+                "--summary",
+                "Alpha synthesis",
+            ]
+        )
+        compile_buf = io.StringIO()
+        with redirect_stdout(compile_buf):
+            compile_args.func(conn, compile_args)
+        card_ref = json.loads(compile_buf.getvalue())["cardRef"]
+
+        with tempfile.TemporaryDirectory() as td:
+            packet_path = Path(td) / "governor.json"
+            packet_path.write_text(
+                json.dumps(
+                    {
+                        "kind": "openclaw-mem.optimize.governor-review.v0",
+                        "items": [
+                            {
+                                "candidate_id": "gbrain-refresh:obs:2",
+                                "recommended_action": "refresh_card",
+                                "decision": "approved_for_apply",
+                                "apply_lane": "graph.synth.refresh",
+                                "target": {"recordRef": card_ref},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            dry_args = build_parser().parse_args(
+                [
+                    "gbrain-sidecar",
+                    "refresh-canary",
+                    "--from-file",
+                    str(packet_path),
+                    "--run-dir",
+                    td,
+                ]
+            )
+            apply_args = build_parser().parse_args(
+                [
+                    "gbrain-sidecar",
+                    "refresh-canary",
+                    "--from-file",
+                    str(packet_path),
+                    "--apply",
+                    "--run-dir",
+                    td,
+                ]
+            )
+            dry_buf = io.StringIO()
+            with redirect_stdout(dry_buf):
+                dry_args.func(conn, dry_args)
+            dry_out = json.loads(dry_buf.getvalue())
+
+            apply_buf = io.StringIO()
+            with redirect_stdout(apply_buf):
+                apply_args.func(conn, apply_args)
+            apply_out = json.loads(apply_buf.getvalue())
+        conn.close()
+
+        self.assertEqual(dry_out["result"], "dry_run")
+        self.assertEqual(apply_out["result"], "applied")
+        self.assertEqual(apply_out["applied_count"], 1)
 
 
 if __name__ == "__main__":
