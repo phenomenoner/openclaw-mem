@@ -15,6 +15,7 @@ DEFAULT_CONSULT_TIMEOUT_MS = 1500
 DEFAULT_JOBS_TIMEOUT_MS = 5000
 DEFAULT_CONSULT_LIMIT = 4
 PHASE2_ALLOWED_JOB_NAME = "embed"
+REFRESH_RECOMMEND_SCHEMA = "openclaw-mem.graph.synth.recommend.v0"
 
 
 @dataclass(frozen=True)
@@ -204,6 +205,79 @@ def trace_extension(consult_payload: Dict[str, Any]) -> Dict[str, Any]:
         "record_refs": [str(item.get("recordRef") or "") for item in items if str(item.get("recordRef") or "")],
         "slugs": [str(item.get("slug") or "") for item in items if str(item.get("slug") or "")],
         "source": "gbrain",
+    }
+
+
+def build_refresh_recommendation(
+    *,
+    record_ref: str,
+    consult_payload: Optional[Dict[str, Any]] = None,
+    candidate_id: Optional[str] = None,
+    max_evidence_refs: int = 4,
+) -> Dict[str, Any]:
+    target_ref = str(record_ref or "").strip()
+    if not target_ref:
+        raise ValueError("record_ref is required")
+
+    consult_items = list((consult_payload or {}).get("items") or [])
+    gbrain_refs = [
+        str(item.get("recordRef") or "").strip()
+        for item in consult_items
+        if isinstance(item, dict) and str(item.get("recordRef") or "").strip()
+    ]
+    evidence_refs = [target_ref] + gbrain_refs[: max(0, int(max_evidence_refs))]
+    query_text = str(((consult_payload or {}).get("query") or {}).get("text") or "").strip()
+    consult_ok = bool((consult_payload or {}).get("ok"))
+
+    reasons = ["gbrain_sidecar_signal"]
+    if query_text:
+        reasons.append(f"consult_query:{query_text}")
+    if not consult_ok and consult_payload is not None:
+        reasons.append("consult_fail_open")
+
+    args = ["graph", "synth", "refresh", target_ref]
+    item = {
+        "candidate_id": str(candidate_id or f"gbrain-refresh:{target_ref}"),
+        "action": "refresh_card",
+        "reasons": reasons,
+        "target": {
+            "recordRef": target_ref,
+        },
+        "suggestion": {
+            "args": args,
+            "command": "openclaw-mem " + " ".join(args),
+        },
+        "evidence_refs": evidence_refs,
+        "evidence": {
+            "source": "gbrain_sidecar",
+            "consult_ok": consult_ok,
+            "consult_result_count": int((consult_payload or {}).get("result_count") or 0),
+            "consult_query": query_text or None,
+        },
+        "auto_apply_eligible": False,
+        "safe_for_auto_apply": False,
+        "risk_level": "low",
+        "risk_reasons": [],
+    }
+    return {
+        "kind": REFRESH_RECOMMEND_SCHEMA,
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "counts": {
+            "refreshSynthesis": 1,
+            "compileSynthesis": 0,
+            "noAction": 0,
+            "items": 1,
+            "synthesisCards": 1,
+            "candidateCardSuggestions": 0,
+        },
+        "items": [item],
+        "source": "gbrain_sidecar",
+        "consult": {
+            "ok": consult_ok,
+            "query": query_text or None,
+            "result_count": int((consult_payload or {}).get("result_count") or 0),
+            "record_refs": gbrain_refs[: max(0, int(max_evidence_refs))],
+        },
     }
 
 

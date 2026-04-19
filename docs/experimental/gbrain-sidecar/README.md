@@ -45,6 +45,28 @@ Why this narrow:
 - keeps phase 2 on deterministic helper work
 - widens only after receipts show net value
 
+## Phase 3 shipped here
+
+Governed refresh canary:
+
+- `openclaw-mem gbrain-sidecar recommend-refresh`
+- `openclaw-mem optimize governor-review --approve-refresh`
+- `openclaw-mem gbrain-sidecar refresh-canary`
+
+Current posture:
+
+- recommendation packet is additive and read-only
+- governor packet is still mandatory
+- canary defaults to dry-run
+- actual apply is bounded to one `refresh_card` candidate per run
+- receipts and rollback artifact are always written
+
+Why this shape:
+
+- proves the governed write bridge without opening broad mutation authority
+- reuses the existing governor ladder instead of inventing a bypass lane
+- keeps gbrain in the evidence role while `openclaw-mem` remains writer-of-record
+
 ## Operator notes
 
 - default binary: `gbrain`

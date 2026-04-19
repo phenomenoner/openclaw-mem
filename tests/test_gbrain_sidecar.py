@@ -3,12 +3,14 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import tempfile
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 from openclaw_mem import gbrain_sidecar
-from openclaw_mem.cli import _connect, build_parser
+from openclaw_mem.cli import _connect, _insert_observation, build_parser
 
 
 class TestGBrainSidecarModule(unittest.TestCase):
@@ -64,6 +66,22 @@ class TestGBrainSidecarModule(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 gbrain_sidecar.retry_job(7)
+
+    def test_build_refresh_recommendation_uses_consult_refs(self):
+        payload = gbrain_sidecar.build_refresh_recommendation(
+            record_ref="obs:123",
+            consult_payload={
+                "schema": gbrain_sidecar.CONSULT_SCHEMA,
+                "ok": True,
+                "query": {"text": "alpha"},
+                "result_count": 1,
+                "items": [{"recordRef": "gbrain:people/alice"}],
+            },
+        )
+        self.assertEqual(payload["kind"], "openclaw-mem.graph.synth.recommend.v0")
+        self.assertEqual(payload["items"][0]["action"], "refresh_card")
+        self.assertEqual(payload["items"][0]["target"]["recordRef"], "obs:123")
+        self.assertIn("gbrain:people/alice", payload["items"][0]["evidence_refs"])
 
 
 class TestGBrainSidecarCLI(unittest.TestCase):
@@ -165,6 +183,108 @@ class TestGBrainSidecarCLI(unittest.TestCase):
         self.assertTrue(out["ok"])
         self.assertEqual(out["phase2_allowed_job"], "embed")
         self.assertEqual((out.get("result") or {}).get("id"), 7)
+
+    def test_recommend_refresh_emits_graph_recommend_packet(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            consult_path = Path(td) / "consult.json"
+            consult_path.write_text(
+                json.dumps(
+                    {
+                        "schema": gbrain_sidecar.CONSULT_SCHEMA,
+                        "ok": True,
+                        "query": {"text": "alpha"},
+                        "result_count": 1,
+                        "items": [{"recordRef": "gbrain:people/alice"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = build_parser().parse_args(
+                [
+                    "gbrain-sidecar",
+                    "recommend-refresh",
+                    "--record-ref",
+                    "obs:123",
+                    "--consult-file",
+                    str(consult_path),
+                ]
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+        conn.close()
+
+        self.assertEqual(out["kind"], "openclaw-mem.graph.synth.recommend.v0")
+        self.assertEqual(out["items"][0]["target"]["recordRef"], "obs:123")
+        self.assertIn("gbrain:people/alice", out["items"][0]["evidence_refs"])
+
+    def test_refresh_canary_apply_runs_bounded_refresh(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+        compile_args = build_parser().parse_args(
+            [
+                "graph",
+                "--json",
+                "synth",
+                "compile",
+                "--query",
+                "alpha",
+                "--title",
+                "Alpha synthesis",
+                "--summary",
+                "Alpha synthesis",
+            ]
+        )
+        compile_buf = io.StringIO()
+        with redirect_stdout(compile_buf):
+            compile_args.func(conn, compile_args)
+        card_ref = json.loads(compile_buf.getvalue())["cardRef"]
+        _insert_observation(conn, {"kind": "note", "summary": "alpha newer source", "tool_name": "memory_store", "detail": {}})
+
+        with tempfile.TemporaryDirectory() as td:
+            packet_path = Path(td) / "governor.json"
+            packet_path.write_text(
+                json.dumps(
+                    {
+                        "kind": "openclaw-mem.optimize.governor-review.v0",
+                        "items": [
+                            {
+                                "candidate_id": "gbrain-refresh:obs:2",
+                                "recommended_action": "refresh_card",
+                                "decision": "approved_for_apply",
+                                "apply_lane": "graph.synth.refresh",
+                                "target": {"recordRef": card_ref},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = build_parser().parse_args(
+                [
+                    "gbrain-sidecar",
+                    "refresh-canary",
+                    "--from-file",
+                    str(packet_path),
+                    "--apply",
+                    "--run-dir",
+                    td,
+                ]
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+        old_id = int(card_ref.split(":", 1)[1])
+        old_row = conn.execute("SELECT detail_json FROM observations WHERE id = ?", (old_id,)).fetchone()
+        old_detail = json.loads(old_row["detail_json"] or "{}")
+        conn.close()
+
+        self.assertEqual(out["result"], "applied")
+        self.assertEqual(out["applied_count"], 1)
+        self.assertEqual(old_detail["graph_synthesis"]["status"], "superseded")
 
 
 if __name__ == "__main__":

@@ -159,6 +159,12 @@ DEFAULT_OPTIMIZE_ASSIST_RUN_DIR = os.path.join(
     "openclaw-mem",
     "optimize-assist",
 )
+DEFAULT_GBRAIN_SIDECAR_RUN_DIR = os.path.join(
+    STATE_DIR,
+    "memory",
+    "openclaw-mem",
+    "gbrain-sidecar",
+)
 DEFAULT_OPENCLAW_SESSIONS_ROOT = os.path.join(STATE_DIR, "sessions")
 DEFAULT_CRON_JOBS_JSON = os.path.join(STATE_DIR, "cron", "jobs.json")
 DEFAULT_DB = os.path.join(STATE_DIR, "memory", "openclaw-mem.sqlite")
@@ -2096,6 +2102,68 @@ def _optimize_assist_load_governor_packet(path_value: Optional[str]) -> Dict[str
     if not isinstance(items, list):
         raise ValueError('packet items must be a list')
     return payload
+
+
+def _gbrain_sidecar_load_consult_packet(path_value: Optional[str]) -> Dict[str, Any]:
+    if path_value:
+        raw = Path(path_value).read_text(encoding='utf-8')
+    else:
+        raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except Exception as e:
+        raise ValueError(f'invalid_json: {e}') from e
+    if not isinstance(payload, dict):
+        raise ValueError('packet must be a JSON object')
+    if str(payload.get('schema') or '') != gbrain_sidecar.CONSULT_SCHEMA:
+        raise ValueError('unsupported consult packet kind')
+    return payload
+
+
+def _gbrain_sidecar_load_refresh_governor_packet(path_value: Optional[str]) -> Dict[str, Any]:
+    payload = _optimize_assist_load_governor_packet(path_value)
+    return payload
+
+
+def _gbrain_sidecar_recent_refresh_count(run_dir: Path, *, since_ts: datetime) -> int:
+    if not run_dir.exists():
+        return 0
+    total = 0
+    for path in run_dir.rglob('*.after.json'):
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get('kind') or '') != 'openclaw-mem.gbrain-sidecar.refresh-canary.after.v0':
+            continue
+        ts_value = _parse_iso_utc(payload.get('ts'))
+        if ts_value is None or ts_value < since_ts:
+            continue
+        if str(payload.get('result') or '') != 'applied':
+            continue
+        total += _optimize_policy_int(payload.get('applied_count'), 0, min_value=0)
+    return total
+
+
+def _gbrain_sidecar_prior_packet_attempts(run_dir: Path, *, packet_sha256: str) -> int:
+    if not run_dir.exists() or not packet_sha256:
+        return 0
+    total = 0
+    for path in run_dir.rglob('*.before.json'):
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get('kind') or '') != 'openclaw-mem.gbrain-sidecar.refresh-canary.before.v0':
+            continue
+        if str(payload.get('packet_sha256') or '') != packet_sha256:
+            continue
+        total += 1
+    return total
 
 
 def _optimize_effect_followup_load_packet(path_value: Optional[str]) -> Dict[str, Any]:
@@ -7827,6 +7895,182 @@ def cmd_gbrain_jobs_retry(_conn: sqlite3.Connection, args: argparse.Namespace) -
     _emit(payload, True)
 
 
+def cmd_gbrain_recommend_refresh(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    consult_payload = None
+    consult_file = getattr(args, 'consult_file', None)
+    if consult_file:
+        try:
+            consult_payload = _gbrain_sidecar_load_consult_packet(consult_file)
+        except Exception as e:
+            _emit({'error': str(e)}, True)
+            sys.exit(2)
+    try:
+        payload = gbrain_sidecar.build_refresh_recommendation(
+            record_ref=str(getattr(args, 'record_ref', None) or ''),
+            consult_payload=consult_payload,
+            candidate_id=getattr(args, 'candidate_id', None),
+            max_evidence_refs=max(1, int(getattr(args, 'max_evidence_refs', 4) or 4)),
+        )
+    except ValueError as e:
+        _emit({'error': str(e)}, True)
+        sys.exit(2)
+    _emit(payload, True)
+
+
+def cmd_gbrain_refresh_canary(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        packet = _gbrain_sidecar_load_refresh_governor_packet(getattr(args, 'from_file', None))
+    except Exception as e:
+        _emit({'error': str(e)}, True)
+        sys.exit(2)
+
+    operator = str(getattr(args, 'operator', None) or 'operator').strip() or 'operator'
+    lane = 'graph.synth.refresh'
+    dry_run = not bool(getattr(args, 'apply', False))
+    run_root = Path(os.path.expanduser(str(getattr(args, 'run_dir', None) or DEFAULT_GBRAIN_SIDECAR_RUN_DIR)))
+    run_dir = run_root / datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    run_dir.mkdir(parents=True, exist_ok=True)
+    max_refresh_writes_per_24h = _optimize_policy_int(getattr(args, 'max_refresh_writes_per_24h', 3), 3, min_value=1)
+    packet_sha256 = _json_sha256(packet)
+
+    approved_items = [
+        item for item in list(packet.get('items') or [])
+        if isinstance(item, dict)
+        and str(item.get('decision') or '') == 'approved_for_apply'
+        and str(item.get('apply_lane') or '') == lane
+        and str(item.get('recommended_action') or '') == 'refresh_card'
+    ]
+
+    blocked_reasons: List[str] = []
+    if not approved_items:
+        blocked_reasons.append('no_approved_refresh_candidates')
+    if len(approved_items) > 1:
+        blocked_reasons.append('max_candidates_per_run_exceeded')
+    if _gbrain_sidecar_prior_packet_attempts(run_root, packet_sha256=packet_sha256) >= 1:
+        blocked_reasons.append('max_retries_per_packet_exceeded')
+    if _gbrain_sidecar_recent_refresh_count(run_root, since_ts=datetime.now(timezone.utc) - timedelta(hours=24)) >= max_refresh_writes_per_24h:
+        blocked_reasons.append('max_refresh_writes_per_24h_exceeded')
+
+    target_ref = None
+    before_snapshot: Dict[str, Any] = {}
+    if approved_items:
+        target_ref = str(((approved_items[0].get('target') or {}).get('recordRef') or '')).strip()
+        if not target_ref:
+            blocked_reasons.append('missing_refresh_target')
+        else:
+            try:
+                oid = _graph_parse_record_ref(target_ref)
+                row = _graph_fetch_rows_by_ids(conn, [oid]).get(oid)
+            except Exception:
+                row = None
+            if row is None:
+                blocked_reasons.append('missing_synthesis_card')
+            else:
+                detail = _pack_parse_detail_json(row['detail_json'])
+                before_snapshot = {
+                    'recordRef': target_ref,
+                    'summary': str(row['summary'] or ''),
+                    'detail_json': detail,
+                    'detail_sha256': _json_sha256(detail),
+                    'status': str((((detail.get('graph_synthesis') if isinstance(detail.get('graph_synthesis'), dict) else {}).get('status')) or '')),
+                }
+
+    run_id = str(uuid.uuid4())
+    ts_now = _utcnow_iso()
+    stamp = _utcnow_compact()
+    before_path = run_dir / f'{stamp}-{run_id}.before.json'
+    rollback_path = run_dir / f'{stamp}-{run_id}.rollback.json'
+    after_path = run_dir / f'{stamp}-{run_id}.after.json'
+
+    before_payload = {
+        'kind': 'openclaw-mem.gbrain-sidecar.refresh-canary.before.v0',
+        'run_id': run_id,
+        'ts': ts_now,
+        'operator': operator,
+        'lane': lane,
+        'dry_run': dry_run,
+        'packet': packet,
+        'packet_sha256': packet_sha256,
+        'target_ref': target_ref,
+        'caps': {
+            'max_candidates_per_run': 1,
+            'max_refresh_writes_per_24h': max_refresh_writes_per_24h,
+            'max_retries_per_packet': 1,
+            'supported_action_classes': ['refresh_card'],
+        },
+        'before_snapshot': before_snapshot,
+        'blocked_reasons': blocked_reasons,
+        'policy': {
+            'mode': 'gbrain_sidecar_refresh_canary',
+            'memory_mutation': 'graph_refresh_pending',
+            'writes_performed': 0,
+        },
+    }
+    before_path.write_text(json.dumps(before_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+    rollback_payload = {
+        'kind': 'openclaw-mem.gbrain-sidecar.refresh-canary.rollback.v0',
+        'run_id': run_id,
+        'ts': ts_now,
+        'operator': operator,
+        'lane': lane,
+        'target_ref': target_ref,
+        'before_snapshot': before_snapshot,
+        'restore_hint': 'restore source card detail_json from before_snapshot and retire any new refresh card recorded in after payload',
+    }
+
+    after_result = 'dry_run' if dry_run else 'applied'
+    refresh_payload = None
+    after_snapshot = None
+    if blocked_reasons:
+        after_result = 'aborted'
+    elif not dry_run:
+        try:
+            refresh_payload = _graph_synth_refresh_payload(conn, record_ref=str(target_ref or ''), force=bool(getattr(args, 'force', False)))
+            conn.commit()
+            result_obj = refresh_payload.get('result') if isinstance(refresh_payload, dict) else {}
+            new_ref = str((result_obj or {}).get('recordRef') or '').strip()
+            row_map = _graph_fetch_rows_by_ids(conn, [_graph_parse_record_ref(new_ref)]) if new_ref else {}
+            new_row = row_map.get(_graph_parse_record_ref(new_ref)) if new_ref else None
+            after_detail = _pack_parse_detail_json(new_row['detail_json']) if new_row is not None else {}
+            after_snapshot = {
+                'recordRef': new_ref or target_ref,
+                'detail_json': after_detail,
+                'detail_sha256': _json_sha256(after_detail) if after_detail else None,
+                'refresh_payload': refresh_payload,
+            }
+            rollback_payload['new_record_ref'] = new_ref or None
+        except Exception as e:
+            conn.rollback()
+            blocked_reasons.append(str(e))
+            after_result = 'aborted'
+
+    rollback_path.write_text(json.dumps(rollback_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+    after_payload = {
+        'kind': 'openclaw-mem.gbrain-sidecar.refresh-canary.after.v0',
+        'run_id': run_id,
+        'ts': _utcnow_iso(),
+        'operator': operator,
+        'lane': lane,
+        'result': after_result,
+        'applied_count': 1 if after_result == 'applied' else 0,
+        'target_ref': target_ref,
+        'blocked_reasons': blocked_reasons,
+        'rollback_ref': str(rollback_path),
+        'before_ref': str(before_path),
+        'after_snapshot': after_snapshot,
+        'refresh_payload': refresh_payload,
+        'policy': {
+            'mode': 'gbrain_sidecar_refresh_canary',
+            'writes_performed': 1 if after_result == 'applied' else 0,
+            'memory_mutation': 'graph_refresh_applied' if after_result == 'applied' else 'none',
+        },
+    }
+    after_path.write_text(json.dumps(after_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    _emit(after_payload, True)
+
+
 
 def _atomic_write(path_: Path, content: str) -> None:
     path_.parent.mkdir(parents=True, exist_ok=True)
@@ -11007,153 +11251,27 @@ def cmd_graph_synth(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             _emit({'error': 'refresh requires exactly one synthesis card ref'}, True)
             sys.exit(2)
         ref = refs[0]
-        oid = _graph_parse_record_ref(ref)
-        row = _graph_fetch_rows_by_ids(conn, [oid]).get(oid)
-        if row is None:
-            _emit({'error': 'missing synthesis card', 'recordRef': ref}, True)
-            sys.exit(2)
-
-        detail = _pack_parse_detail_json(row['detail_json'])
-        synth = detail.get('graph_synthesis') if isinstance(detail.get('graph_synthesis'), dict) else {}
-        if not synth:
-            _emit({'error': 'record is not a synthesis card', 'recordRef': ref}, True)
-            sys.exit(2)
-
-        current_item = _graph_eval_synthesis_card(conn, row)
-        force = bool(getattr(args, 'force', False))
-        if current_item.get('status') == 'fresh' and not force:
-            payload = {
-                'kind': 'openclaw-mem.graph.synth.refresh.v0',
-                'ts': _utcnow_iso(),
-                'sourceCardRef': ref,
-                'result': {
-                    'ok': True,
-                    'refreshed': False,
-                    'reason': 'already_fresh',
-                    'recordRef': ref,
-                    'status': current_item.get('status'),
-                },
-                'staleCheck': current_item,
-            }
-            if bool(args.json):
-                _emit(payload, True)
-                return
-            print(f"recordRef={ref} refreshed=0 reason=already_fresh status=fresh")
-            return
-
         try:
-            selected_refs, selection = _graph_refresh_compile_selection(conn, synth=synth, exclude_refs=[ref])
+            payload = _graph_synth_refresh_payload(
+                conn,
+                record_ref=ref,
+                force=bool(getattr(args, 'force', False)),
+                title=getattr(args, 'title', None),
+                summary_text=getattr(args, 'summary_text', None),
+                why_it_matters=getattr(args, 'why_it_matters', None),
+                write_md=getattr(args, 'write_md', None),
+            )
         except ValueError as e:
             _emit({'error': str(e), 'recordRef': ref}, True)
             sys.exit(2)
-
-        source_ids = [_graph_parse_record_ref(x) for x in selected_refs]
-        source_rows = _graph_fetch_rows_by_ids(conn, source_ids)
-        missing = [x for x in selected_refs if _graph_parse_record_ref(x) not in source_rows]
-        if missing:
-            _emit({'error': 'missing source refs', 'recordRef': ref, 'missing': missing}, True)
-            sys.exit(2)
-
-        snapshots = [_graph_source_snapshot(source_rows[x]) for x in source_ids if x in source_rows]
-        source_digest = _graph_source_digest_from_snapshots(snapshots)
-        compiled_at = _utcnow_iso()
-        title = (getattr(args, 'title', None) or '').strip() or str(synth.get('title') or row['summary'] or ref)
-        summary_text = (getattr(args, 'summary_text', None) or '').strip() or str(synth.get('summary') or row['summary'] or title)
-        why_it_matters = (getattr(args, 'why_it_matters', None) or '').strip() or (synth.get('why_it_matters') or None)
-        scope = _normalize_scope_token((synth.get('scope') or detail.get('scope') or None))
-
-        new_detail = {
-            'scope': scope,
-            'graph_synthesis': {
-                'version': 'v0',
-                'title': title,
-                'summary': summary_text,
-                'why_it_matters': why_it_matters,
-                'source_refs': selected_refs,
-                'source_count': len(selected_refs),
-                'source_digest': source_digest,
-                'compiled_at': compiled_at,
-                'selection': selection,
-                'status': 'fresh',
-                'trust_tier': 'derived',
-                'lifecycle': {
-                    'refresh_of': ref,
-                    'refresh_reasons': list(current_item.get('reasons') or []),
-                    'previous_status': current_item.get('status'),
-                },
-            },
-        }
-
-        obs = {
-            'ts': compiled_at,
-            'kind': 'note',
-            'summary': summary_text,
-            'tool_name': 'graph.synth-compile',
-            'detail': new_detail,
-        }
-        rowid = _insert_observation(conn, obs)
-        new_ref = _graph_record_ref(rowid)
-
-        old_detail = dict(detail)
-        old_synth = dict(synth)
-        old_lifecycle = old_synth.get('lifecycle') if isinstance(old_synth.get('lifecycle'), dict) else {}
-        old_synth['status'] = 'superseded'
-        old_synth['superseded_by'] = new_ref
-        old_synth['superseded_at'] = compiled_at
-        old_synth['lifecycle'] = {
-            **old_lifecycle,
-            'superseded_by': new_ref,
-            'superseded_at': compiled_at,
-            'supersede_reasons': list(current_item.get('reasons') or []),
-        }
-        old_detail['graph_synthesis'] = old_synth
-        _graph_update_observation_detail(conn, rowid=oid, detail=old_detail, summary=str(row['summary'] or ''))
-
-        markdown_path = (getattr(args, 'write_md', None) or '').strip()
-        markdown_written = None
-        markdown_text = _graph_build_synth_markdown(
-            title=title,
-            summary_text=summary_text,
-            why_it_matters=why_it_matters,
-            scope=scope,
-            source_refs=selected_refs,
-            source_digest=source_digest,
-            compiled_at=compiled_at,
-            selection=selection,
-        )
-        if markdown_path:
-            md_path = Path(markdown_path)
-            md_path.parent.mkdir(parents=True, exist_ok=True)
-            md_path.write_text(markdown_text, encoding='utf-8')
-            markdown_written = str(md_path)
-
-        payload = {
-            'kind': 'openclaw-mem.graph.synth.refresh.v0',
-            'ts': compiled_at,
-            'sourceCardRef': ref,
-            'selection': selection,
-            'result': {
-                'ok': True,
-                'refreshed': True,
-                'recordRef': new_ref,
-                'title': title,
-                'summary': summary_text,
-                'whyItMatters': why_it_matters,
-                'sourceRefs': selected_refs,
-                'sourceCount': len(selected_refs),
-                'sourceDigest': source_digest,
-                'markdownPath': markdown_written,
-                'refreshOf': ref,
-                'supersededCardRef': ref,
-            },
-            'staleCheck': current_item,
-            'bundle_text': markdown_text,
-        }
         conn.commit()
         if bool(args.json):
             _emit(payload, True)
             return
-        print(markdown_text, end='')
+        if not bool(((payload.get('result') or {}).get('refreshed'))):
+            print(f"recordRef={ref} refreshed=0 reason=already_fresh status=fresh")
+            return
+        print(str(payload.get('bundle_text') or ''), end='')
         return
 
     if synth_cmd == 'recommend':
@@ -11439,6 +11557,148 @@ def _graph_synth_recommend_payload(conn: sqlite3.Connection) -> Dict[str, Any]:
         'ts': _utcnow_iso(),
         'counts': counts,
         'items': items,
+    }
+
+
+def _graph_synth_refresh_payload(
+    conn: sqlite3.Connection,
+    *,
+    record_ref: str,
+    force: bool = False,
+    title: Optional[str] = None,
+    summary_text: Optional[str] = None,
+    why_it_matters: Optional[str] = None,
+    write_md: Optional[str] = None,
+) -> Dict[str, Any]:
+    ref = str(record_ref or '').strip()
+    oid = _graph_parse_record_ref(ref)
+    row = _graph_fetch_rows_by_ids(conn, [oid]).get(oid)
+    if row is None:
+        raise ValueError('missing synthesis card')
+
+    detail = _pack_parse_detail_json(row['detail_json'])
+    synth = detail.get('graph_synthesis') if isinstance(detail.get('graph_synthesis'), dict) else {}
+    if not synth:
+        raise ValueError('record is not a synthesis card')
+
+    current_item = _graph_eval_synthesis_card(conn, row)
+    if current_item.get('status') == 'fresh' and not force:
+        return {
+            'kind': 'openclaw-mem.graph.synth.refresh.v0',
+            'ts': _utcnow_iso(),
+            'sourceCardRef': ref,
+            'result': {
+                'ok': True,
+                'refreshed': False,
+                'reason': 'already_fresh',
+                'recordRef': ref,
+                'status': current_item.get('status'),
+            },
+            'staleCheck': current_item,
+        }
+
+    selected_refs, selection = _graph_refresh_compile_selection(conn, synth=synth, exclude_refs=[ref])
+
+    source_ids = [_graph_parse_record_ref(x) for x in selected_refs]
+    source_rows = _graph_fetch_rows_by_ids(conn, source_ids)
+    missing = [x for x in selected_refs if _graph_parse_record_ref(x) not in source_rows]
+    if missing:
+        raise ValueError('missing source refs')
+
+    snapshots = [_graph_source_snapshot(source_rows[x]) for x in source_ids if x in source_rows]
+    source_digest = _graph_source_digest_from_snapshots(snapshots)
+    compiled_at = _utcnow_iso()
+    title_value = (title or '').strip() or str(synth.get('title') or row['summary'] or ref)
+    summary_value = (summary_text or '').strip() or str(synth.get('summary') or row['summary'] or title_value)
+    why_value = (why_it_matters or '').strip() or (synth.get('why_it_matters') or None)
+    scope = _normalize_scope_token((synth.get('scope') or detail.get('scope') or None))
+
+    new_detail = {
+        'scope': scope,
+        'graph_synthesis': {
+            'version': 'v0',
+            'title': title_value,
+            'summary': summary_value,
+            'why_it_matters': why_value,
+            'source_refs': selected_refs,
+            'source_count': len(selected_refs),
+            'source_digest': source_digest,
+            'compiled_at': compiled_at,
+            'selection': selection,
+            'status': 'fresh',
+            'trust_tier': 'derived',
+            'lifecycle': {
+                'refresh_of': ref,
+                'refresh_reasons': list(current_item.get('reasons') or []),
+                'previous_status': current_item.get('status'),
+            },
+        },
+    }
+
+    obs = {
+        'ts': compiled_at,
+        'kind': 'note',
+        'summary': summary_value,
+        'tool_name': 'graph.synth-compile',
+        'detail': new_detail,
+    }
+    rowid = _insert_observation(conn, obs)
+    new_ref = _graph_record_ref(rowid)
+
+    old_detail = dict(detail)
+    old_synth = dict(synth)
+    old_lifecycle = old_synth.get('lifecycle') if isinstance(old_synth.get('lifecycle'), dict) else {}
+    old_synth['status'] = 'superseded'
+    old_synth['superseded_by'] = new_ref
+    old_synth['superseded_at'] = compiled_at
+    old_synth['lifecycle'] = {
+        **old_lifecycle,
+        'superseded_by': new_ref,
+        'superseded_at': compiled_at,
+        'supersede_reasons': list(current_item.get('reasons') or []),
+    }
+    old_detail['graph_synthesis'] = old_synth
+    _graph_update_observation_detail(conn, rowid=oid, detail=old_detail, summary=str(row['summary'] or ''))
+
+    markdown_written = None
+    markdown_text = _graph_build_synth_markdown(
+        title=title_value,
+        summary_text=summary_value,
+        why_it_matters=why_value,
+        scope=scope,
+        source_refs=selected_refs,
+        source_digest=source_digest,
+        compiled_at=compiled_at,
+        selection=selection,
+    )
+    markdown_path = (write_md or '').strip()
+    if markdown_path:
+        md_path = Path(markdown_path)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(markdown_text, encoding='utf-8')
+        markdown_written = str(md_path)
+
+    return {
+        'kind': 'openclaw-mem.graph.synth.refresh.v0',
+        'ts': compiled_at,
+        'sourceCardRef': ref,
+        'selection': selection,
+        'result': {
+            'ok': True,
+            'refreshed': True,
+            'recordRef': new_ref,
+            'title': title_value,
+            'summary': summary_value,
+            'whyItMatters': why_value,
+            'sourceRefs': selected_refs,
+            'sourceCount': len(selected_refs),
+            'sourceDigest': source_digest,
+            'markdownPath': markdown_written,
+            'refreshOf': ref,
+            'supersededCardRef': ref,
+        },
+        'staleCheck': current_item,
+        'bundle_text': markdown_text,
     }
 
 
@@ -15799,6 +16059,22 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--timeout-ms", type=int, default=gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS, help=f"Timeout in ms (default: {gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS})")
     g.add_argument("--gbrain-bin", default=gbrain_sidecar.DEFAULT_GBRAIN_BIN, help=f"gbrain binary to invoke (default: {gbrain_sidecar.DEFAULT_GBRAIN_BIN})")
     g.set_defaults(func=cmd_gbrain_jobs_retry)
+
+    g = gsub.add_parser("recommend-refresh", help="Build a bounded refresh recommendation packet for Phase 3 governor review")
+    g.add_argument("--record-ref", required=True, help="Local synthesis card ref to refresh (for example obs:123)")
+    g.add_argument("--consult-file", help="Optional gbrain consult packet JSON path")
+    g.add_argument("--candidate-id", help="Optional candidate id override")
+    g.add_argument("--max-evidence-refs", type=int, default=4, help="Max gbrain evidence refs to attach (default: 4)")
+    g.set_defaults(func=cmd_gbrain_recommend_refresh)
+
+    g = gsub.add_parser("refresh-canary", help="Run the bounded Phase 3 refresh canary from a governor packet")
+    g.add_argument("--from-file", help="Governor packet JSON path (defaults to stdin)")
+    g.add_argument("--operator", default="gbrain-sidecar", help="Operator label for receipts (default: gbrain-sidecar)")
+    g.add_argument("--run-dir", dest="run_dir", default=DEFAULT_GBRAIN_SIDECAR_RUN_DIR, help=f"Directory for before/after/rollback receipts (default: {DEFAULT_GBRAIN_SIDECAR_RUN_DIR})")
+    g.add_argument("--apply", action="store_true", help="Perform the refresh instead of dry-run only")
+    g.add_argument("--force", action="store_true", help="Pass force through to graph synth refresh")
+    g.add_argument("--max-refresh-writes-per-24h", dest="max_refresh_writes_per_24h", type=int, default=3, help="24h cap for applied refresh writes (default: 3)")
+    g.set_defaults(func=cmd_gbrain_refresh_canary)
 
     add_capsule_parser_to_cli(sub)
 
