@@ -8043,6 +8043,7 @@ def cmd_gbrain_refresh_canary(conn: sqlite3.Connection, args: argparse.Namespace
             refresh_payload = _graph_synth_refresh_payload(conn, record_ref=str(target_ref or ''), force=bool(getattr(args, 'force', False)))
             conn.commit()
             result_obj = refresh_payload.get('result') if isinstance(refresh_payload, dict) else {}
+            refreshed = bool((result_obj or {}).get('refreshed'))
             new_ref = str((result_obj or {}).get('recordRef') or '').strip()
             row_map = _graph_fetch_rows_by_ids(conn, [_graph_parse_record_ref(new_ref)]) if new_ref else {}
             new_row = row_map.get(_graph_parse_record_ref(new_ref)) if new_ref else None
@@ -8054,7 +8055,7 @@ def cmd_gbrain_refresh_canary(conn: sqlite3.Connection, args: argparse.Namespace
                 'refresh_payload': refresh_payload,
             }
             rollback_payload['new_record_ref'] = new_ref or None
-            after_result = 'applied'
+            after_result = 'applied' if refreshed else 'noop'
         except Exception as e:
             conn.rollback()
             blocked_reasons.append(str(e))

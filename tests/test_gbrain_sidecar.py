@@ -337,6 +337,7 @@ class TestGBrainSidecarCLI(unittest.TestCase):
         with redirect_stdout(compile_buf):
             compile_args.func(conn, compile_args)
         card_ref = json.loads(compile_buf.getvalue())["cardRef"]
+        _insert_observation(conn, {"kind": "note", "summary": "alpha newer source", "tool_name": "memory_store", "detail": {}})
 
         with tempfile.TemporaryDirectory() as td:
             packet_path = Path(td) / "governor.json"
@@ -392,6 +393,68 @@ class TestGBrainSidecarCLI(unittest.TestCase):
         self.assertEqual(dry_out["result"], "dry_run")
         self.assertEqual(apply_out["result"], "applied")
         self.assertEqual(apply_out["applied_count"], 1)
+
+    def test_refresh_canary_noop_does_not_claim_apply(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+        compile_args = build_parser().parse_args(
+            [
+                "graph",
+                "--json",
+                "synth",
+                "compile",
+                "--query",
+                "alpha",
+                "--title",
+                "Alpha synthesis",
+                "--summary",
+                "Alpha synthesis",
+            ]
+        )
+        compile_buf = io.StringIO()
+        with redirect_stdout(compile_buf):
+            compile_args.func(conn, compile_args)
+        card_ref = json.loads(compile_buf.getvalue())["cardRef"]
+
+        with tempfile.TemporaryDirectory() as td:
+            packet_path = Path(td) / "governor.json"
+            packet_path.write_text(
+                json.dumps(
+                    {
+                        "kind": "openclaw-mem.optimize.governor-review.v0",
+                        "items": [
+                            {
+                                "candidate_id": "gbrain-refresh:obs:1",
+                                "recommended_action": "refresh_card",
+                                "decision": "approved_for_apply",
+                                "apply_lane": "graph.synth.refresh",
+                                "target": {"recordRef": card_ref},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = build_parser().parse_args(
+                [
+                    "gbrain-sidecar",
+                    "refresh-canary",
+                    "--from-file",
+                    str(packet_path),
+                    "--apply",
+                    "--run-dir",
+                    td,
+                ]
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+        conn.close()
+
+        self.assertEqual(out["result"], "noop")
+        self.assertEqual(out["applied_count"], 0)
+        self.assertEqual(((out.get("policy") or {}).get("writes_performed")), 0)
 
 
 if __name__ == "__main__":
