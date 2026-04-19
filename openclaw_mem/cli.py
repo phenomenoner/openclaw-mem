@@ -35,6 +35,7 @@ from typing import Iterable, Dict, Any, List, Optional, Set, Tuple
 from openclaw_mem import __version__
 from openclaw_mem import defaults
 from openclaw_mem import context_pack_v1
+from openclaw_mem import gbrain_sidecar
 from openclaw_mem import pack_trace_v1
 from openclaw_mem import self_model_sidecar
 from openclaw_mem.artifact_sidecar import (
@@ -7189,6 +7190,20 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
     }
 
 
+def _pack_gbrain_consult_optional(args: argparse.Namespace, query: str) -> Optional[Dict[str, Any]]:
+    use_gbrain = str(getattr(args, "use_gbrain", "off") or "off").strip().lower()
+    if use_gbrain == "off":
+        return None
+
+    return gbrain_sidecar.consult(
+        query,
+        limit=max(1, int(getattr(args, "gbrain_limit", gbrain_sidecar.DEFAULT_CONSULT_LIMIT) or gbrain_sidecar.DEFAULT_CONSULT_LIMIT)),
+        timeout_ms=max(1, int(getattr(args, "gbrain_timeout_ms", gbrain_sidecar.DEFAULT_CONSULT_TIMEOUT_MS) or gbrain_sidecar.DEFAULT_CONSULT_TIMEOUT_MS)),
+        gbrain_bin=str(getattr(args, "gbrain_bin", gbrain_sidecar.DEFAULT_GBRAIN_BIN) or gbrain_sidecar.DEFAULT_GBRAIN_BIN),
+        expand=bool(getattr(args, "gbrain_expand", False)),
+    )
+
+
 def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Build a compact, cited L1-style bundle from hybrid retrieval."""
     query = (args.query or "").strip()
@@ -7501,6 +7516,17 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "citations": citations,
         "context_pack": context_pack_v1.to_dict(context_pack),
     }
+
+    gbrain_consult = _pack_gbrain_consult_optional(args, query)
+    if gbrain_consult is not None:
+        payload["gbrain"] = gbrain_consult
+        gbrain_bundle = str(gbrain_consult.get("bundle_text") or "").strip()
+        if gbrain_bundle:
+            base_bundle = str(payload.get("bundle_text_with_graph") or bundle_text).strip()
+            joined_parts = [part for part in [base_bundle, gbrain_bundle] if part]
+            if joined_parts:
+                payload["bundle_text_with_gbrain"] = "\n".join(joined_parts).strip() + "\n"
+
     if compaction_selected:
         compaction_policy_hints = _pack_compaction_policy_hints(compaction_selected)
         payload["compaction_sideband"] = {
@@ -7636,6 +7662,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         trace_extensions: Dict[str, Any] = {}
         if (graph_state or {}).get("use_graph") != "off":
             trace_extensions["graph"] = _pack_graph_trace_extension(graph_state)
+        if gbrain_consult is not None:
+            trace_extensions["gbrain"] = gbrain_sidecar.trace_extension(gbrain_consult)
         if trust_policy_mode != "off":
             trace_extensions["trust_policy"] = trust_policy
         if policy_surface is not None:
@@ -7728,6 +7756,75 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print((payload.get("bundle_text_with_graph") or bundle_text))
+
+
+def cmd_gbrain_consult(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = gbrain_sidecar.consult(
+        args.query,
+        limit=max(1, int(getattr(args, "limit", gbrain_sidecar.DEFAULT_CONSULT_LIMIT) or gbrain_sidecar.DEFAULT_CONSULT_LIMIT)),
+        timeout_ms=max(1, int(getattr(args, "timeout_ms", gbrain_sidecar.DEFAULT_CONSULT_TIMEOUT_MS) or gbrain_sidecar.DEFAULT_CONSULT_TIMEOUT_MS)),
+        gbrain_bin=str(getattr(args, "gbrain_bin", gbrain_sidecar.DEFAULT_GBRAIN_BIN) or gbrain_sidecar.DEFAULT_GBRAIN_BIN),
+        expand=bool(getattr(args, "expand", False)),
+    )
+    _emit(payload, True)
+
+
+def cmd_gbrain_jobs_smoke(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _emit(
+        gbrain_sidecar.smoke(
+            gbrain_bin=str(getattr(args, "gbrain_bin", gbrain_sidecar.DEFAULT_GBRAIN_BIN) or gbrain_sidecar.DEFAULT_GBRAIN_BIN),
+            timeout_ms=max(1, int(getattr(args, "timeout_ms", gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS) or gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS)),
+        ),
+        True,
+    )
+
+
+def cmd_gbrain_jobs_submit(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        params, _, _ = _parse_optional_json_arg(getattr(args, "params_json", None), getattr(args, "params_file", None), "params")
+        payload = gbrain_sidecar.submit_job(
+            name=str(getattr(args, "name", "") or ""),
+            data=dict(params or {}),
+            queue=str(getattr(args, "queue", "default") or "default"),
+            priority=int(getattr(args, "priority", 0) or 0),
+            max_attempts=int(getattr(args, "max_attempts", 3) or 3),
+            delay=(int(getattr(args, "delay_ms", 0) or 0) if getattr(args, "delay_ms", None) is not None else None),
+            gbrain_bin=str(getattr(args, "gbrain_bin", gbrain_sidecar.DEFAULT_GBRAIN_BIN) or gbrain_sidecar.DEFAULT_GBRAIN_BIN),
+            timeout_ms=max(1, int(getattr(args, "timeout_ms", gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS) or gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS)),
+        )
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+    _emit(payload, True)
+
+
+def cmd_gbrain_jobs_list(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        payload = gbrain_sidecar.list_jobs(
+            status=getattr(args, "status", None),
+            queue=getattr(args, "queue", None),
+            limit=max(1, int(getattr(args, "limit", 20) or 20)),
+            name=str(getattr(args, "name", gbrain_sidecar.PHASE2_ALLOWED_JOB_NAME) or gbrain_sidecar.PHASE2_ALLOWED_JOB_NAME),
+            gbrain_bin=str(getattr(args, "gbrain_bin", gbrain_sidecar.DEFAULT_GBRAIN_BIN) or gbrain_sidecar.DEFAULT_GBRAIN_BIN),
+            timeout_ms=max(1, int(getattr(args, "timeout_ms", gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS) or gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS)),
+        )
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+    _emit(payload, True)
+
+
+def cmd_gbrain_jobs_retry(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        payload = gbrain_sidecar.retry_job(
+            int(args.id),
+            gbrain_bin=str(getattr(args, "gbrain_bin", gbrain_sidecar.DEFAULT_GBRAIN_BIN) or gbrain_sidecar.DEFAULT_GBRAIN_BIN),
+            timeout_ms=max(1, int(getattr(args, "timeout_ms", gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS) or gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS)),
+        )
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+    _emit(payload, True)
 
 
 
@@ -15586,6 +15683,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--tail-file", help="Optional file containing protected tail lines (plain text or JSON list)")
     sp.add_argument("--tail-max-items", type=int, default=4, help="Max protected tail lines to consider (default: 4)")
     sp.add_argument("--tail-budget-tokens", type=int, default=0, help="Reserved token budget for protected tail lines (default: 0, disabled)")
+    sp.add_argument("--use-gbrain", choices=["off", "on"], default="off", help="Experimental gbrain consult adapter: off (default) | on")
+    sp.add_argument("--gbrain-bin", default=gbrain_sidecar.DEFAULT_GBRAIN_BIN, help=f"gbrain binary to invoke (default: {gbrain_sidecar.DEFAULT_GBRAIN_BIN})")
+    sp.add_argument("--gbrain-limit", type=int, default=gbrain_sidecar.DEFAULT_CONSULT_LIMIT, help=f"Max gbrain consult hits to normalize (default: {gbrain_sidecar.DEFAULT_CONSULT_LIMIT})")
+    sp.add_argument("--gbrain-timeout-ms", type=int, default=gbrain_sidecar.DEFAULT_CONSULT_TIMEOUT_MS, help=f"Timeout for gbrain consult in ms (default: {gbrain_sidecar.DEFAULT_CONSULT_TIMEOUT_MS})")
+    sp.add_argument("--gbrain-expand", action="store_true", help="Allow gbrain multi-query expansion for consult lane (default: off)")
 
     # Optional: Graphic Memory preflight integration (default OFF; fail-open)
     sp.add_argument(
@@ -15646,6 +15748,57 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)
+
+    sp = sub.add_parser("gbrain-sidecar", help="Experimental gbrain consult + bounded phase-2 jobs bridge")
+    sp.add_argument("--db", default=None, help="SQLite DB path")
+    sp.add_argument(
+        "--json",
+        dest="json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true).",
+    )
+    gsub = sp.add_subparsers(dest="gbrain_sidecar_cmd", required=True)
+
+    g = gsub.add_parser("consult", help="Run the experimental read-only gbrain consult adapter")
+    g.add_argument("--query", required=True, help="Consult query text")
+    g.add_argument("--limit", type=int, default=gbrain_sidecar.DEFAULT_CONSULT_LIMIT, help=f"Max hits to normalize (default: {gbrain_sidecar.DEFAULT_CONSULT_LIMIT})")
+    g.add_argument("--timeout-ms", type=int, default=gbrain_sidecar.DEFAULT_CONSULT_TIMEOUT_MS, help=f"Timeout in ms (default: {gbrain_sidecar.DEFAULT_CONSULT_TIMEOUT_MS})")
+    g.add_argument("--expand", action="store_true", help="Allow gbrain multi-query expansion")
+    g.add_argument("--gbrain-bin", default=gbrain_sidecar.DEFAULT_GBRAIN_BIN, help=f"gbrain binary to invoke (default: {gbrain_sidecar.DEFAULT_GBRAIN_BIN})")
+    g.set_defaults(func=cmd_gbrain_consult)
+
+    g = gsub.add_parser("jobs-smoke", help="Verify gbrain jobs smoke for the bounded phase-2 lane")
+    g.add_argument("--timeout-ms", type=int, default=gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS, help=f"Timeout in ms (default: {gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS})")
+    g.add_argument("--gbrain-bin", default=gbrain_sidecar.DEFAULT_GBRAIN_BIN, help=f"gbrain binary to invoke (default: {gbrain_sidecar.DEFAULT_GBRAIN_BIN})")
+    g.set_defaults(func=cmd_gbrain_jobs_smoke)
+
+    g = gsub.add_parser("jobs-submit", help=f"Submit the bounded phase-2 job lane ({gbrain_sidecar.PHASE2_ALLOWED_JOB_NAME})")
+    g.add_argument("--name", default=gbrain_sidecar.PHASE2_ALLOWED_JOB_NAME, help=f"Bounded job name (default and only allowed: {gbrain_sidecar.PHASE2_ALLOWED_JOB_NAME})")
+    g.add_argument("--params-json", help="Job params JSON")
+    g.add_argument("--params-file", help="Path to job params JSON file")
+    g.add_argument("--queue", default="default", help="Queue name (default: default)")
+    g.add_argument("--priority", type=int, default=0, help="Priority (default: 0)")
+    g.add_argument("--max-attempts", type=int, default=3, help="Max attempts (default: 3)")
+    g.add_argument("--delay-ms", type=int, help="Optional delay before eligibility")
+    g.add_argument("--timeout-ms", type=int, default=gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS, help=f"Timeout in ms (default: {gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS})")
+    g.add_argument("--gbrain-bin", default=gbrain_sidecar.DEFAULT_GBRAIN_BIN, help=f"gbrain binary to invoke (default: {gbrain_sidecar.DEFAULT_GBRAIN_BIN})")
+    g.set_defaults(func=cmd_gbrain_jobs_submit)
+
+    g = gsub.add_parser("jobs-list", help="List bounded phase-2 jobs through the gbrain bridge")
+    g.add_argument("--status", help="Optional status filter")
+    g.add_argument("--queue", help="Optional queue filter")
+    g.add_argument("--name", default=gbrain_sidecar.PHASE2_ALLOWED_JOB_NAME, help=f"Job name filter (default: {gbrain_sidecar.PHASE2_ALLOWED_JOB_NAME})")
+    g.add_argument("--limit", type=int, default=20, help="Max rows (default: 20)")
+    g.add_argument("--timeout-ms", type=int, default=gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS, help=f"Timeout in ms (default: {gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS})")
+    g.add_argument("--gbrain-bin", default=gbrain_sidecar.DEFAULT_GBRAIN_BIN, help=f"gbrain binary to invoke (default: {gbrain_sidecar.DEFAULT_GBRAIN_BIN})")
+    g.set_defaults(func=cmd_gbrain_jobs_list)
+
+    g = gsub.add_parser("jobs-retry", help="Retry a failed/dead gbrain job by id")
+    g.add_argument("--id", required=True, type=int, help="Job id")
+    g.add_argument("--timeout-ms", type=int, default=gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS, help=f"Timeout in ms (default: {gbrain_sidecar.DEFAULT_JOBS_TIMEOUT_MS})")
+    g.add_argument("--gbrain-bin", default=gbrain_sidecar.DEFAULT_GBRAIN_BIN, help=f"gbrain binary to invoke (default: {gbrain_sidecar.DEFAULT_GBRAIN_BIN})")
+    g.set_defaults(func=cmd_gbrain_jobs_retry)
 
     add_capsule_parser_to_cli(sub)
 
