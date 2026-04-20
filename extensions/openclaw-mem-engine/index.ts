@@ -3,7 +3,7 @@
  *
  * Enable (no config apply here):
  * 1) Add this extension folder to OpenClaw plugin load paths.
- *    - Example (config): plugins.loadPaths += ["/root/.openclaw/workspace/openclaw-mem-dev/extensions"]
+ *    - Example (config): plugins.loadPaths += ["/path/to/openclaw-mem/extensions"]
  * 2) Set the memory slot to this plugin:
  *    - plugins.slots.memory = "openclaw-mem-engine"
  * 3) Configure embeddings (either):

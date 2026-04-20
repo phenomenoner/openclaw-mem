@@ -47,7 +47,7 @@ openclaw ltm stats --scope openclaw-mem --json
 ```bash
 openclaw memory export \
   --scope openclaw-mem \
-  --out /root/.openclaw/workspace/.tmp/openclaw/mem_export_test.jsonl \
+  --out /path/to/tmp/mem_export_test.jsonl \
   --format jsonl \
   --json
 
@@ -63,7 +63,7 @@ openclaw ltm export --scope openclaw-mem --out /tmp/mem.json --format json --jso
 
 ```bash
 openclaw memory import \
-  --in /root/.openclaw/workspace/.tmp/openclaw/mem_export_test.jsonl \
+  --in /path/to/tmp/mem_export_test.jsonl \
   --dedupe id_text \
   --dry-run \
   --json
@@ -115,13 +115,13 @@ This keeps admin functionality available in agent/tool workflows even if CLI wir
       "openclaw-mem-engine": {
         "enabled": true,
         "config": {
-          "docsColdLane": {
-            "enabled": true,
-            "sqlitePath": "~/.openclaw/memory/openclaw-mem.sqlite",
-            "sourceRoots": [
-              "/root/.openclaw/workspace/lyria-working-ledger/DECISIONS",
-              "/root/.openclaw/workspace/openclaw-async-coding-playbook/projects"
-            ],
+            "docsColdLane": {
+              "enabled": true,
+              "sqlitePath": "~/.openclaw/memory/openclaw-mem.sqlite",
+              "sourceRoots": [
+              "/path/to/decision-docs",
+              "/path/to/project-docs"
+              ],
             "sourceGlobs": ["**/*.md", "**/ROADMAP*.md", "**/*SPEC*.md"],
             "scopeMappingStrategy": "repo_prefix", // none|repo_prefix|path_prefix|map
             "scopeMap": {

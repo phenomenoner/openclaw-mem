@@ -137,10 +137,10 @@ Example host config:
             "commandArgs": [
               "run",
               "--project",
-              "/root/.openclaw/workspace/delirium-to-weiji",
+              "/path/to/wei-ji-repo",
               "weiji-memory-preflight"
             ],
-            "dbPath": "/root/.openclaw/workspace/delirium-to-weiji/.state/d2w/verdicts.sqlite3",
+            "dbPath": "/path/to/wei-ji-repo/.state/d2w/verdicts.sqlite3",
             "timeoutMs": 12000,
             "failMode": "open",
             "failOnQueued": false,
