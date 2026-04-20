@@ -18,11 +18,14 @@ The phase 4-9 code slice was already shipped, but the real gate was still operat
 
 ## Verification
 - `python3 -m unittest tests.test_self_model_sidecar`
-  - result: `Ran 13 tests ... OK`
+  - result: `Ran 16 tests ... OK`
 - live controller smoke:
   - first run surfaced the real residue problem (`receipt_gap`) caused by an old autorun receipt
   - controller was hardened to start from a fresh baseline instead of over-reading stale history
-  - second run returned `NO_REPLY` and wrote:
+  - later soak review surfaced a `suspicious_drift` false positive driven by role-only support fluctuation without contradiction
+  - drift gate was narrowed so role-only state/score shifts without contradiction are recorded as ignored soak drift, not blocking alerts
+  - current smoke returns `NO_REPLY` with `status: hold`, `reason: window_incomplete`, `suspicious_count: 0`, `ignored_count: 2`
+  - durable status remains at:
     - `~/.openclaw/memory/openclaw-mem/self-model-sidecar/soak/baseline.json`
     - `~/.openclaw/memory/openclaw-mem/self-model-sidecar/soak/status.json`
 - live Gateway cron activation:

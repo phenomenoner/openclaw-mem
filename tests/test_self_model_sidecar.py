@@ -8,7 +8,7 @@ from pathlib import Path
 
 from openclaw_mem import self_model_sidecar
 from openclaw_mem.cli import _connect, build_parser
-from openclaw_mem.continuity_soak import SoakConfig, ensure_baseline, evaluate_soak
+from openclaw_mem.continuity_soak import SoakConfig, compute_drift_summary, ensure_baseline, evaluate_soak
 
 
 class TestSelfModelSidecarCli(unittest.TestCase):
@@ -554,6 +554,97 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             report = evaluate_soak(SoakConfig(run_dir=tmp, cadence_seconds=300, target_hours=72.0), now=datetime.fromisoformat("2026-04-20T00:00:10+00:00").astimezone(timezone.utc), baseline_started_at=baseline["started_at"])
             self.assertEqual(report["status"], "hold")
             self.assertEqual(report["receipt_count"], 1)
+
+    def test_soak_ignores_role_only_support_decay_without_contradiction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshots = root / "snapshots"
+            snapshots.mkdir(parents=True, exist_ok=True)
+            before = {
+                "schema": "openclaw-mem.self-model.snapshot.v0",
+                "snapshot_id": "snap-1",
+                "source_digest": "digest-a",
+                "attachments": [{"id": "role:reviewer", "attachment_score": 0.97, "confidence": 0.9, "fragility": "supported", "adjudication_state": "accepted", "contradiction_hits": 0}],
+            }
+            after = {
+                "schema": "openclaw-mem.self-model.snapshot.v0",
+                "snapshot_id": "snap-2",
+                "source_digest": "digest-b",
+                "attachments": [{"id": "role:reviewer", "attachment_score": 0.61, "confidence": 0.55, "fragility": "watch", "adjudication_state": "tentative", "contradiction_hits": 0}],
+            }
+            (snapshots / "snap-1.json").write_text(json.dumps(before), encoding="utf-8")
+            (snapshots / "snap-2.json").write_text(json.dumps(after), encoding="utf-8")
+            autorun = root / "autorun"
+            autorun.mkdir(parents=True, exist_ok=True)
+            (autorun / "run-1.json").write_text(json.dumps({"generated_at": "2026-04-20T00:00:00+00:00", "snapshot_id": "snap-1"}), encoding="utf-8")
+            (autorun / "run-2.json").write_text(json.dumps({"generated_at": "2026-04-20T00:05:00+00:00", "snapshot_id": "snap-2"}), encoding="utf-8")
+            drift = compute_drift_summary(tmp, [json.loads((autorun / "run-1.json").read_text()), json.loads((autorun / "run-2.json").read_text())])
+            self.assertEqual(drift["suspicious_count"], 0)
+            self.assertEqual(drift["ignored_count"], 1)
+            self.assertEqual(drift["ignored_pairs"][0]["ignored_reason"], "role_shift_without_contradiction")
+
+    def test_soak_ignores_role_only_strengthening_without_contradiction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshots = root / "snapshots"
+            snapshots.mkdir(parents=True, exist_ok=True)
+            before = {
+                "schema": "openclaw-mem.self-model.snapshot.v0",
+                "snapshot_id": "snap-1",
+                "source_digest": "digest-a",
+                "attachments": [
+                    {"id": "role:reviewer", "attachment_score": 0.61, "confidence": 0.55, "fragility": "watch", "adjudication_state": "tentative", "contradiction_hits": 0},
+                    {"id": "role:operator", "attachment_score": 0.38, "confidence": 0.33, "fragility": "watch", "adjudication_state": "fragile", "contradiction_hits": 0},
+                    {"id": "style:evidence_first", "attachment_score": 0.79, "confidence": 0.73, "fragility": "supported", "adjudication_state": "accepted", "contradiction_hits": 0},
+                ],
+            }
+            after = {
+                "schema": "openclaw-mem.self-model.snapshot.v0",
+                "snapshot_id": "snap-2",
+                "source_digest": "digest-b",
+                "attachments": [
+                    {"id": "role:reviewer", "attachment_score": 0.97, "confidence": 0.92, "fragility": "supported", "adjudication_state": "accepted", "contradiction_hits": 0},
+                    {"id": "role:operator", "attachment_score": 0.61, "confidence": 0.55, "fragility": "watch", "adjudication_state": "tentative", "contradiction_hits": 0},
+                    {"id": "style:evidence_first", "attachment_score": 1.0, "confidence": 0.95, "fragility": "supported", "adjudication_state": "accepted", "contradiction_hits": 0},
+                ],
+            }
+            (snapshots / "snap-1.json").write_text(json.dumps(before), encoding="utf-8")
+            (snapshots / "snap-2.json").write_text(json.dumps(after), encoding="utf-8")
+            autorun = root / "autorun"
+            autorun.mkdir(parents=True, exist_ok=True)
+            (autorun / "run-1.json").write_text(json.dumps({"generated_at": "2026-04-20T00:00:00+00:00", "snapshot_id": "snap-1"}), encoding="utf-8")
+            (autorun / "run-2.json").write_text(json.dumps({"generated_at": "2026-04-20T00:05:00+00:00", "snapshot_id": "snap-2"}), encoding="utf-8")
+            drift = compute_drift_summary(tmp, [json.loads((autorun / "run-1.json").read_text()), json.loads((autorun / "run-2.json").read_text())])
+            self.assertEqual(drift["suspicious_count"], 0)
+            self.assertEqual(drift["ignored_count"], 1)
+            self.assertEqual(drift["ignored_pairs"][0]["ignored_reason"], "role_shift_without_contradiction")
+
+    def test_soak_keeps_suspicious_when_contradiction_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshots = root / "snapshots"
+            snapshots.mkdir(parents=True, exist_ok=True)
+            before = {
+                "schema": "openclaw-mem.self-model.snapshot.v0",
+                "snapshot_id": "snap-1",
+                "source_digest": "digest-a",
+                "attachments": [{"id": "role:reviewer", "attachment_score": 0.97, "confidence": 0.9, "fragility": "supported", "adjudication_state": "accepted", "contradiction_hits": 0}],
+            }
+            after = {
+                "schema": "openclaw-mem.self-model.snapshot.v0",
+                "snapshot_id": "snap-2",
+                "source_digest": "digest-b",
+                "attachments": [{"id": "role:reviewer", "attachment_score": 0.61, "confidence": 0.55, "fragility": "watch", "adjudication_state": "tentative", "contradiction_hits": 1}],
+            }
+            (snapshots / "snap-1.json").write_text(json.dumps(before), encoding="utf-8")
+            (snapshots / "snap-2.json").write_text(json.dumps(after), encoding="utf-8")
+            autorun = root / "autorun"
+            autorun.mkdir(parents=True, exist_ok=True)
+            (autorun / "run-1.json").write_text(json.dumps({"generated_at": "2026-04-20T00:00:00+00:00", "snapshot_id": "snap-1"}), encoding="utf-8")
+            (autorun / "run-2.json").write_text(json.dumps({"generated_at": "2026-04-20T00:05:00+00:00", "snapshot_id": "snap-2"}), encoding="utf-8")
+            drift = compute_drift_summary(tmp, [json.loads((autorun / "run-1.json").read_text()), json.loads((autorun / "run-2.json").read_text())])
+            self.assertEqual(drift["suspicious_count"], 1)
+            self.assertEqual(drift["ignored_count"], 0)
 
 
 if __name__ == "__main__":

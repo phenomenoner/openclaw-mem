@@ -88,9 +88,49 @@ def iter_autorun_receipts(run_dir: str) -> List[Dict[str, Any]]:
     return receipts
 
 
+def _is_benign_role_shift(before: Dict[str, Any], after: Dict[str, Any], diff: Dict[str, Any]) -> bool:
+    changed = list(diff.get("changed") or [])
+    if not changed or diff.get("added") or diff.get("removed"):
+        return False
+    risk_flags = list(diff.get("risk_flags") or [])
+    if not risk_flags:
+        return False
+
+    before_map = {str(item.get("id")): item for item in list(before.get("attachments") or [])}
+    after_map = {str(item.get("id")): item for item in list(after.get("attachments") or [])}
+    changed_map = {str(item.get("id")): item for item in changed}
+
+    flagged_ids = []
+    for flag in risk_flags:
+        head, _, rest = str(flag).partition(":")
+        if head not in {"large_delta", "state_transition"}:
+            return False
+        if head == "large_delta":
+            stance_id = rest
+        else:
+            parts = rest.split(":") if rest else []
+            stance_id = ":".join(parts[:2]) if len(parts) >= 2 else ""
+        if not stance_id.startswith("role:"):
+            return False
+        flagged_ids.append(stance_id)
+
+    for stance_id in set(flagged_ids):
+        item = changed_map.get(stance_id) or {}
+        before_item = before_map.get(stance_id) or {}
+        after_item = after_map.get(stance_id) or {}
+        if int(before_item.get("contradiction_hits") or 0) > 0:
+            return False
+        if int(after_item.get("contradiction_hits") or 0) > 0:
+            return False
+        if str(item.get("before_state") or "") == "contested" or str(item.get("after_state") or "") == "contested":
+            return False
+    return True
+
+
 def compute_drift_summary(run_dir: str, receipts: List[Dict[str, Any]]) -> Dict[str, Any]:
     snapshots_dir = Path(run_dir) / "snapshots"
     suspicious_pairs: List[Dict[str, Any]] = []
+    ignored_pairs: List[Dict[str, Any]] = []
     checked_pairs = 0
     previous_snapshot: Optional[Dict[str, Any]] = None
     previous_receipt: Optional[Dict[str, Any]] = None
@@ -106,20 +146,25 @@ def compute_drift_summary(run_dir: str, receipts: List[Dict[str, Any]]) -> Dict[
             diff = compare_snapshots(previous_snapshot, current_snapshot)
             checked_pairs += 1
             if diff.get("drift_class") == "suspicious":
-                suspicious_pairs.append(
-                    {
-                        "from_snapshot_id": previous_receipt.get("snapshot_id"),
-                        "to_snapshot_id": receipt.get("snapshot_id"),
-                        "risk_flags": diff.get("risk_flags") or [],
-                        "summary": diff.get("summary") or {},
-                    }
-                )
+                pair = {
+                    "from_snapshot_id": previous_receipt.get("snapshot_id"),
+                    "to_snapshot_id": receipt.get("snapshot_id"),
+                    "risk_flags": diff.get("risk_flags") or [],
+                    "summary": diff.get("summary") or {},
+                }
+                if _is_benign_role_shift(previous_snapshot, current_snapshot, diff):
+                    pair["ignored_reason"] = "role_shift_without_contradiction"
+                    ignored_pairs.append(pair)
+                else:
+                    suspicious_pairs.append(pair)
         previous_snapshot = current_snapshot
         previous_receipt = receipt
     return {
         "checked_pairs": checked_pairs,
         "suspicious_pairs": suspicious_pairs,
         "suspicious_count": len(suspicious_pairs),
+        "ignored_pairs": ignored_pairs,
+        "ignored_count": len(ignored_pairs),
     }
 
 
