@@ -170,6 +170,9 @@ Operator bridge note:
 
 If you want each successful `memory_store` to also land in `gbrain`, enable `gbrainMirror`.
 
+This is separate from the experimental **GBrain sidecar** described in [`docs/experimental/gbrain-sidecar/README.md`](../../docs/experimental/gbrain-sidecar/README.md).
+`gbrainMirror` is an engine-side write-through mirror for successful `memory_store` writes, not the read-only lookup / restricted helper-job bridge described in the sidecar doc.
+
 Example host config:
 
 ```jsonc
@@ -213,5 +216,6 @@ Receipts:
 
 See the repo docs for:
 - `docs/mem-engine.md`
+- `docs/experimental/gbrain-sidecar/README.md`
 - `docs/ecosystem-fit.md`
 - `docs/mem-engine-admin-ops.md`

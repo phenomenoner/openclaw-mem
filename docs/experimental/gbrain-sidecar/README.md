@@ -1,11 +1,30 @@
-# gbrain side-car experimental lane
+# GBrain sidecar experimental lane
 
-Status: Phase 1 and Phase 2 bounded implementation slice.
+Status: experimental rollout surface.
+
+This lane is **not enabled by default** and does **not** carry stability guarantees yet.
+Use it as an experimental integration surface when you want to test whether GBrain can help with read-only Pack lookup or one tightly bounded helper lane.
+
+Plain-language summary:
+
+- Phase 1 = **read-only lookup** from GBrain during Pack assembly
+- Phase 2 = **restricted background jobs** for one deterministic helper family
+- Phase 3 = **gated refresh apply** through the existing governor path
 
 ## Verdict
 
 `openclaw-mem` stays the memory governor and `ContextPack` owner.
-`gbrain` is consulted as an external brain and used as a bounded deterministic worker substrate.
+`gbrain` is consulted as an external retrieval/helper substrate, not promoted into a second truth owner.
+
+## Relation to `gbrainMirror`
+
+This experimental sidecar is **not** the same thing as `gbrainMirror`.
+
+- `gbrain sidecar` = optional experimental lookup + bounded helper bridge during Pack/maintenance workflows
+- `gbrainMirror` = optional mem-engine write-through mirror that copies successful `memory_store` writes into a dedicated GBrain import root
+
+They can coexist, but they solve different problems.
+If you are looking for engine-side write mirroring, read [`docs/mem-engine.md`](../../mem-engine.md) and [`extensions/openclaw-mem-engine/README.md`](../../../extensions/openclaw-mem-engine/README.md).
 
 ## Phase 1 shipped here
 
@@ -73,6 +92,10 @@ Why this shape:
 - override with `--gbrain-bin` when needed
 - consult timeout and job timeout are explicit flags
 - if `gbrain` is missing or slow, Pack degrades to baseline behavior
+
+Repo-local operator card:
+
+- [`skills/gbrain-sidecar.ops.md`](../../../skills/gbrain-sidecar.ops.md)
 
 ## Non-goals in this slice
 

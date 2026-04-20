@@ -72,6 +72,23 @@ The product loop is simple and stable:
 
 When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
 
+## Experimental GBrain sidecar
+
+`openclaw-mem` also ships an **experimental GBrain sidecar**.
+It is **not enabled by default**, carries **no stability guarantee**, and is still documented as an experimental rollout rather than a default product path.
+
+For teams that want to test two bounded additions, it currently offers:
+
+- a **read-only GBrain lookup** that can add extra Pack candidates without changing `ContextPack`
+- a **restricted background-job bridge** for one deterministic helper lane at a time
+
+Use it when you want to evaluate whether GBrain can improve retrieval support or bounded helper execution without changing memory ownership.
+Do not treat it as a second truth store, a backend replacement, or a general-purpose job runner.
+
+Read more:
+- [Experimental GBrain sidecar](docs/experimental/gbrain-sidecar/README.md)
+- [Optional Mem Engine + GBrain mirror](docs/mem-engine.md)
+
 ## Governed continuity side-car
 
 `openclaw-mem` also ships an optional derived continuity lane.
@@ -205,7 +222,9 @@ When a compaction receipt is later selected by `pack`, the response may include:
 - **Docs site:** <https://phenomenoner.github.io/openclaw-mem/>
 - **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
 - **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
+- **Experimental GBrain sidecar:** [`docs/experimental/gbrain-sidecar/README.md`](docs/experimental/gbrain-sidecar/README.md)
 - **Continuity side-car ops lane:** [`skills/self-model-sidecar.ops.md`](skills/self-model-sidecar.ops.md)
+- **GBrain sidecar ops lane:** [`skills/gbrain-sidecar.ops.md`](skills/gbrain-sidecar.ops.md)
 - **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
 - **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
 - **Pack policy contract:** [`docs/specs/context-pack-policy-v1.1.md`](docs/specs/context-pack-policy-v1.1.md)

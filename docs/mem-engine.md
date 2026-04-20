@@ -86,6 +86,11 @@ That means:
 - in short, helper lanes do not become competing durable-memory writers
 - if `gbrainMirror` is enabled, it is a **write-through mirror / retrieval substrate**, not a second truth owner
 
+Related experimental lane:
+- the separate **GBrain sidecar** doc covers read-only GBrain lookup, a restricted helper-job bridge, and a gated refresh canary
+- that surface is still experimental and **not enabled by default**
+- see [`docs/experimental/gbrain-sidecar/README.md`](experimental/gbrain-sidecar/README.md)
+
 If you need watchdog or advisory-only execution, set `readOnly: true` (or `OPENCLAW_MEM_ENGINE_READONLY=1`).
 That forces write-path rejection and disables `autoCapture`, which keeps the ownership boundary honest.
 
