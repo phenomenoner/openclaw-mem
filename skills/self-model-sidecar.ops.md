@@ -25,15 +25,24 @@ uv run --python 3.13 -- python -m openclaw_mem continuity current --scope <scope
 uv run --python 3.13 -- python -m openclaw_mem continuity attachment-map --snapshot <path> --json
 uv run --python 3.13 -- python -m openclaw_mem continuity adjudication --snapshot <path> --json
 uv run --python 3.13 -- python -m openclaw_mem continuity public-summary --snapshot <path> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity explain --snapshot <path> --stance <id> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity sensitivity --snapshot <path> --stance <id> --json
 uv run --python 3.13 -- python -m openclaw_mem continuity threat-feed --snapshot <path> --json
 uv run --python 3.13 -- python -m openclaw_mem continuity diff --from <snapshot-a.json> --to <snapshot-b.json> --json
 uv run --python 3.13 -- python -m openclaw_mem continuity release --stance <id> --reason <text> --mode weaken --factor 0.5 --json
 uv run --python 3.13 -- python -m openclaw_mem continuity release --stance <id> --reason <text> --mode rebind --json
 uv run --python 3.13 -- python -m openclaw_mem continuity release-history --scope <scope> --session-id <session> --stance <id> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity patterns --scope <scope> --session-id <session> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity triggers --snapshot <path> --scope <scope> --session-id <session> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity interventions --snapshot <path> --scope <scope> --session-id <session> --json
 uv run --python 3.13 -- python -m openclaw_mem continuity compare-migration \
   --baseline-persona-file baseline.json \
   --candidate-persona-file candidate.json \
   --scope <scope> --session-id <session> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity compare-sessions \
+  --left-scope <scope-a> --left-session-id <session-a> \
+  --right-scope <scope-b> --right-session-id <session-b> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity wording-lint --snapshot <path> --json
 uv run --python 3.13 -- python -m openclaw_mem continuity enable --cadence-seconds 300 --json
 uv run --python 3.13 -- python -m openclaw_mem continuity status --json
 uv run --python 3.13 -- python -m openclaw_mem continuity auto-run --scope <scope> --session-id <session> --cycles 1 --json
@@ -44,12 +53,16 @@ uv run --python 3.13 -- python -m openclaw_mem continuity disable --json
 1. Build `current` and persist it when you need an audit point.
 2. Inspect `attachment-map` and `adjudication` before making release decisions.
 3. Check `threat-feed` before claiming the model is stable.
-4. Use `public-summary` only for restrained public-safe language, never as identity truth.
-5. Use `release` only with a concrete operator reason, ideally scoped to the active scope/session.
-6. Use `release-history` when you need to replay weaken -> rebind -> retire state transitions.
-7. Use `compare-migration` before prompt/model/persona refreshes.
-8. Enable the control plane only when you actually want autonomous receipts.
-9. Rebuild `current` after release to verify the attachment actually loosened, recovered, or disappeared as expected.
+4. Use `explain` before acting on a claim you do not fully trust.
+5. Use `sensitivity` before promoting a claim to stronger operator/public wording.
+6. Use `public-summary` only for restrained public-safe language, never as identity truth.
+7. Use `release` only with a concrete operator reason, ideally scoped to the active scope/session.
+8. Use `release-history` when you need to replay weaken -> rebind -> retire state transitions.
+9. Use `patterns`, `triggers`, and `interventions` to close the operator loop once persisted receipts exist.
+10. Use `compare-migration` or `compare-sessions` before prompt/model/session boundary changes.
+11. Run `wording-lint` before shipping continuity-facing copy.
+12. Enable the control plane only when you actually want autonomous receipts.
+13. Rebuild `current` after release to verify the attachment actually loosened, recovered, or disappeared as expected.
 
 ## Inputs
 - live `openclaw-mem` observations / episodic events DB
@@ -66,7 +79,14 @@ uv run --python 3.13 -- python -m openclaw_mem continuity disable --json
 - diff schema: `openclaw-mem.self-model.diff.v0`
 - release receipt schema: `openclaw-mem.self-model.release-receipt.v0`
 - release history schema: `openclaw-mem.self-model.release-history.v0`
+- explain schema: `openclaw-mem.self-model.explain.v0`
+- sensitivity schema: `openclaw-mem.self-model.sensitivity.v0`
+- pattern report schema: `openclaw-mem.self-model.pattern-report.v0`
+- trigger report schema: `openclaw-mem.self-model.trigger-report.v0`
+- intervention report schema: `openclaw-mem.self-model.intervention-report.v0`
 - migration compare schema: `openclaw-mem.self-model.compare-migration.v0`
+- cross-session compare schema: `openclaw-mem.self-model.compare-sessions.v0`
+- wording lint schema: `openclaw-mem.self-model.wording-lint.v0`
 
 ## Safety reminders
 - Persona priors are hints, not sovereignty.

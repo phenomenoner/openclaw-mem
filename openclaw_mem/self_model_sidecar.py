@@ -26,8 +26,32 @@ AUTORUN_SCHEMA = "openclaw-mem.self-model.autorun.v0"
 ADJUDICATION_SCHEMA = "openclaw-mem.self-model.adjudication.v0"
 PUBLIC_SUMMARY_SCHEMA = "openclaw-mem.self-model.public-summary.v0"
 RELEASE_HISTORY_SCHEMA = "openclaw-mem.self-model.release-history.v0"
+EXPLAIN_SCHEMA = "openclaw-mem.self-model.explain.v0"
+SENSITIVITY_SCHEMA = "openclaw-mem.self-model.sensitivity.v0"
+PATTERN_REPORT_SCHEMA = "openclaw-mem.self-model.pattern-report.v0"
+TRIGGER_REPORT_SCHEMA = "openclaw-mem.self-model.trigger-report.v0"
+INTERVENTION_REPORT_SCHEMA = "openclaw-mem.self-model.intervention-report.v0"
+COMPARE_SESSIONS_SCHEMA = "openclaw-mem.self-model.compare-sessions.v0"
+WORDING_LINT_SCHEMA = "openclaw-mem.self-model.wording-lint.v0"
 DERIVATION_VERSION = "self_model_sidecar_v0"
 ADJUDICATION_POLICY_VERSION = "self_model_sidecar_adjudication_v1"
+
+PUBLIC_BANNED_NOUNS: Tuple[str, ...] = (
+    "soul",
+    "consciousness",
+    "real self",
+    "true self",
+    "authoritative self-model",
+    "identity proof",
+)
+
+TRIGGER_LIBRARY: Dict[str, Dict[str, Any]] = {
+    "suspicious_drift": {"severity": "high", "cooldown_runs": 2, "action": "review_diff"},
+    "prior_dominance": {"severity": "medium", "cooldown_runs": 2, "action": "weaken_claim"},
+    "contradiction_pressure": {"severity": "high", "cooldown_runs": 1, "action": "retire_or_contest"},
+    "fragile_claim": {"severity": "medium", "cooldown_runs": 1, "action": "suppress_public_surface"},
+    "no_op_stability": {"severity": "low", "cooldown_runs": 3, "action": "observe_only"},
+}
 
 KEYWORD_GROUPS: Dict[str, Dict[str, Sequence[str]]] = {
     "role": {
@@ -102,6 +126,14 @@ def _control_path(run_dir: Optional[str]) -> Path:
 
 def _control_history_dir(run_dir: Optional[str]) -> Path:
     return _mkdir(Path(run_dir or default_run_dir()) / "control-history")
+
+
+def _patterns_dir(run_dir: Optional[str]) -> Path:
+    return _mkdir(Path(run_dir or default_run_dir()) / "patterns")
+
+
+def _analysis_dir(run_dir: Optional[str]) -> Path:
+    return _mkdir(Path(run_dir or default_run_dir()) / "analysis")
 
 
 def _state_residue_summary(run_dir: Optional[str]) -> Dict[str, Any]:
@@ -432,6 +464,63 @@ def _sorted_release_receipts(run_dir: str, *, scope: Optional[str], session_id: 
         receipts.append(payload)
     receipts.sort(key=lambda item: (str(item.get("released_at") or ""), str(item.get("receipt_id") or "")))
     return receipts
+
+
+def _iter_persisted_snapshots(run_dir: Optional[str], *, scope: Optional[str] = None, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    root = Path(run_dir or default_run_dir()) / "snapshots"
+    snapshots: List[Dict[str, Any]] = []
+    if not root.exists():
+        return snapshots
+    for path in sorted(root.glob("sms:v0:*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if scope is not None and payload.get("scope") != scope:
+            continue
+        if session_id is not None and payload.get("session_id") != session_id:
+            continue
+        payload["_path"] = str(path)
+        snapshots.append(payload)
+    snapshots.sort(key=lambda item: str(item.get("generated_at") or item.get("snapshot_id") or ""))
+    return snapshots
+
+
+def _iter_autorun_receipts(run_dir: Optional[str]) -> List[Dict[str, Any]]:
+    root = Path(run_dir or default_run_dir()) / "autorun"
+    receipts: List[Dict[str, Any]] = []
+    if not root.exists():
+        return receipts
+    for path in sorted(root.glob("run-*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            payload["_path"] = str(path)
+            receipts.append(payload)
+    return receipts
+
+
+def _patch_attachment(snapshot: Dict[str, Any], target_id: str, mutator) -> Dict[str, Any]:
+    patched = json.loads(json.dumps(snapshot))
+    attachments = list(patched.get("attachments") or [])
+    next_attachments: List[Dict[str, Any]] = []
+    for item in attachments:
+        if str(item.get("id")) == target_id:
+            next_attachments.append(mutator(dict(item)))
+        else:
+            next_attachments.append(dict(item))
+    next_attachments.sort(key=lambda item: (-float(item.get("attachment_score") or 0.0), str(item.get("id") or "")))
+    patched["attachments"] = _with_attachment_provenance(next_attachments)
+    patched["roles"] = [item["id"] for item in patched["attachments"] if item.get("category") == "role"][:5]
+    patched["goals"] = [item["id"] for item in patched["attachments"] if item.get("category") == "goal"][:5]
+    patched["refusals"] = [item["id"] for item in patched["attachments"] if item.get("category") == "refusal"][:5]
+    patched["style_commitments"] = [item["id"] for item in patched["attachments"] if item.get("category") == "style"][:5]
+    patched["narrative"] = _build_narrative(patched["attachments"][:8])
+    return patched
 
 
 def _collect_candidates(evidence: List[Dict[str, Any]], persona_priors: Dict[str, Dict[str, float]]) -> List[Dict[str, Any]]:
@@ -845,6 +934,140 @@ def build_public_summary(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def build_explain_report(
+    snapshot: Dict[str, Any],
+    *,
+    stance_id: str,
+    run_dir: Optional[str],
+    scope: Optional[str],
+    session_id: Optional[str],
+) -> Dict[str, Any]:
+    attachments = list(snapshot.get("attachments") or [])
+    target = next((item for item in attachments if str(item.get("id")) == stance_id), None)
+    history = build_release_history(run_dir=run_dir, scope=scope, session_id=session_id, stance_id=stance_id)
+    threat_feed = build_threat_feed(snapshot)
+    related_threats = [threat for threat in threat_feed.get("threats", []) if stance_id in set(threat.get("attachment_ids") or [])]
+    if target is None:
+        return {
+            "schema": EXPLAIN_SCHEMA,
+            "snapshot_id": snapshot.get("snapshot_id"),
+            "stance_id": stance_id,
+            "generated_at": _utcnow_iso(),
+            "found": False,
+            "release_history": history,
+            "related_threats": related_threats,
+            "provenance": {
+                "derived": True,
+                "authoritative": False,
+                "derivation_version": DERIVATION_VERSION,
+                "snapshot_source_digest": snapshot.get("source_digest"),
+            },
+        }
+    return {
+        "schema": EXPLAIN_SCHEMA,
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "stance_id": stance_id,
+        "generated_at": _utcnow_iso(),
+        "found": True,
+        "attachment": target,
+        "operator_explanation": {
+            "state": target.get("adjudication_state"),
+            "reasons": list(target.get("adjudication_reasons") or []),
+            "evidence_count": int(target.get("evidence_count") or 0),
+            "evidence_ids": list(((target.get("provenance") or {}).get("evidence_ids") or [])),
+            "prior_weight": float(target.get("prior_weight") or 0.0),
+            "contradiction_hits": int(target.get("contradiction_hits") or 0),
+            "public_visible": bool(((target.get("publication") or {}).get("public_visible"))),
+            "hedge": ((target.get("publication") or {}).get("hedge")),
+        },
+        "release_history": history,
+        "related_threats": related_threats,
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+        },
+    }
+
+
+def build_sensitivity_report(snapshot: Dict[str, Any], *, stance_id: Optional[str] = None, top_k: int = 1) -> Dict[str, Any]:
+    attachments = list(snapshot.get("attachments") or [])
+    targets = [item for item in attachments if stance_id is None or str(item.get("id")) == stance_id]
+    analyses: List[Dict[str, Any]] = []
+    unsupported_claims: List[str] = []
+    prior_dominance: List[str] = []
+    low_evidence_high_coherence: List[str] = []
+    for item in targets:
+        item_id = str(item.get("id") or "")
+        if not item_id:
+            continue
+        evidence_ids = list(((item.get("provenance") or {}).get("evidence_ids") or []))
+        removed = evidence_ids[: max(1, int(top_k))]
+        base_evidence_count = int(item.get("evidence_count") or 0)
+        base_score = float(item.get("attachment_score") or 0.0)
+        patched = _patch_attachment(
+            snapshot,
+            item_id,
+            lambda target: {
+                **target,
+                "evidence_count": max(0, base_evidence_count - len(removed)),
+                "evidence_ids": evidence_ids[len(removed):],
+                "attachment_score": round(max(0.0, base_score - (0.25 * len(removed))), 3),
+            },
+        )
+        after = next((candidate for candidate in patched.get("attachments", []) if str(candidate.get("id")) == item_id), None)
+        if after is None:
+            continue
+        before_state = str(item.get("adjudication_state") or "tentative")
+        after_state = str(after.get("adjudication_state") or "tentative")
+        state_flip = before_state != after_state
+        if after_state == "rejected":
+            unsupported_claims.append(item_id)
+        if float(item.get("prior_weight") or 0.0) >= 0.8 and base_evidence_count <= 1:
+            prior_dominance.append(item_id)
+        if base_evidence_count <= 1 and base_score >= 0.75:
+            low_evidence_high_coherence.append(item_id)
+        analyses.append(
+            {
+                "id": item_id,
+                "removed_evidence_ids": removed,
+                "before_state": before_state,
+                "after_state": after_state,
+                "state_flip": state_flip,
+                "before_score": round(base_score, 3),
+                "after_score": round(float(after.get("attachment_score") or 0.0), 3),
+                "before_evidence_count": base_evidence_count,
+                "after_evidence_count": int(after.get("evidence_count") or 0),
+            }
+        )
+    denominator = max(1, len(targets))
+    overclaim_count = len(set(unsupported_claims) | set(low_evidence_high_coherence))
+    return {
+        "schema": SENSITIVITY_SCHEMA,
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "generated_at": _utcnow_iso(),
+        "target_scope": stance_id,
+        "analyses": analyses,
+        "signals": {
+            "unsupported_claim_ids": sorted(set(unsupported_claims)),
+            "prior_dominance_ids": sorted(set(prior_dominance)),
+            "low_evidence_high_coherence_ids": sorted(set(low_evidence_high_coherence)),
+        },
+        "metrics": {
+            "analysis_count": len(analyses),
+            "state_flip_count": sum(1 for item in analyses if item.get("state_flip")),
+            "overclaim_rate": round(overclaim_count / denominator, 3),
+        },
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+        },
+    }
+
+
 def build_attachment_map(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     attachments = list(snapshot.get("attachments") or [])
     grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -1143,6 +1366,321 @@ def compare_migration(
             "authoritative": False,
             "derivation_version": DERIVATION_VERSION,
             "query_only_enforced": True,
+        },
+    }
+
+
+def _compute_pattern_report(run_dir: Optional[str], *, scope: Optional[str], session_id: Optional[str]) -> Dict[str, Any]:
+    snapshots = _iter_persisted_snapshots(run_dir, scope=scope, session_id=session_id)
+    diffs: List[Dict[str, Any]] = []
+    for before, after in zip(snapshots, snapshots[1:]):
+        diffs.append(compare_snapshots(before, after))
+
+    pattern_counts: Counter[str] = Counter()
+    pattern_examples: Dict[str, Dict[str, Any]] = {}
+    for diff in diffs:
+        if diff.get("drift_class") == "no_op":
+            pattern_counts["pattern:stable_no_op_window"] += 1
+            pattern_examples.setdefault(
+                "pattern:stable_no_op_window",
+                {"kind": "stability", "evidence": [diff.get("from_snapshot_id"), diff.get("to_snapshot_id")]},
+            )
+        if diff.get("drift_class") == "suspicious":
+            pattern_counts["pattern:suspicious_drift_recurrence"] += 1
+            pattern_examples.setdefault(
+                "pattern:suspicious_drift_recurrence",
+                {"kind": "drift", "risk_flags": list(diff.get("risk_flags") or [])},
+            )
+        for changed in diff.get("changed", []):
+            if changed.get("after_state") == "contested":
+                pid = f"pattern:contested_recurrence:{changed.get('id')}"
+                pattern_counts[pid] += 1
+                pattern_examples.setdefault(pid, {"kind": "contested_claim", "stance_id": changed.get("id")})
+            if changed.get("after_state") == "fragile":
+                pid = f"pattern:fragile_recurrence:{changed.get('id')}"
+                pattern_counts[pid] += 1
+                pattern_examples.setdefault(pid, {"kind": "fragile_claim", "stance_id": changed.get("id")})
+
+    latest = snapshots[-1] if snapshots else None
+    if latest is not None:
+        for threat in build_threat_feed(latest).get("threats", []):
+            if threat.get("kind") == "prior_dominance":
+                pattern_counts["pattern:prior_dominance_watch"] += 1
+                pattern_examples.setdefault(
+                    "pattern:prior_dominance_watch",
+                    {"kind": "prior_dominance", "attachment_ids": list(threat.get("attachment_ids") or [])},
+                )
+
+    patterns = []
+    for pattern_id, count in sorted(pattern_counts.items(), key=lambda item: (-item[1], item[0])):
+        example = pattern_examples.get(pattern_id) or {}
+        patterns.append(
+            {
+                "pattern_id": pattern_id,
+                "support_count": count,
+                "kind": example.get("kind"),
+                "example": example,
+                "confidence": round(min(0.95, 0.35 + (count * 0.15)), 3),
+            }
+        )
+
+    payload = {
+        "schema": PATTERN_REPORT_SCHEMA,
+        "generated_at": _utcnow_iso(),
+        "scope": scope,
+        "session_id": session_id,
+        "snapshot_count": len(snapshots),
+        "diff_count": len(diffs),
+        "patterns": patterns,
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "run_dir": str(Path(run_dir or default_run_dir())),
+        },
+    }
+    return payload
+
+
+def build_pattern_report(run_dir: Optional[str], *, scope: Optional[str], session_id: Optional[str]) -> Dict[str, Any]:
+    payload = _compute_pattern_report(run_dir, scope=scope, session_id=session_id)
+    path = _patterns_dir(run_dir) / f"pattern-report-{int(time.time() * 1000)}.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload["path"] = str(path)
+    return payload
+
+
+def build_trigger_report(
+    snapshot: Dict[str, Any],
+    *,
+    run_dir: Optional[str],
+    scope: Optional[str],
+    session_id: Optional[str],
+) -> Dict[str, Any]:
+    threat_feed = build_threat_feed(snapshot)
+    pattern_report = _compute_pattern_report(run_dir, scope=scope, session_id=session_id)
+    autorun_receipts = _iter_autorun_receipts(run_dir)
+    recent_drifts = [item for item in autorun_receipts[-5:] if isinstance(item.get("diff_summary"), dict)]
+    activations: List[Dict[str, Any]] = []
+
+    for threat in threat_feed.get("threats", []):
+        key = "contradiction_pressure" if threat.get("kind") == "identity_tension" else str(threat.get("kind") or "")
+        if key not in TRIGGER_LIBRARY:
+            continue
+        spec = TRIGGER_LIBRARY[key]
+        activations.append(
+            {
+                "trigger_id": key,
+                "severity": spec["severity"],
+                "action": spec["action"],
+                "cooldown_runs": spec["cooldown_runs"],
+                "attachment_ids": list(threat.get("attachment_ids") or []),
+                "reason": threat.get("reason"),
+                "source": "threat_feed",
+            }
+        )
+
+    if any(item.get("drift_class") == "suspicious" for item in recent_drifts):
+        spec = TRIGGER_LIBRARY["suspicious_drift"]
+        activations.append(
+            {
+                "trigger_id": "suspicious_drift",
+                "severity": spec["severity"],
+                "action": spec["action"],
+                "cooldown_runs": spec["cooldown_runs"],
+                "attachment_ids": [],
+                "reason": "recent autorun receipts contain suspicious drift",
+                "source": "autorun",
+            }
+        )
+    if recent_drifts and all(item.get("diff_summary", {}).get("changed") == 0 for item in recent_drifts):
+        spec = TRIGGER_LIBRARY["no_op_stability"]
+        activations.append(
+            {
+                "trigger_id": "no_op_stability",
+                "severity": spec["severity"],
+                "action": spec["action"],
+                "cooldown_runs": spec["cooldown_runs"],
+                "attachment_ids": [],
+                "reason": "recent autorun receipts stayed stable",
+                "source": "autorun",
+            }
+        )
+
+    for pattern in pattern_report.get("patterns", []):
+        if str(pattern.get("kind") or "") == "fragile_claim":
+            spec = TRIGGER_LIBRARY["fragile_claim"]
+            activations.append(
+                {
+                    "trigger_id": "fragile_claim",
+                    "severity": spec["severity"],
+                    "action": spec["action"],
+                    "cooldown_runs": spec["cooldown_runs"],
+                    "attachment_ids": [((pattern.get("example") or {}).get("stance_id"))],
+                    "reason": "fragile claim recurred across diffs",
+                    "source": "patterns",
+                }
+            )
+
+    return {
+        "schema": TRIGGER_REPORT_SCHEMA,
+        "generated_at": _utcnow_iso(),
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "scope": scope,
+        "session_id": session_id,
+        "activations": activations,
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+        },
+    }
+
+
+def build_intervention_report(
+    snapshot: Dict[str, Any],
+    *,
+    run_dir: Optional[str],
+    scope: Optional[str],
+    session_id: Optional[str],
+) -> Dict[str, Any]:
+    sensitivity = build_sensitivity_report(snapshot)
+    triggers = build_trigger_report(snapshot, run_dir=run_dir, scope=scope, session_id=session_id)
+    proposals: List[Dict[str, Any]] = []
+
+    for analysis in sensitivity.get("analyses", []):
+        if analysis.get("after_state") == "rejected":
+            proposals.append(
+                {
+                    "kind": "retire_candidate",
+                    "stance_id": analysis.get("id"),
+                    "recommended_mode": "retire",
+                    "reason": "top evidence removal collapses claim into rejected",
+                    "governance_required": True,
+                }
+            )
+        elif analysis.get("state_flip"):
+            proposals.append(
+                {
+                    "kind": "weaken_candidate",
+                    "stance_id": analysis.get("id"),
+                    "recommended_mode": "weaken",
+                    "reason": "sensitivity check flips adjudication state",
+                    "governance_required": True,
+                }
+            )
+
+    for activation in triggers.get("activations", []):
+        if activation.get("trigger_id") == "no_op_stability":
+            continue
+        proposals.append(
+            {
+                "kind": "operator_review",
+                "stance_id": next((x for x in activation.get("attachment_ids", []) if x), None),
+                "recommended_mode": None,
+                "reason": activation.get("reason"),
+                "governance_required": True,
+                "trigger_id": activation.get("trigger_id"),
+            }
+        )
+
+    unique: List[Dict[str, Any]] = []
+    seen = set()
+    for item in proposals:
+        key = (item.get("kind"), item.get("stance_id"), item.get("recommended_mode"), item.get("trigger_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+
+    return {
+        "schema": INTERVENTION_REPORT_SCHEMA,
+        "generated_at": _utcnow_iso(),
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "scope": scope,
+        "session_id": session_id,
+        "proposal_count": len(unique),
+        "proposals": unique,
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+        },
+    }
+
+
+def compare_sessions(
+    conn: sqlite3.Connection,
+    *,
+    left_scope: Optional[str],
+    left_session_id: Optional[str],
+    right_scope: Optional[str],
+    right_session_id: Optional[str],
+    limit: int,
+    persona_file: Optional[str],
+    observations_file: Optional[str],
+    episodes_file: Optional[str],
+    run_dir: Optional[str],
+) -> Dict[str, Any]:
+    with _db_readonly_guard(conn):
+        left = build_snapshot(
+            conn,
+            scope=left_scope,
+            session_id=left_session_id,
+            limit=limit,
+            persona_file=persona_file,
+            observations_file=observations_file,
+            episodes_file=episodes_file,
+            run_dir=run_dir,
+        )
+        right = build_snapshot(
+            conn,
+            scope=right_scope,
+            session_id=right_session_id,
+            limit=limit,
+            persona_file=persona_file,
+            observations_file=observations_file,
+            episodes_file=episodes_file,
+            run_dir=run_dir,
+        )
+    return {
+        "schema": COMPARE_SESSIONS_SCHEMA,
+        "generated_at": _utcnow_iso(),
+        "left": left,
+        "right": right,
+        "diff": compare_snapshots(left, right),
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "query_only_enforced": True,
+        },
+    }
+
+
+def build_wording_lint(snapshot: Optional[Dict[str, Any]] = None, *, text: Optional[str] = None) -> Dict[str, Any]:
+    summary_payload = build_public_summary(snapshot) if snapshot is not None else None
+    candidate_text = str(text or (summary_payload or {}).get("summary") or "")
+    lowered = candidate_text.lower()
+    violations = [token for token in PUBLIC_BANNED_NOUNS if token in lowered]
+    # v0 lint intentionally stays substring-based and hedge-first.
+    # It is a copy guardrail, not a semantic classifier.
+    needs_hedge = bool(candidate_text.strip()) and "derived" not in lowered and "continuity" not in lowered
+    return {
+        "schema": WORDING_LINT_SCHEMA,
+        "generated_at": _utcnow_iso(),
+        "snapshot_id": (snapshot or {}).get("snapshot_id") if isinstance(snapshot, dict) else None,
+        "text": candidate_text,
+        "violations": violations,
+        "needs_required_hedge": needs_hedge,
+        "ok": not violations and not needs_hedge,
+        "required_language": ["derived", "continuity"] if needs_hedge else [],
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
         },
     }
 

@@ -102,6 +102,13 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem continuity current --jso
 uv run --python 3.13 --frozen -- python -m openclaw_mem continuity attachment-map --snapshot <snapshot.json> --json
 uv run --python 3.13 --frozen -- python -m openclaw_mem continuity adjudication --snapshot <snapshot.json> --json
 uv run --python 3.13 --frozen -- python -m openclaw_mem continuity public-summary --snapshot <snapshot.json> --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity explain --snapshot <snapshot.json> --stance <id> --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity sensitivity --snapshot <snapshot.json> --stance <id> --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity patterns --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity triggers --snapshot <snapshot.json> --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity interventions --snapshot <snapshot.json> --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity compare-sessions --left-scope <scope-a> --left-session-id <session-a> --right-scope <scope-b> --right-session-id <session-b> --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem continuity wording-lint --snapshot <snapshot.json> --json
 uv run --python 3.13 --frozen -- python -m openclaw_mem continuity release-history --json
 ```
 
@@ -114,6 +121,12 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem continuity disable --jso
 ```
 
 Use it when you need auditable continuity receipts, migration comparison, or public-safe hedged summaries, not when you need a new source of truth. The lane stays rebuildable from memory-of-record by design.
+
+Updated operator loop:
+- `continuity explain` answers why one claim exists, including adjudication reasons and release history.
+- `continuity sensitivity` measures fragility by removing top evidence and recomputing the claim state.
+- `continuity patterns`, `triggers`, and `interventions` turn persisted receipts into a governed operator loop instead of raw JSON archaeology.
+- `continuity wording-lint` catches selfhood inflation and missing hedges before copy leaves the operator lane.
 
 Example:
 

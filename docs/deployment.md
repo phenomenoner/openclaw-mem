@@ -366,14 +366,23 @@ Recommended first operator checks after enablement:
 uv run --python 3.13 -- python -m openclaw_mem continuity current --json
 uv run --python 3.13 -- python -m openclaw_mem continuity attachment-map --snapshot <snapshot.json> --json
 uv run --python 3.13 -- python -m openclaw_mem continuity adjudication --snapshot <snapshot.json> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity explain --snapshot <snapshot.json> --stance <id> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity sensitivity --snapshot <snapshot.json> --stance <id> --json
 uv run --python 3.13 -- python -m openclaw_mem continuity public-summary --snapshot <snapshot.json> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity patterns --json
+uv run --python 3.13 -- python -m openclaw_mem continuity triggers --snapshot <snapshot.json> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity interventions --snapshot <snapshot.json> --json
+uv run --python 3.13 -- python -m openclaw_mem continuity wording-lint --snapshot <snapshot.json> --json
 uv run --python 3.13 -- python -m openclaw_mem continuity release-history --json
 ```
 
 Operator notes:
 - `continuity adjudication` is the gate that decides how strong a continuity claim is allowed to be.
+- `continuity explain` and `continuity sensitivity` are the minimum anti-delusion checks before stronger product copy or release actions.
 - `continuity public-summary` is the bounded hedge-first surface for restrained external phrasing.
 - `continuity release` now supports `weaken`, `rebind`, and `retire`, and `release-history` gives you replayable receipts.
+- `continuity patterns`, `triggers`, and `interventions` convert persisted receipts into a governed operator loop.
+- `continuity wording-lint` catches missing hedges and banned selfhood-inflation terms before text leaves the lane.
 - If you do not want autonomous continuity receipts, leave the control plane disabled and run the read surfaces ad hoc.
 
 Rollback:

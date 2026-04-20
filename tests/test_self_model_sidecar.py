@@ -136,6 +136,20 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             public_summary = self._run(["continuity", "public-summary", "--snapshot", snapshot_path, "--json"])
             self.assertEqual(public_summary["schema"], "openclaw-mem.self-model.public-summary.v0")
             self.assertTrue(public_summary["provenance"]["public_safe"])
+
+            explain = self._run(["continuity", "explain", "--snapshot", snapshot_path, "--stance", "goal:ship_mvp", "--run-dir", tmp, "--json"])
+            self.assertEqual(explain["schema"], "openclaw-mem.self-model.explain.v0")
+            self.assertTrue(explain["found"])
+            self.assertEqual(explain["attachment"]["id"], "goal:ship_mvp")
+
+            sensitivity = self._run(["continuity", "sensitivity", "--snapshot", snapshot_path, "--stance", "goal:ship_mvp", "--json"])
+            self.assertEqual(sensitivity["schema"], "openclaw-mem.self-model.sensitivity.v0")
+            self.assertEqual(sensitivity["target_scope"], "goal:ship_mvp")
+            self.assertEqual(len(sensitivity["analyses"]), 1)
+
+            wording = self._run(["continuity", "wording-lint", "--snapshot", snapshot_path, "--json"])
+            self.assertEqual(wording["schema"], "openclaw-mem.self-model.wording-lint.v0")
+            self.assertTrue(wording["ok"])
             self.assertEqual(obs_before, self._observation_count())
             self.assertEqual(events_before, self._event_count())
 
@@ -237,6 +251,17 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             self.assertEqual(history["receipt_count"], 3)
             self.assertEqual(history["current_state_by_stance"]["goal:ship_mvp"], "retired")
 
+            patterns = self._run(["continuity", "patterns", "--run-dir", tmp, "--scope", "proj-a", "--session-id", "s1", "--json"])
+            self.assertEqual(patterns["schema"], "openclaw-mem.self-model.pattern-report.v0")
+            self.assertGreaterEqual(patterns["snapshot_count"], 3)
+            self.assertTrue(Path(patterns["path"]).exists())
+
+            triggers = self._run(["continuity", "triggers", "--snapshot", after["persisted"]["snapshot_path"], "--run-dir", tmp, "--scope", "proj-a", "--session-id", "s1", "--json"])
+            self.assertEqual(triggers["schema"], "openclaw-mem.self-model.trigger-report.v0")
+
+            interventions = self._run(["continuity", "interventions", "--snapshot", after["persisted"]["snapshot_path"], "--run-dir", tmp, "--scope", "proj-a", "--session-id", "s1", "--json"])
+            self.assertEqual(interventions["schema"], "openclaw-mem.self-model.intervention-report.v0")
+
             compare = self._run(
                 [
                     "continuity",
@@ -260,6 +285,41 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             self.assertNotIn("latest_path", compare["candidate_paths"])
             self.assertGreaterEqual(compare["diff"]["summary"]["changed"] + compare["diff"]["summary"]["added"], 1)
             self.assertTrue(compare["provenance"]["query_only_enforced"])
+
+            compare_sessions = self._run(
+                [
+                    "continuity",
+                    "compare-sessions",
+                    "--left-scope",
+                    "proj-a",
+                    "--left-session-id",
+                    "s1",
+                    "--right-scope",
+                    "proj-a",
+                    "--right-session-id",
+                    "missing",
+                    "--run-dir",
+                    tmp,
+                    "--persist",
+                    "--json",
+                ]
+            )
+            self.assertEqual(compare_sessions["schema"], "openclaw-mem.self-model.compare-sessions.v0")
+            self.assertIn("left_paths", compare_sessions)
+            self.assertIn("right_paths", compare_sessions)
+            self.assertTrue(Path(compare_sessions["left_paths"]["snapshot_path"]).exists())
+            self.assertTrue(Path(compare_sessions["right_paths"]["snapshot_path"]).exists())
+            self.assertEqual(json.loads(Path(compare_sessions["left_paths"]["snapshot_path"]).read_text(encoding="utf-8"))["schema"], "openclaw-mem.self-model.snapshot.v0")
+            self.assertEqual(json.loads(Path(compare_sessions["right_paths"]["snapshot_path"]).read_text(encoding="utf-8"))["schema"], "openclaw-mem.self-model.snapshot.v0")
+
+            pattern_count_before = len(list((Path(tmp) / "patterns").glob("pattern-report-*.json"))) if (Path(tmp) / "patterns").exists() else 0
+            self._run(["continuity", "triggers", "--snapshot", after["persisted"]["snapshot_path"], "--run-dir", tmp, "--scope", "proj-a", "--session-id", "s1", "--json"])
+            pattern_count_after_trigger = len(list((Path(tmp) / "patterns").glob("pattern-report-*.json"))) if (Path(tmp) / "patterns").exists() else 0
+            self.assertEqual(pattern_count_before, pattern_count_after_trigger)
+
+            self._run(["continuity", "interventions", "--snapshot", after["persisted"]["snapshot_path"], "--run-dir", tmp, "--scope", "proj-a", "--session-id", "s1", "--json"])
+            pattern_count_after_intervention = len(list((Path(tmp) / "patterns").glob("pattern-report-*.json"))) if (Path(tmp) / "patterns").exists() else 0
+            self.assertEqual(pattern_count_before, pattern_count_after_intervention)
 
             threat = self._run(["continuity", "threat-feed", "--snapshot", after["persisted"]["snapshot_path"], "--json"])
             self.assertEqual(threat["schema"], "openclaw-mem.self-model.threat-feed.v0")
@@ -412,6 +472,26 @@ class TestSelfModelSidecarCli(unittest.TestCase):
         self.assertIn("state_transition:goal:verify:tentative->contested", diff["risk_flags"])
         self.assertEqual(diff["changed"][0]["before_state"], "tentative")
         self.assertEqual(diff["changed"][0]["after_state"], "contested")
+
+    def test_wording_lint_flags_inflation_terms(self):
+        report = self_model_sidecar.build_wording_lint(text="This is the true self and a form of consciousness.")
+        self.assertFalse(report["ok"])
+        self.assertIn("true self", report["violations"])
+        self.assertIn("consciousness", report["violations"])
+
+    def test_patterns_empty_snapshots_is_read_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._run(["continuity", "patterns", "--run-dir", tmp, "--json"])
+            self.assertEqual(report["schema"], "openclaw-mem.self-model.pattern-report.v0")
+            self.assertEqual(report["snapshot_count"], 0)
+            self.assertEqual(report["diff_count"], 0)
+            self.assertEqual(report["patterns"], [])
+            self.assertTrue(Path(report["path"]).exists())
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trigger_report = self_model_sidecar.build_trigger_report({"snapshot_id": "snap", "source_digest": "digest", "attachments": []}, run_dir=tmp, scope=None, session_id=None)
+            self.assertEqual(trigger_report["schema"], "openclaw-mem.self-model.trigger-report.v0")
+            self.assertFalse((Path(tmp) / "patterns").exists())
 
 
 if __name__ == "__main__":

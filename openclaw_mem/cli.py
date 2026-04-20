@@ -4494,6 +4494,28 @@ def cmd_self_public_summary(conn: sqlite3.Connection, args: argparse.Namespace) 
     _emit(payload, args.json)
 
 
+def cmd_self_explain(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_explain_report(
+        snapshot,
+        stance_id=args.stance,
+        run_dir=getattr(args, "run_dir", None),
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+    )
+    _emit(payload, args.json)
+
+
+def cmd_self_sensitivity(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_sensitivity_report(
+        snapshot,
+        stance_id=getattr(args, "stance", None),
+        top_k=int(getattr(args, "top_k", 1)),
+    )
+    _emit(payload, args.json)
+
+
 def cmd_self_diff(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     before = self_model_sidecar.load_snapshot(args.from_snapshot)
     after = self_model_sidecar.load_snapshot(args.to_snapshot)
@@ -4540,6 +4562,64 @@ def cmd_self_compare_migration(conn: sqlite3.Connection, args: argparse.Namespac
     if getattr(args, "persist", False):
         payload["baseline_paths"] = self_model_sidecar.persist_snapshot(payload["baseline"], getattr(args, "run_dir", None), update_latest=False)
         payload["candidate_paths"] = self_model_sidecar.persist_snapshot(payload["candidate"], getattr(args, "run_dir", None), update_latest=False)
+    _emit(payload, args.json)
+
+
+def cmd_self_patterns(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = self_model_sidecar.build_pattern_report(
+        getattr(args, "run_dir", None),
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+    )
+    _emit(payload, args.json)
+
+
+def cmd_self_triggers(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_trigger_report(
+        snapshot,
+        run_dir=getattr(args, "run_dir", None),
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+    )
+    _emit(payload, args.json)
+
+
+def cmd_self_interventions(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_intervention_report(
+        snapshot,
+        run_dir=getattr(args, "run_dir", None),
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+    )
+    _emit(payload, args.json)
+
+
+def cmd_self_compare_sessions(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = self_model_sidecar.compare_sessions(
+        conn,
+        left_scope=getattr(args, "left_scope", None),
+        left_session_id=getattr(args, "left_session_id", None),
+        right_scope=getattr(args, "right_scope", None),
+        right_session_id=getattr(args, "right_session_id", None),
+        limit=int(getattr(args, "limit", 50)),
+        persona_file=getattr(args, "persona_file", None),
+        observations_file=getattr(args, "observations_file", None),
+        episodes_file=getattr(args, "episodes_file", None),
+        run_dir=getattr(args, "run_dir", None),
+    )
+    if getattr(args, "persist", False):
+        payload["left_paths"] = self_model_sidecar.persist_snapshot(payload["left"], getattr(args, "run_dir", None), update_latest=False)
+        payload["right_paths"] = self_model_sidecar.persist_snapshot(payload["right"], getattr(args, "run_dir", None), update_latest=False)
+    _emit(payload, args.json)
+
+
+def cmd_self_wording_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = None
+    if getattr(args, "snapshot", None) or not getattr(args, "text", None):
+        snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_wording_lint(snapshot, text=getattr(args, "text", None))
     _emit(payload, args.json)
 
 
@@ -15704,6 +15784,19 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
         s.set_defaults(func=cmd_self_public_summary)
 
+        s = ssub.add_parser("explain", help="Explain one continuity attachment with adjudication, threats, and release history")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.add_argument("--stance", required=True, help="Attachment/stance id to explain")
+        s.set_defaults(func=cmd_self_explain)
+
+        s = ssub.add_parser("sensitivity", help="Run anti-delusion sensitivity checks by removing top evidence from one or more claims")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.add_argument("--stance", default=None, help="Optional single stance id to probe")
+        s.add_argument("--top-k", dest="top_k", type=int, default=1, help="How many top evidence ids to remove per claim (default: 1)")
+        s.set_defaults(func=cmd_self_sensitivity)
+
         s = ssub.add_parser("diff", help="Compare two persisted continuity snapshots")
         add_common(s)
         s.add_argument("--from", dest="from_snapshot", required=True, help="Baseline snapshot JSON path")
@@ -15736,6 +15829,38 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--candidate-persona-file", dest="candidate_persona_file", default=None, help="Candidate persona-prior JSON")
         s.add_argument("--persist", action="store_true", help="Persist both baseline and candidate snapshots")
         s.set_defaults(func=cmd_self_compare_migration)
+
+        s = ssub.add_parser("patterns", help="Derive recurring continuity patterns from persisted snapshots and receipts")
+        add_common(s)
+        s.add_argument("--run-dir", dest="run_dir", default=self_model_sidecar.default_run_dir(), help="Side-car state root for snapshots, receipts, and pattern reports")
+        s.add_argument("--scope", default=None, help="Optional scope boundary for pattern analysis")
+        s.add_argument("--session-id", dest="session_id", default=None, help="Optional session boundary for pattern analysis")
+        s.set_defaults(func=cmd_self_patterns)
+
+        s = ssub.add_parser("triggers", help="Evaluate environmental trigger activations from continuity state and receipts")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.set_defaults(func=cmd_self_triggers)
+
+        s = ssub.add_parser("interventions", help="Generate governed intervention proposals from continuity sensitivity and triggers")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.set_defaults(func=cmd_self_interventions)
+
+        s = ssub.add_parser("compare-sessions", help="Compare derived continuity between two scope/session boundaries")
+        add_self_surface_common(s)
+        s.add_argument("--left-scope", dest="left_scope", default=None, help="Left-hand scope boundary")
+        s.add_argument("--left-session-id", dest="left_session_id", default=None, help="Left-hand session boundary")
+        s.add_argument("--right-scope", dest="right_scope", default=None, help="Right-hand scope boundary")
+        s.add_argument("--right-session-id", dest="right_session_id", default=None, help="Right-hand session boundary")
+        s.add_argument("--persist", action="store_true", help="Persist both compared snapshots without updating latest")
+        s.set_defaults(func=cmd_self_compare_sessions)
+
+        s = ssub.add_parser("wording-lint", help="Lint continuity copy for banned selfhood inflation and missing hedges")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.add_argument("--text", default=None, help="Optional raw text to lint instead of the generated public summary")
+        s.set_defaults(func=cmd_self_wording_lint)
 
         s = ssub.add_parser("status", help="Inspect continuity enablement state and latest persisted snapshot")
         add_common(s)
@@ -16718,8 +16843,8 @@ def main() -> None:
     args = build_parser().parse_args()
     cmd = getattr(args, "cmd", None)
     self_cmd = getattr(args, "self_cmd", None)
-    file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd == "capsule" or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "status", "enable", "disable"}) or file_only_snapshot
+    file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
+    no_db_path = cmd == "capsule" or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

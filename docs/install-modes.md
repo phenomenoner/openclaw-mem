@@ -65,6 +65,7 @@ Delete the test DB or the repo checkout. No OpenClaw state changed.
 - backend-aware observability
 - deterministic triage / ops workflows
 - optional continuity side-car activation later without changing the active memory slot
+- continuity operator loop can later graduate from snapshots to explain/sensitivity/patterns/triggers/interventions without changing the active memory slot
 - no active memory-backend change
 
 ### First step
