@@ -46,6 +46,11 @@ uv run --python 3.13 -- python -m openclaw_mem continuity wording-lint --snapsho
 uv run --python 3.13 -- python -m openclaw_mem continuity enable --cadence-seconds 300 --json
 uv run --python 3.13 -- python -m openclaw_mem continuity status --json
 uv run --python 3.13 -- python -m openclaw_mem continuity auto-run --scope <scope> --session-id <session> --cycles 1 --json
+python3 tools/self_model_sidecar_soak_controller.py \
+  --repo-root /root/.openclaw/workspace/openclaw-mem \
+  --run-dir /root/.openclaw/memory/openclaw-mem/self-model-sidecar \
+  --cadence-seconds 300 \
+  --target-hours 72
 uv run --python 3.13 -- python -m openclaw_mem continuity disable --json
 ```
 
@@ -62,7 +67,8 @@ uv run --python 3.13 -- python -m openclaw_mem continuity disable --json
 10. Use `compare-migration` or `compare-sessions` before prompt/model/session boundary changes.
 11. Run `wording-lint` before shipping continuity-facing copy.
 12. Enable the control plane only when you actually want autonomous receipts.
-13. Rebuild `current` after release to verify the attachment actually loosened, recovered, or disappeared as expected.
+13. Use the soak controller for the real 72h gate, not ad hoc shell loops.
+14. Rebuild `current` after release to verify the attachment actually loosened, recovered, or disappeared as expected.
 
 ## Inputs
 - live `openclaw-mem` observations / episodic events DB

@@ -358,7 +358,16 @@ uv run --python 3.13 -- python -m openclaw_mem continuity enable --cadence-secon
 
 # Verify control plane status
 uv run --python 3.13 -- python -m openclaw_mem continuity status --json
+
+# Start the bounded 72h soak controller
+python3 tools/self_model_sidecar_soak_controller.py \
+  --repo-root /opt/openclaw-mem \
+  --run-dir /root/.openclaw/memory/openclaw-mem/self-model-sidecar \
+  --cadence-seconds 300 \
+  --target-hours 72
 ```
+
+The soak controller uses a fresh baseline under `~/.openclaw/memory/openclaw-mem/self-model-sidecar/soak/`, warns clearly on stale/gapped/suspicious drift, and is designed to disable its own Gateway cron job once the 72h window passes cleanly.
 
 Recommended first operator checks after enablement:
 

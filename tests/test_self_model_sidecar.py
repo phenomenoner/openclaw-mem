@@ -3,10 +3,12 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 
 from openclaw_mem import self_model_sidecar
 from openclaw_mem.cli import _connect, build_parser
+from openclaw_mem.continuity_soak import SoakConfig, ensure_baseline, evaluate_soak
 
 
 class TestSelfModelSidecarCli(unittest.TestCase):
@@ -492,6 +494,66 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             trigger_report = self_model_sidecar.build_trigger_report({"snapshot_id": "snap", "source_digest": "digest", "attachments": []}, run_dir=tmp, scope=None, session_id=None)
             self.assertEqual(trigger_report["schema"], "openclaw-mem.self-model.trigger-report.v0")
             self.assertFalse((Path(tmp) / "patterns").exists())
+
+    def test_soak_evaluate_hold_then_complete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshots = root / "snapshots"
+            snapshots.mkdir(parents=True, exist_ok=True)
+            base = {
+                "schema": "openclaw-mem.self-model.snapshot.v0",
+                "source_digest": "digest-a",
+                "attachments": [{"id": "goal:ship", "attachment_score": 0.6, "confidence": 0.7, "fragility": "supported", "adjudication_state": "accepted"}],
+            }
+            first = {**base, "snapshot_id": "snap-1"}
+            second = {**base, "snapshot_id": "snap-2"}
+            (snapshots / "snap-1.json").write_text(json.dumps(first), encoding="utf-8")
+            (snapshots / "snap-2.json").write_text(json.dumps(second), encoding="utf-8")
+            autorun = root / "autorun"
+            autorun.mkdir(parents=True, exist_ok=True)
+            (autorun / "run-1.json").write_text(json.dumps({"generated_at": "2026-04-20T00:00:00+00:00", "snapshot_id": "snap-1"}), encoding="utf-8")
+            (autorun / "run-2.json").write_text(json.dumps({"generated_at": "2026-04-20T00:05:00+00:00", "snapshot_id": "snap-2"}), encoding="utf-8")
+            hold = evaluate_soak(SoakConfig(run_dir=tmp, cadence_seconds=300, target_hours=72.0), now=datetime.fromisoformat("2026-04-20T00:05:30+00:00").astimezone(timezone.utc))
+            self.assertEqual(hold["status"], "hold")
+            self.assertEqual(hold["reason"], "window_incomplete")
+
+            complete = evaluate_soak(SoakConfig(run_dir=tmp, cadence_seconds=300, target_hours=(5.0 / 60.0) / 60.0), now=datetime.fromisoformat("2026-04-20T00:05:30+00:00").astimezone(timezone.utc))
+            self.assertEqual(complete["status"], "complete")
+            self.assertEqual(complete["reason"], "target_window_satisfied")
+
+    def test_soak_evaluate_warns_on_gap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshots = root / "snapshots"
+            snapshots.mkdir(parents=True, exist_ok=True)
+            snap = {"schema": "openclaw-mem.self-model.snapshot.v0", "source_digest": "digest-a", "attachments": [], "snapshot_id": "snap-1"}
+            (snapshots / "snap-1.json").write_text(json.dumps(snap), encoding="utf-8")
+            (snapshots / "snap-2.json").write_text(json.dumps({**snap, "snapshot_id": "snap-2"}), encoding="utf-8")
+            autorun = root / "autorun"
+            autorun.mkdir(parents=True, exist_ok=True)
+            (autorun / "run-1.json").write_text(json.dumps({"generated_at": "2026-04-20T00:00:00+00:00", "snapshot_id": "snap-1"}), encoding="utf-8")
+            (autorun / "run-2.json").write_text(json.dumps({"generated_at": "2026-04-20T00:20:00+00:00", "snapshot_id": "snap-2"}), encoding="utf-8")
+            report = evaluate_soak(SoakConfig(run_dir=tmp, cadence_seconds=300, target_hours=72.0), now=datetime.fromisoformat("2026-04-20T00:20:10+00:00").astimezone(timezone.utc))
+            self.assertEqual(report["status"], "warn")
+            self.assertEqual(report["reason"], "receipt_gap")
+
+    def test_soak_baseline_ignores_older_residue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshots = root / "snapshots"
+            snapshots.mkdir(parents=True, exist_ok=True)
+            base = {"schema": "openclaw-mem.self-model.snapshot.v0", "source_digest": "digest-a", "attachments": [], "snapshot_id": "snap-1"}
+            (snapshots / "snap-1.json").write_text(json.dumps(base), encoding="utf-8")
+            (snapshots / "snap-2.json").write_text(json.dumps({**base, "snapshot_id": "snap-2"}), encoding="utf-8")
+            autorun = root / "autorun"
+            autorun.mkdir(parents=True, exist_ok=True)
+            (autorun / "run-1.json").write_text(json.dumps({"generated_at": "2026-04-18T00:00:00+00:00", "snapshot_id": "snap-1"}), encoding="utf-8")
+            latest = {"generated_at": "2026-04-20T00:00:00+00:00", "snapshot_id": "snap-2"}
+            (autorun / "run-2.json").write_text(json.dumps(latest), encoding="utf-8")
+            baseline = ensure_baseline(tmp, latest)
+            report = evaluate_soak(SoakConfig(run_dir=tmp, cadence_seconds=300, target_hours=72.0), now=datetime.fromisoformat("2026-04-20T00:00:10+00:00").astimezone(timezone.utc), baseline_started_at=baseline["started_at"])
+            self.assertEqual(report["status"], "hold")
+            self.assertEqual(report["receipt_count"], 1)
 
 
 if __name__ == "__main__":

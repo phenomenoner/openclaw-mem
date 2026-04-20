@@ -120,6 +120,16 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem continuity status --json
 uv run --python 3.13 --frozen -- python -m openclaw_mem continuity disable --json
 ```
 
+For the real 72h endurance gate, run the self-closing soak controller instead of hand-counting receipts. It advances one autorun cycle per wake, writes status under `~/.openclaw/memory/openclaw-mem/self-model-sidecar/soak/`, emits a clear warning on anomalous gaps/drift, and disables its own cron job after a healthy 72h window closes:
+
+```bash
+python3 tools/self_model_sidecar_soak_controller.py \
+  --repo-root /root/.openclaw/workspace/openclaw-mem \
+  --run-dir /root/.openclaw/memory/openclaw-mem/self-model-sidecar \
+  --cadence-seconds 300 \
+  --target-hours 72
+```
+
 Use it when you need auditable continuity receipts, migration comparison, or public-safe hedged summaries, not when you need a new source of truth. The lane stays rebuildable from memory-of-record by design.
 
 Updated operator loop:
