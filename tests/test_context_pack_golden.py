@@ -8,7 +8,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from openclaw_mem.cli import _connect, build_parser
+from openclaw_mem.cli import _connect, _insert_observation, build_parser
 
 
 def _iter_jsonl(path: Path):
@@ -75,6 +75,9 @@ class TestContextPackGoldenHarness(unittest.TestCase):
     def _run_scenario(self, row: dict) -> dict:
         conn = _connect(":memory:")
         args = build_parser().parse_args(list(row["args"]))
+        for obs in list(row.get("seed_observations") or []):
+            _insert_observation(conn, dict(obs or {}))
+        conn.commit()
         pack_state = _normalize_pack_state(dict(row.get("pack_state") or {}))
         synthesis_pref_raw = dict(row.get("synthesis_pref") or {})
         synthesis_pref = (
@@ -93,8 +96,12 @@ class TestContextPackGoldenHarness(unittest.TestCase):
             patchers.append(patch("openclaw_mem.cli._pack_graph_stage1_keywords", return_value=row["stage1"]))
         if "graph_index_payload" in row:
             patchers.append(patch("openclaw_mem.cli._graph_index_payload", return_value=row["graph_index_payload"]))
+        if "graph_index_error" in row:
+            patchers.append(patch("openclaw_mem.cli._graph_index_payload", side_effect=RuntimeError(str(row["graph_index_error"]))))
         if "graph_pack_payload" in row:
             patchers.append(patch("openclaw_mem.cli._graph_pack_payload", return_value=row["graph_pack_payload"]))
+        if "graph_pack_error" in row:
+            patchers.append(patch("openclaw_mem.cli._graph_pack_payload", side_effect=RuntimeError(str(row["graph_pack_error"]))))
         if "perf_counter" in row:
             patchers.append(patch("openclaw_mem.cli.time.perf_counter", side_effect=list(row["perf_counter"])))
 
@@ -128,6 +135,10 @@ class TestContextPackGoldenHarness(unittest.TestCase):
                         self.assertEqual(graph.get("triggered"), graph_expect["triggered"])
                     if "trigger_reason" in graph_expect:
                         self.assertEqual(graph.get("trigger_reason"), graph_expect["trigger_reason"])
+                    if "fail_open" in graph_expect:
+                        self.assertEqual(trace_graph.get("fail_open"), graph_expect["fail_open"])
+                    if "error_first_line" in graph_expect:
+                        self.assertEqual(trace_graph.get("error_first_line"), graph_expect["error_first_line"])
                     if "scope_source" in graph_expect:
                         self.assertEqual(trace_graph.get("scope_source"), graph_expect["scope_source"])
                     if "scope_decision" in graph_expect:
