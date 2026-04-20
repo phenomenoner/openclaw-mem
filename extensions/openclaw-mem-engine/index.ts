@@ -5163,12 +5163,16 @@ const memoryPlugin = {
             api.logger.info(
               `openclaw-mem-engine:weijiMemoryPreflight ${JSON.stringify({
                 id,
+                intentId: weiJiIntentId,
+                traceId: (preflight.receipt as { traceId?: unknown } | undefined)?.traceId ?? null,
                 decision: (preflight.receipt as { decision?: unknown } | undefined)?.decision ?? null,
                 mode: (preflight.receipt as { mode?: unknown } | undefined)?.mode ?? null,
                 wrapperExitCode: (preflight.receipt as { wrapperExitCode?: unknown } | undefined)?.wrapperExitCode ?? null,
                 wrapperFailReason: (preflight.receipt as { wrapperFailReason?: unknown } | undefined)?.wrapperFailReason ?? null,
                 governorStatus: (preflight.receipt as { governorStatus?: unknown } | undefined)?.governorStatus ?? null,
                 reviewRequired: (preflight.receipt as { reviewRequired?: unknown } | undefined)?.reviewRequired ?? null,
+                bridgeMode: (preflight.receipt as { bridgeMode?: unknown } | undefined)?.bridgeMode ?? null,
+                nextSafeMove: (preflight.receipt as { nextSafeMove?: unknown } | undefined)?.nextSafeMove ?? null,
                 runtimeFailed: (preflight.receipt as { runtimeFailed?: unknown } | undefined)?.runtimeFailed ?? null,
                 failMode: weijiMemoryPreflightResolved.failMode,
               })}`,
@@ -5176,12 +5180,17 @@ const memoryPlugin = {
 
             if (preflight.blocked) {
               const latencyMs = Math.round(performance.now() - t0);
+              const traceId = (weiJiMemoryPreflightReceipt as { traceId?: unknown } | undefined)?.traceId;
+              const blockedMessage = typeof traceId === "string" && traceId.trim()
+                ? `Memory write held by Wei Ji preflight policy. No memory was stored. Review trace: ${traceId}`
+                : "Memory write held by Wei Ji preflight policy. No memory was stored.";
               return {
-                content: [{ type: "text", text: "Memory write held by Wei Ji preflight policy. No memory was stored." }],
+                content: [{ type: "text", text: blockedMessage }],
                 details: {
                   error: "weiji_memory_preflight_blocked",
                   action: "blocked",
                   id,
+                  intent_id: weiJiIntentId,
                   category,
                   importance: normalizedImportance ?? null,
                   importance_label: normalizedLabel,

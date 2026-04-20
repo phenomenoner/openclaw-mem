@@ -58,6 +58,12 @@ function normalizeStatus(payload) {
   return normalized || null;
 }
 
+function normalizeOptionalString(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
 function clampTimeout(raw) {
   const parsed = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(parsed)) return DEFAULT_TIMEOUT_MS;
@@ -168,6 +174,13 @@ export async function runWeiJiMemoryPreflight({ intent, config, runner = default
     const failReason = typeof envelope?.fail_reason === "string" ? envelope.fail_reason : null;
     const governorStatus = normalizeStatus(envelope);
     const reviewRequired = envelope?.result?.memory_governor?.review_required === true;
+    const traceId = normalizeOptionalString(envelope?.result?.memory_governor?.trace_id);
+    const writeId = normalizeOptionalString(
+      envelope?.result?.memory_governor?.write_id ?? envelope?.result?.memory_governor?.request_payload?.write_id,
+    );
+    const bridgeMode = normalizeOptionalString(envelope?.result?.memory_governor?.bridge?.mode);
+    const nextSafeMove = normalizeOptionalString(envelope?.result?.next_safe_move);
+    const shadowMode = envelope?.result?.shadow_mode === true;
 
     const policyBlock =
       wrapperExitCode === WRAPPER_EXIT_QUEUED ||
@@ -192,6 +205,11 @@ export async function runWeiJiMemoryPreflight({ intent, config, runner = default
       wrapperFailReason: failReason,
       governorStatus,
       reviewRequired,
+      traceId,
+      writeId,
+      bridgeMode,
+      nextSafeMove,
+      shadowMode,
       errorCode: commandResult.errorCode,
       errorMessage: commandResult.errorMessage,
       policyBlock,

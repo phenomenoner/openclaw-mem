@@ -77,7 +77,10 @@ test('queued result blocks when failOnQueued is enabled', async () => {
     exit_code: 40,
     fail_reason: 'memory_write_queued_for_review',
     result: {
+      next_safe_move: 'queue_memory_write_for_review',
+      shadow_mode: true,
       memory_governor: {
+        trace_id: 'mem-intent-abc123',
         status: 'queued',
         review_required: true,
       },
@@ -107,6 +110,56 @@ test('queued result blocks when failOnQueued is enabled', async () => {
   assert.equal(out.receipt.policyBlock, true);
   assert.equal(out.receipt.wrapperExitCode, 40);
   assert.equal(out.receipt.governorStatus, 'queued');
+  assert.equal(out.receipt.traceId, 'mem-intent-abc123');
+  assert.equal(out.receipt.nextSafeMove, 'queue_memory_write_for_review');
+  assert.equal(out.receipt.shadowMode, true);
+});
+
+test('approved replay exposes trace bridge metadata for retry wiring', async () => {
+  const stdout = JSON.stringify({
+    wrapper: 'weiji-memory-preflight',
+    ok: true,
+    exit_code: 0,
+    result: {
+      next_safe_move: 'allow_memory_write',
+      shadow_mode: true,
+      memory_governor: {
+        trace_id: 'mem-intent-approved123',
+        write_id: 'mem-intent-approved123',
+        status: 'approved',
+        review_required: false,
+        bridge: {
+          mode: 'operator_approval_reuse',
+        },
+      },
+    },
+  });
+
+  const out = await runWeiJiMemoryPreflight({
+    intent: { text: 'remember me' },
+    config: {
+      enabled: true,
+      command: 'weiji-memory-preflight',
+      failOnQueued: true,
+      failMode: 'closed',
+    },
+    runner: async () => ({
+      ok: true,
+      exitCode: 0,
+      stdout,
+      stderr: '',
+      errorCode: null,
+      errorMessage: null,
+    }),
+  });
+
+  assert.equal(out.allowed, true);
+  assert.equal(out.blocked, false);
+  assert.equal(out.receipt.traceId, 'mem-intent-approved123');
+  assert.equal(out.receipt.writeId, 'mem-intent-approved123');
+  assert.equal(out.receipt.bridgeMode, 'operator_approval_reuse');
+  assert.equal(out.receipt.nextSafeMove, 'allow_memory_write');
+  assert.equal(out.receipt.shadowMode, true);
 });
 
 test('parseJsonLoose can recover json line from noisy output', () => {

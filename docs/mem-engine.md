@@ -488,6 +488,7 @@ That gives an **advisory-first** live lane:
 
 Receipts surface:
 - `memory_store.details.receipt.weiJiMemoryPreflight`
+- blocked receipts should carry Wei Ji `traceId` plus the engine `intent_id`, so operator approval reuse can retry the same governed memory intent instead of spawning opaque duplicate review items
 
 Blocking modes:
 - `failMode: "closed"` blocks on runtime/subprocess failure

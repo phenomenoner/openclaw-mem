@@ -163,6 +163,9 @@ Behavior:
 Receipts:
 - `memory_store.details.receipt.weiJiMemoryPreflight`
 
+Operator bridge note:
+- blocked receipts now surface Wei Ji `traceId` / `intent_id` so an approved review can be retried against the same governed write instead of opening a blind fresh queue item
+
 ## GBrain write-through mirror (optional)
 
 If you want each successful `memory_store` to also land in `gbrain`, enable `gbrainMirror`.
