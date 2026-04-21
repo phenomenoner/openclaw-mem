@@ -58,6 +58,10 @@ Current lane is intentionally narrow:
 
 - allowed job family: `embed`
 
+Runtime note:
+- durable worker execution depends on a PostgreSQL-backed GBrain engine
+- `pglite` can still support bounded inline work, but not the persistent `gbrain jobs work` daemon posture
+
 Why this narrow:
 
 - proves the queue bridge without giving gbrain broad execution authority

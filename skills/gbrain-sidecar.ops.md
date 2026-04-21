@@ -38,6 +38,10 @@ It is **not enabled by default** and does **not** replace `openclaw-mem-engine` 
 Current allowed helper family:
 - `embed`
 
+Runtime note:
+- persistent worker execution for this lane needs PostgreSQL-backed `gbrain`
+- if the host is still on `pglite`, treat the jobs bridge as non-daemon / bounded-only
+
 ### Phase 3, gated refresh canary
 
 - `openclaw-mem gbrain-sidecar recommend-refresh`
