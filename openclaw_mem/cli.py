@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -12028,10 +12029,30 @@ def _graph_parse_iso_or_none(raw: Any) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
+def _graph_source_format(source_path: str) -> str:
+    suffix = Path(source_path).suffix.lower()
+    if suffix == ".json":
+        return "json"
+    if suffix in {".yaml", ".yml"}:
+        return "yaml"
+    return "unknown"
+
+
+def _graph_yaml_loader_available() -> bool:
+    return importlib.util.find_spec("yaml") is not None
+
+
 def _graph_source_status(latest_receipt: Dict[str, Any]) -> Dict[str, Any]:
     source_path = str(latest_receipt.get("source_path") or "").strip()
+    source_format = _graph_source_format(source_path) if source_path else "unknown"
+    requires_yaml_loader = source_format == "yaml"
+    yaml_available = _graph_yaml_loader_available() if requires_yaml_loader else None
     out: Dict[str, Any] = {
         "source_path": source_path or None,
+        "format": source_format,
+        "requires_yaml_loader": requires_yaml_loader,
+        "yaml_available": yaml_available,
+        "loadable": source_format == "json" or not requires_yaml_loader or bool(yaml_available),
         "exists": False,
         "mtime": None,
         "newer_than_refresh": None,
@@ -12134,6 +12155,8 @@ def _graph_readiness_payload(
         blockers.append("topology_source_missing")
     if bool(source_status.get("newer_than_refresh")):
         blockers.append("topology_source_changed_since_refresh")
+    if bool(source_status.get("requires_yaml_loader")) and source_status.get("yaml_available") is False:
+        blockers.append("topology_yaml_loader_unavailable")
     if int(support_plane.get("total_count") or 0) <= 0:
         warnings.append("graph_match_support_plane_empty")
 

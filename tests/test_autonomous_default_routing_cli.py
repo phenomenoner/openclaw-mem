@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from openclaw_mem.cli import _connect, _episodic_build_search_text, _insert_observation, build_parser
-from openclaw_mem.graph.refresh import refresh_topology_file
+from openclaw_mem.graph.refresh import refresh_topology, refresh_topology_file
 
 
 class TestAutonomousDefaultRoutingCli(unittest.TestCase):
@@ -159,6 +159,62 @@ class TestAutonomousDefaultRoutingCli(unittest.TestCase):
                 self.assertEqual(out["kind"], "openclaw-mem.graph.readiness.v0")
                 self.assertEqual(out["result"]["verdict"], "green")
                 self.assertTrue(out["result"]["ready_for_autonomous_match"])
+                self.assertEqual(out["result"]["source_status"]["format"], "json")
+                self.assertTrue(out["result"]["source_status"]["loadable"])
+                self.assertIsNone(out["result"]["source_status"]["yaml_available"])
+            finally:
+                conn.close()
+
+    def test_graph_readiness_blocks_yaml_sources_when_yaml_loader_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            db_path = root / "mem.sqlite"
+            topology_path = root / "topology.yaml"
+            topology_path.write_text(
+                "nodes:\n  - id: project.openclaw-mem\n    type: project\n    tags: [repo]\n    metadata: {}\nedges: []\n",
+                encoding="utf-8",
+            )
+            refresh_topology(
+                {
+                    "nodes": [
+                        {"id": "project.openclaw-mem", "type": "project", "tags": ["repo"], "metadata": {}},
+                    ],
+                    "edges": [],
+                },
+                db_path=str(db_path),
+                source_path=str(topology_path),
+            )
+            conn = _connect(str(db_path))
+            try:
+                _insert_observation(
+                    conn,
+                    {
+                        "ts": "2026-04-06T08:00:00Z",
+                        "kind": "note",
+                        "tool_name": "graph.capture-md",
+                        "summary": "[MD] readiness.md#Autonomous routing bridge",
+                        "detail": {
+                            "scope": "proj-x",
+                            "source_path": str(topology_path),
+                            "rel_path": "docs/readiness.md",
+                            "heading": "Autonomous routing bridge",
+                        },
+                    },
+                )
+                conn.commit()
+
+                with patch("openclaw_mem.cli._graph_yaml_loader_available", return_value=False):
+                    out = self._run(
+                        conn,
+                        ["--db", str(db_path), "--json", "graph", "readiness", "--support-window-hours", "100000"],
+                    )
+                self.assertEqual(out["kind"], "openclaw-mem.graph.readiness.v0")
+                self.assertEqual(out["result"]["verdict"], "red")
+                self.assertFalse(out["result"]["ready_for_autonomous_match"])
+                self.assertIn("topology_yaml_loader_unavailable", out["result"]["blockers"])
+                self.assertEqual(out["result"]["source_status"]["format"], "yaml")
+                self.assertFalse(out["result"]["source_status"]["yaml_available"])
+                self.assertFalse(out["result"]["source_status"]["loadable"])
             finally:
                 conn.close()
 
