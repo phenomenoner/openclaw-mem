@@ -209,6 +209,28 @@ openclaw gateway restart
 
 ---
 
+## Step 7: Autograde toggle (optional)
+
+`openclaw-mem` can auto-score importance during ingest/harvest with `heuristic-v1`.
+
+Enable per-command:
+
+```bash
+OPENCLAW_MEM_IMPORTANCE_SCORER=heuristic-v1 uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+```
+
+Disable for a one-off run (kill-switch):
+
+```bash
+OPENCLAW_MEM_IMPORTANCE_SCORER=off uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed
+```
+
+Or override only this command:
+
+```bash
+uv run python -m openclaw_mem harvest --file /tmp/incoming.jsonl --json --no-embed --importance-scorer off
+```
+
 ## Next steps
 
 - Full docs: `README.md`
