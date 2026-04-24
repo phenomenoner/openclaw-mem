@@ -4597,6 +4597,53 @@ def cmd_self_interventions(conn: sqlite3.Connection, args: argparse.Namespace) -
     _emit(payload, args.json)
 
 
+def cmd_self_ledger(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_claim_ledger(
+        snapshot,
+        run_dir=getattr(args, "run_dir", None),
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+    )
+    _emit(payload, args.json)
+
+
+def cmd_self_mirror(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_mirror_report(
+        snapshot,
+        run_dir=getattr(args, "run_dir", None),
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+    )
+    if bool(getattr(args, "markdown", False)) and not bool(getattr(args, "json", False)):
+        print(self_model_sidecar.render_mirror_markdown(payload), end="")
+        return
+    _emit(payload, args.json)
+
+
+def cmd_self_rule_table(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = self_model_sidecar.build_adjudication_rule_table()
+    _emit(payload, args.json)
+
+
+def cmd_self_golden_eval(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_golden_eval(snapshot, cases_file=getattr(args, "cases_file", None))
+    _emit(payload, args.json)
+
+
+def cmd_self_governance(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    snapshot = _load_or_build_self_snapshot(conn, args)
+    payload = self_model_sidecar.build_governance_review(
+        snapshot,
+        run_dir=getattr(args, "run_dir", None),
+        scope=getattr(args, "scope", None),
+        session_id=getattr(args, "session_id", None),
+    )
+    _emit(payload, args.json)
+
+
 def cmd_self_compare_sessions(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     payload = self_model_sidecar.compare_sessions(
         conn,
@@ -15869,6 +15916,32 @@ def build_parser() -> argparse.ArgumentParser:
         add_self_surface_common(s)
         s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
         s.set_defaults(func=cmd_self_interventions)
+
+        s = ssub.add_parser("ledger", help="Build the derived claim lifecycle ledger for current continuity")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.set_defaults(func=cmd_self_ledger)
+
+        s = ssub.add_parser("mirror", help="Render the operator continuity mirror with claims, drift, and governance suggestions")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.add_argument("--markdown", action="store_true", help="Render the operator mirror as markdown instead of key/value text")
+        s.set_defaults(func=cmd_self_mirror)
+
+        s = ssub.add_parser("rule-table", help="Show the executable adjudication rule table and negative fixture classes")
+        add_common(s)
+        s.set_defaults(func=cmd_self_rule_table)
+
+        s = ssub.add_parser("golden-eval", help="Run the continuity golden-set evaluation against a snapshot")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.add_argument("--cases-file", dest="cases_file", default=None, help="Optional JSON/JSONL golden cases file")
+        s.set_defaults(func=cmd_self_golden_eval)
+
+        s = ssub.add_parser("governance", help="Suggest release/rebind/keep actions without applying them")
+        add_self_surface_common(s)
+        s.add_argument("--snapshot", default=None, help="Optional persisted snapshot JSON path instead of rebuilding")
+        s.set_defaults(func=cmd_self_governance)
 
         s = ssub.add_parser("compare-sessions", help="Compare derived continuity between two scope/session boundaries")
         add_self_surface_common(s)

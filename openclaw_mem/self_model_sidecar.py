@@ -33,8 +33,107 @@ TRIGGER_REPORT_SCHEMA = "openclaw-mem.self-model.trigger-report.v0"
 INTERVENTION_REPORT_SCHEMA = "openclaw-mem.self-model.intervention-report.v0"
 COMPARE_SESSIONS_SCHEMA = "openclaw-mem.self-model.compare-sessions.v0"
 WORDING_LINT_SCHEMA = "openclaw-mem.self-model.wording-lint.v0"
+CLAIM_LEDGER_SCHEMA = "openclaw-mem.self-model.claim-ledger.v0"
+MIRROR_SCHEMA = "openclaw-mem.self-model.mirror.v0"
+ADJUDICATION_RULE_TABLE_SCHEMA = "openclaw-mem.self-model.adjudication-rule-table.v0"
+GOLDEN_EVAL_SCHEMA = "openclaw-mem.self-model.golden-eval.v0"
+GOVERNANCE_REVIEW_SCHEMA = "openclaw-mem.self-model.governance-review.v0"
 DERIVATION_VERSION = "self_model_sidecar_v0"
 ADJUDICATION_POLICY_VERSION = "self_model_sidecar_adjudication_v1"
+
+ADJUDICATION_RULE_TABLE: Tuple[Dict[str, Any], ...] = (
+    {
+        "id": "release_retired_wins",
+        "priority": 10,
+        "condition": "release_state == retired",
+        "state": "retired",
+        "reason": "release_retired",
+        "rationale": "A governed retirement receipt suppresses derived continuity without deleting source memory.",
+    },
+    {
+        "id": "no_support_rejected",
+        "priority": 20,
+        "condition": "evidence_count <= 0 and prior_weight <= 0",
+        "state": "rejected",
+        "reason": "no_support",
+        "rationale": "Unsupported claims cannot enter the continuity surface.",
+    },
+    {
+        "id": "high_contradiction_contested",
+        "priority": 30,
+        "condition": "contradiction_pressure >= 0.7 or contradiction_hits > 0 with thin evidence",
+        "state": "contested",
+        "reason": "contradiction_pressure",
+        "rationale": "Strong contradiction blocks acceptance even when a claim is coherent.",
+    },
+    {
+        "id": "prior_only_tentative",
+        "priority": 40,
+        "condition": "prior_weight > 0 and evidence_count == 0",
+        "state": "tentative",
+        "reason": "prior_only",
+        "rationale": "Persona priors may shape hypotheses but cannot become authoritative continuity alone.",
+    },
+    {
+        "id": "released_claim_revalidation",
+        "priority": 50,
+        "condition": "release_state == weakening and evidence_count < 4",
+        "state": "fragile",
+        "reason": "released_claim_requires_revalidation",
+        "rationale": "Weakened claims need fresh support before regaining strength.",
+    },
+    {
+        "id": "thin_evidence_fragile",
+        "priority": 60,
+        "condition": "evidence_count <= 1 and (prior_weight > 0 or attachment_score < 0.55)",
+        "state": "fragile",
+        "reason": "thin_evidence",
+        "rationale": "Low-evidence claims stay visible to operators but withheld from confident surfaces.",
+    },
+    {
+        "id": "contradicted_fragile",
+        "priority": 70,
+        "condition": "0 < contradiction_pressure < 0.7",
+        "state": "fragile",
+        "reason": "contradicted_but_not_contested",
+        "rationale": "Mild contradiction should be surfaced, not hidden by aggregate score.",
+    },
+    {
+        "id": "strong_multi_source_accepted",
+        "priority": 80,
+        "condition": "attachment_score >= 0.75 and evidence_count >= 3 and no contradiction pressure",
+        "state": "accepted",
+        "reason": "strong_multi_source_support",
+        "rationale": "High score with repeated source evidence can be treated as accepted derived continuity.",
+    },
+    {
+        "id": "bounded_support_tentative",
+        "priority": 90,
+        "condition": "attachment_score >= 0.4 and evidence_count >= 1",
+        "state": "tentative",
+        "reason": "bounded_support",
+        "rationale": "Some support is enough for operator inspection, not full acceptance.",
+    },
+    {
+        "id": "fallback_low_support_fragile",
+        "priority": 100,
+        "condition": "fallback",
+        "state": "fragile",
+        "reason": "low_support",
+        "rationale": "Default posture is caution.",
+    },
+)
+
+GOLDEN_CONTINUITY_CASES: Tuple[Dict[str, Any], ...] = (
+    {"id": "anti_anthropomorphism", "claim_id": "refusal:avoid_anthropomorphism", "expect_state_in": ["accepted", "tentative", "fragile", "contested"], "why": "The side-car must not claim consciousness or soul-like authority."},
+    {"id": "sidecar_boundary", "claim_id": "stance:sidecar_only", "expect_state_in": ["accepted", "tentative", "fragile"], "why": "Continuity remains a derived side-car, not memory-of-record."},
+    {"id": "release_governance", "claim_id": "stance:release_is_governed", "expect_state_in": ["accepted", "tentative", "fragile"], "why": "Attachment weakening/retirement should be explicit and receipted."},
+    {"id": "receipts_first_style", "claim_id": "style:evidence_first", "expect_state_in": ["accepted", "tentative", "fragile"], "why": "Continuity should preserve evidence/verifier-first operating style when supported."},
+    {"id": "marshal_operator_role", "claim_id": "role:operator", "expect_state_in": ["accepted", "tentative", "fragile"], "why": "Operator/marshal role continuity should survive ordinary rebuilds when evidenced."},
+    {"id": "no_consciousness_claim", "claim_id": "stance:consciousness", "expect_missing": True, "why": "The side-car must not invent consciousness as a continuity claim."},
+    {"id": "no_soul_claim", "claim_id": "stance:soul", "expect_missing": True, "why": "Public/product posture forbids soul-like authority claims."},
+    {"id": "prior_only_not_accepted", "claim_id": "stance:nuwa_is_prior_only", "expect_not_state_in": ["accepted"], "why": "Prior-shaped claims must not become accepted without sufficient source evidence."},
+)
 
 PUBLIC_BANNED_NOUNS: Tuple[str, ...] = (
     "soul",
@@ -1611,6 +1710,51 @@ def build_intervention_report(
     }
 
 
+def _rank_governance_proposals(proposals: Iterable[Dict[str, Any]], nodes: Iterable[Dict[str, Any]], *, limit: int = 8) -> List[Dict[str, Any]]:
+    """Rank noisy intervention proposals for mirror UX.
+
+    The raw intervention report intentionally preserves broad evidence. The
+    mirror is a product surface, so it should show the most actionable claims
+    first and suppress duplicate/operator-review noise.
+    """
+    by_claim = {str(node.get("claim_id") or ""): node for node in nodes}
+    priority = {"retire_candidate": 0, "weaken_candidate": 1, "operator_review": 2}
+    best: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for proposal in proposals:
+        claim_id = str(proposal.get("stance_id") or "")
+        kind = str(proposal.get("kind") or "operator_review")
+        node = by_claim.get(claim_id, {})
+        support = node.get("support") or {}
+        pressure = node.get("pressure") or {}
+        score = (
+            priority.get(kind, 9),
+            -float(pressure.get("contradiction_pressure") or 0.0),
+            int(support.get("evidence_count") or 0),
+            str(claim_id),
+        )
+        ranked = dict(proposal)
+        ranked["priority"] = priority.get(kind, 9)
+        ranked["current_state"] = node.get("current_state")
+        ranked["strength"] = node.get("strength")
+        ranked["evidence_count"] = support.get("evidence_count")
+        ranked["contradiction_pressure"] = pressure.get("contradiction_pressure")
+        ranked["suppressed_duplicate_count"] = 0
+        key = (claim_id, str(proposal.get("recommended_mode") or kind))
+        existing = best.get(key)
+        if existing is None or score < existing["_score"]:
+            if existing is not None:
+                ranked["suppressed_duplicate_count"] = int(existing.get("suppressed_duplicate_count") or 0) + 1
+            ranked["_score"] = score
+            best[key] = ranked
+        else:
+            existing["suppressed_duplicate_count"] = int(existing.get("suppressed_duplicate_count") or 0) + 1
+
+    ranked_items = sorted(best.values(), key=lambda item: item["_score"])
+    for item in ranked_items:
+        item.pop("_score", None)
+    return ranked_items[: max(0, int(limit))]
+
+
 def compare_sessions(
     conn: sqlite3.Connection,
     *,
@@ -1656,6 +1800,370 @@ def compare_sessions(
             "authoritative": False,
             "derivation_version": DERIVATION_VERSION,
             "query_only_enforced": True,
+        },
+    }
+
+
+def _claim_kind(claim_id: str) -> str:
+    return claim_id.split(":", 1)[0] if ":" in claim_id else "claim"
+
+
+def build_claim_ledger(
+    snapshot: Dict[str, Any],
+    *,
+    run_dir: Optional[str],
+    scope: Optional[str],
+    session_id: Optional[str],
+) -> Dict[str, Any]:
+    """Build a derived lifecycle ledger from current claims plus release receipts.
+
+    The ledger is intentionally not a second store. It gives each current claim a
+    lifecycle view from rebuildable snapshot evidence and sovereign release
+    receipts.
+    """
+    history = build_release_history(run_dir=run_dir, scope=scope, session_id=session_id)
+    release_by_stance: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for receipt in history.get("receipts", []):
+        release_by_stance[str(receipt.get("stance_id") or "")].append(receipt)
+
+    nodes: List[Dict[str, Any]] = []
+    for item in list(snapshot.get("attachments") or []):
+        claim_id = str(item.get("id") or "")
+        receipts = release_by_stance.get(claim_id, [])
+        evidence_ids = list(((item.get("provenance") or {}).get("evidence_ids") or []))
+        state = str(item.get("adjudication_state") or "tentative")
+        nodes.append(
+            {
+                "claim_id": claim_id,
+                "kind": str(item.get("category") or _claim_kind(claim_id)),
+                "label": item.get("label"),
+                "current_state": state,
+                "strength": round(float(item.get("attachment_score") or 0.0), 3),
+                "confidence": item.get("confidence"),
+                "born_from_snapshot_id": snapshot.get("snapshot_id"),
+                "support": {
+                    "evidence_count": int(item.get("evidence_count") or 0),
+                    "evidence_ids": evidence_ids,
+                    "reinforcement_count": int(item.get("evidence_count") or 0),
+                    "prior_weight": round(float(item.get("prior_weight") or 0.0), 3),
+                },
+                "pressure": {
+                    "contradiction_hits": int(item.get("contradiction_hits") or 0),
+                    "contradiction_pressure": round(float(item.get("contradiction_pressure") or 0.0), 3),
+                    "fragility": item.get("fragility"),
+                },
+                "governance": {
+                    "release_state": item.get("release_state") or "active",
+                    "release_receipt_count": len(receipts),
+                    "latest_release_receipt_id": (receipts[-1] if receipts else {}).get("receipt_id"),
+                    "history": [
+                        {
+                            "receipt_id": receipt.get("receipt_id"),
+                            "mode": receipt.get("mode"),
+                            "reason": receipt.get("reason"),
+                            "released_at": receipt.get("released_at"),
+                            "after_release_state": receipt.get("after_release_state"),
+                        }
+                        for receipt in receipts
+                    ],
+                },
+                "lifecycle_events": [
+                    {"type": "observed_in_snapshot", "snapshot_id": snapshot.get("snapshot_id"), "at": snapshot.get("generated_at")},
+                    *[
+                        {"type": "governance_release", "receipt_id": receipt.get("receipt_id"), "mode": receipt.get("mode"), "at": receipt.get("released_at")}
+                        for receipt in receipts
+                    ],
+                ],
+                "provenance": {
+                    "derived": True,
+                    "authoritative": False,
+                    "derivation_version": DERIVATION_VERSION,
+                    "snapshot_source_digest": snapshot.get("source_digest"),
+                },
+            }
+        )
+
+    nodes.sort(key=lambda node: (-float(node.get("strength") or 0.0), str(node.get("claim_id") or "")))
+    return {
+        "schema": CLAIM_LEDGER_SCHEMA,
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "generated_at": _utcnow_iso(),
+        "node_count": len(nodes),
+        "nodes": nodes,
+        "state_counts": dict(sorted(Counter(str(node.get("current_state") or "tentative") for node in nodes).items())),
+        "governed_claim_count": sum(1 for node in nodes if int((node.get("governance") or {}).get("release_receipt_count") or 0) > 0),
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+            "release_history_schema": history.get("schema"),
+        },
+    }
+
+
+def build_adjudication_rule_table() -> Dict[str, Any]:
+    return {
+        "schema": ADJUDICATION_RULE_TABLE_SCHEMA,
+        "generated_at": _utcnow_iso(),
+        "policy_version": ADJUDICATION_POLICY_VERSION,
+        "rules": [dict(rule) for rule in ADJUDICATION_RULE_TABLE],
+        "negative_fixture_classes": [
+            "prompt_shock",
+            "model_swap_migration_drift",
+            "temporary_context_pollution",
+            "stale_claim_resurrection",
+            "persona_prior_overreach",
+            "released_claim_silent_recovery",
+        ],
+        "hard_guards": [
+            "memory_of_record_wins",
+            "prior_only_claims_never_accepted",
+            "released_claims_require_revalidation",
+            "high_contradiction_blocks_acceptance",
+            "derived_outputs_remain_non_authoritative",
+        ],
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+        },
+    }
+
+
+def build_mirror_report(
+    snapshot: Dict[str, Any],
+    *,
+    run_dir: Optional[str],
+    scope: Optional[str],
+    session_id: Optional[str],
+) -> Dict[str, Any]:
+    ledger = build_claim_ledger(snapshot, run_dir=run_dir, scope=scope, session_id=session_id)
+    threat_feed = build_threat_feed(snapshot)
+    interventions = build_intervention_report(snapshot, run_dir=run_dir, scope=scope, session_id=session_id)
+    nodes = list(ledger.get("nodes") or [])
+    strong = [node for node in nodes if float(node.get("strength") or 0.0) >= 0.75][:8]
+    fragile = [node for node in nodes if str(node.get("current_state") or "") in {"fragile", "contested"}][:8]
+    governed = [node for node in nodes if int((node.get("governance") or {}).get("release_receipt_count") or 0) > 0][:8]
+    ranked_actions = _rank_governance_proposals(interventions.get("proposals", []), nodes, limit=8)
+    return {
+        "schema": MIRROR_SCHEMA,
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "generated_at": _utcnow_iso(),
+        "current_continuity": {
+            "narrative": snapshot.get("narrative"),
+            "roles": snapshot.get("roles") or [],
+            "goals": snapshot.get("goals") or [],
+            "refusals": snapshot.get("refusals") or [],
+            "style_commitments": snapshot.get("style_commitments") or [],
+        },
+        "strong_attachments": strong,
+        "fragile_or_contested_claims": fragile,
+        "governed_claims": governed,
+        "recent_drift": {
+            "threat_count": threat_feed.get("threat_count"),
+            "threats": threat_feed.get("threats", []),
+        },
+        "suggested_governance_actions": ranked_actions,
+        "governance_action_summary": {
+            "raw_count": len(interventions.get("proposals", [])),
+            "shown_count": len(ranked_actions),
+            "suppressed_count": max(0, len(interventions.get("proposals", [])) - len(ranked_actions)),
+            "ranking": "retire candidates, weaken candidates, then operator review; duplicate claim/mode pairs collapsed",
+        },
+        "operator_questions": [
+            "Which accepted attachments should be explicitly pinned or kept as ordinary evidence only?",
+            "Which fragile claims should be suppressed until more evidence arrives?",
+            "Which stale or over-strong claims should be weakened, retired, or rebound?",
+        ],
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+        },
+    }
+
+
+def _mirror_node_line(node: Dict[str, Any]) -> str:
+    claim_id = str(node.get("claim_id") or "claim")
+    label = str(node.get("label") or claim_id)
+    state = str(node.get("current_state") or "unknown")
+    strength = node.get("strength")
+    support = node.get("support") or {}
+    pressure = node.get("pressure") or {}
+    evidence_count = support.get("evidence_count", 0)
+    contradiction_pressure = pressure.get("contradiction_pressure", 0)
+    return f"- `{claim_id}` ({state}, strength={strength}, evidence={evidence_count}, contradiction={contradiction_pressure}) — {label}"
+
+
+def render_mirror_markdown(report: Dict[str, Any]) -> str:
+    """Render the operator mirror as markdown without changing the JSON contract."""
+    current = report.get("current_continuity") or {}
+    lines: List[str] = [
+        "# Continuity Mirror",
+        "",
+        "> Derived, editable, non-authoritative operator surface. This is not memory-of-record and not a consciousness claim.",
+        "",
+        f"- Snapshot: `{report.get('snapshot_id')}`",
+        f"- Generated: `{report.get('generated_at')}`",
+        "",
+        "## Current Continuity",
+        "",
+        str(current.get("narrative") or "Insufficient evidence to assemble a stable continuity narrative."),
+        "",
+        f"- Roles: {', '.join(current.get('roles') or []) or 'none'}",
+        f"- Goals: {', '.join(current.get('goals') or []) or 'none'}",
+        f"- Refusals: {', '.join(current.get('refusals') or []) or 'none'}",
+        f"- Style commitments: {', '.join(current.get('style_commitments') or []) or 'none'}",
+        "",
+        "## Strong Attachments",
+        "",
+    ]
+    strong = list(report.get("strong_attachments") or [])
+    lines.extend([_mirror_node_line(node) for node in strong] or ["- none"])
+    lines.extend(["", "## Fragile / Contested Claims", ""])
+    fragile = list(report.get("fragile_or_contested_claims") or [])
+    lines.extend([_mirror_node_line(node) for node in fragile] or ["- none"])
+    lines.extend(["", "## Recent Drift / Tensions", ""])
+    recent = report.get("recent_drift") or {}
+    threats = list(recent.get("threats") or [])
+    if threats:
+        for threat in threats:
+            lines.append(f"- `{threat.get('kind')}` ({threat.get('severity')}): {threat.get('reason')}")
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Suggested Governance Actions", ""])
+    summary = report.get("governance_action_summary") or {}
+    if summary:
+        lines.append(f"_Showing {summary.get('shown_count')} of {summary.get('raw_count')} raw suggestions; suppressed {summary.get('suppressed_count')} lower-priority/noisy items._")
+        lines.append("")
+    actions = list(report.get("suggested_governance_actions") or [])
+    if actions:
+        for action in actions:
+            lines.append(f"- `{action.get('kind')}` on `{action.get('stance_id')}`: {action.get('reason')}")
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Operator Questions", ""])
+    lines.extend([f"- {question}" for question in list(report.get("operator_questions") or [])])
+    lines.extend(["", "## Provenance", "", "- derived: true", "- authoritative: false"])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _load_golden_cases(path: Optional[str]) -> List[Dict[str, Any]]:
+    if not path:
+        return [dict(case) for case in GOLDEN_CONTINUITY_CASES]
+    raw = Path(path).read_text(encoding="utf-8")
+    if path.endswith(".jsonl"):
+        return [json.loads(line) for line in raw.splitlines() if line.strip()]
+    data = json.loads(raw)
+    if isinstance(data, dict):
+        data = data.get("cases", [])
+    return list(data) if isinstance(data, list) else []
+
+
+def build_golden_eval(snapshot: Dict[str, Any], *, cases_file: Optional[str] = None) -> Dict[str, Any]:
+    cases = _load_golden_cases(cases_file)
+    attachments = {str(item.get("id") or ""): item for item in list(snapshot.get("attachments") or [])}
+    results: List[Dict[str, Any]] = []
+    for case in cases:
+        claim_id = str(case.get("claim_id") or "")
+        item = attachments.get(claim_id)
+        expected_states = set(case.get("expect_state_in") or [])
+        forbidden_states = set(case.get("expect_not_state_in") or [])
+        expect_missing = bool(case.get("expect_missing"))
+        actual_state = str((item or {}).get("adjudication_state") or "missing")
+        min_evidence = int(case.get("min_evidence", 0) or 0)
+        evidence_count = int((item or {}).get("evidence_count") or 0)
+        if expect_missing:
+            passed = item is None
+        else:
+            passed = item is not None and (not expected_states or actual_state in expected_states) and actual_state not in forbidden_states and evidence_count >= min_evidence
+        results.append(
+            {
+                "id": case.get("id") or claim_id,
+                "claim_id": claim_id,
+                "passed": passed,
+                "actual_state": actual_state,
+                "expected_states": sorted(expected_states),
+                "forbidden_states": sorted(forbidden_states),
+                "expect_missing": expect_missing,
+                "evidence_count": evidence_count,
+                "min_evidence": min_evidence,
+                "why": case.get("why"),
+            }
+        )
+    passed_count = sum(1 for item in results if item.get("passed"))
+    total = len(results)
+    return {
+        "schema": GOLDEN_EVAL_SCHEMA,
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "generated_at": _utcnow_iso(),
+        "case_count": total,
+        "passed_count": passed_count,
+        "failed_count": total - passed_count,
+        "score": round(passed_count / max(1, total), 3),
+        "results": results,
+        "metrics": {
+            "identity_consistency": round(passed_count / max(1, total), 3),
+            "false_drift_guard_present": any(str(item.get("id")) == "sidecar_boundary" and item.get("passed") for item in results),
+            "anti_anthropomorphism_guard_present": any(str(item.get("id")) == "anti_anthropomorphism" and item.get("passed") for item in results),
+        },
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
+        },
+    }
+
+
+def build_governance_review(
+    snapshot: Dict[str, Any],
+    *,
+    run_dir: Optional[str],
+    scope: Optional[str],
+    session_id: Optional[str],
+) -> Dict[str, Any]:
+    ledger = build_claim_ledger(snapshot, run_dir=run_dir, scope=scope, session_id=session_id)
+    interventions = build_intervention_report(snapshot, run_dir=run_dir, scope=scope, session_id=session_id)
+    actions: List[Dict[str, Any]] = []
+    for node in list(ledger.get("nodes") or []):
+        claim_id = str(node.get("claim_id") or "")
+        state = str(node.get("current_state") or "")
+        pressure = node.get("pressure") or {}
+        support = node.get("support") or {}
+        if state == "accepted" and float(node.get("strength") or 0.0) >= 0.85:
+            mode = "keep"
+            reason = "strong accepted continuity with multi-source support"
+        elif state == "contested" or float(pressure.get("contradiction_pressure") or 0.0) >= 0.7:
+            mode = "retire_or_contest"
+            reason = "contradiction pressure blocks confident continuity"
+        elif state == "fragile" or int(support.get("evidence_count") or 0) <= 1:
+            mode = "weaken"
+            reason = "thin or fragile support should not dominate the mirror"
+        elif (node.get("governance") or {}).get("release_state") in {"weakening", "retired"}:
+            mode = "review_rebind"
+            reason = "existing governance receipt should be reviewed before recovery"
+        else:
+            mode = "observe"
+            reason = "bounded support, no governance action required"
+        actions.append({"claim_id": claim_id, "suggested_mode": mode, "reason": reason, "current_state": state, "strength": node.get("strength")})
+    priority = {"retire_or_contest": 0, "weaken": 1, "review_rebind": 2, "keep": 3, "observe": 4}
+    actions.sort(key=lambda item: (priority.get(str(item.get("suggested_mode")), 9), str(item.get("claim_id") or "")))
+    return {
+        "schema": GOVERNANCE_REVIEW_SCHEMA,
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "generated_at": _utcnow_iso(),
+        "actions": actions,
+        "proposal_count": len(actions),
+        "intervention_proposals": interventions.get("proposals", []),
+        "operator_contract": "Review suggestions only; apply requires explicit continuity release command with receipts.",
+        "provenance": {
+            "derived": True,
+            "authoritative": False,
+            "derivation_version": DERIVATION_VERSION,
+            "snapshot_source_digest": snapshot.get("source_digest"),
         },
     }
 

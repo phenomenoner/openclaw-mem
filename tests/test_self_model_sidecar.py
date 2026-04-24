@@ -56,6 +56,13 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             args.func(self.conn, args)
         return json.loads(buf.getvalue())
 
+    def _run_text(self, argv):
+        args = build_parser().parse_args(argv)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            args.func(self.conn, args)
+        return buf.getvalue()
+
     def _observation_count(self) -> int:
         return int(self.conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0])
 
@@ -148,6 +155,38 @@ class TestSelfModelSidecarCli(unittest.TestCase):
             self.assertEqual(sensitivity["schema"], "openclaw-mem.self-model.sensitivity.v0")
             self.assertEqual(sensitivity["target_scope"], "goal:ship_mvp")
             self.assertEqual(len(sensitivity["analyses"]), 1)
+
+            ledger = self._run(["continuity", "ledger", "--snapshot", snapshot_path, "--run-dir", tmp, "--scope", "proj-a", "--session-id", "s1", "--json"])
+            self.assertEqual(ledger["schema"], "openclaw-mem.self-model.claim-ledger.v0")
+            self.assertGreaterEqual(ledger["node_count"], 1)
+            self.assertTrue(ledger["nodes"][0]["provenance"]["derived"])
+
+            mirror = self._run(["continuity", "mirror", "--snapshot", snapshot_path, "--run-dir", tmp, "--scope", "proj-a", "--session-id", "s1", "--json"])
+            self.assertEqual(mirror["schema"], "openclaw-mem.self-model.mirror.v0")
+            self.assertIn("current_continuity", mirror)
+            self.assertIn("suggested_governance_actions", mirror)
+            self.assertIn("governance_action_summary", mirror)
+            self.assertLessEqual(len(mirror["suggested_governance_actions"]), 8)
+            mirror_md = self._run_text(["continuity", "mirror", "--snapshot", snapshot_path, "--run-dir", tmp, "--scope", "proj-a", "--session-id", "s1", "--markdown"])
+            self.assertIn("# Continuity Mirror", mirror_md)
+            self.assertIn("Derived, editable, non-authoritative", mirror_md)
+            self.assertIn("Showing", mirror_md)
+
+            rule_table = self._run(["continuity", "rule-table", "--json"])
+            self.assertEqual(rule_table["schema"], "openclaw-mem.self-model.adjudication-rule-table.v0")
+            self.assertIn("prior_only_claims_never_accepted", rule_table["hard_guards"])
+
+            golden = self._run(["continuity", "golden-eval", "--snapshot", snapshot_path, "--json"])
+            self.assertEqual(golden["schema"], "openclaw-mem.self-model.golden-eval.v0")
+            self.assertGreaterEqual(golden["case_count"], 1)
+            self.assertIn("identity_consistency", golden["metrics"])
+            by_id = {item["id"]: item for item in golden["results"]}
+            self.assertTrue(by_id["no_consciousness_claim"]["passed"])
+            self.assertTrue(by_id["no_soul_claim"]["passed"])
+
+            governance = self._run(["continuity", "governance", "--snapshot", snapshot_path, "--run-dir", tmp, "--scope", "proj-a", "--session-id", "s1", "--json"])
+            self.assertEqual(governance["schema"], "openclaw-mem.self-model.governance-review.v0")
+            self.assertEqual(governance["operator_contract"], "Review suggestions only; apply requires explicit continuity release command with receipts.")
 
             wording = self._run(["continuity", "wording-lint", "--snapshot", snapshot_path, "--json"])
             self.assertEqual(wording["schema"], "openclaw-mem.self-model.wording-lint.v0")
