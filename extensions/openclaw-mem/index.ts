@@ -256,6 +256,47 @@ function extractTextFromMessageContent(content: unknown): string {
   return out.join("\n").trim();
 }
 
+function sanitizeConversationTextForEpisode(text: string, role: string): string {
+  let cleaned = String(text ?? "").trim();
+  if (!cleaned) return "";
+  if (role === "assistant" && cleaned === "NO_REPLY") return "";
+
+  const blockPatterns = [
+    /<relevant-memories>[\s\S]*?<\/relevant-memories>/gi,
+    /<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>/gi,
+    /<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>[\s\S]*?<<<END_UNTRUSTED_CHILD_RESULT>>>/gi,
+    /^\s*(Conversation info|Sender|Replied message|System \(untrusted\)|\[Subagent Context\]).*?\n```json\s*[\s\S]*?```/gim,
+  ];
+  for (const pattern of blockPatterns) {
+    cleaned = cleaned.replace(pattern, "\n");
+  }
+
+  const linePatterns = [
+    /^\s*(Conversation info|Sender|Replied message|System \(untrusted\)|\[Subagent Context\]).*$/i,
+    /^\s*memory-policy:\s*untrusted_reference_only.*$/i,
+    /^\s*\d+\.\s*\[[^\]]+\|[^\]]+\]\s*route-hint:\s*transcript recall.*$/i,
+  ];
+  const kept: string[] = [];
+  for (const line of cleaned.split(/\r?\n/)) {
+    if (linePatterns.some((pattern) => pattern.test(line))) continue;
+    const stripped = line.trim();
+    if (stripped === "NO_REPLY" || stripped === "AUDIO_AS_VOICE") continue;
+    if (stripped.startsWith("MEDIA:")) continue;
+    kept.push(line);
+  }
+  cleaned = kept.join("\n");
+
+  cleaned = cleaned
+    .replace(/<\|im_start\|>|<\|im_end\|>/gi, " ")
+    .replace(/\[\/?INST\]/gi, " ")
+    .replace(/<<<BEGIN_[A-Z0-9_]+>>>|<<<END_[A-Z0-9_]+>>>/gi, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return cleaned;
+}
+
 function stableEventId(parts: Array<string | number | boolean | undefined | null>): string {
   const h = createHash("sha256");
   for (const part of parts) {
@@ -593,7 +634,7 @@ const plugin = {
             if (role === "user" && !episodesCaptureConversationUser) continue;
             if (role === "assistant" && !episodesCaptureConversationAssistant) continue;
 
-            const text = extractTextFromMessageContent(msg.content);
+            const text = sanitizeConversationTextForEpisode(extractTextFromMessageContent(msg.content), role);
             if (!text) continue;
 
             const scoped = splitLeadingScopeTag(text);
