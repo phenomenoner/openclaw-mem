@@ -14564,6 +14564,73 @@ def _extract_role_text_from_session_line(obj: Dict[str, Any]) -> Tuple[Optional[
     return None, ""
 
 
+_EPISODIC_CONVERSATION_BLOCK_PATTERNS = [
+    re.compile(r"<relevant-memories>[\s\S]*?</relevant-memories>", re.IGNORECASE),
+    re.compile(r"<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>", re.IGNORECASE),
+    re.compile(r"<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>[\s\S]*?<<<END_UNTRUSTED_CHILD_RESULT>>>", re.IGNORECASE),
+    re.compile(
+        r"^\s*(Conversation info|Sender|Replied message|System \(untrusted\)|\[Subagent Context\]).*?\n```json\s*[\s\S]*?```",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+]
+
+_EPISODIC_CONVERSATION_LINE_PATTERNS = [
+    re.compile(r"^\s*(Conversation info|Sender|Replied message|System \(untrusted\)|\[Subagent Context\]).*$", re.IGNORECASE),
+    re.compile(r"^\s*memory-policy:\s*untrusted_reference_only.*$", re.IGNORECASE),
+    re.compile(r"^\s*\d+\.\s*\[[^\]]+\|[^\]]+\]\s*route-hint:\s*transcript recall.*$", re.IGNORECASE),
+]
+
+_EPISODIC_CONVERSATION_CONTROL_PATTERNS = [
+    re.compile(r"<\|im_start\|>|<\|im_end\|>", re.IGNORECASE),
+    re.compile(r"\[/?INST\]", re.IGNORECASE),
+    re.compile(r"<<<BEGIN_[A-Z0-9_]+>>>|<<<END_[A-Z0-9_]+>>>", re.IGNORECASE),
+]
+
+
+def _sanitize_episodic_conversation_text(text: str, *, role: str) -> Optional[str]:
+    """Strip runtime/recall/control artifacts before conversation spooling.
+
+    Session JSONL rows may contain channel envelopes, recalled-memory injections,
+    subagent/internal delivery blocks, or assistant control tokens. Those are useful
+    runtime metadata, but they are not user/assistant episodic memory.
+    """
+
+    cleaned = _sanitize_str_surrogates(text or "").strip()
+    if not cleaned:
+        return None
+
+    if role == "assistant" and cleaned.strip() == "NO_REPLY":
+        return None
+
+    for pattern in _EPISODIC_CONVERSATION_BLOCK_PATTERNS:
+        cleaned = pattern.sub("\n", cleaned)
+
+    kept_lines: List[str] = []
+    for line in cleaned.splitlines():
+        if any(pattern.search(line) for pattern in _EPISODIC_CONVERSATION_LINE_PATTERNS):
+            continue
+        kept_lines.append(line)
+    cleaned = "\n".join(kept_lines)
+
+    for pattern in _EPISODIC_CONVERSATION_CONTROL_PATTERNS:
+        cleaned = pattern.sub(" ", cleaned)
+
+    # Control delivery directives should not become semantic memory unless they
+    # are embedded in a larger intentionally quoted sentence.
+    cleaned_lines = []
+    for line in cleaned.splitlines():
+        stripped = line.strip()
+        if stripped in {"NO_REPLY", "AUDIO_AS_VOICE"}:
+            continue
+        if stripped.startswith("MEDIA:"):
+            continue
+        cleaned_lines.append(line)
+
+    cleaned = re.sub(r"[ \t]+", " ", "\n".join(cleaned_lines))
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned or None
+
+
 def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     sessions_root = Path(
         str(getattr(args, "sessions_root", None) or DEFAULT_OPENCLAW_SESSIONS_ROOT)
@@ -14615,6 +14682,7 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
     emitted = 0
     payload_redacted = 0
     payload_truncated = 0
+    sanitized_dropped = 0
     trailing_partial_bytes = 0
     errors_sample: List[str] = []
 
@@ -14700,7 +14768,12 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
                 scope = _normalize_episodic_scope(scope_from_tag or "global")
 
                 original_text = stripped or text
-                clean_text = _redact_pii_lite(original_text)
+                sanitized_text = _sanitize_episodic_conversation_text(original_text, role=role)
+                if not sanitized_text:
+                    sanitized_dropped += 1
+                    continue
+
+                clean_text = _redact_pii_lite(sanitized_text)
                 secret_like = _looks_like_secret(clean_text)
                 tool_dump_like = _looks_like_tool_output(clean_text)
 
@@ -14802,6 +14875,7 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
         "emitted": emitted,
         "payload_redacted": payload_redacted,
         "payload_truncated": payload_truncated,
+        "sanitized_dropped": sanitized_dropped,
         "trailing_partial_bytes": trailing_partial_bytes,
         "payload_cap_bytes": payload_cap,
         "errors_sample": errors_sample,
