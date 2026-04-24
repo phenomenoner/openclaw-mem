@@ -13,6 +13,7 @@ Auto mode is rollbackable and split into lanes:
      - `tool.call`
      - `tool.result`
      - `ops.alert`
+   - when configured to capture conversation events, applies the same runtime-artifact sanitation before writing the spool
 2. **Conversation extractor lane** (`openclaw-mem episodes extract-sessions`)
    - tails OpenClaw `sessions/*.jsonl`
    - emits:
@@ -31,6 +32,12 @@ Auto mode is rollbackable and split into lanes:
   - Payload is returned only with explicit `--include-payload`.
 - Secret-like redaction is always on.
 - PII-lite redaction (email/phone) is enabled by default.
+- Conversation capture strips runtime artifacts before spooling/ingest:
+  - recalled-memory injection blocks
+  - channel or sender metadata envelopes
+  - internal delivery/result markers
+  - assistant control-only replies such as `NO_REPLY`
+  - media-delivery directives such as `MEDIA:`
 - Payload policy:
   - conversation payload default cap: **4096 bytes**
   - ingest hard ceiling: **8192 bytes**

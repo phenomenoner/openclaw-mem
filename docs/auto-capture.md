@@ -93,6 +93,12 @@ Useful follow flags:
 - query/replay are summary-only by default (`--include-payload` is explicit)
 - secret redaction always on
 - PII-lite redaction (email/phone) enabled by default
+- conversation capture strips runtime artifacts before spooling/ingest:
+  - recalled-memory injection blocks
+  - channel/sender metadata envelopes
+  - internal delivery/result markers
+  - assistant control-only replies such as `NO_REPLY`
+  - media-delivery directives such as `MEDIA:`
 - conversation payload default cap: 4096 bytes
 - ingest hard payload ceiling: 8192 bytes
 - if secret-like/tool-dump content still looks unsafe, payload is nulled and row marked `redacted=1`

@@ -11,7 +11,7 @@ When you do promote the engine, the live-turn hook is framed as **Proactive Pack
 - **Local-first by default** — JSONL + SQLite, no external database required.
 - **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
 - **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, graph-aware synthesis preference, protected fresh tails, and trace-backed debugging.
-- **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, and keep rollback simple.
+- **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, sanitize runtime artifacts, and keep rollback simple.
 - **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
 - **Governed continuity side-car** — optional `continuity` surface for derived self/continuity inspection, adjudication, public-safe summaries, and explicit weaken/rebind/retire receipts.
 
