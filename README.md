@@ -7,6 +7,22 @@ When you do promote the engine, the live-turn hook is framed as **Proactive Pack
 
 > 中文：給 OpenClaw operator 的本地優先記憶層。工具結果、決策、偏好與操作痕跡都能留下可查證紀錄；先 sidecar、後 engine，不強迫第一天就換記憶槽。
 
+## Start here
+
+1. **Verify locally in ~60 seconds:** [Reality check & status](docs/reality-check.md)
+2. **Run the CLI path:** [Quickstart](QUICKSTART.md)
+3. **Choose sidecar vs engine:** [Install modes](docs/install-modes.md)
+4. **Check what is automatic:** [Automation status](docs/automation-status.md)
+5. **See the product gaps:** [OpenClaw user improvement roadmap](docs/openclaw-user-improvement-roadmap.md)
+
+## What is automatic today?
+
+| Surface | Status | Meaning |
+| --- | --- | --- |
+| Sidecar observation capture | Automatic when the plugin is enabled | Captures denoised JSONL observations and backend/action annotations. |
+| Harvest, triage, and graph capture | Scheduled on configured hosts | Converts captured records into searchable stores and receipts. |
+| `pack`, graph routing, optimize assist, continuity | CLI / opt-in lanes | Available, but not assumed to run in every live agent turn. |
+| Mem-engine Proactive Pack | Optional promotion | Bounded pre-reply recall orchestration after explicit engine adoption. |
 
 ## What you get
 

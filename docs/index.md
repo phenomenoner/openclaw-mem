@@ -23,15 +23,35 @@ $ openclaw-mem search "privacy timezone style" --json
 </div>
 
 <div class="ocm-ctas" markdown="1">
-[Run the 5-minute demo](showcase/inside-out-demo.md){ .md-button .md-button--primary }
-[Choose an install path](install-modes.md){ .md-button }
+[Verify in 60 seconds](reality-check.md){ .md-button .md-button--primary }
 [Read the quickstart](quickstart.md){ .md-button }
+[Choose an install path](install-modes.md){ .md-button }
 </div>
 
 </div>
 
 !!! tip "中文一句話"
     `openclaw-mem` 是給 OpenClaw 的本地優先記憶層：把工具結果、決策、偏好與操作痕跡變成可搜尋、可引用、可回滾的記憶，而不是把一切丟給黑盒向量庫。
+
+## Start here: one operator path
+
+If you are evaluating `openclaw-mem`, take the shortest trustworthy route:
+
+1. **Verify the local proof** — run the [60-second reality check](reality-check.md) with a temporary SQLite DB.
+2. **Install the sidecar** — follow the [quickstart](quickstart.md), then choose a [sidecar / engine / hybrid install path](install-modes.md).
+3. **Check what is automatic** — read the [automation status](automation-status.md) before assuming anything is wired into the live agent loop.
+4. **Track the product arc** — use the [product-facing roadmap](openclaw-user-improvement-roadmap.md) for current gaps and next bets.
+
+## What runs automatically today?
+
+| Surface | Status | Operator meaning |
+| --- | --- | --- |
+| Sidecar observation capture | Automatic when the plugin is enabled | Captures JSONL observations, backend annotations, and denoised tool/action receipts. |
+| Harvest / triage / graph capture jobs | Scheduled on configured hosts | Turns captured records into searchable stores and maintenance receipts. |
+| `pack`, graph routing, optimize assist, continuity tools | Available as CLI or opt-in lanes | Powerful, but not assumed to be in every live agent turn unless explicitly promoted. |
+| Mem-engine Proactive Pack | Optional promotion path | Adds bounded pre-reply recall orchestration without making graph/docs a competing truth store. |
+
+This split is intentional: **Store / Pack / Observe** stays inspectable, and automation is promoted only when it has receipts.
 
 ## The promise
 
@@ -141,6 +161,8 @@ Keep the sidecar as the safe default. Add the optional memory engine for hybrid 
 If your agent only has one short chat, no ops trail, no audit need, and no repeated context to recover, the model context window is probably enough. `openclaw-mem` is for the moment memory becomes operational infrastructure.
 
 ## See it, don’t just believe it
+
+Start with the [60-second reality proof](reality-check.md), then use these deeper demos when you want to inspect richer behavior.
 
 <div class="ocm-grid" markdown="1">
 
