@@ -39,6 +39,7 @@ from openclaw_mem import context_pack_v1
 from openclaw_mem import gbrain_sidecar
 from openclaw_mem import pack_trace_v1
 from openclaw_mem import self_model_sidecar
+from openclaw_mem import project_resolver
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -15685,6 +15686,31 @@ def cmd_episodes_gc(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(out, args.json)
 
 
+
+def cmd_routing_resolve(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    resolution = project_resolver.resolve_project(
+        str(getattr(args, "query", "") or ""),
+        workspace_root=getattr(args, "workspace_root", "."),
+        project_map=getattr(args, "project_map", None),
+        max_depth=int(getattr(args, "max_depth", 2) or 2),
+        min_confidence=float(getattr(args, "min_confidence", 0.74) or 0.74),
+    )
+    _emit({"kind": "openclaw-mem.routing.resolve.v0", "resolution": resolution.to_dict()}, getattr(args, "json", False))
+
+
+def cmd_routing_eval(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    probes = project_resolver.load_probes(getattr(args, "probes"))
+    out = project_resolver.evaluate_routing_probes(
+        probes,
+        workspace_root=getattr(args, "workspace_root", "."),
+        project_map=getattr(args, "project_map", None),
+        max_depth=int(getattr(args, "max_depth", 2) or 2),
+    )
+    _emit(out, getattr(args, "json", False))
+
+
 def build_parser() -> argparse.ArgumentParser:
     epilog = (
         "Examples:\n"
@@ -15779,6 +15805,27 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("backend", help="Inspect active OpenClaw memory backend + fallback posture")
     add_common(sp)
     sp.set_defaults(func=cmd_backend)
+
+    sp = sub.add_parser("routing", help="Evaluate and resolve canonical project/repo routing guardrails")
+    add_common(sp)
+    rsub = sp.add_subparsers(dest="routing_cmd", required=True)
+
+    r = rsub.add_parser("resolve", help="Resolve an ambiguous project query to a canonical local git repo")
+    add_common(r)
+    r.add_argument("query", help="Project or task query to resolve")
+    r.add_argument("--workspace-root", default=".", help="Workspace root to scan for git repos (default: current directory)")
+    r.add_argument("--project-map", dest="project_map", default=None, help="Optional JSON project alias map")
+    r.add_argument("--max-depth", dest="max_depth", type=int, default=2, help="Max directory depth for git repo scan (default: 2)")
+    r.add_argument("--min-confidence", dest="min_confidence", type=float, default=0.74, help="Minimum confidence for resolved status (default: 0.74)")
+    r.set_defaults(func=cmd_routing_resolve)
+
+    r = rsub.add_parser("eval", help="Run public-safe routing probes against canonical project resolver")
+    add_common(r)
+    r.add_argument("--probes", required=True, help="JSON file containing routing probes")
+    r.add_argument("--workspace-root", default=".", help="Workspace root to scan for git repos (default: current directory)")
+    r.add_argument("--project-map", dest="project_map", default=None, help="Optional JSON project alias map")
+    r.add_argument("--max-depth", dest="max_depth", type=int, default=2, help="Max directory depth for git repo scan (default: 2)")
+    r.set_defaults(func=cmd_routing_eval)
 
     sp = sub.add_parser("optimize", help="Memory optimization review, judgment, and bounded apply helpers")
     add_common(sp)

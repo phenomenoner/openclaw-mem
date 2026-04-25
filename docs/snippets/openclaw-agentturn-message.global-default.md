@@ -59,6 +59,8 @@ Never store:
   - unattended: prefer `openclaw-mem graph readiness` first
   - single entrypoint router: `openclaw-mem route auto "<query>"` (fail-open)
     - when graph candidates are truthfully covered by a fresh synthesis card, prefer the synthesis card but keep `preferredCardRefs` / `coveredRawRefs` receipts
+  - pre-action repo grounding: `openclaw-mem routing resolve "<project task>" --workspace-root <workspace> --json` before file-changing work when project names or product terms are ambiguous
+  - regression probes: `openclaw-mem routing eval --probes <public-safe-probes.json> --workspace-root <workspace> --json`
   - mem-engine auto-hook: enable `autoRecall.routeAuto` when you want **Proactive Pack** live turns to consult that router during prompt build and inject the same synthesis-aware hint
     - current OpenClaw prefers `before_prompt_build`; `openclaw-mem-engine` keeps `before_agent_start` as a backward-compatible fallback
 

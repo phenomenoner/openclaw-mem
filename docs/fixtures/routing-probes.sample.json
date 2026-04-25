@@ -1,0 +1,16 @@
+{
+  "probes": [
+    {
+      "query": "beta close landing page",
+      "expected_path": "/workspace/beta-close",
+      "expected_remote_contains": "example/beta-close",
+      "forbidden_path": "/workspace/alpha-memory"
+    },
+    {
+      "query": "alpha memory recall policy",
+      "expected_path": "/workspace/alpha-memory",
+      "expected_remote_contains": "example/alpha-memory",
+      "forbidden_path": "/workspace/beta-close"
+    }
+  ]
+}

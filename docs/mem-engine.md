@@ -117,6 +117,10 @@ Related boundary: the shipped **verbatim semantic lane** remains a **sidecar ret
   - emits bounded lifecycle receipt (`openclaw-mem-engine.recall.receipt.v1`) with skip reason / tier counts / top IDs
   - in `receipts.verbosity=high`, injects a compact autoRecall wrapper comment (IDs only; no memory text in receipt)
     - default `low` keeps receipts in logs only (no prompt-side comment)
+  - project/repo action guardrail: for ambiguous project references, run the deterministic routing resolver before file-changing work:
+    - `openclaw-mem routing resolve "<project task>" --workspace-root <workspace> --json`
+    - `openclaw-mem routing eval --probes docs/fixtures/routing-probes.sample.json --workspace-root <workspace> --json`
+    - resolver output is advisory and fail-open: `resolved` may proceed after operator review; `ambiguous`, `low_confidence`, or `unresolved` should trigger a clarification or a narrower project map
 
 Boundary rule:
 - this is a **Pack runtime mode** that assembles a small pre-reply bundle
