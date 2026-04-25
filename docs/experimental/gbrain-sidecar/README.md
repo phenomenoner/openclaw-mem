@@ -24,7 +24,7 @@ This experimental sidecar is **not** the same thing as `gbrainMirror`.
 - `gbrainMirror` = optional mem-engine write-through mirror that copies successful `memory_store` writes into a dedicated GBrain import root
 
 They can coexist, but they solve different problems.
-If you are looking for engine-side write mirroring, read [`docs/mem-engine.md`](../../mem-engine.md) and [`extensions/openclaw-mem-engine/README.md`](../../../extensions/openclaw-mem-engine/README.md).
+If you are looking for engine-side write mirroring, read [`docs/mem-engine.md`](../../mem-engine.md) and [`extensions/openclaw-mem-engine/README.md`](https://github.com/phenomenoner/openclaw-mem/blob/main/extensions/openclaw-mem-engine/README.md).
 
 ## Phase 1 shipped here
 
@@ -99,7 +99,7 @@ Why this shape:
 
 Repo-local operator card:
 
-- [`skills/gbrain-sidecar.ops.md`](../../../skills/gbrain-sidecar.ops.md)
+- [`skills/gbrain-sidecar.ops.md`](https://github.com/phenomenoner/openclaw-mem/blob/main/skills/gbrain-sidecar.ops.md)
 
 ## Non-goals in this slice
 

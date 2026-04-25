@@ -77,7 +77,7 @@ Read:
 - [Optional continuity side-car activation](deployment.md#2b-optional-governed-continuity-side-car)
 - [Governed optimize assist lane](optimize-assist.md)
 - [Auto-capture plugin](auto-capture.md)
-- [Continuity ops lane](../skills/self-model-sidecar.ops.md)
+- [Continuity ops lane](https://github.com/phenomenoner/openclaw-mem/blob/main/skills/self-model-sidecar.ops.md)
 - [Agent memory skill (SOP)](agent-memory-skill.md) (recommended agent prompt contract)
 
 ### Rollback
@@ -120,7 +120,7 @@ Read:
 - [Ecosystem fit](ecosystem-fit.md)
 - [Deployment guide](deployment.md)
 - [Optional continuity side-car activation](deployment.md#2b-optional-governed-continuity-side-car)
-- [Continuity ops lane](../skills/self-model-sidecar.ops.md)
+- [Continuity ops lane](https://github.com/phenomenoner/openclaw-mem/blob/main/skills/self-model-sidecar.ops.md)
 - [Agent memory skill (SOP)](agent-memory-skill.md) (recommended agent prompt contract)
 - `python tools/route_auto_synthesis_smoke.py` (deterministic route-auto synthesis smoke)
 
