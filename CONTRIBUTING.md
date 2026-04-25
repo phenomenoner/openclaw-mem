@@ -18,6 +18,12 @@ This repo is run like a small, ops-sensitive product: **main stays stable**, exp
   - `.../openclaw-mem` (main)
   - `.../openclaw-mem-dev` (dev)
 
+- Install and run the default local verifier with uv:
+  ```bash
+  uv sync --locked
+  uv run pytest -q
+  ```
+
 - Slow-cook lanes policy (important):
   - Slow-cook automation **direct-pushes to `dev`**.
   - Do **NOT** open PRs into `dev` from `slowcook/*` branches.

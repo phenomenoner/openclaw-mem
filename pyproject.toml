@@ -24,6 +24,12 @@ docs = [
   "mkdocs-material>=9.5",
 ]
 
+[dependency-groups]
+# Keep the default contributor verification lane reproducible with `uv run pytest`.
+dev = [
+  "pytest>=8.0",
+]
+
 [project.scripts]
 openclaw-mem = "openclaw_mem.cli:main"
 openclaw-mem-pack-capsule = "openclaw_mem.capsule:standalone_main"

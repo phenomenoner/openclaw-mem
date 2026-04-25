@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Hardened episodic conversation auto-capture so runtime recall blocks, channel metadata envelopes, internal delivery markers, and assistant control-only replies are stripped before events enter the episodic spool.
 - Added regression coverage for sanitized conversation extraction to keep public query/replay surfaces focused on user-visible dialogue rather than runtime transport artifacts.
+- Aligned mem-engine auto-capture `maxCharsPerItem` runtime normalization with the plugin schema guardrail floor so too-short capture snippets fail closed consistently.
+- Added a default uv `dev` dependency group for pytest and documented the local verification command in the contributor workflow.
 
 ## [1.8.0] - 2026-04-18
 

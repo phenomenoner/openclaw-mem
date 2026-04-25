@@ -768,7 +768,7 @@ function resolveAutoCaptureConfig(input: PluginConfig["autoCapture"]): AutoCaptu
       integer: true,
     }),
     maxCharsPerItem: normalizeNumberInRange(raw.maxCharsPerItem, defaults.maxCharsPerItem, {
-      min: 40,
+      min: 60,
       max: AUTO_CAPTURE_MAX_CHARS_PER_ITEM,
       integer: true,
     }),
