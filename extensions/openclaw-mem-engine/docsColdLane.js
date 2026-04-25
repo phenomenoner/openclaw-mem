@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile as execFileCb } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCb);
@@ -225,34 +226,95 @@ function parseJsonLoose(text) {
   return null;
 }
 
-async function runOpenclawMemJson(args, timeoutMs = 240000) {
-  try {
-    const { stdout, stderr } = await execFile("openclaw-mem", args, {
-      timeout: timeoutMs,
-      maxBuffer: 8 * 1024 * 1024,
-    });
+function openclawMemProjectRoot() {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+}
 
-    const payload = parseJsonLoose(stdout) ?? parseJsonLoose(stderr);
-    return {
-      ok: true,
-      payload,
-      stdout: String(stdout || ""),
-      stderr: String(stderr || ""),
-    };
-  } catch (err) {
-    const stdout = String(err?.stdout || "");
-    const stderr = String(err?.stderr || "");
-    const payload = parseJsonLoose(stdout) ?? parseJsonLoose(stderr);
-    return {
-      ok: false,
-      payload,
-      stdout,
-      stderr,
-      error: err?.code === "ENOENT"
-        ? "openclaw-mem_not_found"
-        : String(err?.message || err),
-    };
+function commandCandidates(args) {
+  const requested = Array.isArray(args) ? args : [];
+  const projectRoot = process.env.OPENCLAW_MEM_PROJECT || openclawMemProjectRoot();
+  return [
+    {
+      label: "path-binary",
+      command: "openclaw-mem",
+      args: requested,
+    },
+    {
+      label: "uv-project-module",
+      command: "uv",
+      args: [
+        "run",
+        "--project",
+        projectRoot,
+        "--python",
+        "3.13",
+        "--frozen",
+        "python",
+        "-m",
+        "openclaw_mem",
+        ...requested,
+      ],
+    },
+  ];
+}
+
+async function runOneJsonCommand(candidate, timeoutMs) {
+  const { stdout, stderr } = await execFile(candidate.command, candidate.args, {
+    timeout: timeoutMs,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+
+  const payload = parseJsonLoose(stdout) ?? parseJsonLoose(stderr);
+  return {
+    ok: true,
+    payload,
+    stdout: String(stdout || ""),
+    stderr: String(stderr || ""),
+    commandLabel: candidate.label,
+  };
+}
+
+async function runOpenclawMemJson(args, timeoutMs = 240000) {
+  const failures = [];
+
+  for (const candidate of commandCandidates(args)) {
+    try {
+      return await runOneJsonCommand(candidate, timeoutMs);
+    } catch (err) {
+      const stdout = String(err?.stdout || "");
+      const stderr = String(err?.stderr || "");
+      const payload = parseJsonLoose(stdout) ?? parseJsonLoose(stderr);
+      const error = err?.code === "ENOENT"
+        ? `${candidate.command}_not_found`
+        : String(err?.message || err);
+      failures.push({ candidate, error, stdout, stderr, payload });
+
+      if (payload) {
+        return {
+          ok: false,
+          payload,
+          stdout,
+          stderr,
+          commandLabel: candidate.label,
+          error,
+        };
+      }
+    }
   }
+
+  const last = failures[failures.length - 1] || {};
+  const missingPrimary = failures.some((failure) => failure.error === "openclaw-mem_not_found");
+  const missingFallback = failures.some((failure) => failure.error === "uv_not_found");
+  return {
+    ok: false,
+    payload: null,
+    stdout: String(last.stdout || ""),
+    stderr: String(last.stderr || ""),
+    commandLabel: String(last.candidate?.label || "none"),
+    error: missingPrimary && missingFallback
+      ? "openclaw-mem_and_uv_not_found"
+      : String(last.error || "openclaw-mem_failed"),
+  };
 }
 
 function toNumber(value, fallback = 0) {
@@ -541,4 +603,6 @@ export const __private__ = {
   normalizeScopeToken,
   matchesScope,
   computeScopePushdownRepos,
+  commandCandidates,
+  openclawMemProjectRoot,
 };

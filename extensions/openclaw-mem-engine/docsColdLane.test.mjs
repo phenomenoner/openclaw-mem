@@ -86,3 +86,21 @@ test('matchesScope map strategy fails closed when scope is unmapped', () => {
   const ok = __private__.matchesScope(row, 'openclaw-mem', 'map', {});
   assert.equal(ok, false);
 });
+
+test('docs cold lane falls back to uv project module when PATH binary is absent', () => {
+  const candidates = __private__.commandCandidates(['--json', 'status']);
+  assert.equal(candidates[0].command, 'openclaw-mem');
+  assert.equal(candidates[1].command, 'uv');
+  assert.deepEqual(candidates[1].args.slice(0, 8), [
+    'run',
+    '--project',
+    __private__.openclawMemProjectRoot(),
+    '--python',
+    '3.13',
+    '--frozen',
+    'python',
+    '-m',
+  ]);
+  assert.equal(candidates[1].args[8], 'openclaw_mem');
+  assert.deepEqual(candidates[1].args.slice(-2), ['--json', 'status']);
+});
