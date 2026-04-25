@@ -1,10 +1,12 @@
 # openclaw-mem
 
-**A local-first context supply chain for OpenClaw: store what matters, pack what fits, observe what changed.**
+**Memory your agent can’t lie about — a local context supply chain you can grep, diff, and roll back.**
 
-`openclaw-mem` turns agent work into a durable, searchable, auditable memory trail, then assembles bounded context bundles that are small enough to inject and easy to verify.
-Start with a local SQLite sidecar. Keep your current OpenClaw memory backend if you want. Promote to the optional mem engine later if you need hybrid recall, policy controls, and safer automation.
+`openclaw-mem` turns agent work into a durable, searchable, auditable memory trail, then assembles bounded context bundles that are small enough to inject and easy to verify. Start with a local SQLite sidecar beside OpenClaw, keep your current memory backend, and promote to the optional mem engine only when hybrid recall and policy controls earn their keep.
 When you do promote the engine, the live-turn hook is framed as **Proactive Pack**: bounded pre-reply recall orchestration, not a separate hidden memory layer.
+
+> 中文：給 OpenClaw operator 的本地優先記憶層。工具結果、決策、偏好與操作痕跡都能留下可查證紀錄；先 sidecar、後 engine，不強迫第一天就換記憶槽。
+
 
 ## What you get
 

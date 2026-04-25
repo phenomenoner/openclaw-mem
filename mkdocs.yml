@@ -17,11 +17,16 @@ theme:
     - search.suggest
     - search.highlight
 
+extra_css:
+  - stylesheets/landing.css
+
 plugins:
   - search
 
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html
   - pymdownx.details
   - pymdownx.superfences
   - toc:

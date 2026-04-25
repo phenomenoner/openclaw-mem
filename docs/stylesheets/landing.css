@@ -1,0 +1,99 @@
+.ocm-hero {
+  margin: 1.4rem 0 2rem;
+  padding: 2rem;
+  border: 1px solid rgba(125, 125, 255, 0.24);
+  border-radius: 1.1rem;
+  background:
+    radial-gradient(circle at top left, rgba(99, 102, 241, 0.22), transparent 34rem),
+    radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.18), transparent 28rem),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(2, 6, 23, 0.98));
+  color: #f8fafc;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+}
+
+.ocm-hero h1 {
+  max-width: 14ch;
+  margin: 0.35rem 0 0.7rem;
+  color: #fff;
+  font-size: clamp(2.05rem, 5vw, 4rem);
+  line-height: 0.96;
+  letter-spacing: -0.055em;
+}
+
+.ocm-hero p {
+  max-width: 47rem;
+  color: #dbeafe;
+  font-size: 1.02rem;
+}
+
+.ocm-eyebrow {
+  color: #93c5fd;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.ocm-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 1.1rem;
+}
+
+.ocm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.9rem;
+  margin: 1.1rem 0 2rem;
+}
+
+.ocm-card {
+  padding: 1rem;
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  border-radius: 0.85rem;
+  background: linear-gradient(180deg, rgba(255,255,255,0.86), rgba(248,250,252,0.72));
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+}
+
+[data-md-color-scheme="slate"] .ocm-card {
+  background: linear-gradient(180deg, rgba(30,41,59,0.86), rgba(15,23,42,0.72));
+  border-color: rgba(147, 197, 253, 0.18);
+}
+
+.ocm-card h3 {
+  margin-top: 0;
+}
+
+.ocm-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 1rem 0;
+}
+
+.ocm-pills span {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(191, 219, 254, 0.28);
+  border-radius: 999px;
+  padding: 0.24rem 0.6rem;
+  color: #bfdbfe;
+  background: rgba(15, 23, 42, 0.42);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.ocm-terminal {
+  max-width: 48rem;
+  margin: 1rem 0;
+  border: 1px solid rgba(147, 197, 253, 0.18);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.ocm-terminal pre {
+  margin: 0;
+  background: rgba(2, 6, 23, 0.72) !important;
+}
