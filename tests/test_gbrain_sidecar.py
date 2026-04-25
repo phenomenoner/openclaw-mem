@@ -41,6 +41,59 @@ class TestGBrainSidecarModule(unittest.TestCase):
         self.assertTrue(out["fail_open"])
         self.assertIn("missing-gbrain", out["error"])
 
+    def test_consult_fail_open_on_invalid_json(self):
+        completed = subprocess.CompletedProcess(
+            args=["gbrain"],
+            returncode=0,
+            stdout="not-json",
+            stderr="",
+        )
+        with patch("openclaw_mem.gbrain_sidecar.subprocess.run", return_value=completed):
+            out = gbrain_sidecar.consult("rollout state", gbrain_bin="gbrain")
+
+        self.assertFalse(out["ok"])
+        self.assertTrue(out["fail_open"])
+        self.assertIn("invalid gbrain JSON output", out["error"])
+
+    def test_consult_fail_open_on_timeout_with_bounded_receipt_text(self):
+        exc = subprocess.TimeoutExpired(
+            cmd=["gbrain", "call", "query", "{}"],
+            timeout=0.01,
+            output="x" * 8000,
+            stderr="y" * 8000,
+        )
+        with patch("openclaw_mem.gbrain_sidecar.subprocess.run", side_effect=exc):
+            result = gbrain_sidecar._run_gbrain_call("query", {}, gbrain_bin="gbrain", timeout_ms=10)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.returncode, 124)
+        self.assertIn("timed out", result.error or "")
+        self.assertLessEqual(len(result.stdout), gbrain_sidecar.MAX_GBRAIN_RECEIPT_CHARS + 1)
+        self.assertLessEqual(len(result.stderr), gbrain_sidecar.MAX_GBRAIN_RECEIPT_CHARS + 1)
+
+    def test_call_failure_with_empty_stderr_has_actionable_error(self):
+        completed = subprocess.CompletedProcess(args=["gbrain"], returncode=17, stdout="", stderr="")
+        with patch("openclaw_mem.gbrain_sidecar.subprocess.run", return_value=completed):
+            result = gbrain_sidecar._run_gbrain_call("query", {}, gbrain_bin="gbrain")
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.returncode, 17)
+        self.assertEqual(result.error, "gbrain call query failed")
+
+    def test_call_rejects_huge_stdout_before_json_parse(self):
+        completed = subprocess.CompletedProcess(
+            args=["gbrain"],
+            returncode=0,
+            stdout="[" + (" " * (gbrain_sidecar.MAX_GBRAIN_STDOUT_CHARS + 1)) + "]",
+            stderr="",
+        )
+        with patch("openclaw_mem.gbrain_sidecar.subprocess.run", return_value=completed):
+            result = gbrain_sidecar._run_gbrain_call("query", {}, gbrain_bin="gbrain")
+
+        self.assertFalse(result.ok)
+        self.assertIn("too large", result.error or "")
+        self.assertLessEqual(len(result.stdout), gbrain_sidecar.MAX_GBRAIN_RECEIPT_CHARS + 1)
+
     def test_submit_job_is_bounded_to_embed_lane(self):
         with self.assertRaises(ValueError):
             gbrain_sidecar.submit_job(name="sync")

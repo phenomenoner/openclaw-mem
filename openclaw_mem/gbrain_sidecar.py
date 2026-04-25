@@ -16,6 +16,8 @@ DEFAULT_JOBS_TIMEOUT_MS = 5000
 DEFAULT_CONSULT_LIMIT = 4
 PHASE2_ALLOWED_JOB_NAME = "embed"
 REFRESH_RECOMMEND_SCHEMA = "openclaw-mem.graph.synth.recommend.v0"
+MAX_GBRAIN_STDOUT_CHARS = 1_000_000
+MAX_GBRAIN_RECEIPT_CHARS = 4000
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,14 @@ def _truncate(text: str, limit: int = 240) -> str:
     if len(value) <= limit:
         return value
     return value[:limit].rstrip() + "…"
+
+
+def _stringify_subprocess_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def _run_gbrain_call(
@@ -65,19 +75,23 @@ def _run_gbrain_call(
             error=f"gbrain binary not found: {gbrain_bin}",
         )
     except subprocess.TimeoutExpired as e:
+        stdout = _truncate(_stringify_subprocess_text(e.stdout), MAX_GBRAIN_RECEIPT_CHARS)
+        stderr = _truncate(_stringify_subprocess_text(e.stderr), MAX_GBRAIN_RECEIPT_CHARS)
         return GBrainCallResult(
             ok=False,
             command=command,
             returncode=124,
-            stdout=e.stdout or "",
-            stderr=e.stderr or "",
+            stdout=stdout,
+            stderr=stderr,
             duration_ms=int((time.perf_counter() - started) * 1000),
             error=f"gbrain call timed out after {timeout_ms}ms",
         )
 
     duration_ms = int((time.perf_counter() - started) * 1000)
-    stdout = completed.stdout or ""
-    stderr = completed.stderr or ""
+    raw_stdout = _stringify_subprocess_text(completed.stdout)
+    raw_stderr = _stringify_subprocess_text(completed.stderr)
+    stdout = _truncate(raw_stdout, MAX_GBRAIN_RECEIPT_CHARS)
+    stderr = _truncate(raw_stderr, MAX_GBRAIN_RECEIPT_CHARS)
 
     if completed.returncode != 0:
         return GBrainCallResult(
@@ -90,8 +104,19 @@ def _run_gbrain_call(
             error=_truncate(stderr or stdout or f"gbrain call {tool_name} failed"),
         )
 
+    if len(raw_stdout) > MAX_GBRAIN_STDOUT_CHARS:
+        return GBrainCallResult(
+            ok=False,
+            command=command,
+            returncode=int(completed.returncode),
+            stdout=stdout,
+            stderr=stderr,
+            duration_ms=duration_ms,
+            error=f"gbrain JSON output too large: {len(raw_stdout)} chars",
+        )
+
     try:
-        parsed = json.loads(stdout or "null")
+        parsed = json.loads(raw_stdout or "null")
     except Exception as e:
         return GBrainCallResult(
             ok=False,
