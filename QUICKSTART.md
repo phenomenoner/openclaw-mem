@@ -79,6 +79,12 @@ See:
 - `docs/showcase/artifacts/trust-aware-context-pack.metrics.json`
 - `docs/showcase/inside-out-demo.md`
 
+Optional operator handoff template:
+
+```bash
+./scripts/operator_template_demo.sh
+```
+
 ---
 
 ## Step 3: Ingest sample data

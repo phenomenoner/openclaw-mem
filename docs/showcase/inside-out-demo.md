@@ -34,6 +34,23 @@ You should see a packed bundle (plus an optional trace) for a keyword-style quer
 
 > `timezone privacy demo style`
 
+## Operator template variant
+
+If you want a reusable handoff skeleton instead of the persona-style Inside-Out sample, run:
+
+```bash
+# From repo root
+./scripts/operator_template_demo.sh
+```
+
+This creates a temporary synthetic operator workspace with:
+
+- `DECISIONS/2026-02-12-demo.md`
+- `RUNBOOKS/memory-demo.md`
+- `receipts/operator-template-pack.json`
+
+It uses an isolated SQLite DB and JSONL ingest, so it does **not** mutate OpenClaw config, restart the gateway, or write to the host memory journal.
+
 ## Demo talk track
 
 Use this 3-beat flow when showing it to someone:

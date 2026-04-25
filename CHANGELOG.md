@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Promoted the docs front door into a clearer operator path: 60-second proof, quickstart, install modes, automation status, and product roadmap are now visible from the top nav and landing surfaces.
 - Fixed repo-internal docs links that pointed outside MkDocs' docs tree so `mkdocs build --strict` can pass cleanly again.
 - Hardened the experimental GBrain sidecar call wrapper against malformed JSON, oversized stdout, timeouts with large partial output, and non-zero calls with empty stderr while keeping fail-open receipts bounded.
+- Added `scripts/operator_template_demo.sh`, a synthetic one-command operator handoff template that generates a temporary decision/runbook workspace, ingests JSONL into an isolated DB, and emits a cited pack receipt without touching OpenClaw config or the host memory journal.
 
 ## [1.8.0] - 2026-04-18
 
