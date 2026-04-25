@@ -2,6 +2,7 @@ import io
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -32,6 +33,7 @@ class TestOptimizePostureReview(unittest.TestCase):
         conn = _connect(":memory:")
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
+            now = datetime.now(timezone.utc).isoformat()
             (root / "controller-state.json").write_text(
                 json.dumps(
                     {
@@ -48,7 +50,7 @@ class TestOptimizePostureReview(unittest.TestCase):
                             "medium": {"status": "green"},
                             "soak": {"status": "green"},
                         },
-                        "updated_at": "2026-04-17T00:00:00+00:00",
+                        "updated_at": now,
                     }
                 ),
                 encoding="utf-8",
@@ -56,17 +58,17 @@ class TestOptimizePostureReview(unittest.TestCase):
             run_dir = root / "2026-04-17" / "run-1"
             run_dir.mkdir(parents=True, exist_ok=True)
             (run_dir / "controller.json").write_text(
-                json.dumps({"ts": "2026-04-17T00:00:00+00:00", "next_mode": "auto_low_risk"}),
+                json.dumps({"ts": now, "next_mode": "auto_low_risk"}),
                 encoding="utf-8",
             )
             (run_dir / "challenger.json").write_text(
-                json.dumps({"ts": "2026-04-17T00:00:00+00:00", "summary": {"agreement_pass": True}}),
+                json.dumps({"ts": now, "summary": {"agreement_pass": True}}),
                 encoding="utf-8",
             )
             (run_dir / "verifier.json").write_text(
                 json.dumps(
                     {
-                        "ts": "2026-04-17T00:00:00+00:00",
+                        "ts": now,
                         "summary": {
                             "effect_receipt_missing_pct": 0.0,
                             "cap_integrity_pass": True,
@@ -77,7 +79,7 @@ class TestOptimizePostureReview(unittest.TestCase):
                 encoding="utf-8",
             )
             (run_dir / "assist-after.json").write_text(
-                json.dumps({"ts": "2026-04-17T00:00:00+00:00", "result": "applied"}),
+                json.dumps({"ts": now, "result": "applied"}),
                 encoding="utf-8",
             )
             args = type("Args", (), {"runner_root": str(root), "window_hours": 72, "top": 10, "json": True})()
