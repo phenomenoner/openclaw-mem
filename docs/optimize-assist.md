@@ -72,7 +72,9 @@ This command:
 - scans recent assist apply receipts
 - checks effect-receipt completeness
 - checks cap integrity against before receipts
+- checks no-hard-delete posture via before/after observation row-count snapshots
 - runs rollback replay simulation on a temporary DB clone when the current row state still matches the recorded after hashes
+- reports per-action family accounting (including `set_soft_archive_candidate`) in verifier summary
 - emits a compact verifier bundle without mutating memory rows
 
 ## Challenger review

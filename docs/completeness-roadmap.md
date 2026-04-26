@@ -110,6 +110,7 @@ Latest lifecycle MVP archive-first progress (shipped, governed lane):
 - `optimize evolution-review` emits bounded `set_soft_archive_candidate` proposals with `safe_for_auto_apply=false` by default.
 - `optimize governor-review` requires explicit `--approve-soft-archive` before any soft-archive candidate can become `approved_for_apply`.
 - `optimize assist-apply` now supports governed soft-archive mutation with reversible lifecycle writes only (`soft_archive_candidate`, `archived_at`, `archive_reason_code`) and apply-time protection rechecks; no hard-delete path is introduced.
+- canary-readiness hardening now extends verifier/posture accounting so soft-archive action counts are visible in `verifier-bundle`/`posture-review`, and verifier receipts assert no-hard-delete row-count invariants alongside rollback replay.
 
 Focused verifier command for this slice:
-- `uv run --group dev python -m pytest tests/test_optimize_review.py tests/test_optimize_evolution_review.py tests/test_optimize_governor_review.py tests/test_optimize_assist_apply.py tests/test_optimize_assist_runner.py -q`
+- `uv run --group dev python -m pytest tests/test_optimize_review.py tests/test_optimize_evolution_review.py tests/test_optimize_governor_review.py tests/test_optimize_assist_apply.py tests/test_optimize_effect_followup.py tests/test_optimize_verifier_bundle.py tests/test_optimize_posture_review.py tests/test_optimize_assist_runner.py -q`

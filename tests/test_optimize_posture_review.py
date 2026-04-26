@@ -57,6 +57,7 @@ class TestOptimizePostureReview(unittest.TestCase):
                         },
                         "family_state": {
                             "stale_candidate": {"enabled": True, "mode": "enabled", "reasons": []},
+                            "soft_archive_candidate": {"enabled": True, "mode": "enabled", "reasons": []},
                             "importance_downshift": {"enabled": True, "mode": "enabled", "reasons": []},
                             "score_label_alignment": {"enabled": False, "mode": "disabled", "reasons": ["disabled_by_flag"]},
                         },
@@ -105,7 +106,13 @@ class TestOptimizePostureReview(unittest.TestCase):
                         "summary": {
                             "effect_receipt_missing_pct": 0.0,
                             "cap_integrity_pass": True,
+                            "no_hard_delete_pass": True,
                             "rollback_replay_pass": True,
+                            "applied_action_counts": {
+                                "set_stale_candidate": 1,
+                                "adjust_importance_score": 0,
+                                "set_soft_archive_candidate": 1,
+                            },
                         },
                     }
                 ),
@@ -128,7 +135,9 @@ class TestOptimizePostureReview(unittest.TestCase):
         self.assertTrue(out["controller"]["importance_drift_gate_passed"])
         self.assertEqual(out["controller"]["importance_drift_profile"], "balanced")
         self.assertIn("importance_drift_baseline", out["controller"])
-        self.assertEqual(out["counts"]["enabledFamilies"], 2)
+        self.assertEqual(out["counts"]["enabledFamilies"], 3)
+        self.assertEqual(out["counts"]["softArchiveActionsObserved"], 1)
+        self.assertEqual(out["families"]["verifier_applied_action_counts"]["set_soft_archive_candidate"], 1)
         self.assertGreaterEqual(out["counts"]["importanceDriftGateGreenRuns"], 1)
         self.assertGreaterEqual(out["counts"]["importanceDriftBaselineLiveRuns"], 1)
         conn.close()

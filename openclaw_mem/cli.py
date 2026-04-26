@@ -2612,6 +2612,39 @@ def _optimize_verifier_cap_integrity(after_payload: Dict[str, Any], before_paylo
     }
 
 
+def _optimize_verifier_no_hard_delete_integrity(after_payload: Dict[str, Any], before_payload: Dict[str, Any]) -> Dict[str, Any]:
+    before_snapshot = before_payload.get('state_snapshot') if isinstance(before_payload.get('state_snapshot'), dict) else {}
+    after_snapshot = after_payload.get('state_snapshot') if isinstance(after_payload.get('state_snapshot'), dict) else {}
+    try:
+        before_rows = int(before_snapshot.get('observation_rows'))
+    except Exception:
+        before_rows = None
+    try:
+        after_rows = int(after_snapshot.get('observation_rows') if after_snapshot.get('observation_rows') is not None else after_snapshot.get('observation_rows_after'))
+    except Exception:
+        after_rows = None
+    if before_rows is None or after_rows is None:
+        return {
+            'pass': None,
+            'reason': 'missing_observation_row_snapshot',
+            'before_observation_rows': before_rows,
+            'after_observation_rows': after_rows,
+        }
+    if after_rows != before_rows:
+        return {
+            'pass': False,
+            'reason': 'observation_row_count_changed',
+            'before_observation_rows': before_rows,
+            'after_observation_rows': after_rows,
+        }
+    return {
+        'pass': True,
+        'reason': 'observation_row_count_unchanged',
+        'before_observation_rows': before_rows,
+        'after_observation_rows': after_rows,
+    }
+
+
 def _optimize_verifier_rollback_replay(conn: sqlite3.Connection, rollback_payload: Dict[str, Any], after_payload: Dict[str, Any]) -> Dict[str, Any]:
     mutations = rollback_payload.get('mutations') if isinstance(rollback_payload.get('mutations'), list) else []
     if not mutations:
@@ -3072,6 +3105,7 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
 
     run_id = str(uuid.uuid4())
     ts_now = _utcnow_iso()
+    observation_rows_before = int(conn.execute('SELECT COUNT(*) AS count FROM observations').fetchone()['count'])
     packet_sha256 = _json_sha256(packet)
     if _optimize_assist_prior_packet_attempts(run_root, packet_sha256=packet_sha256) >= 1:
         blocked_reasons.append('max_retries_per_packet_exceeded')
@@ -3128,6 +3162,9 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
             'mode': 'assist_apply',
             'writes_performed': 0,
             'memory_mutation': 'assist_apply_pending',
+        },
+        'state_snapshot': {
+            'observation_rows': observation_rows_before,
         },
     }
     before_path.write_text(json.dumps(before_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
@@ -3248,6 +3285,8 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
     }
     effect_path.write_text(json.dumps(effect_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
+    observation_rows_after = int(conn.execute('SELECT COUNT(*) AS count FROM observations').fetchone()['count'])
+
     after_payload = {
         'kind': 'openclaw-mem.optimize.assist.after.v1',
         'run_id': run_id,
@@ -3269,6 +3308,11 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
             'writes_performed': applied_rows,
             'memory_mutation': 'assist_apply' if applied_rows > 0 else 'none',
             'governor_required': True,
+        },
+        'state_snapshot': {
+            'observation_rows': observation_rows_after,
+            'observation_rows_before': observation_rows_before,
+            'observation_rows_delta': observation_rows_after - observation_rows_before,
         },
         'artifacts': {
             'before_ref': str(before_path),
@@ -3344,6 +3388,8 @@ def cmd_optimize_verifier_bundle(conn: sqlite3.Connection, args: argparse.Namesp
     receipts = _optimize_verifier_recent_after_receipts(run_root, since_ts=since_ts)[:top]
 
     items: List[Dict[str, Any]] = []
+    action_names = ('set_stale_candidate', 'adjust_importance_score', 'set_soft_archive_candidate')
+    applied_action_counts_total: Dict[str, int] = {name: 0 for name in action_names}
     for after_payload in receipts:
         artifacts = after_payload.get('artifacts') if isinstance(after_payload.get('artifacts'), dict) else {}
         before_ref = str(artifacts.get('before_ref') or '').strip()
@@ -3354,7 +3400,12 @@ def cmd_optimize_verifier_bundle(conn: sqlite3.Connection, args: argparse.Namesp
         effect_payload = _optimize_verifier_load_json(Path(effect_ref).expanduser()) if effect_ref else {}
         effect_receipt_present = str(effect_payload.get('kind') or '') == 'openclaw-mem.optimize.assist.effect-batch.v0'
         cap_integrity = _optimize_verifier_cap_integrity(after_payload, before_payload) if before_payload else {'pass': False, 'reasons': ['missing_before_receipt']}
+        no_hard_delete_integrity = _optimize_verifier_no_hard_delete_integrity(after_payload, before_payload) if before_payload else {'pass': None, 'reason': 'missing_before_receipt'}
         rollback_replay = _optimize_verifier_rollback_replay(conn, rollback_payload, after_payload) if rollback_payload else {'rollback_replay_pass': None, 'reason': 'missing_rollback_receipt'}
+        raw_action_counts = after_payload.get('applied_action_counts') if isinstance(after_payload.get('applied_action_counts'), dict) else {}
+        applied_action_counts = {name: int(raw_action_counts.get(name) or 0) for name in action_names}
+        for name, count in applied_action_counts.items():
+            applied_action_counts_total[name] = int(applied_action_counts_total.get(name) or 0) + int(count)
         item = {
             'run_id': str(after_payload.get('run_id') or ''),
             'ts': after_payload.get('ts'),
@@ -3363,9 +3414,12 @@ def cmd_optimize_verifier_bundle(conn: sqlite3.Connection, args: argparse.Namesp
             'effect_receipt_present': effect_receipt_present,
             'cap_integrity_pass': bool(cap_integrity.get('pass')),
             'cap_integrity_reasons': list(cap_integrity.get('reasons') or []),
+            'no_hard_delete_pass': no_hard_delete_integrity.get('pass'),
+            'no_hard_delete_reason': no_hard_delete_integrity.get('reason'),
             'rollback_replay_pass': rollback_replay.get('rollback_replay_pass'),
             'rollback_replay_reason': rollback_replay.get('reason'),
             'applied_rows': int(after_payload.get('applied_rows') or 0),
+            'applied_action_counts': applied_action_counts,
             'blocked_by_caps': list(after_payload.get('blocked_by_caps') or []),
         }
         items.append(item)
@@ -3389,6 +3443,9 @@ def cmd_optimize_verifier_bundle(conn: sqlite3.Connection, args: argparse.Namesp
             'items': len(items),
             'effectReceiptPresent': sum(1 for item in items if item.get('effect_receipt_present')),
             'capIntegrityPass': sum(1 for item in items if item.get('cap_integrity_pass')),
+            'noHardDeletePass': sum(1 for item in items if item.get('no_hard_delete_pass') is True),
+            'noHardDeleteInconclusive': sum(1 for item in items if item.get('no_hard_delete_pass') is None),
+            'noHardDeleteFail': sum(1 for item in items if item.get('no_hard_delete_pass') is False),
             'rollbackReplayPass': sum(1 for item in items if item.get('rollback_replay_pass') is True),
             'rollbackReplayInconclusive': sum(1 for item in items if item.get('rollback_replay_pass') is None),
             'rollbackReplayFail': sum(1 for item in items if item.get('rollback_replay_pass') is False),
@@ -3396,7 +3453,9 @@ def cmd_optimize_verifier_bundle(conn: sqlite3.Connection, args: argparse.Namesp
         'summary': {
             'effect_receipt_missing_pct': round(((sum(1 for item in items if not item.get('effect_receipt_present')) / len(items)) * 100.0), 2) if items else 0.0,
             'cap_integrity_pass': all(bool(item.get('cap_integrity_pass')) for item in items) if items else True,
+            'no_hard_delete_pass': all(item.get('no_hard_delete_pass') is True for item in items if item.get('no_hard_delete_pass') is not None) if any(item.get('no_hard_delete_pass') is not None for item in items) else None,
             'rollback_replay_pass': all(item.get('rollback_replay_pass') is True for item in items if item.get('rollback_replay_pass') is not None) if any(item.get('rollback_replay_pass') is not None for item in items) else None,
+            'applied_action_counts': applied_action_counts_total,
         },
         'items': items,
     }
@@ -3511,6 +3570,13 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
     assist_packets = _optimize_posture_recent_packets(runner_root, 'assist-after.json', since_ts=since_ts, top=top)
 
     family_state = controller_state.get('family_state') if isinstance(controller_state.get('family_state'), dict) else {}
+    latest_verifier_summary = verifier_packets[0].get('summary') if verifier_packets and isinstance(verifier_packets[0].get('summary'), dict) else {}
+    latest_verifier_applied_action_counts_raw = latest_verifier_summary.get('applied_action_counts') if isinstance(latest_verifier_summary.get('applied_action_counts'), dict) else {}
+    latest_verifier_applied_action_counts = {
+        'set_stale_candidate': int(latest_verifier_applied_action_counts_raw.get('set_stale_candidate') or 0),
+        'adjust_importance_score': int(latest_verifier_applied_action_counts_raw.get('adjust_importance_score') or 0),
+        'set_soft_archive_candidate': int(latest_verifier_applied_action_counts_raw.get('set_soft_archive_candidate') or 0),
+    }
     enabled_families = sorted(
         family for family, slot in family_state.items()
         if isinstance(slot, dict) and bool(slot.get('enabled', False))
@@ -3621,6 +3687,7 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
             'enabled': enabled_families,
             'quarantined': quarantined_families,
             'state': family_state,
+            'verifier_applied_action_counts': latest_verifier_applied_action_counts,
         },
         'counts': {
             'enabledFamilies': len(enabled_families),
@@ -3630,6 +3697,7 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
             'importanceDriftGateGreenRuns': importance_drift_gate_green,
             'importanceDriftBaselineLiveRuns': importance_drift_baseline_live_runs,
             'importanceDriftPersistentRuns': importance_drift_persistent_runs,
+            'softArchiveActionsObserved': latest_verifier_applied_action_counts['set_soft_archive_candidate'],
             'autoLowRiskCycles': auto_apply_cycles,
             'appliedCycles': applied_cycles,
         },

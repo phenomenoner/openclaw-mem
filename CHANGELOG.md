@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `optimize governor-review` now requires an explicit `--approve-soft-archive` flag before `set_soft_archive_candidate` proposals can move from `proposal_only` to `approved_for_apply`.
 - `optimize assist-apply` now supports governed soft-archive application for `set_soft_archive_candidate` actions, writing reversible lifecycle metadata only (`archived_at`, `archive_reason_code`, `soft_archive_candidate`, and bounded `optimization.assist` receipts) with no hard delete path.
 - Soft-archive apply now re-checks protections at mutation time (must-remember, recent-use conflict, already-archived idempotent skip) and records protection skips in assist after-receipts.
+- Assist before/after receipts now include observation-row snapshot metadata so verifier lanes can assert no-hard-delete invariants without widening write authority.
+- `optimize verifier-bundle` now reports per-action family counts (including `set_soft_archive_candidate`) and emits a no-hard-delete integrity verdict in addition to rollback replay/cap checks.
+- `optimize posture-review` now surfaces the latest verifier family action counts and soft-archive observed-action accounting for canary-readiness audits.
 - `optimize evolution-review` now carries compact upstream importance-drift counters for operator visibility without widening apply behavior.
 - Added a deterministic read-only `importance_drift.policy_card` gate (`openclaw-mem.optimize.importance-drift-policy-card.v0`) with conservative count/rate thresholds and compact text-line rendering in optimize review/evolution outputs.
 - Wired the importance-drift gate into optimize-assist promotion/controller receipts as a non-mutating constraint (`promotion_gates.importance_drift_gate`) and surfaced it in posture review readiness checks.
@@ -45,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added optimize-review regression coverage for importance-drift JSON shape, top-bounded output, mismatch detection, text rendering, and read-only/query-only posture.
 - Added optimize-review regression coverage for archive-first proposal candidates, including stale low-importance detection, `must_remember` exclusion, recent-use protection, already-archived exclusion, and `--top` bounded JSON output.
 - Added evolution/governor/assist regression coverage for the governed soft-archive lane: candidate JSON shape/classification, explicit governor approval flag gating, dry-run + real apply receipts/rollback artifacts, apply-time protection rechecks (`must_remember`, recent-use, already-archived skip), and no-hard-delete posture.
+- Added effect/verifier/posture regression coverage for soft-archive canary readiness: soft-archive follow-up family judgments, verifier family accounting + rollback replay + no-hard-delete invariants, and posture-review surfacing of verifier soft-archive action counts.
 - Added regression coverage for importance-drift gate pass/fail policy behavior, runner promotion-gate integration, and posture-review gate visibility.
 - Added regression coverage for deterministic profile pass/fail behavior, runner baseline-comparator transient-vs-persistent classification, parser flag propagation, and posture-review baseline surface fields.
 - Added secret-hardening regression coverage for episodic extraction/guardrails (new token families redacted with null payload, no secret echo in guard errors) plus mem-engine autoCapture receipt-boundedness/source-contract checks.

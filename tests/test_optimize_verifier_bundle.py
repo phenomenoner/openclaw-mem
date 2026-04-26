@@ -99,8 +99,92 @@ class TestOptimizeVerifierBundle(unittest.TestCase):
         self.assertEqual(out["kind"], "openclaw-mem.optimize.verifier-bundle.v0")
         self.assertEqual(out["counts"]["items"], 1)
         self.assertEqual(out["counts"]["effectReceiptPresent"], 1)
+        self.assertEqual(out["counts"]["noHardDeletePass"], 1)
         self.assertEqual(out["counts"]["rollbackReplayPass"], 1)
         self.assertTrue(out["summary"]["cap_integrity_pass"])
+        self.assertTrue(out["summary"]["no_hard_delete_pass"])
+        self.assertEqual(out["summary"]["applied_action_counts"]["set_stale_candidate"], 1)
+        self.assertEqual(out["items"][0]["run_id"], apply_out["run_id"])
+        self.assertTrue(out["items"][0]["no_hard_delete_pass"])
+        self.assertEqual(out["items"][0]["applied_action_counts"]["set_stale_candidate"], 1)
+        conn.close()
+
+    def test_verifier_bundle_soft_archive_smoke_covers_family_accounting_and_no_hard_delete(self):
+        conn = _connect(":memory:")
+        stale_ts = (datetime.now(timezone.utc) - timedelta(days=120)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        obs_id = _insert_observation(
+            conn,
+            {
+                "ts": stale_ts,
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Soft archive candidate memory",
+                "detail": {"scope": "team/alpha", "importance": {"score": 0.2, "label": "ignore"}},
+            },
+        )
+        packet = {
+            "kind": "openclaw-mem.optimize.governor-review.v0",
+            "items": [
+                {
+                    "candidate_id": f"soft-archive-candidate-{obs_id}",
+                    "recommended_action": "set_soft_archive_candidate",
+                    "decision": "approved_for_apply",
+                    "apply_lane": "observations.assist",
+                    "target": {"observationId": obs_id, "recordRef": f"obs:{obs_id}"},
+                    "patch": {"lifecycle": {"soft_archive_candidate": True, "set_archived_at": True, "archive_reason_code": "stale_low_importance"}},
+                    "evidence_refs": [f"obs:{obs_id}"],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            governor_path = Path(td) / "governor.json"
+            governor_path.write_text(json.dumps(packet), encoding="utf-8")
+            apply_args = type(
+                "Args",
+                (),
+                {
+                    "from_file": str(governor_path),
+                    "operator": "lyria",
+                    "lane": "observations.assist",
+                    "run_dir": td,
+                    "max_rows_per_run": 5,
+                    "max_rows_per_24h": 20,
+                    "max_importance_adjustments_per_run": 3,
+                    "max_importance_adjustments_per_24h": 10,
+                    "dry_run": False,
+                    "db": ":memory:",
+                    "json": True,
+                },
+            )()
+            apply_buf = io.StringIO()
+            with redirect_stdout(apply_buf):
+                cmd_optimize_assist_apply(conn, apply_args)
+            apply_out = json.loads(apply_buf.getvalue())
+
+            verify_args = type(
+                "Args",
+                (),
+                {
+                    "run_dir": td,
+                    "window_hours": 24,
+                    "top": 10,
+                    "db": ":memory:",
+                    "json": True,
+                },
+            )()
+            verify_buf = io.StringIO()
+            with redirect_stdout(verify_buf):
+                cmd_optimize_verifier_bundle(conn, verify_args)
+            out = json.loads(verify_buf.getvalue())
+
+        self.assertEqual(apply_out["applied_action_counts"]["set_soft_archive_candidate"], 1)
+        self.assertEqual(out["counts"]["items"], 1)
+        self.assertEqual(out["counts"]["noHardDeletePass"], 1)
+        self.assertEqual(out["counts"]["rollbackReplayPass"], 1)
+        self.assertTrue(out["summary"]["no_hard_delete_pass"])
+        self.assertEqual(out["summary"]["applied_action_counts"]["set_soft_archive_candidate"], 1)
+        self.assertEqual(out["items"][0]["applied_action_counts"]["set_soft_archive_candidate"], 1)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0], 1)
         self.assertEqual(out["items"][0]["run_id"], apply_out["run_id"])
         conn.close()
 
