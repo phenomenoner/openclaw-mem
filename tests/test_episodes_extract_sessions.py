@@ -1,6 +1,7 @@
 import io
 import json
 import tempfile
+from unittest.mock import patch
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -75,6 +76,8 @@ class TestEpisodesExtractSessionsCli(unittest.TestCase):
                 ],
             )
             self.assertEqual(extract_out["emitted"], 2)
+            self.assertEqual(extract_out["iterations"], 1)
+            self.assertEqual(extract_out["stop_reason"], "one_shot")
 
             ingest_out = self._run(
                 conn,
@@ -366,6 +369,96 @@ MEDIA:/tmp/not-memory.png
             self.assertNotIn("Conversation info", text)
             self.assertNotIn("message_id", text)
             self.assertNotIn("MEDIA:", text)
+
+        conn.close()
+
+    def test_extract_sessions_follow_noop_exits_by_max_duration(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sessions_root = root / "sessions"
+            sessions_root.mkdir(parents=True, exist_ok=True)
+            spool = root / "episodes.jsonl"
+            extract_state = root / "extract-state.json"
+
+            out = self._run(
+                conn,
+                [
+                    "episodes",
+                    "extract-sessions",
+                    "--sessions-root",
+                    str(sessions_root),
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(extract_state),
+                    "--follow",
+                    "--poll-interval-ms",
+                    "100",
+                    "--max-duration-seconds",
+                    "0.25",
+                    "--json",
+                ],
+            )
+            self.assertEqual(out["aggregate"]["emitted"], 0)
+            self.assertGreaterEqual(out["iterations"], 1)
+            self.assertEqual(out["stop_reason"], "max_duration")
+
+        conn.close()
+
+    def test_extract_sessions_follow_sees_appended_event(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sessions_root = root / "sessions"
+            sessions_root.mkdir(parents=True, exist_ok=True)
+            session_file = sessions_root / "thread-follow.jsonl"
+            session_file.write_text("", encoding="utf-8")
+            spool = root / "episodes.jsonl"
+            extract_state = root / "extract-state.json"
+
+            clock = {"now": 0.0, "appended": False}
+
+            def fake_monotonic():
+                return clock["now"]
+
+            def fake_sleep(seconds):
+                if not clock["appended"]:
+                    line = self._session_line(ts="2026-03-06T00:00:00Z", role="user", text="[SCOPE: proj-f] hello")
+                    with session_file.open("a", encoding="utf-8") as fp:
+                        fp.write(json.dumps(line, ensure_ascii=False) + "\n")
+                    clock["appended"] = True
+                clock["now"] += float(seconds)
+
+            with patch("openclaw_mem.cli.time.monotonic", fake_monotonic), patch("openclaw_mem.cli.time.sleep", fake_sleep):
+                out = self._run(
+                    conn,
+                    [
+                        "episodes",
+                        "extract-sessions",
+                        "--sessions-root",
+                        str(sessions_root),
+                        "--file",
+                        str(spool),
+                        "--state",
+                        str(extract_state),
+                        "--follow",
+                        "--poll-interval-ms",
+                        "100",
+                        "--max-duration-seconds",
+                        "0.2",
+                        "--json",
+                    ],
+                )
+
+            self.assertEqual(out["aggregate"]["emitted"], 1)
+            self.assertEqual(out["stop_reason"], "max_duration")
+
+            spool_lines = [x for x in spool.read_text(encoding="utf-8").splitlines() if x.strip()]
+            self.assertEqual(len(spool_lines), 1)
+            event = json.loads(spool_lines[0])
+            self.assertEqual(event["type"], "conversation.user")
+            self.assertEqual(event["scope"], "proj-f")
 
         conn.close()
 

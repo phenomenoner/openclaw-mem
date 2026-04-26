@@ -80,23 +80,24 @@ Fields:
 }
 ```
 
-## Operator surfaces (CLI/tools) — proposal
+## Operator surfaces (CLI/tools)
 
-### Commands (suggested)
+### Commands (implemented v0)
 - `openclaw-mem engine snapshot create --tag <tag> [--reason <text>] [--db-path <path>] [--snapshots-dir <path>]`
-- `openclaw-mem engine snapshot list [--json]`
-- `openclaw-mem engine snapshot checkout --tag <tag> [--set-config] [--restart-gateway]`
+- `openclaw-mem engine snapshot list [--snapshots-dir <path>] [--json]`
+- `openclaw-mem engine snapshot checkout --tag <tag> --yes [--db-path <path>] [--snapshots-dir <path>]`
 - `openclaw-mem engine snapshot delete --tag <tag> --yes`
 
-(Exact wiring can be either in `openclaw-mem` python CLI, or a small TS tool inside the engine plugin; preference: python CLI for file ops + determinism.)
+Current v0 is wired in the Python CLI for deterministic filesystem operations. It does **not** auto-edit OpenClaw config or restart the gateway; checkout emits `restartRequired: true` and rollback instructions so the operator can stop/restart at the right boundary.
 
 ### Receipt contract (v0)
 All commands should return a stable, bounded JSON:
 
 - `create` receipt includes:
-  - tag, createdAt, source dbPath, snapshot artifact path, file count/bytes (optional), rowCount (if cheap)
+  - tag, createdAt, source dbPath, snapshot artifact path, file count/bytes, dataset sha256, and per-file path/bytes/sha256 evidence
+- `reason` is accepted as an operator UX flag for command symmetry, but is intentionally not persisted in manifests or emitted in create/list receipts because it is free-form operator text.
 - `checkout` receipt includes:
-  - previous dbPath, new dbPath, whether config was updated, whether gateway restart was requested
+  - previous dbPath, new dbPath, source snapshot, `restartRequired`, and one-screen rollback guidance
 
 No raw memory text.
 
@@ -106,11 +107,12 @@ No raw memory text.
 - Snapshots are sensitive by default (can contain private memory). Never auto-publish.
 
 ## Acceptance checklist (v0)
-- [ ] Create snapshot with tag; manifest written; receipt emitted.
-- [ ] List shows snapshots deterministically (by createdAt desc).
-- [ ] Checkout switches engine dbPath to the snapshot and the system remains functional.
-- [ ] Rollback instructions are one-screen copy/paste.
-- [ ] Basic tests cover tag validation + path traversal prevention.
+- [x] Create snapshot with tag; manifest written; receipt emitted.
+- [x] List shows snapshots deterministically (by createdAt desc).
+- [x] Checkout restores a tagged snapshot into the active dbPath after backing up the previous dataset.
+- [x] Rollback instructions are one-screen copy/paste.
+- [x] Basic tests cover tag validation + path traversal prevention.
+- [x] Tests cover failed checkout rollback and symlink skip behavior.
 
 ## Rollout plan
 1) Ship CLI + tests (feature-flagged).
