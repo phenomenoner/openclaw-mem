@@ -195,8 +195,36 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
     handler(
       {
         toolName: 'memory_recall',
+        toolCallId: 'call-json-malformed-nested-quoted-output-doc',
+        message: buildMessage(
+          '{"outer":{"items":[{"note":"guide says labels "stdout": "sample" and "stderr": "sample" are docs labels"}],"status":"ok"}',
+        ),
+      },
+      {
+        sessionKey: 'session-1',
+        agentId: 'agent-1',
+        toolName: 'memory_recall',
+      },
+    );
+
+    handler(
+      {
+        toolName: 'memory_recall',
         toolCallId: 'call-json-malformed-keylike-stdout',
         message: buildMessage('{"stdout":"synthetic trace line"'),
+      },
+      {
+        sessionKey: 'session-1',
+        agentId: 'agent-1',
+        toolName: 'memory_recall',
+      },
+    );
+
+    handler(
+      {
+        toolName: 'memory_recall',
+        toolCallId: 'call-json-malformed-nested-keylike-stdout',
+        message: buildMessage('{"outer":{"items":[{"stdout":"synthetic trace line"}],"status":"error"}'),
       },
       {
         sessionKey: 'session-1',
@@ -228,7 +256,7 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
 
     const parsed = rawLines.map((line) => ({ raw: line, json: JSON.parse(line) }));
     const resultRows = parsed.filter((row) => row.json.type === 'tool.result');
-    assert.equal(resultRows.length, 8, 'expected exactly eight tool.result rows');
+    assert.equal(resultRows.length, 10, 'expected exactly ten tool.result rows');
 
     const highRow = resultRows.find((row) => row.json?.payload?.tool_call_id === 'call-high');
     const stdoutRow = resultRows.find((row) => row.json?.payload?.tool_call_id === 'call-stdout');
@@ -238,8 +266,14 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
     const jsonMalformedQuotedOutputDocRow = resultRows.find(
       (row) => row.json?.payload?.tool_call_id === 'call-json-malformed-quoted-output-doc',
     );
+    const jsonMalformedNestedQuotedOutputDocRow = resultRows.find(
+      (row) => row.json?.payload?.tool_call_id === 'call-json-malformed-nested-quoted-output-doc',
+    );
     const jsonMalformedKeylikeStdoutRow = resultRows.find(
       (row) => row.json?.payload?.tool_call_id === 'call-json-malformed-keylike-stdout',
+    );
+    const jsonMalformedNestedKeylikeStdoutRow = resultRows.find(
+      (row) => row.json?.payload?.tool_call_id === 'call-json-malformed-nested-keylike-stdout',
     );
     const benignRow = resultRows.find((row) => row.json?.payload?.tool_call_id === 'call-benign');
     assert.ok(highRow, 'missing high-risk tool.result row');
@@ -248,7 +282,15 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
     assert.ok(jsonBenignRow, 'missing structured benign JSON tool.result row');
     assert.ok(jsonEscapedKeysDocRow, 'missing escaped output-key docs tool.result row');
     assert.ok(jsonMalformedQuotedOutputDocRow, 'missing malformed JSON-like quoted output-key docs tool.result row');
+    assert.ok(
+      jsonMalformedNestedQuotedOutputDocRow,
+      'missing malformed nested JSON-like quoted output-key docs tool.result row',
+    );
     assert.ok(jsonMalformedKeylikeStdoutRow, 'missing malformed JSON-like key-like stdout tool.result row');
+    assert.ok(
+      jsonMalformedNestedKeylikeStdoutRow,
+      'missing malformed nested JSON-like key-like stdout tool.result row',
+    );
     assert.ok(benignRow, 'missing benign tool.result row');
 
     const highSummary = String(highRow.json.summary || '');
@@ -403,6 +445,37 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
       'malformed JSON-like quoted output-key docs payload summary should not collapse to blocked stdout posture',
     );
 
+    const jsonMalformedNestedQuotedOutputDocSummary = String(jsonMalformedNestedQuotedOutputDocRow.json.summary || '');
+    const jsonMalformedNestedQuotedOutputDocResultSummary = String(
+      jsonMalformedNestedQuotedOutputDocRow.json?.payload?.result_summary || '',
+    );
+
+    assert.equal(
+      jsonMalformedNestedQuotedOutputDocSummary.length <= summaryCap + 1,
+      true,
+      'malformed nested JSON-like quoted output-key docs summary should stay bounded',
+    );
+    assert.equal(
+      jsonMalformedNestedQuotedOutputDocSummary.includes('guide says'),
+      true,
+      'malformed nested JSON-like quoted output-key docs summary should preserve useful docs text',
+    );
+    assert.equal(
+      jsonMalformedNestedQuotedOutputDocResultSummary.includes('guide says'),
+      true,
+      'malformed nested JSON-like quoted output-key docs payload summary should preserve useful docs text',
+    );
+    assert.equal(
+      jsonMalformedNestedQuotedOutputDocSummary.includes('result captured (output redacted)'),
+      false,
+      'malformed nested JSON-like quoted output-key docs summary should not collapse to blocked stdout posture',
+    );
+    assert.equal(
+      jsonMalformedNestedQuotedOutputDocResultSummary.includes('result captured (output redacted)'),
+      false,
+      'malformed nested JSON-like quoted output-key docs payload summary should not collapse to blocked stdout posture',
+    );
+
     const jsonMalformedKeylikeStdoutSummary = String(jsonMalformedKeylikeStdoutRow.json.summary || '');
     const jsonMalformedKeylikeStdoutResultSummary = String(jsonMalformedKeylikeStdoutRow.json?.payload?.result_summary || '');
 
@@ -420,6 +493,27 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
       jsonMalformedKeylikeStdoutRow.raw.includes('"stdout"'),
       false,
       'malformed JSON-like key-like stdout JSONL row should not include stdout key text',
+    );
+
+    const jsonMalformedNestedKeylikeStdoutSummary = String(jsonMalformedNestedKeylikeStdoutRow.json.summary || '');
+    const jsonMalformedNestedKeylikeStdoutResultSummary = String(
+      jsonMalformedNestedKeylikeStdoutRow.json?.payload?.result_summary || '',
+    );
+
+    assert.equal(
+      jsonMalformedNestedKeylikeStdoutSummary,
+      expectedStdoutSummary,
+      'malformed nested JSON-like key-like stdout summary should collapse to bounded redacted posture',
+    );
+    assert.equal(
+      jsonMalformedNestedKeylikeStdoutResultSummary,
+      expectedStdoutSummary,
+      'malformed nested JSON-like key-like stdout payload summary should collapse to bounded redacted posture',
+    );
+    assert.equal(
+      jsonMalformedNestedKeylikeStdoutRow.raw.includes('"stdout"'),
+      false,
+      'malformed nested JSON-like key-like stdout JSONL row should not include stdout key text',
     );
 
     const benignSummary = String(benignRow.json.summary || '');

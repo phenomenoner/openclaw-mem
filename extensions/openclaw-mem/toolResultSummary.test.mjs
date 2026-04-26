@@ -193,3 +193,34 @@ test('malformed JSON-like payload with true output key still collapses to redact
 
   assert.equal(summary, 'memory_recall result captured (output redacted)');
 });
+
+test('nested malformed JSON-like boundary keeps quoted output-key prose informative but still blocks true nested output keys', () => {
+  const nestedQuotedDocsSummary = buildToolResultSummary(
+    'memory_recall',
+    buildMessage(
+      '{"outer":{"items":[{"note":"guide says labels "stdout": "sample" and "stderr": "sample" are docs labels"}],"status":"ok"}',
+    ),
+    true,
+    240,
+  );
+
+  assert.equal(
+    nestedQuotedDocsSummary.includes('guide says'),
+    true,
+    'nested malformed JSON-like docs prose should preserve useful context',
+  );
+  assert.equal(
+    nestedQuotedDocsSummary.includes('result captured (output redacted)'),
+    false,
+    'nested malformed JSON-like docs prose should not collapse to output redacted posture',
+  );
+
+  const nestedTrueOutputSummary = buildToolResultSummary(
+    'memory_recall',
+    buildMessage('{"outer":{"items":[{"stdout":"synthetic trace line"}],"status":"error"}'),
+    true,
+    240,
+  );
+
+  assert.equal(nestedTrueOutputSummary, 'memory_recall result captured (output redacted)');
+});
