@@ -655,6 +655,174 @@ class TestOptimizeReview(unittest.TestCase):
 
         conn.close()
 
+    def test_optimize_review_importance_drift_signal_is_bounded_and_read_only(self):
+        conn = _connect(":memory:")
+
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Operator decision index refresh checkpoint",
+                "detail": {"importance": {"score": 0.95, "label": "ignore"}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Legacy sync reminder",
+                "detail": {"importance": {"score": 0.2, "label": "must_remember"}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "No importance metadata yet",
+                "detail": {},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Malformed importance payload",
+                "detail": {"importance": {"score": "oops", "label": "??"}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Rotate API key for production deploy",
+                "detail": {"importance": {"score": 0.1, "label": "ignore"}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Store private key escrow location",
+                "detail": {"importance": {"score": 0.2, "label": "ignore"}},
+            },
+        )
+        conn.commit()
+
+        before_count = conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 1000,
+                "stale_days": 60,
+                "duplicate_min_count": 2,
+                "bloat_summary_chars": 240,
+                "bloat_detail_bytes": 4096,
+                "orphan_min_tokens": 2,
+                "miss_min_count": 2,
+                "lifecycle_limit": 20,
+                "scope": None,
+                "top": 1,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_review(conn, args)
+
+        out = json.loads(buf.getvalue())
+        drift = out["signals"]["importance_drift"]
+
+        self.assertEqual(
+            set(drift["normalized_label_distribution"].keys()),
+            {"must_remember", "nice_to_have", "ignore", "unknown"},
+        )
+        self.assertEqual(sum(drift["normalized_label_distribution"].values()), out["source"]["rows_scanned"])
+        self.assertEqual(drift["normalized_label_distribution"]["must_remember"], 1)
+        self.assertEqual(drift["normalized_label_distribution"]["ignore"], 3)
+        self.assertEqual(drift["normalized_label_distribution"]["unknown"], 2)
+
+        self.assertEqual(drift["score_label_mismatch_count"], 2)
+        self.assertEqual(drift["missing_or_unparseable_count"], 2)
+        self.assertEqual(drift["high_risk_content_mismatch_count"], 2)
+
+        self.assertEqual(len(drift["score_label_mismatch_items"]), 1)
+        self.assertEqual(len(drift["missing_or_unparseable_items"]), 1)
+        self.assertEqual(len(drift["high_risk_content_mismatch_items"]), 1)
+
+        mismatch = drift["score_label_mismatch_items"][0]
+        self.assertNotEqual(mismatch["stored_label"], mismatch["normalized_label"])
+
+        high_risk = drift["high_risk_content_mismatch_items"][0]
+        self.assertEqual(high_risk["severity"], "high")
+        self.assertGreaterEqual(len(high_risk["keyword_hits"]), 1)
+
+        self.assertEqual(out["policy"]["writes_performed"], 0)
+        self.assertEqual(out["policy"]["memory_mutation"], "none")
+        self.assertEqual(out["policy"]["query_only_enforced"], True)
+
+        after_count = conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+        self.assertEqual(before_count, after_count)
+        self.assertEqual(conn.execute("PRAGMA query_only").fetchone()[0], 0)
+
+        conn.close()
+
+    def test_optimize_review_text_mentions_importance_drift_signal(self):
+        conn = _connect(":memory:")
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Text renderer probe",
+                "detail": {"importance": {"score": 0.5, "label": "nice_to_have"}},
+            },
+        )
+        conn.commit()
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 1000,
+                "stale_days": 60,
+                "duplicate_min_count": 2,
+                "bloat_summary_chars": 240,
+                "bloat_detail_bytes": 4096,
+                "orphan_min_tokens": 2,
+                "miss_min_count": 2,
+                "lifecycle_limit": 20,
+                "scope": None,
+                "top": 10,
+                "json": False,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_review(conn, args)
+
+        text = buf.getvalue()
+        self.assertIn("importance_drift=label_mismatch:", text)
+        self.assertIn("missing_or_unparseable:", text)
+        self.assertIn("high_risk_content:", text)
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

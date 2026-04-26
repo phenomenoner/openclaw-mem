@@ -279,7 +279,7 @@ Status: **DONE** (shadow-only review loop shipped on stable main; apply path rem
 Shipped v0.1 slice:
 - `openclaw-mem optimize review` / `optimize consolidation-review` (zero-write observer/reporters)
 - bounded source-of-truth scan (`observations`, default limit 1000)
-- low-risk signals: staleness, duplication, bloat, weakly-connected candidates, repeated no-result `memory_recall` miss patterns
+- low-risk signals: staleness, duplication, bloat, weakly-connected candidates, repeated no-result `memory_recall` miss patterns, and importance drift spot-checks (score-vs-label mismatch, missing/unparseable metadata, conservative high-risk under-label detections)
 - outputs structured report `openclaw-mem.optimize.review.v0` with recommendations (no mutation)
 
 Artifacts:

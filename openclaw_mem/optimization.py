@@ -42,6 +42,18 @@ _STOPWORDS: Set[str] = {
 _WORD_TOKEN_RE = re.compile(r"[a-z0-9_]{3,}")
 _CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
 
+_IMPORTANCE_HIGH_RISK_UNDERLABEL_PATTERNS: List[tuple[str, re.Pattern[str]]] = [
+    ("api_key", re.compile(r"\bapi[\s_\-]*key\b", re.IGNORECASE)),
+    ("private_key", re.compile(r"\b(private|secret|ssh)[\s_\-]*key\b", re.IGNORECASE)),
+    ("password", re.compile(r"\b(password|passphrase)\b", re.IGNORECASE)),
+    ("seed_phrase", re.compile(r"\b(seed[\s_\-]*phrase|mnemonic)\b", re.IGNORECASE)),
+    ("access_token", re.compile(r"\b(access|refresh)[\s_\-]*token\b", re.IGNORECASE)),
+    ("zh_password", re.compile(r"密碼")),
+    ("zh_private_key", re.compile(r"私鑰|金鑰")),
+    ("zh_seed_phrase", re.compile(r"助記詞|種子詞")),
+    ("zh_token", re.compile(r"存取權杖|刷新權杖")),
+]
+
 
 _EPISODIC_RETENTION_DAYS: Dict[str, Optional[int]] = {
     "conversation.user": 60,
@@ -155,6 +167,23 @@ def _importance_label(detail_obj: Dict[str, Any]) -> str:
     if not is_parseable_importance(importance):
         return "unknown"
     return label_from_score(parse_importance_score(importance))
+
+
+def _importance_stored_label(importance_value: Any) -> Optional[str]:
+    if not isinstance(importance_value, dict):
+        return None
+    return normalize_label(importance_value.get("label"))
+
+
+def _importance_high_risk_underlabel_hits(summary: str) -> List[str]:
+    if not summary:
+        return []
+
+    hits: List[str] = []
+    for code, pattern in _IMPORTANCE_HIGH_RISK_UNDERLABEL_PATTERNS:
+        if pattern.search(summary):
+            hits.append(code)
+    return hits
 
 
 def _preview(text: str, limit: int = 120) -> str:
@@ -1279,6 +1308,18 @@ def build_memory_health_review(
         summary = _normalize_summary(r["summary_en"] or r["summary"] or "")
         detail_raw = r["detail_json"] or ""
         detail_obj = _parse_detail(detail_raw)
+        importance_raw = detail_obj.get("importance")
+        importance_parseable = bool(is_parseable_importance(importance_raw)) if importance_raw is not None else False
+        importance_score = round(parse_importance_score(importance_raw), 4) if importance_parseable else None
+        importance_label = label_from_score(float(importance_score)) if importance_parseable and importance_score is not None else "unknown"
+        importance_stored_label = _importance_stored_label(importance_raw)
+        if importance_raw is None:
+            importance_state = "missing"
+        elif not importance_parseable:
+            importance_state = "unparseable"
+        else:
+            importance_state = "parseable"
+
         tool_name = str(r["tool_name"] or "")
         tool_name_norm = tool_name.strip().lower()
         recall_query = _extract_recall_query(detail_obj) if tool_name_norm == "memory_recall" else None
@@ -1304,7 +1345,10 @@ def build_memory_health_review(
             "detail_bytes": len(detail_raw.encode("utf-8")) if isinstance(detail_raw, str) else 0,
             "summary_chars": len(summary),
             "scope": _normalize_scope_token(detail_obj.get("scope")),
-            "importance": _importance_label(detail_obj),
+            "importance": importance_label,
+            "importance_state": importance_state,
+            "importance_score": importance_score,
+            "importance_stored_label": importance_stored_label,
             "recall_query": recall_query,
             "recall_result_count": recall_result_count,
             "recent_use_count": int(recent_use_slot.get("count") or 0),
@@ -1466,6 +1510,73 @@ def build_memory_health_review(
         )
     repeated_miss_items.sort(key=lambda x: (x["count"], x["latest_id"], x["query"]), reverse=True)
 
+    # Importance grading drift / operator spot-check signals (proposal-only)
+    importance_distribution: Dict[str, int] = {
+        "must_remember": 0,
+        "nice_to_have": 0,
+        "ignore": 0,
+        "unknown": 0,
+    }
+    importance_score_label_mismatch_items: List[Dict[str, Any]] = []
+    importance_missing_or_unparseable_items: List[Dict[str, Any]] = []
+    importance_high_risk_content_mismatch_items: List[Dict[str, Any]] = []
+
+    for it in prepared:
+        normalized_label = str(it.get("importance") or "unknown")
+        if normalized_label not in importance_distribution:
+            normalized_label = "unknown"
+        importance_distribution[normalized_label] += 1
+
+        importance_state = str(it.get("importance_state") or "").strip() or "unknown"
+        if importance_state in {"missing", "unparseable"}:
+            importance_missing_or_unparseable_items.append(
+                {
+                    "id": it["id"],
+                    "scope": it.get("scope"),
+                    "state": importance_state,
+                    "kind": it.get("kind"),
+                    "tool_name": it.get("tool_name"),
+                    "summary_preview": it.get("summary_preview"),
+                }
+            )
+
+        stored_label = it.get("importance_stored_label")
+        if importance_state == "parseable" and stored_label and stored_label != normalized_label:
+            importance_score_label_mismatch_items.append(
+                {
+                    "id": it["id"],
+                    "scope": it.get("scope"),
+                    "score": it.get("importance_score"),
+                    "stored_label": stored_label,
+                    "normalized_label": normalized_label,
+                    "kind": it.get("kind"),
+                    "tool_name": it.get("tool_name"),
+                    "summary_preview": it.get("summary_preview"),
+                }
+            )
+
+        if importance_state == "parseable" and normalized_label == "ignore":
+            summary_value = str(it.get("summary") or "")
+            keyword_hits = _importance_high_risk_underlabel_hits(summary_value)
+            if keyword_hits:
+                importance_high_risk_content_mismatch_items.append(
+                    {
+                        "id": it["id"],
+                        "scope": it.get("scope"),
+                        "severity": "high",
+                        "normalized_label": normalized_label,
+                        "recommended_label": "must_remember",
+                        "keyword_hits": keyword_hits,
+                        "kind": it.get("kind"),
+                        "tool_name": it.get("tool_name"),
+                        "summary_preview": it.get("summary_preview"),
+                    }
+                )
+
+    importance_score_label_mismatch_items.sort(key=lambda x: x["id"], reverse=True)
+    importance_missing_or_unparseable_items.sort(key=lambda x: x["id"], reverse=True)
+    importance_high_risk_content_mismatch_items.sort(key=lambda x: x["id"], reverse=True)
+
     rows_scanned = len(prepared)
     coverage_pct = round((rows_scanned / total_rows) * 100, 1) if total_rows > 0 else 100.0
     warnings: List[Dict[str, Any]] = []
@@ -1536,6 +1647,15 @@ def build_memory_health_review(
                 "tool_name": "memory_recall",
                 "items": repeated_miss_items[:top],
             },
+            "importance_drift": {
+                "normalized_label_distribution": importance_distribution,
+                "score_label_mismatch_count": len(importance_score_label_mismatch_items),
+                "missing_or_unparseable_count": len(importance_missing_or_unparseable_items),
+                "high_risk_content_mismatch_count": len(importance_high_risk_content_mismatch_items),
+                "score_label_mismatch_items": importance_score_label_mismatch_items[:top],
+                "missing_or_unparseable_items": importance_missing_or_unparseable_items[:top],
+                "high_risk_content_mismatch_items": importance_high_risk_content_mismatch_items[:top],
+            },
         },
         "policy": {
             "mode": "recommendation-first",
@@ -1575,6 +1695,7 @@ def build_evolution_review(
 
     stale = ((review.get("signals") or {}).get("staleness") or {})
     recent_use = ((review.get("signals") or {}).get("recent_use") or {})
+    importance_drift = ((review.get("signals") or {}).get("importance_drift") or {})
     recommendations = list(review.get("recommendations") or [])
     items: List[Dict[str, Any]] = []
 
@@ -1926,6 +2047,9 @@ def build_evolution_review(
             "mediumRisk": sum(1 for item in items if str(item.get("risk_level") or "") == "medium"),
             "highRisk": sum(1 for item in items if str(item.get("risk_level") or "") == "high"),
             "deferredRecommendations": len(deferred_actions),
+            "importanceDriftLabelMismatches": int(importance_drift.get("score_label_mismatch_count") or 0),
+            "importanceDriftMissingOrUnparseable": int(importance_drift.get("missing_or_unparseable_count") or 0),
+            "importanceDriftHighRiskContent": int(importance_drift.get("high_risk_content_mismatch_count") or 0),
         },
         "items": items,
         "deferred": {
@@ -1944,7 +2068,10 @@ def render_evolution_review(report: Dict[str, Any]) -> str:
         (
             f"candidates={int(counts.get('items') or 0)} "
             f"low_risk={int(counts.get('lowRisk') or 0)} "
-            f"deferred={int(counts.get('deferredRecommendations') or 0)}"
+            f"deferred={int(counts.get('deferredRecommendations') or 0)} "
+            f"importance_drift(label_mismatch={int(counts.get('importanceDriftLabelMismatches') or 0)},"
+            f"missing_or_unparseable={int(counts.get('importanceDriftMissingOrUnparseable') or 0)},"
+            f"high_risk_content={int(counts.get('importanceDriftHighRiskContent') or 0)})"
         ),
     ]
     for item in list(report.get("items") or [])[:10]:
@@ -1968,6 +2095,7 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
     bloat = sig.get("bloat", {})
     weak = sig.get("weakly_connected", {})
     misses = sig.get("repeated_misses", {})
+    importance_drift = sig.get("importance_drift", {})
 
     lines = [
         "openclaw-mem optimize review (recommendation-only)",
@@ -1983,7 +2111,10 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
             f"duplicates={dup.get('groups', 0)} groups ({dup.get('duplicate_rows', 0)} extra rows) | "
             f"bloat={bloat.get('count', 0)} | "
             f"weakly_connected={weak.get('count', 0)} | "
-            f"repeated_misses={misses.get('groups', 0)} groups ({misses.get('miss_events', 0)} events)"
+            f"repeated_misses={misses.get('groups', 0)} groups ({misses.get('miss_events', 0)} events) | "
+            f"importance_drift=label_mismatch:{importance_drift.get('score_label_mismatch_count', 0)} "
+            f"missing_or_unparseable:{importance_drift.get('missing_or_unparseable_count', 0)} "
+            f"high_risk_content:{importance_drift.get('high_risk_content_mismatch_count', 0)}"
         ),
     ]
 

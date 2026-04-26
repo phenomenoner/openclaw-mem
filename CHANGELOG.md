@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed repo-internal docs links that pointed outside MkDocs' docs tree so `mkdocs build --strict` can pass cleanly again.
 - Hardened the experimental GBrain sidecar call wrapper against malformed JSON, oversized stdout, timeouts with large partial output, and non-zero calls with empty stderr while keeping fail-open receipts bounded.
 - Added `scripts/operator_template_demo.sh`, a synthetic one-command operator handoff template that generates a temporary decision/runbook workspace, ingests JSONL into an isolated DB, and emits a cited pack receipt without touching OpenClaw config or the host memory journal.
+- `optimize review` now emits bounded `signals.importance_drift` spot-checks (score-vs-label mismatch, missing/unparseable metadata, conservative high-risk under-label content detection, and normalized label distribution) while staying query-only and proposal-only.
+- `optimize evolution-review` now carries compact upstream importance-drift counters for operator visibility without widening apply behavior.
+
+### Testing
+
+- Added optimize-review regression coverage for importance-drift JSON shape, top-bounded output, mismatch detection, text rendering, and read-only/query-only posture.
 
 ## [1.8.0] - 2026-04-18
 
