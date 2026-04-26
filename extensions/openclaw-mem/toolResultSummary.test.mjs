@@ -164,3 +164,32 @@ test('benign prose mentioning JSON-escaped "stdout"/"stderr" keys stays informat
     'benign prose should not collapse to output redacted posture',
   );
 });
+
+test('malformed JSON-like prose with quoted output-key terms inside string content stays informative', () => {
+  const summary = buildToolResultSummary(
+    'memory_recall',
+    buildMessage(
+      '{"note":"guide says, "stdout": "sample" and "stderr": "sample" are docs labels", "status":"ok"',
+    ),
+    true,
+    240,
+  );
+
+  assert.equal(summary.includes('guide says'), true, 'malformed JSON-like docs prose should preserve useful context');
+  assert.equal(
+    summary.includes('result captured (output redacted)'),
+    false,
+    'malformed JSON-like docs prose should not collapse to output redacted posture',
+  );
+});
+
+test('malformed JSON-like payload with true output key still collapses to redacted-output posture', () => {
+  const summary = buildToolResultSummary(
+    'memory_recall',
+    buildMessage('{"stdout":"synthetic trace line"'),
+    true,
+    240,
+  );
+
+  assert.equal(summary, 'memory_recall result captured (output redacted)');
+});
