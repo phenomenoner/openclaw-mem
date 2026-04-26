@@ -63,6 +63,7 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
    - Shipped (2026-04-27): deterministic high-risk token coverage widened for `sk-proj`, `github_pat`, AWS secret-access-key assignments, and long Bearer auth values across mem-engine autoCapture + episodic helper guards.
    - Shipped (2026-04-27, follow-up): shared synthetic golden corpus `tests/data/SECRET_DETECTOR_GOLDEN.v1.json` now drives mem-engine source-contract checks, episodic guard tests, and sidecar/plugin redaction coverage from one source of truth.
   - Shipped (2026-04-27, follow-up): sidecar/plugin tool-result summary runtime behavior is now covered by a bounded black-box Node test (`extensions/openclaw-mem/toolResultSummary.test.mjs`) wired through `tests/test_plugin_episodic_summary_runtime.py`.
+  - Shipped (2026-04-27, follow-up): `tool_result_persist` now has an end-to-end fake-API plugin harness runtime check (`extensions/openclaw-mem/toolResultPersistE2E.test.mjs`) asserting emitted episodic `tool.result` JSONL lines stay redacted/non-leaking while preserving benign text.
    - Verification surface:
      - `tests/test_episodes_extract_sessions.py`
      - `tests/test_episodic_secret_detection.py`
@@ -70,11 +71,13 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
      - `tests/test_plugin_episodic_spool.py`
      - `extensions/openclaw-mem-engine/secretDetectorGolden.test.mjs`
     - `extensions/openclaw-mem/toolResultSummary.test.mjs`
+    - `extensions/openclaw-mem/toolResultPersistE2E.test.mjs`
     - `tests/test_plugin_episodic_summary_runtime.py`
    - Suggested focused verification commands:
      - `python3 -m pytest tests/test_episodes_extract_sessions.py tests/test_episodic_secret_detection.py tests/test_mem_engine_auto_capture_tool_output.py tests/test_plugin_episodic_spool.py tests/test_plugin_episodic_summary_runtime.py -q`
      - `node --test extensions/openclaw-mem-engine/secretDetectorGolden.test.mjs`
     - `node --test extensions/openclaw-mem/toolResultSummary.test.mjs`
+    - `node --experimental-strip-types --test extensions/openclaw-mem/toolResultPersistE2E.test.mjs`
    - Acceptance: no obvious secrets captured in test corpus
 
 ### P2 — UX/Website completeness (nice, but helps adoption)

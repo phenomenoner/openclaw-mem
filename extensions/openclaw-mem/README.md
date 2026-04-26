@@ -59,6 +59,7 @@ Disable the entry or uninstall the package. The native memory slot stays untouch
 
 ```bash
 node --test extensions/openclaw-mem/toolResultSummary.test.mjs
+node --experimental-strip-types --test extensions/openclaw-mem/toolResultPersistE2E.test.mjs
 python3 -m pytest tests/test_plugin_episodic_summary_runtime.py tests/test_plugin_episodic_spool.py tests/test_episodic_secret_detection.py -q
 ```
 
