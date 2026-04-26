@@ -60,6 +60,9 @@ def test_tool_result_persist_hook_uses_shared_summary_helper_without_local_outpu
         r"type:\s*[\"']tool\.result[\"'][\s\S]*?summary:\s*resultSummary",
         hook_body,
     ), "tool_result_persist tool.result episode summary must use resultSummary"
+    assert len(re.findall(r"\bsummary\s*:\s*resultSummary\b", hook_body)) == 1, (
+        "tool_result_persist hook must write summary: resultSummary exactly once"
+    )
     assert "OUTPUT_FIELD_KEYS" not in hook_body, (
         "tool_result_persist hook must not embed output field-key fallback wiring; keep it in toolResultSummary.js"
     )
