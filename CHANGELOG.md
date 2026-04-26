@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a precision guard for docs/prose mentions of JSON-escaped output-key strings (for example `\"stdout\"`, `\"stderr\"`) so benign explanatory text stays informative instead of collapsing to redacted-output posture.
 - Tightened malformed-JSON fallback precision for tool-result summaries: JSON-like payloads that start with `{` but only mention quoted `"stdout"`/`"stderr"` inside prose string content now stay informative across both top-level and nested object/array contexts, while true key-like malformed output fields (including nested `stdout`/`stderr` keys in truncated JSON) still collapse to bounded redacted-output posture.
 - Extended malformed-JSON fallback boundary coverage to root array-first (`[`) payloads with full `OUTPUT_FIELD_KEYS` parity: malformed array docs/prose that only mention quoted `"stdout"`/`"stderr"` terms inside string content now stay informative, while malformed array payloads containing true nested output keys (`stdout`, `stderr`, `raw_stdout`, `raw_stderr`, `tool_output`, `command_output`) still collapse to bounded redacted-output posture without leaking synthetic high-risk needles.
+- Exported `OUTPUT_FIELD_KEYS` from `toolResultSummary.js` as a readonly runtime constant and introduced a shared malformed-array output-key test table helper so alias coverage references one explicit list.
 
 ### Testing
 
@@ -47,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended sidecar/plugin runtime coverage with a negative-control case where benign docs/prose text mentions JSON-escaped `"stdout"`/`"stderr"` keys; verifier now asserts emitted `tool.result` JSONL stays informative and does not falsely collapse to redacted-output posture.
 - Extended sidecar/plugin runtime coverage with malformed-JSON boundary assertions: `{`-prefixed payloads with quoted `"stdout"`/`"stderr"` terms inside prose string content must remain informative in both top-level and nested object/array cases, while malformed key-like output fields (top-level and nested) still must collapse to bounded redacted-output posture.
 - Extended sidecar/plugin runtime coverage with malformed array-first boundary assertions and full `OUTPUT_FIELD_KEYS` parity: `[`-prefixed malformed payloads that quote `"stdout"`/`"stderr"` inside prose string content must remain informative, while malformed array payloads with real nested output keys (`stdout`, `stderr`, `raw_stdout`, `raw_stderr`, `tool_output`, `command_output`) must still collapse to bounded redacted-output posture and remain non-leaking in emitted JSONL.
+- Added a contract test that enforces parity between runtime `OUTPUT_FIELD_KEYS` and malformed-array key tables, so future runtime key changes fail fast unless alias-coverage tables are updated.
 
 ## [1.8.0] - 2026-04-18
 

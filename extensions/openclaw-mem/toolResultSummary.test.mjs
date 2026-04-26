@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildToolResultSummary } from './toolResultSummary.js';
+import { buildToolResultSummary, OUTPUT_FIELD_KEYS } from './toolResultSummary.js';
+import { MALFORMED_ARRAY_OUTPUT_FIELD_KEYS } from './toolResultOutputFieldKeyTable.test-helper.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -21,6 +22,22 @@ function buildMessage(text) {
     content: [{ type: 'text', text }],
   };
 }
+
+test('contract: malformed-array output-key table stays in parity with runtime OUTPUT_FIELD_KEYS', () => {
+  assert.equal(
+    new Set(MALFORMED_ARRAY_OUTPUT_FIELD_KEYS).size,
+    MALFORMED_ARRAY_OUTPUT_FIELD_KEYS.length,
+    'malformed-array output-key table must not contain duplicates',
+  );
+
+  const runtimeKeys = [...OUTPUT_FIELD_KEYS].sort();
+  const tableKeys = [...MALFORMED_ARRAY_OUTPUT_FIELD_KEYS].sort();
+  assert.deepEqual(
+    tableKeys,
+    runtimeKeys,
+    'malformed-array output-key table must stay in parity with runtime OUTPUT_FIELD_KEYS',
+  );
+});
 
 test('tool-result summary redacts high-risk golden corpus cases without leaking needles', () => {
   const corpus = loadCorpus();
@@ -247,16 +264,8 @@ test('array-first malformed JSON-like boundary keeps quoted output-key prose inf
   );
 
   const syntheticNeedle = 'sk-proj-ARRAYROOTBOUNDARYNEEDLE1234567890';
-  const arrayLikeOutputKeys = [
-    'stdout',
-    'stderr',
-    'raw_stdout',
-    'raw_stderr',
-    'tool_output',
-    'command_output',
-  ];
 
-  for (const outputKey of arrayLikeOutputKeys) {
+  for (const outputKey of MALFORMED_ARRAY_OUTPUT_FIELD_KEYS) {
     const aliasSummary = buildToolResultSummary(
       'memory_recall',
       buildMessage(`[{"meta":"ok"},{"${outputKey}":"synthetic trace line ${syntheticNeedle}"}`),

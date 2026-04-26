@@ -41,7 +41,7 @@ function shortText(text, maxLength) {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength)}…`;
 }
 
-const OUTPUT_FIELD_KEYS = ["stdout", "stderr", "raw_stdout", "raw_stderr", "tool_output", "command_output"];
+export const OUTPUT_FIELD_KEYS = Object.freeze(["stdout", "stderr", "raw_stdout", "raw_stderr", "tool_output", "command_output"]);
 const OUTPUT_FIELD_KEY_SET = new Set(OUTPUT_FIELD_KEYS);
 
 function hasStructuredOutputFields(value, depth = 0) {

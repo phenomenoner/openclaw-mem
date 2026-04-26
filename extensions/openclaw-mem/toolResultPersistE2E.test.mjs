@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import plugin from './index.ts';
+import { MALFORMED_ARRAY_OUTPUT_FIELD_KEYS } from './toolResultOutputFieldKeyTable.test-helper.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -22,8 +23,6 @@ function buildMessage(text) {
     content: [{ type: 'text', text }],
   };
 }
-
-const ARRAY_LIKE_OUTPUT_KEYS = ['stdout', 'stderr', 'raw_stdout', 'raw_stderr', 'tool_output', 'command_output'];
 
 function createFakeApi({ stateDir, pluginConfig }) {
   const handlers = new Map();
@@ -250,7 +249,7 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
       },
     );
 
-    for (const outputKey of ARRAY_LIKE_OUTPUT_KEYS) {
+    for (const outputKey of MALFORMED_ARRAY_OUTPUT_FIELD_KEYS) {
       handler(
         {
           toolName: 'memory_recall',
@@ -292,7 +291,7 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
     const resultRows = parsed.filter((row) => row.json.type === 'tool.result');
     assert.equal(
       resultRows.length,
-      11 + ARRAY_LIKE_OUTPUT_KEYS.length,
+      11 + MALFORMED_ARRAY_OUTPUT_FIELD_KEYS.length,
       'expected exactly seventeen tool.result rows',
     );
 
@@ -317,7 +316,7 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
       (row) => row.json?.payload?.tool_call_id === 'call-json-malformed-nested-keylike-stdout',
     );
     const jsonMalformedArrayKeylikeRowsByKey = new Map(
-      ARRAY_LIKE_OUTPUT_KEYS.map((outputKey) => [
+      MALFORMED_ARRAY_OUTPUT_FIELD_KEYS.map((outputKey) => [
         outputKey,
         resultRows.find(
           (row) => row.json?.payload?.tool_call_id === `call-json-malformed-array-keylike-${outputKey.replaceAll('_', '-')}`,
@@ -344,7 +343,7 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
       jsonMalformedNestedKeylikeStdoutRow,
       'missing malformed nested JSON-like key-like stdout tool.result row',
     );
-    for (const outputKey of ARRAY_LIKE_OUTPUT_KEYS) {
+    for (const outputKey of MALFORMED_ARRAY_OUTPUT_FIELD_KEYS) {
       assert.ok(
         jsonMalformedArrayKeylikeRowsByKey.get(outputKey),
         `missing malformed array-first JSON-like key-like ${outputKey} tool.result row`,
@@ -606,7 +605,7 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
       'malformed nested JSON-like key-like stdout JSONL row should not include stdout key text',
     );
 
-    for (const outputKey of ARRAY_LIKE_OUTPUT_KEYS) {
+    for (const outputKey of MALFORMED_ARRAY_OUTPUT_FIELD_KEYS) {
       const aliasRow = jsonMalformedArrayKeylikeRowsByKey.get(outputKey);
       assert.ok(aliasRow, `expected malformed array-first JSON-like key-like ${outputKey} row`);
 
