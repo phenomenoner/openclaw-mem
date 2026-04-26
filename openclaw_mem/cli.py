@@ -6897,6 +6897,100 @@ def _pack_lifecycle_shadow_mode(args: argparse.Namespace) -> str:
     return mode_raw if mode_raw in {"off", "on"} else "on"
 
 
+def _pack_lifecycle_write_mode(args: argparse.Namespace) -> str:
+    mode_raw = str(getattr(args, "pack_lifecycle_write", "off") or "off").strip().lower()
+    return mode_raw if mode_raw in {"off", "on"} else "off"
+
+
+def _pack_lifecycle_obs_id_from_ref(ref: Any) -> Optional[int]:
+    token = str(ref or "").strip()
+    if not token.startswith("obs:"):
+        return None
+    raw = token.split(":", 1)[1].strip()
+    if not raw.isdigit():
+        return None
+    value = int(raw)
+    return value if value > 0 else None
+
+
+def _pack_lifecycle_refresh_selected_records(
+    conn: sqlite3.Connection,
+    *,
+    selected_refs: List[str],
+    ts: str,
+) -> Dict[str, Any]:
+    clipped_refs = _pack_lifecycle_clip_refs(selected_refs)
+    ref_to_id: Dict[str, int] = {}
+    skipped_refs: List[str] = []
+
+    for ref in clipped_refs:
+        obs_id = _pack_lifecycle_obs_id_from_ref(ref)
+        if obs_id is None:
+            skipped_refs.append(ref)
+            continue
+        ref_to_id.setdefault(ref, obs_id)
+
+    refreshed_refs: List[str] = []
+    missing_refs: List[str] = []
+    before_counts: Dict[str, int] = {}
+    after_counts: Dict[str, int] = {}
+
+    with conn:
+        for ref, obs_id in ref_to_id.items():
+            row = conn.execute("SELECT detail_json FROM observations WHERE id = ?", (obs_id,)).fetchone()
+            if row is None:
+                missing_refs.append(ref)
+                continue
+
+            detail = _pack_parse_detail_json(row["detail_json"])
+            lifecycle = detail.get("lifecycle") if isinstance(detail.get("lifecycle"), dict) else {}
+            lifecycle = dict(lifecycle or {})
+            before_count = max(0, _pack_graph_int(lifecycle.get("used_count"), 0))
+            after_count = before_count + 1
+            lifecycle["last_used_at"] = ts
+            lifecycle["used_count"] = after_count
+            detail["lifecycle"] = lifecycle
+
+            conn.execute(
+                "UPDATE observations SET detail_json = ? WHERE id = ?",
+                (json.dumps(detail, ensure_ascii=False, sort_keys=True), obs_id),
+            )
+            refreshed_refs.append(ref)
+            before_counts[ref] = before_count
+            after_counts[ref] = after_count
+
+    return {
+        "kind": "openclaw-mem.pack.lifecycle-write.v1",
+        "mode": "selected_pack_records_only",
+        "ts": ts,
+        "selection": {
+            "pack_selected_refs": clipped_refs,
+            "refreshed_record_refs": refreshed_refs,
+            "skipped_record_refs": skipped_refs,
+            "missing_record_refs": missing_refs,
+            "selection_signature": _pack_lifecycle_selection_signature(clipped_refs),
+        },
+        "mutation": {
+            "memory_mutation": "detail_json.lifecycle_refresh",
+            "writes_observations": len(refreshed_refs),
+            "writes_embeddings": 0,
+            "auto_archive_applied": 0,
+            "auto_mutation_applied": len(refreshed_refs),
+            "hard_delete_applied": 0,
+        },
+        "lifecycle": {
+            "last_used_at": ts,
+            "used_count_before": before_counts,
+            "used_count_after": after_counts,
+            "archived_at_preserved": True,
+        },
+        "storage": {
+            "field": "observations.detail_json.lifecycle",
+            "error_code": None,
+        },
+    }
+
+
 def _pack_lifecycle_clip_refs(raw: Any, *, max_refs: int = _PACK_LIFECYCLE_MAX_REFS) -> List[str]:
     out: List[str] = []
     seen: set[str] = set()
@@ -8028,6 +8122,54 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if policy_surface is not None:
         payload["policy_surface"] = policy_surface
 
+    lifecycle_write_receipt: Optional[Dict[str, Any]] = None
+    lifecycle_write_mode = _pack_lifecycle_write_mode(args)
+    if lifecycle_write_mode == "on":
+        selected_refs_for_lifecycle = _pack_lifecycle_clip_refs([item.get("recordRef") for item in selected_items])
+        lifecycle_write_ts = _utcnow_iso()
+        try:
+            lifecycle_write_receipt = _pack_lifecycle_refresh_selected_records(
+                conn,
+                selected_refs=selected_refs_for_lifecycle,
+                ts=lifecycle_write_ts,
+            )
+        except Exception as exc:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            lifecycle_write_receipt = {
+                "kind": "openclaw-mem.pack.lifecycle-write.v1",
+                "mode": "selected_pack_records_only",
+                "ts": lifecycle_write_ts,
+                "selection": {
+                    "pack_selected_refs": selected_refs_for_lifecycle,
+                    "refreshed_record_refs": [],
+                    "skipped_record_refs": [],
+                    "missing_record_refs": [],
+                    "selection_signature": _pack_lifecycle_selection_signature(selected_refs_for_lifecycle),
+                },
+                "mutation": {
+                    "memory_mutation": "failed_open",
+                    "writes_observations": 0,
+                    "writes_embeddings": 0,
+                    "auto_archive_applied": 0,
+                    "auto_mutation_applied": 0,
+                    "hard_delete_applied": 0,
+                },
+                "lifecycle": {
+                    "last_used_at": lifecycle_write_ts,
+                    "used_count_before": {},
+                    "used_count_after": {},
+                    "archived_at_preserved": True,
+                },
+                "storage": {
+                    "field": "observations.detail_json.lifecycle",
+                    "error_code": str(exc.__class__.__name__ or "lifecycle_write_error").strip() or "lifecycle_write_error",
+                },
+            }
+        payload["lifecycle_write"] = lifecycle_write_receipt
+
     lifecycle_shadow_receipt: Optional[Dict[str, Any]] = None
     lifecycle_shadow_mode = _pack_lifecycle_shadow_mode(args)
     if lifecycle_shadow_mode == "on":
@@ -8080,6 +8222,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             trace_extensions["policy_surface"] = policy_surface
         if lifecycle_shadow_receipt is not None:
             trace_extensions["lifecycle_shadow"] = lifecycle_shadow_receipt
+        if lifecycle_write_receipt is not None:
+            trace_extensions["lifecycle_write"] = lifecycle_write_receipt
         if compaction_selected:
             trace_extensions["compaction_sideband"] = {
                 "mode": "prefer_compact_fail_open",
@@ -16746,6 +16890,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=_PACK_LIFECYCLE_LOG_MAX_ROWS_DEFAULT,
         help="Bounded row-retention cap for pack lifecycle shadow log table (default: 2000).",
+    )
+    sp.add_argument(
+        "--pack-lifecycle-write",
+        choices=["off", "on"],
+        default="off",
+        help="Opt-in lifecycle writeback: refresh detail_json.lifecycle.last_used_at/used_count for records selected into the final pack (default: off).",
     )
 
     # Probe knobs (used in --use-graph=auto)

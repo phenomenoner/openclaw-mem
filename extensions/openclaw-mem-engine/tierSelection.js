@@ -3,10 +3,31 @@ function tierNameFromBucket(bucket) {
   return typeof raw === 'string' ? raw : '';
 }
 
+function createdAtMs(hit) {
+  const raw = hit?.row?.createdAt;
+  const parsed = typeof raw === 'number' ? raw : Number(raw);
+  if (Number.isFinite(parsed)) return parsed;
+
+  if (typeof raw === 'string') {
+    const ts = Date.parse(raw);
+    if (Number.isFinite(ts)) return ts;
+  }
+
+  return 0;
+}
+
+export function compareRecallHitsV1(a, b) {
+  if (b.score !== a.score) return b.score - a.score;
+
+  const createdDiff = createdAtMs(b) - createdAtMs(a);
+  if (createdDiff !== 0) return createdDiff;
+
+  return String(a?.row?.id ?? '').localeCompare(String(b?.row?.id ?? ''));
+}
+
 function compareWildcardCandidates(a, b) {
-  if (b.hit.score !== a.hit.score) return b.hit.score - a.hit.score;
-  const idDiff = a.hit.row.id.localeCompare(b.hit.row.id);
-  if (idDiff !== 0) return idDiff;
+  const hitDiff = compareRecallHitsV1(a.hit, b.hit);
+  if (hitDiff !== 0) return hitDiff;
   return a.tier.localeCompare(b.tier);
 }
 

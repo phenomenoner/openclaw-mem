@@ -1,14 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { runTierFirstV1, selectTierQuotaV1 } from './tierSelection.js';
+import { compareRecallHitsV1, runTierFirstV1, selectTierQuotaV1 } from './tierSelection.js';
 
-function hit(id, score) {
+function hit(id, score, createdAt = 1) {
   return {
     row: {
       id,
       text: id,
-      createdAt: 1,
+      createdAt,
       category: 'other',
       importance: null,
       importance_label: 'unknown',
@@ -30,9 +33,40 @@ function bucket(tier, hits) {
   };
 }
 
+function bucketFromFixture(raw) {
+  return bucket(
+    raw.tier,
+    (raw.hits ?? []).map((item) => hit(item.id, item.score, item.createdAt)),
+  );
+}
+
 function selectedIds(result) {
   return result.selected.map((item) => item.row.id);
 }
+
+test('recall hit comparator uses deterministic recency tie-break before id', () => {
+  const ordered = [hit('a-old', 0.5, 10), hit('b-new', 0.5, 20), hit('c-best', 0.7, 1), hit('a-newer', 0.5, 20)].sort(
+    compareRecallHitsV1,
+  );
+
+  assert.deepEqual(
+    ordered.map((item) => item.row.id),
+    ['c-best', 'a-newer', 'b-new', 'a-old'],
+  );
+});
+
+test('recall hit comparator handles timestamp strings and equal-createdAt id fallback', () => {
+  const ordered = [
+    hit('b-same-ts', 0.5, 20),
+    hit('iso-newer', 0.5, '2026-04-27T00:00:00Z'),
+    hit('a-same-ts', 0.5, 20),
+  ].sort(compareRecallHitsV1);
+
+  assert.deepEqual(
+    ordered.map((item) => item.row.id),
+    ['iso-newer', 'a-same-ts', 'b-same-ts'],
+  );
+});
 
 test('tier_quota_v1 caps must saturation and still reserves nice recall', () => {
   const result = selectTierQuotaV1({
@@ -83,6 +117,45 @@ test('tier_quota_v1 wildcard spill fills remaining slots by global score', () =>
   assert.equal(result.selectedByTier.nice, 1);
   assert.equal(result.selectedByTier.unknown, 1);
   assert.equal(result.quota.wildcardUsed, 2);
+});
+
+test('tier_quota_v1 wildcard spill uses recency only for score ties', () => {
+  const result = selectTierQuotaV1({
+    buckets: [
+      bucket('must', [hit('m-old', 0.9, 10), hit('m-new', 0.8, 30)]),
+      bucket('nice', []),
+      bucket('unknown', [hit('u-new', 0.8, 40), hit('u-old', 0.8, 5)]),
+    ],
+    limit: 4,
+    quotas: { mustMax: 1, niceMin: 0, unknownMax: 0 },
+  });
+
+  assert.deepEqual(selectedIds(result), ['m-old', 'u-new', 'm-new', 'u-old']);
+  assert.equal(result.quota.wildcardUsed, 3);
+});
+
+test('tier selection golden fixture stays deterministic', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const fixturePath = path.join(here, 'fixtures', 'tier-selection-golden.v1.jsonl');
+  const rows = fs
+    .readFileSync(fixturePath, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+
+  assert.ok(rows.length >= 2);
+
+  for (const row of rows) {
+    assert.equal(row.version, 'v1', `${row.id}: fixture version`);
+    const result = selectTierQuotaV1({
+      buckets: (row.buckets ?? []).map(bucketFromFixture),
+      limit: row.limit,
+      quotas: row.quotas,
+    });
+
+    assert.deepEqual(selectedIds(result), row.expect.selectedIds, row.id);
+    assert.equal(result.quota.wildcardUsed, row.expect.wildcardUsed, `${row.id}: wildcardUsed`);
+  }
 });
 
 test('tier_quota_v1 is robust when must/unknown tiers are empty', () => {

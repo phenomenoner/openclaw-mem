@@ -78,7 +78,8 @@ These should be high-impact and low-risk.
 
 - **Recall ranking that matches operator expectations**
   - Improve deterministic ranking so “the obvious memory” is returned first.
-  - Candidate approach (still deterministic): split **retention** from **activation**; use Working Set as backbone lane, then quota-mix hot recall (`must` cap + `nice` floor + wildcard) instead of letting `must_remember` fill the whole budget.
+  - Candidate approach (still deterministic): split **retention** from **activation**; use quota-mixed hot recall (`must` cap + `nice` floor + wildcard) instead of letting `must_remember` fill the whole budget.
+  - First cut: quota-based selection now has a small deterministic golden fixture; base rank-fusion remains unchanged, while fallback overflow selection can use the record timestamp only as a stable tie-break.
   - Spec: `docs/specs/auto-recall-activation-vs-retention-v1.md`
   - Acceptance: on a small golden set, top-1/top-3 improves without increasing noise, and large `must_remember` pools no longer wash out turn-relevant memories.
 
@@ -97,7 +98,7 @@ These should be high-impact and low-risk.
   - Acceptance: operators can spot-check must/ignore precision and correct mistakes quickly.
 
 - **Lifecycle MVP (archive-first, reversible)**
-  - Use-based decay: track `last_used_at` based on *actual inclusion* (e.g., pack trace), not “retrieved”.
+  - Use-based decay: track `last_used_at` based on *actual inclusion* (e.g., pack trace), not “retrieved”. First opt-in cut refreshes `detail_json.lifecycle.last_used_at` / `used_count` only for final pack records and preserves `archived_at` without hard delete.
   - Soft-archive low-value records; reversible.
   - Acceptance: DB growth is bounded; must_remember remains stable.
 

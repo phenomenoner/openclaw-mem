@@ -76,4 +76,10 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
   - logs Decision/Tech Note if it changes ops posture
 
 ## Next slice (recommended)
-P1-5 (fusion/ranking improvements) next, then lifecycle MVP archive-first.
+P1-5 (fusion/ranking improvements) is the active next slice, then lifecycle MVP archive-first.
+
+Current first cut:
+- Add a deterministic golden fixture for quota-based recall selection.
+- Keep base rank-fusion behavior unchanged; use the record timestamp only as a deterministic tie-break inside fallback overflow selection.
+- Add opt-in lifecycle writeback for records selected into the final pack: refresh `detail_json.lifecycle.last_used_at` / `used_count`, preserve `archived_at`, and never hard-delete.
+- Verify with focused engine and lifecycle tests before broader rollout or default changes.

@@ -4859,6 +4859,180 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(row_count, 0)
         conn.close()
 
+    def test_pack_lifecycle_write_refreshes_selected_records_only_when_opted_in(self):
+        conn = _connect(":memory:")
+
+        _insert_observation(
+            conn,
+            {
+                "kind": "fact",
+                "tool_name": "memory_store",
+                "summary": "selected lifecycle record",
+                "detail": {"lifecycle": {"used_count": 2, "archived_at": "2026-01-01T00:00:00Z"}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "kind": "fact",
+                "tool_name": "memory_store",
+                "summary": "budget excluded lifecycle record with a much longer summary",
+                "detail": {"lifecycle": {"used_count": 7}},
+            },
+        )
+
+        pack_state = {
+            "ordered_ids": [1, 2],
+            "fts_ids": {1, 2},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.9, 2: 0.8},
+            "obs_map": {
+                1: {"summary": "short", "summary_en": "short", "kind": "fact", "lang": "en"},
+                2: {
+                    "summary": "this summary is intentionally long to exceed token budget",
+                    "summary_en": "this summary is intentionally long to exceed token budget",
+                    "kind": "fact",
+                    "lang": "en",
+                },
+            },
+            "candidate_limit": 10,
+        }
+
+        args = build_parser().parse_args(
+            [
+                "pack",
+                "--query",
+                "lifecycle write demo",
+                "--json",
+                "--trace",
+                "--limit",
+                "2",
+                "--budget-tokens",
+                "2",
+                "--pack-lifecycle-write",
+                "on",
+            ]
+        )
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        lifecycle_write = out["trace"]["extensions"]["lifecycle_write"]
+        self.assertEqual(lifecycle_write["selection"]["refreshed_record_refs"], ["obs:1"])
+        self.assertEqual(lifecycle_write["mutation"]["writes_observations"], 1)
+        self.assertEqual(lifecycle_write["mutation"]["hard_delete_applied"], 0)
+
+        row1 = conn.execute("SELECT detail_json FROM observations WHERE id = 1").fetchone()
+        row2 = conn.execute("SELECT detail_json FROM observations WHERE id = 2").fetchone()
+        detail1 = json.loads(row1["detail_json"])
+        detail2 = json.loads(row2["detail_json"])
+
+        self.assertEqual(detail1["lifecycle"]["used_count"], 3)
+        self.assertEqual(detail1["lifecycle"]["last_used_at"], lifecycle_write["ts"])
+        self.assertEqual(detail1["lifecycle"]["archived_at"], "2026-01-01T00:00:00Z")
+        self.assertEqual(detail2["lifecycle"]["used_count"], 7)
+        self.assertNotIn("last_used_at", detail2["lifecycle"])
+        conn.close()
+
+    def test_pack_lifecycle_write_defaults_off(self):
+        args = build_parser().parse_args(["pack", "--query", "x", "--json"])
+        self.assertEqual(args.pack_lifecycle_write, "off")
+
+    def test_pack_lifecycle_write_failure_rolls_back_before_shadow_log_commit(self):
+        conn = _connect(":memory:")
+
+        _insert_observation(
+            conn,
+            {
+                "kind": "fact",
+                "tool_name": "memory_store",
+                "summary": "first selected lifecycle record",
+                "detail": {"lifecycle": {"used_count": 2}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "kind": "fact",
+                "tool_name": "memory_store",
+                "summary": "second selected lifecycle record",
+                "detail": {"lifecycle": {"used_count": 7}},
+            },
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER lifecycle_write_fail_second
+            BEFORE UPDATE OF detail_json ON observations
+            WHEN old.id = 2
+            BEGIN
+                SELECT RAISE(ABORT, 'forced lifecycle write failure');
+            END;
+            """
+        )
+        conn.commit()
+
+        pack_state = {
+            "ordered_ids": [1, 2],
+            "fts_ids": {1, 2},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.9, 2: 0.8},
+            "obs_map": {
+                1: {"summary": "short one", "summary_en": "short one", "kind": "fact", "lang": "en"},
+                2: {"summary": "short two", "summary_en": "short two", "kind": "fact", "lang": "en"},
+            },
+            "candidate_limit": 10,
+        }
+
+        args = build_parser().parse_args(
+            [
+                "pack",
+                "--query",
+                "lifecycle rollback demo",
+                "--json",
+                "--trace",
+                "--limit",
+                "2",
+                "--budget-tokens",
+                "100",
+                "--pack-lifecycle-write",
+                "on",
+            ]
+        )
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        lifecycle_write = out["trace"]["extensions"]["lifecycle_write"]
+        self.assertEqual(lifecycle_write["mutation"]["memory_mutation"], "failed_open")
+        self.assertEqual(lifecycle_write["mutation"]["writes_observations"], 0)
+        self.assertEqual(lifecycle_write["storage"]["error_code"], "IntegrityError")
+
+        row1 = conn.execute("SELECT detail_json FROM observations WHERE id = 1").fetchone()
+        row2 = conn.execute("SELECT detail_json FROM observations WHERE id = 2").fetchone()
+        detail1 = json.loads(row1["detail_json"])
+        detail2 = json.loads(row2["detail_json"])
+
+        self.assertEqual(detail1["lifecycle"]["used_count"], 2)
+        self.assertNotIn("last_used_at", detail1["lifecycle"])
+        self.assertEqual(detail2["lifecycle"]["used_count"], 7)
+        self.assertNotIn("last_used_at", detail2["lifecycle"])
+
+        shadow_rows = conn.execute("SELECT COUNT(*) FROM pack_lifecycle_shadow_log").fetchone()[0]
+        self.assertEqual(shadow_rows, 1)
+        conn.close()
+
     def test_pack_use_graph_on_elides_l1_items_covered_by_preferred_cards(self):
         conn = _connect(":memory:")
 
