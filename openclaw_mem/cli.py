@@ -14,8 +14,10 @@ import fnmatch
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
+import shutil
 import shlex
 import signal
 import sqlite3
@@ -155,6 +157,8 @@ DEFAULT_EPISODIC_EXTRACT_STATE_PATH = os.path.join(
     "openclaw-mem",
     "episodes-extract-state.json",
 )
+DEFAULT_ENGINE_LANCEDB_PATH = os.path.join(STATE_DIR, "memory", "lancedb")
+DEFAULT_ENGINE_SNAPSHOTS_DIR = os.path.join(STATE_DIR, "memory", "lancedb-snapshots")
 DEFAULT_OPTIMIZE_ASSIST_RUN_DIR = os.path.join(
     STATE_DIR,
     "memory",
@@ -1772,6 +1776,205 @@ def _lancedb_api_key_ready(config: Dict[str, Any]) -> bool:
 def cmd_backend(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     cfg = _read_openclaw_config()
     _emit(_build_backend_status(cfg), args.json)
+
+
+ENGINE_SNAPSHOT_TAG_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def _engine_snapshot_error(message: str, *, json_mode: bool, code: int = 2) -> None:
+    _emit({"kind": "openclaw-mem-engine.dataset-snapshot.v0", "ok": False, "error": message}, json_mode)
+    sys.exit(code)
+
+
+def _engine_snapshot_validate_tag(tag: str) -> str:
+    value = str(tag or "").strip()
+    if not ENGINE_SNAPSHOT_TAG_RE.fullmatch(value):
+        raise ValueError("snapshot tag must match [A-Za-z0-9._-]{1,64}")
+    if value in {".", ".."} or "/" in value or "\\" in value:
+        raise ValueError("snapshot tag must not contain path separators")
+    return value
+
+
+def _engine_snapshot_paths(tag: str, snapshots_dir: Path) -> Dict[str, Path]:
+    safe_tag = _engine_snapshot_validate_tag(tag)
+    root = snapshots_dir.expanduser().resolve()
+    snap = (root / safe_tag).resolve()
+    try:
+        snap.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("snapshot path escapes snapshots dir") from exc
+    return {"root": root, "snapshot": snap, "data": snap / "data", "manifest": snap / "manifest.json"}
+
+
+def _engine_dataset_stats(path: Path) -> Dict[str, Any]:
+    file_count = 0
+    total_bytes = 0
+    files: List[Dict[str, Any]] = []
+    if path.exists():
+        for item in path.rglob("*"):
+            if not item.is_file():
+                continue
+            try:
+                st = item.stat()
+                digest = hashlib.sha256(item.read_bytes()).hexdigest()
+            except OSError:
+                continue
+            rel = item.relative_to(path).as_posix()
+            file_count += 1
+            total_bytes += int(st.st_size)
+            files.append({"path": rel, "bytes": int(st.st_size), "sha256": digest})
+    files.sort(key=lambda x: str(x.get("path") or ""))
+    dataset_digest = hashlib.sha256(
+        "".join(f"{row['path']}\0{row['bytes']}\0{row['sha256']}\n" for row in files).encode("utf-8")
+    ).hexdigest()
+    return {"fileCount": file_count, "bytes": total_bytes, "sha256": dataset_digest, "files": files}
+
+
+def _engine_snapshot_ignore_symlinks(src: str, names: List[str]) -> Set[str]:
+    src_path = Path(src)
+    ignored: Set[str] = set()
+    for name in names:
+        try:
+            if (src_path / name).is_symlink():
+                ignored.add(name)
+        except OSError:
+            ignored.add(name)
+    return ignored
+
+
+def _engine_snapshot_manifest(tag: str, *, source_db: Path, snapshot_dir: Path) -> Dict[str, Any]:
+    return {
+        "kind": "openclaw-mem-engine.dataset-snapshot.v0",
+        "tag": tag,
+        "createdAt": _utcnow_iso(),
+        "source": {"dbPath": str(source_db), "table": "memories"},
+        "artifact": {"format": "dir", "path": str(snapshot_dir), "dataPath": str(snapshot_dir / "data")},
+        "stats": _engine_dataset_stats(snapshot_dir / "data"),
+        "notes": {"openclawMemVersion": __version__},
+    }
+
+
+def _load_engine_snapshot_manifest(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def cmd_engine_snapshot_create(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        tag = _engine_snapshot_validate_tag(getattr(args, "tag", ""))
+        db_path = Path(str(getattr(args, "db_path", DEFAULT_ENGINE_LANCEDB_PATH))).expanduser().resolve()
+        paths = _engine_snapshot_paths(tag, Path(str(getattr(args, "snapshots_dir", DEFAULT_ENGINE_SNAPSHOTS_DIR))))
+    except ValueError as exc:
+        _engine_snapshot_error(str(exc), json_mode=args.json)
+        return
+    if not db_path.exists() or not db_path.is_dir():
+        _engine_snapshot_error(f"dbPath not found or not a directory: {db_path}", json_mode=args.json)
+        return
+    if paths["snapshot"].exists():
+        _engine_snapshot_error(f"snapshot already exists for tag: {tag}", json_mode=args.json)
+        return
+    paths["root"].mkdir(parents=True, exist_ok=True)
+    paths["snapshot"].mkdir(parents=False, exist_ok=False)
+    try:
+        shutil.copytree(db_path, paths["data"], symlinks=False, ignore=_engine_snapshot_ignore_symlinks)
+        manifest = _engine_snapshot_manifest(tag, source_db=db_path, snapshot_dir=paths["snapshot"])
+        _write_json_file_atomic(paths["manifest"], manifest)
+    except Exception:
+        shutil.rmtree(paths["snapshot"], ignore_errors=True)
+        raise
+    _emit({"ok": True, "action": "create", **manifest}, args.json)
+
+
+def cmd_engine_snapshot_list(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    root = Path(str(getattr(args, "snapshots_dir", DEFAULT_ENGINE_SNAPSHOTS_DIR))).expanduser().resolve()
+    items: List[Dict[str, Any]] = []
+    if root.exists():
+        for manifest_path in sorted(root.glob("*/manifest.json")):
+            manifest = _load_engine_snapshot_manifest(manifest_path)
+            if not manifest:
+                continue
+            items.append(
+                {
+                    "tag": manifest.get("tag"),
+                    "createdAt": manifest.get("createdAt"),
+                    "artifact": manifest.get("artifact") or {},
+                    "stats": manifest.get("stats") or {},
+                }
+            )
+    items.sort(key=lambda x: (str(x.get("createdAt") or ""), str(x.get("tag") or "")), reverse=True)
+    _emit({"kind": "openclaw-mem-engine.dataset-snapshot-list.v0", "ok": True, "snapshotsDir": str(root), "count": len(items), "items": items}, args.json)
+
+
+def cmd_engine_snapshot_checkout(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        tag = _engine_snapshot_validate_tag(getattr(args, "tag", ""))
+        db_path = Path(str(getattr(args, "db_path", DEFAULT_ENGINE_LANCEDB_PATH))).expanduser().resolve()
+        paths = _engine_snapshot_paths(tag, Path(str(getattr(args, "snapshots_dir", DEFAULT_ENGINE_SNAPSHOTS_DIR))))
+    except ValueError as exc:
+        _engine_snapshot_error(str(exc), json_mode=args.json)
+        return
+    manifest = _load_engine_snapshot_manifest(paths["manifest"])
+    if not manifest or not paths["data"].is_dir():
+        _engine_snapshot_error(f"snapshot not found for tag: {tag}", json_mode=args.json)
+        return
+    if not bool(getattr(args, "yes", False)):
+        _engine_snapshot_error("checkout is destructive; pass --yes to replace the active dbPath with this snapshot", json_mode=args.json)
+        return
+
+    backup_path = None
+    if db_path.exists():
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup_root = paths["root"] / "_checkout-backups"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_root / f"{db_path.name}.{stamp}"
+        suffix = 1
+        while backup_path.exists():
+            suffix += 1
+            backup_path = backup_root / f"{db_path.name}.{stamp}.{suffix}"
+        shutil.move(str(db_path), str(backup_path))
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copytree(paths["data"], db_path, symlinks=False, ignore=_engine_snapshot_ignore_symlinks)
+    except Exception:
+        if db_path.exists():
+            shutil.rmtree(db_path, ignore_errors=True)
+        if backup_path and backup_path.exists():
+            shutil.move(str(backup_path), str(db_path))
+        raise
+    _emit(
+        {
+            "kind": "openclaw-mem-engine.dataset-snapshot-checkout.v0",
+            "ok": True,
+            "action": "checkout",
+            "tag": tag,
+            "previousDbPath": str(backup_path) if backup_path else None,
+            "newDbPath": str(db_path),
+            "sourceSnapshot": str(paths["snapshot"]),
+            "restartRequired": True,
+            "rollback": f"To undo: stop gateway if running, replace {db_path} with {backup_path}" if backup_path else "No previous dbPath backup was created.",
+        },
+        args.json,
+    )
+
+
+def cmd_engine_snapshot_delete(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        tag = _engine_snapshot_validate_tag(getattr(args, "tag", ""))
+        paths = _engine_snapshot_paths(tag, Path(str(getattr(args, "snapshots_dir", DEFAULT_ENGINE_SNAPSHOTS_DIR))))
+    except ValueError as exc:
+        _engine_snapshot_error(str(exc), json_mode=args.json)
+        return
+    if not bool(getattr(args, "yes", False)):
+        _engine_snapshot_error("delete is destructive; pass --yes", json_mode=args.json)
+        return
+    if not paths["snapshot"].exists():
+        _engine_snapshot_error(f"snapshot not found for tag: {tag}", json_mode=args.json, code=1)
+        return
+    shutil.rmtree(paths["snapshot"])
+    _emit({"kind": "openclaw-mem-engine.dataset-snapshot-delete.v0", "ok": True, "action": "delete", "tag": tag, "deletedPath": str(paths["snapshot"])}, args.json)
 
 
 def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -14632,43 +14835,15 @@ def _sanitize_episodic_conversation_text(text: str, *, role: str) -> Optional[st
     return cleaned or None
 
 
-def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    sessions_root = Path(
-        str(getattr(args, "sessions_root", None) or DEFAULT_OPENCLAW_SESSIONS_ROOT)
-    ).expanduser().resolve()
-    spool_path = Path(str(getattr(args, "file", None) or DEFAULT_EPISODIC_SPOOL_PATH)).expanduser().resolve()
-    state_path = Path(
-        str(getattr(args, "state", None) or DEFAULT_EPISODIC_EXTRACT_STATE_PATH)
-    ).expanduser().resolve()
-
-    summary_max = max(40, min(400, int(getattr(args, "summary_max_chars", 220) or 220)))
-    payload_cap = int(
-        getattr(
-            args,
-            "payload_cap_bytes",
-            EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES,
-        )
-        or EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES
-    )
-    payload_cap = min(max(256, payload_cap), EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES)
-
-    if not sessions_root.exists() or not sessions_root.is_dir():
-        _emit(
-            {
-                "kind": "openclaw-mem.episodes.extract-sessions.v0",
-                "ok": False,
-                "error": f"sessions root not found: {sessions_root}",
-            },
-            True,
-        )
-        sys.exit(2)
-
-    try:
-        state = _read_json_file(state_path)
-    except ValueError as e:
-        _emit({"kind": "openclaw-mem.episodes.extract-sessions.v0", "ok": False, "error": str(e)}, True)
-        sys.exit(2)
-
+def _episodes_extract_sessions_once(
+    *,
+    sessions_root: Path,
+    spool_path: Path,
+    state_path: Path,
+    summary_max: int,
+    payload_cap: int,
+) -> Dict[str, Any]:
+    state = _read_json_file(state_path)
     files_state = state.get("files") if isinstance(state.get("files"), dict) else {}
     files = sorted([p for p in sessions_root.rglob("*.jsonl") if p.is_file()], key=lambda p: str(p))
 
@@ -14688,7 +14863,7 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
     errors_sample: List[str] = []
 
     lock_path = _episodic_lock_path(spool_path)
-    with _episodic_flock(lock_path, exclusive=False, timeout_s=30), spool_path.open("a", encoding="utf-8") as spool_fp:
+    with _episodic_flock(lock_path, exclusive=True, timeout_s=30), spool_path.open("a", encoding="utf-8") as spool_fp:
         for fp in files:
             files_seen += 1
             key = str(fp)
@@ -14858,11 +15033,7 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
     }
     _write_json_file_atomic(state_path, out_state)
 
-    out = {
-        "kind": "openclaw-mem.episodes.extract-sessions.v0",
-        "ts": _utcnow_iso(),
-        "version": {"openclaw_mem": __version__, "schema": "v0"},
-        "ok": True,
+    return {
         "source": {
             "sessions_root": str(sessions_root),
             "state": str(state_path),
@@ -14880,6 +15051,192 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
         "trailing_partial_bytes": trailing_partial_bytes,
         "payload_cap_bytes": payload_cap,
         "errors_sample": errors_sample,
+    }
+
+
+def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    sessions_root = Path(str(getattr(args, "sessions_root", None) or DEFAULT_OPENCLAW_SESSIONS_ROOT)).expanduser().resolve()
+    spool_path = Path(str(getattr(args, "file", None) or DEFAULT_EPISODIC_SPOOL_PATH)).expanduser().resolve()
+    state_path = Path(str(getattr(args, "state", None) or DEFAULT_EPISODIC_EXTRACT_STATE_PATH)).expanduser().resolve()
+
+    follow = bool(getattr(args, "follow", False))
+
+    try:
+        summary_max = max(40, min(400, int(getattr(args, "summary_max_chars", 220) or 220)))
+        payload_cap = int(
+            getattr(
+                args,
+                "payload_cap_bytes",
+                EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES,
+            )
+            or EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES
+        )
+        payload_cap = min(max(256, payload_cap), EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES)
+        poll_interval_ms = int(getattr(args, "poll_interval_ms", EPISODIC_FOLLOW_DEFAULT_POLL_INTERVAL_MS))
+        max_duration_seconds = float(getattr(args, "max_duration_seconds", 0.0) or 0.0)
+
+        if follow and poll_interval_ms < EPISODIC_FOLLOW_MIN_POLL_INTERVAL_MS:
+            raise ValueError(f"--poll-interval-ms must be >= {EPISODIC_FOLLOW_MIN_POLL_INTERVAL_MS}")
+        if not math.isfinite(max_duration_seconds) or max_duration_seconds < 0:
+            raise ValueError("--max-duration-seconds must be a finite value >= 0")
+    except ValueError as e:
+        _emit({"kind": "openclaw-mem.episodes.extract-sessions.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(2)
+
+    if not sessions_root.exists() or not sessions_root.is_dir():
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.extract-sessions.v0",
+                "ok": False,
+                "error": f"sessions root not found: {sessions_root}",
+            },
+            True,
+        )
+        sys.exit(2)
+
+    if not follow:
+        started = time.monotonic()
+        try:
+            cycle = _episodes_extract_sessions_once(
+                sessions_root=sessions_root,
+                spool_path=spool_path,
+                state_path=state_path,
+                summary_max=summary_max,
+                payload_cap=payload_cap,
+            )
+        except ValueError as e:
+            _emit({"kind": "openclaw-mem.episodes.extract-sessions.v0", "ok": False, "error": str(e)}, True)
+            sys.exit(2)
+        duration_ms = int((time.monotonic() - started) * 1000)
+
+        out = {
+            "kind": "openclaw-mem.episodes.extract-sessions.v0",
+            "ts": _utcnow_iso(),
+            "version": {"openclaw_mem": __version__, "schema": "v0"},
+            "ok": True,
+            **cycle,
+            "iterations": 1,
+            "duration_ms": duration_ms,
+            "stop_reason": "one_shot",
+            "counters": {
+                "emitted": int(cycle.get("emitted") or 0),
+                "skipped": {
+                    "invalid_json": int(cycle.get("invalid_json") or 0),
+                    "unsupported_rows": int(cycle.get("unsupported_rows") or 0),
+                },
+                "sanitized": {"dropped": int(cycle.get("sanitized_dropped") or 0)},
+                "payload": {
+                    "redacted": int(cycle.get("payload_redacted") or 0),
+                    "truncated": int(cycle.get("payload_truncated") or 0),
+                    "cap_bytes": payload_cap,
+                },
+            },
+        }
+        _emit(out, args.json)
+        return
+
+    started = time.monotonic()
+    stop_reason = None
+    iterations = 0
+
+    aggregate: Dict[str, Any] = {
+        "files_seen": 0,
+        "files_with_updates": 0,
+        "lines_total": 0,
+        "invalid_json": 0,
+        "unsupported_rows": 0,
+        "emitted": 0,
+        "payload_redacted": 0,
+        "payload_truncated": 0,
+        "sanitized_dropped": 0,
+        "trailing_partial_bytes": 0,
+    }
+    errors_sample: List[str] = []
+    last_cycle: Optional[Dict[str, Any]] = None
+
+    try:
+        while True:
+            now = time.monotonic()
+            if max_duration_seconds > 0 and (now - started) >= max_duration_seconds:
+                stop_reason = "max_duration"
+                break
+
+            cycle = _episodes_extract_sessions_once(
+                sessions_root=sessions_root,
+                spool_path=spool_path,
+                state_path=state_path,
+                summary_max=summary_max,
+                payload_cap=payload_cap,
+            )
+            last_cycle = cycle
+            iterations += 1
+
+            for key in list(aggregate.keys()):
+                aggregate[key] = int(aggregate.get(key) or 0) + int(cycle.get(key) or 0)
+
+            for entry in (cycle.get("errors_sample") or []):
+                if len(errors_sample) >= 5:
+                    break
+                if entry in errors_sample:
+                    continue
+                errors_sample.append(str(entry))
+
+            has_updates = int(cycle.get("files_with_updates") or 0) > 0
+            if not has_updates:
+                time.sleep(poll_interval_ms / 1000.0)
+    except KeyboardInterrupt:
+        stop_reason = "keyboard_interrupt"
+    except ValueError as e:
+        _emit({"kind": "openclaw-mem.episodes.extract-sessions.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(2)
+    except Exception as e:
+        _emit(
+            {
+                "kind": "openclaw-mem.episodes.extract-sessions.v0",
+                "ok": False,
+                "error": "follow extract-sessions failed",
+                "detail": str(e),
+            },
+            True,
+        )
+        sys.exit(1)
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    out = {
+        "kind": "openclaw-mem.episodes.extract-sessions.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "source": {
+            "sessions_root": str(sessions_root),
+            "state": str(state_path),
+            "spool": str(spool_path),
+        },
+        "aggregate": aggregate,
+        "payload_cap_bytes": payload_cap,
+        "errors_sample": errors_sample,
+        "iterations": iterations,
+        "duration_ms": duration_ms,
+        "stop_reason": stop_reason,
+        "follow": {
+            "enabled": True,
+            "poll_interval_ms": poll_interval_ms,
+            "max_duration_seconds": max_duration_seconds,
+        },
+        "last_iteration": last_cycle,
+        "counters": {
+            "emitted": int(aggregate.get("emitted") or 0),
+            "skipped": {
+                "invalid_json": int(aggregate.get("invalid_json") or 0),
+                "unsupported_rows": int(aggregate.get("unsupported_rows") or 0),
+            },
+            "sanitized": {"dropped": int(aggregate.get("sanitized_dropped") or 0)},
+            "payload": {
+                "redacted": int(aggregate.get("payload_redacted") or 0),
+                "truncated": int(aggregate.get("payload_truncated") or 0),
+                "cap_bytes": payload_cap,
+            },
+        },
     }
     _emit(out, args.json)
 
@@ -15805,6 +16162,42 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("backend", help="Inspect active OpenClaw memory backend + fallback posture")
     add_common(sp)
     sp.set_defaults(func=cmd_backend)
+
+    sp = sub.add_parser("engine", help="openclaw-mem-engine operator utilities")
+    add_common(sp)
+    eng_sub = sp.add_subparsers(dest="engine_cmd", required=True)
+
+    eng = eng_sub.add_parser("snapshot", help="Dataset snapshot/tag safety net")
+    add_common(eng)
+    snap_sub = eng.add_subparsers(dest="snapshot_cmd", required=True)
+
+    sn = snap_sub.add_parser("create", help="Create a filesystem snapshot of the engine LanceDB dataset")
+    add_common(sn)
+    sn.add_argument("--tag", required=True, help="Snapshot tag, [A-Za-z0-9._-]{1,64}")
+    sn.add_argument("--reason", default="", help="Operator reason recorded in the manifest")
+    sn.add_argument("--db-path", dest="db_path", default=DEFAULT_ENGINE_LANCEDB_PATH, help=f"Engine LanceDB dbPath (default: {DEFAULT_ENGINE_LANCEDB_PATH})")
+    sn.add_argument("--snapshots-dir", dest="snapshots_dir", default=DEFAULT_ENGINE_SNAPSHOTS_DIR, help=f"Snapshots root (default: {DEFAULT_ENGINE_SNAPSHOTS_DIR})")
+    sn.set_defaults(func=cmd_engine_snapshot_create)
+
+    sn = snap_sub.add_parser("list", help="List dataset snapshots deterministically")
+    add_common(sn)
+    sn.add_argument("--snapshots-dir", dest="snapshots_dir", default=DEFAULT_ENGINE_SNAPSHOTS_DIR, help=f"Snapshots root (default: {DEFAULT_ENGINE_SNAPSHOTS_DIR})")
+    sn.set_defaults(func=cmd_engine_snapshot_list)
+
+    sn = snap_sub.add_parser("checkout", help="Restore a tagged snapshot into the active dbPath")
+    add_common(sn)
+    sn.add_argument("--tag", required=True, help="Snapshot tag to restore")
+    sn.add_argument("--db-path", dest="db_path", default=DEFAULT_ENGINE_LANCEDB_PATH, help=f"Engine LanceDB dbPath (default: {DEFAULT_ENGINE_LANCEDB_PATH})")
+    sn.add_argument("--snapshots-dir", dest="snapshots_dir", default=DEFAULT_ENGINE_SNAPSHOTS_DIR, help=f"Snapshots root (default: {DEFAULT_ENGINE_SNAPSHOTS_DIR})")
+    sn.add_argument("--yes", action="store_true", help="Required: replace active dbPath after backing it up")
+    sn.set_defaults(func=cmd_engine_snapshot_checkout)
+
+    sn = snap_sub.add_parser("delete", help="Delete a tagged snapshot")
+    add_common(sn)
+    sn.add_argument("--tag", required=True, help="Snapshot tag to delete")
+    sn.add_argument("--snapshots-dir", dest="snapshots_dir", default=DEFAULT_ENGINE_SNAPSHOTS_DIR, help=f"Snapshots root (default: {DEFAULT_ENGINE_SNAPSHOTS_DIR})")
+    sn.add_argument("--yes", action="store_true", help="Required: delete snapshot")
+    sn.set_defaults(func=cmd_engine_snapshot_delete)
 
     sp = sub.add_parser("routing", help="Evaluate and resolve canonical project/repo routing guardrails")
     add_common(sp)
@@ -16795,6 +17188,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     e.add_argument("--summary-max-chars", type=int, default=220, help="Summary max chars for extracted conversation events (default: 220)")
     e.add_argument("--payload-cap-bytes", type=int, default=EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES, help="Conversation payload cap in bytes (default: 4096, hard max: 8192)")
+    e.add_argument("--follow", action="store_true", help="Follow session logs (poll for new lines until interrupted)")
+    e.add_argument("--poll-interval-ms", type=int, default=EPISODIC_FOLLOW_DEFAULT_POLL_INTERVAL_MS, help="Follow mode poll interval in ms (default: 1000, min: 100)")
+    e.add_argument("--max-duration-seconds", type=float, default=0.0, help="(test hook) Follow mode: stop after N seconds (default: 0 = no limit)")
     e.set_defaults(func=cmd_episodes_extract_sessions)
 
     e = esub.add_parser("ingest", help="Ingest episodic events from JSONL spool using an offset state file")
