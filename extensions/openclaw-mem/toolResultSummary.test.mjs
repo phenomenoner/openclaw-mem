@@ -247,45 +247,28 @@ test('array-first malformed JSON-like boundary keeps quoted output-key prose inf
   );
 
   const syntheticNeedle = 'sk-proj-ARRAYROOTBOUNDARYNEEDLE1234567890';
-  const arrayTrueOutputSummary = buildToolResultSummary(
-    'memory_recall',
-    buildMessage(`[{"meta":"ok"},{"stdout":"synthetic trace line ${syntheticNeedle}"}`),
-    true,
-    240,
-  );
+  const arrayLikeOutputKeys = [
+    'stdout',
+    'stderr',
+    'raw_stdout',
+    'raw_stderr',
+    'tool_output',
+    'command_output',
+  ];
 
-  assert.equal(arrayTrueOutputSummary, 'memory_recall result captured (output redacted)');
-  assert.equal(
-    arrayTrueOutputSummary.includes(syntheticNeedle),
-    false,
-    'array-first malformed JSON-like true output-key summary must not leak synthetic needle',
-  );
+  for (const outputKey of arrayLikeOutputKeys) {
+    const aliasSummary = buildToolResultSummary(
+      'memory_recall',
+      buildMessage(`[{"meta":"ok"},{"${outputKey}":"synthetic trace line ${syntheticNeedle}"}`),
+      true,
+      240,
+    );
 
-  const arrayRawStdoutSummary = buildToolResultSummary(
-    'memory_recall',
-    buildMessage(`[{"meta":"ok"},{"raw_stdout":"synthetic trace line ${syntheticNeedle}"}`),
-    true,
-    240,
-  );
-
-  assert.equal(arrayRawStdoutSummary, 'memory_recall result captured (output redacted)');
-  assert.equal(
-    arrayRawStdoutSummary.includes(syntheticNeedle),
-    false,
-    'array-first malformed JSON-like raw_stdout summary must not leak synthetic needle',
-  );
-
-  const arrayToolOutputSummary = buildToolResultSummary(
-    'memory_recall',
-    buildMessage(`[{"meta":"ok"},{"tool_output":"synthetic trace line ${syntheticNeedle}"}`),
-    true,
-    240,
-  );
-
-  assert.equal(arrayToolOutputSummary, 'memory_recall result captured (output redacted)');
-  assert.equal(
-    arrayToolOutputSummary.includes(syntheticNeedle),
-    false,
-    'array-first malformed JSON-like tool_output summary must not leak synthetic needle',
-  );
+    assert.equal(aliasSummary, 'memory_recall result captured (output redacted)');
+    assert.equal(
+      aliasSummary.includes(syntheticNeedle),
+      false,
+      `array-first malformed JSON-like ${outputKey} summary must not leak synthetic needle`,
+    );
+  }
 });

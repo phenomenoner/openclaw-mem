@@ -23,6 +23,8 @@ function buildMessage(text) {
   };
 }
 
+const ARRAY_LIKE_OUTPUT_KEYS = ['stdout', 'stderr', 'raw_stdout', 'raw_stderr', 'tool_output', 'command_output'];
+
 function createFakeApi({ stateDir, pluginConfig }) {
   const handlers = new Map();
 
@@ -248,50 +250,22 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
       },
     );
 
-    handler(
-      {
-        toolName: 'memory_recall',
-        toolCallId: 'call-json-malformed-array-keylike-stdout',
-        message: buildMessage(
-          `[{"meta":"ok"},{"stdout":"synthetic trace ${highRisk.sample} ${highRisk.episodic.leakNeedles?.[0] || 'needle'}"}`,
-        ),
-      },
-      {
-        sessionKey: 'session-1',
-        agentId: 'agent-1',
-        toolName: 'memory_recall',
-      },
-    );
-
-    handler(
-      {
-        toolName: 'memory_recall',
-        toolCallId: 'call-json-malformed-array-keylike-raw-stdout',
-        message: buildMessage(
-          `[{"meta":"ok"},{"raw_stdout":"synthetic trace ${highRisk.sample} ${highRisk.episodic.leakNeedles?.[0] || 'needle'}"}`,
-        ),
-      },
-      {
-        sessionKey: 'session-1',
-        agentId: 'agent-1',
-        toolName: 'memory_recall',
-      },
-    );
-
-    handler(
-      {
-        toolName: 'memory_recall',
-        toolCallId: 'call-json-malformed-array-keylike-tool-output',
-        message: buildMessage(
-          `[{"meta":"ok"},{"tool_output":"synthetic trace ${highRisk.sample} ${highRisk.episodic.leakNeedles?.[0] || 'needle'}"}`,
-        ),
-      },
-      {
-        sessionKey: 'session-1',
-        agentId: 'agent-1',
-        toolName: 'memory_recall',
-      },
-    );
+    for (const outputKey of ARRAY_LIKE_OUTPUT_KEYS) {
+      handler(
+        {
+          toolName: 'memory_recall',
+          toolCallId: `call-json-malformed-array-keylike-${outputKey.replaceAll('_', '-')}`,
+          message: buildMessage(
+            `[{"meta":"ok"},{"${outputKey}":"synthetic trace ${highRisk.sample} ${highRisk.episodic.leakNeedles?.[0] || 'needle'}"}`,
+          ),
+        },
+        {
+          sessionKey: 'session-1',
+          agentId: 'agent-1',
+          toolName: 'memory_recall',
+        },
+      );
+    }
 
     handler(
       {
@@ -316,7 +290,11 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
 
     const parsed = rawLines.map((line) => ({ raw: line, json: JSON.parse(line) }));
     const resultRows = parsed.filter((row) => row.json.type === 'tool.result');
-    assert.equal(resultRows.length, 14, 'expected exactly fourteen tool.result rows');
+    assert.equal(
+      resultRows.length,
+      11 + ARRAY_LIKE_OUTPUT_KEYS.length,
+      'expected exactly seventeen tool.result rows',
+    );
 
     const highRow = resultRows.find((row) => row.json?.payload?.tool_call_id === 'call-high');
     const stdoutRow = resultRows.find((row) => row.json?.payload?.tool_call_id === 'call-stdout');
@@ -338,14 +316,13 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
     const jsonMalformedNestedKeylikeStdoutRow = resultRows.find(
       (row) => row.json?.payload?.tool_call_id === 'call-json-malformed-nested-keylike-stdout',
     );
-    const jsonMalformedArrayKeylikeStdoutRow = resultRows.find(
-      (row) => row.json?.payload?.tool_call_id === 'call-json-malformed-array-keylike-stdout',
-    );
-    const jsonMalformedArrayKeylikeRawStdoutRow = resultRows.find(
-      (row) => row.json?.payload?.tool_call_id === 'call-json-malformed-array-keylike-raw-stdout',
-    );
-    const jsonMalformedArrayKeylikeToolOutputRow = resultRows.find(
-      (row) => row.json?.payload?.tool_call_id === 'call-json-malformed-array-keylike-tool-output',
+    const jsonMalformedArrayKeylikeRowsByKey = new Map(
+      ARRAY_LIKE_OUTPUT_KEYS.map((outputKey) => [
+        outputKey,
+        resultRows.find(
+          (row) => row.json?.payload?.tool_call_id === `call-json-malformed-array-keylike-${outputKey.replaceAll('_', '-')}`,
+        ),
+      ]),
     );
     const benignRow = resultRows.find((row) => row.json?.payload?.tool_call_id === 'call-benign');
     assert.ok(highRow, 'missing high-risk tool.result row');
@@ -367,18 +344,12 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
       jsonMalformedNestedKeylikeStdoutRow,
       'missing malformed nested JSON-like key-like stdout tool.result row',
     );
-    assert.ok(
-      jsonMalformedArrayKeylikeStdoutRow,
-      'missing malformed array-first JSON-like key-like stdout tool.result row',
-    );
-    assert.ok(
-      jsonMalformedArrayKeylikeRawStdoutRow,
-      'missing malformed array-first JSON-like key-like raw_stdout tool.result row',
-    );
-    assert.ok(
-      jsonMalformedArrayKeylikeToolOutputRow,
-      'missing malformed array-first JSON-like key-like tool_output tool.result row',
-    );
+    for (const outputKey of ARRAY_LIKE_OUTPUT_KEYS) {
+      assert.ok(
+        jsonMalformedArrayKeylikeRowsByKey.get(outputKey),
+        `missing malformed array-first JSON-like key-like ${outputKey} tool.result row`,
+      );
+    }
     assert.ok(benignRow, 'missing benign tool.result row');
 
     const highSummary = String(highRow.json.summary || '');
@@ -635,134 +606,51 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
       'malformed nested JSON-like key-like stdout JSONL row should not include stdout key text',
     );
 
-    const jsonMalformedArrayKeylikeStdoutSummary = String(jsonMalformedArrayKeylikeStdoutRow.json.summary || '');
-    const jsonMalformedArrayKeylikeStdoutResultSummary = String(
-      jsonMalformedArrayKeylikeStdoutRow.json?.payload?.result_summary || '',
-    );
+    for (const outputKey of ARRAY_LIKE_OUTPUT_KEYS) {
+      const aliasRow = jsonMalformedArrayKeylikeRowsByKey.get(outputKey);
+      assert.ok(aliasRow, `expected malformed array-first JSON-like key-like ${outputKey} row`);
 
-    assert.equal(
-      jsonMalformedArrayKeylikeStdoutSummary,
-      expectedStdoutSummary,
-      'malformed array-first JSON-like key-like stdout summary should collapse to bounded redacted posture',
-    );
-    assert.equal(
-      jsonMalformedArrayKeylikeStdoutResultSummary,
-      expectedStdoutSummary,
-      'malformed array-first JSON-like key-like stdout payload summary should collapse to bounded redacted posture',
-    );
-    assert.equal(
-      jsonMalformedArrayKeylikeStdoutRow.raw.includes('"stdout"'),
-      false,
-      'malformed array-first JSON-like key-like stdout JSONL row should not include stdout key text',
-    );
-    for (const needle of highRisk.episodic.leakNeedles || []) {
+      const aliasSummary = String(aliasRow.json.summary || '');
+      const aliasResultSummary = String(aliasRow.json?.payload?.result_summary || '');
+
       assert.equal(
-        jsonMalformedArrayKeylikeStdoutSummary.includes(needle),
-        false,
-        `malformed array-first JSON-like key-like stdout summary leaked needle: ${needle}`,
+        aliasSummary,
+        expectedStdoutSummary,
+        `malformed array-first JSON-like key-like ${outputKey} summary should collapse to bounded redacted posture`,
       );
       assert.equal(
-        jsonMalformedArrayKeylikeStdoutResultSummary.includes(needle),
-        false,
-        `malformed array-first JSON-like key-like stdout payload summary leaked needle: ${needle}`,
+        aliasResultSummary,
+        expectedStdoutSummary,
+        `malformed array-first JSON-like key-like ${outputKey} payload summary should collapse to bounded redacted posture`,
       );
       assert.equal(
-        jsonMalformedArrayKeylikeStdoutRow.raw.includes(needle),
+        aliasRow.raw.includes(`"${outputKey}"`),
         false,
-        `malformed array-first JSON-like key-like stdout JSONL row leaked needle: ${needle}`,
+        `malformed array-first JSON-like key-like ${outputKey} JSONL row should not include ${outputKey} key text`,
+      );
+      for (const needle of highRisk.episodic.leakNeedles || []) {
+        assert.equal(
+          aliasSummary.includes(needle),
+          false,
+          `malformed array-first JSON-like key-like ${outputKey} summary leaked needle: ${needle}`,
+        );
+        assert.equal(
+          aliasResultSummary.includes(needle),
+          false,
+          `malformed array-first JSON-like key-like ${outputKey} payload summary leaked needle: ${needle}`,
+        );
+        assert.equal(
+          aliasRow.raw.includes(needle),
+          false,
+          `malformed array-first JSON-like key-like ${outputKey} JSONL row leaked needle: ${needle}`,
+        );
+      }
+      assert.equal(
+        aliasRow.raw.includes(highRisk.sample),
+        false,
+        `malformed array-first JSON-like key-like ${outputKey} JSONL row leaked full sample`,
       );
     }
-    assert.equal(
-      jsonMalformedArrayKeylikeStdoutRow.raw.includes(highRisk.sample),
-      false,
-      'malformed array-first JSON-like key-like stdout JSONL row leaked full sample',
-    );
-
-    const jsonMalformedArrayKeylikeRawStdoutSummary = String(jsonMalformedArrayKeylikeRawStdoutRow.json.summary || '');
-    const jsonMalformedArrayKeylikeRawStdoutResultSummary = String(
-      jsonMalformedArrayKeylikeRawStdoutRow.json?.payload?.result_summary || '',
-    );
-
-    assert.equal(
-      jsonMalformedArrayKeylikeRawStdoutSummary,
-      expectedStdoutSummary,
-      'malformed array-first JSON-like key-like raw_stdout summary should collapse to bounded redacted posture',
-    );
-    assert.equal(
-      jsonMalformedArrayKeylikeRawStdoutResultSummary,
-      expectedStdoutSummary,
-      'malformed array-first JSON-like key-like raw_stdout payload summary should collapse to bounded redacted posture',
-    );
-    assert.equal(
-      jsonMalformedArrayKeylikeRawStdoutRow.raw.includes('"raw_stdout"'),
-      false,
-      'malformed array-first JSON-like key-like raw_stdout JSONL row should not include raw_stdout key text',
-    );
-    for (const needle of highRisk.episodic.leakNeedles || []) {
-      assert.equal(
-        jsonMalformedArrayKeylikeRawStdoutSummary.includes(needle),
-        false,
-        `malformed array-first JSON-like key-like raw_stdout summary leaked needle: ${needle}`,
-      );
-      assert.equal(
-        jsonMalformedArrayKeylikeRawStdoutResultSummary.includes(needle),
-        false,
-        `malformed array-first JSON-like key-like raw_stdout payload summary leaked needle: ${needle}`,
-      );
-      assert.equal(
-        jsonMalformedArrayKeylikeRawStdoutRow.raw.includes(needle),
-        false,
-        `malformed array-first JSON-like key-like raw_stdout JSONL row leaked needle: ${needle}`,
-      );
-    }
-    assert.equal(
-      jsonMalformedArrayKeylikeRawStdoutRow.raw.includes(highRisk.sample),
-      false,
-      'malformed array-first JSON-like key-like raw_stdout JSONL row leaked full sample',
-    );
-
-    const jsonMalformedArrayKeylikeToolOutputSummary = String(jsonMalformedArrayKeylikeToolOutputRow.json.summary || '');
-    const jsonMalformedArrayKeylikeToolOutputResultSummary = String(
-      jsonMalformedArrayKeylikeToolOutputRow.json?.payload?.result_summary || '',
-    );
-
-    assert.equal(
-      jsonMalformedArrayKeylikeToolOutputSummary,
-      expectedStdoutSummary,
-      'malformed array-first JSON-like key-like tool_output summary should collapse to bounded redacted posture',
-    );
-    assert.equal(
-      jsonMalformedArrayKeylikeToolOutputResultSummary,
-      expectedStdoutSummary,
-      'malformed array-first JSON-like key-like tool_output payload summary should collapse to bounded redacted posture',
-    );
-    assert.equal(
-      jsonMalformedArrayKeylikeToolOutputRow.raw.includes('"tool_output"'),
-      false,
-      'malformed array-first JSON-like key-like tool_output JSONL row should not include tool_output key text',
-    );
-    for (const needle of highRisk.episodic.leakNeedles || []) {
-      assert.equal(
-        jsonMalformedArrayKeylikeToolOutputSummary.includes(needle),
-        false,
-        `malformed array-first JSON-like key-like tool_output summary leaked needle: ${needle}`,
-      );
-      assert.equal(
-        jsonMalformedArrayKeylikeToolOutputResultSummary.includes(needle),
-        false,
-        `malformed array-first JSON-like key-like tool_output payload summary leaked needle: ${needle}`,
-      );
-      assert.equal(
-        jsonMalformedArrayKeylikeToolOutputRow.raw.includes(needle),
-        false,
-        `malformed array-first JSON-like key-like tool_output JSONL row leaked needle: ${needle}`,
-      );
-    }
-    assert.equal(
-      jsonMalformedArrayKeylikeToolOutputRow.raw.includes(highRisk.sample),
-      false,
-      'malformed array-first JSON-like key-like tool_output JSONL row leaked full sample',
-    );
 
     const benignSummary = String(benignRow.json.summary || '');
     const benignResultSummary = String(benignRow.json?.payload?.result_summary || '');

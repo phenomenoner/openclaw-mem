@@ -591,14 +591,14 @@ Deliverables:
 - Shipped hardening follow-up (2026-04-27, stdout/stderr): the same e2e harness now verifies stdout/stderr-style payload summaries collapse to bounded `result captured (output redacted)` posture and that no secret-like needles appear anywhere in emitted `tool.result` JSONL rows.
 - Shipped hardening follow-up (2026-04-27, structured JSON stdout/stderr): structured JSON-style tool outputs containing `stdout`/`stderr` fields now must collapse to bounded redacted-output posture end-to-end, while benign JSON/docs payload snippets without output fields are verified to stay informative.
 - Shipped hardening follow-up (2026-04-27, escaped output-key docs prose): a negative-control e2e now proves benign docs text that mentions JSON-escaped key strings like `\"stdout\"` / `\"stderr\"` remains informative end-to-end and does not falsely collapse to redacted-output posture.
-- Shipped hardening follow-up (2026-04-27, malformed-json array-first boundary): malformed JSON-like payload coverage now includes top-level, nested object/array, and root array-first (`[`) boundary cases, asserting quoted `"stdout"`/`"stderr"` terms inside prose string content stay informative while true malformed key-like output fields (including nested array alias keys `raw_stdout` and `tool_output`) still collapse.
+- Shipped hardening follow-up (2026-04-27, malformed-json array-first boundary): malformed JSON-like payload coverage now includes top-level, nested object/array, and root array-first (`[`) boundary cases, asserting quoted `"stdout"`/`"stderr"` terms inside prose string content stay informative while true malformed key-like output fields with full `OUTPUT_FIELD_KEYS` parity (`stdout`, `stderr`, `raw_stdout`, `raw_stderr`, `tool_output`, `command_output`) still collapse.
 
 Acceptance criteria:
 - Operators can enable aggressive pruning without losing the ability to recover key tool outcomes from `openclaw-mem`.
 - Focused verification stays cheap and deterministic:
   - `uv run --group dev python -m pytest tests/test_plugin_episodic_summary_runtime.py tests/test_plugin_episodic_spool.py tests/test_episodic_secret_detection.py -q`
   - `node --test extensions/openclaw-mem/toolResultSummary.test.mjs`
-  - `node --experimental-strip-types --test extensions/openclaw-mem/toolResultPersistE2E.test.mjs` (includes plain + structured JSON stdout/stderr collapse, escaped output-key docs negative-control, malformed-json top-level+nested+array-first boundary assertions including alias keys `raw_stdout`/`tool_output`, no-leak assertions, and benign JSON/docs non-overblock assertions)
+  - `node --experimental-strip-types --test extensions/openclaw-mem/toolResultPersistE2E.test.mjs` (includes plain + structured JSON stdout/stderr collapse, escaped output-key docs negative-control, malformed-json top-level+nested+array-first boundary assertions with full `OUTPUT_FIELD_KEYS` parity (`stdout`, `stderr`, `raw_stdout`, `raw_stderr`, `tool_output`, `command_output`), no-leak assertions, and benign JSON/docs non-overblock assertions)
 
 ### 11) Contract hardening (interface-first) — stable schemas + fail-fast validation
 
