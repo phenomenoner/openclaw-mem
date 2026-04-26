@@ -146,3 +146,21 @@ test('structured JSON stdout/stderr payloads collapse to redacted-output posture
     'benign structured JSON should not collapse to output redacted posture',
   );
 });
+
+test('benign prose mentioning JSON-escaped "stdout"/"stderr" keys stays informative', () => {
+  const summary = buildToolResultSummary(
+    'memory_recall',
+    buildMessage(
+      'Docs note: use JSON-escaped keys \\"stdout\\" and \\"stderr\\" in examples. This sentence is documentation text, not a live output payload.',
+    ),
+    true,
+    220,
+  );
+
+  assert.equal(summary.includes('Docs note'), true, 'benign prose should preserve useful docs context');
+  assert.equal(
+    summary.includes('result captured (output redacted)'),
+    false,
+    'benign prose should not collapse to output redacted posture',
+  );
+});
