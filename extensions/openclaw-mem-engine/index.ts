@@ -592,9 +592,14 @@ const SECRET_LIKE_PATTERNS: RegExp[] = [
   /-----BEGIN (?:RSA|EC|DSA|OPENSSH|PGP)?\s*PRIVATE KEY-----/i,
   /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|pwd|secret)\b\s*[:=]\s*\S+/i,
   /\bsk-[A-Za-z0-9]{20,}\b/,
+  /\bsk-proj-[A-Za-z0-9\-_]{16,}\b/,
   /\bAKIA[0-9A-Z]{16}\b/,
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/,
   /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/,
+  /\baws[_-]?secret[_-]?access[_-]?key\b\s*[:=]\s*[A-Za-z0-9/+=]{20,}\b/i,
+  /\bAuthorization:\s*Bearer\s+[A-Za-z0-9\-_.=]{16,}\b/i,
+  /\bBearer\s+[A-Za-z0-9\-_.=]{24,}\b/,
 ];
 
 const TOOL_OUTPUT_PATTERNS: RegExp[] = [
@@ -1577,10 +1582,12 @@ const EXPORT_REDACTION_PATTERNS: Array<[RegExp, string]> = [
   [/\bsk-proj-[A-Za-z0-9\-_]{16,}\b/g, "sk-proj-[REDACTED]"],
   [/\bBearer\s+[A-Za-z0-9\-_.=]{8,}\b/g, "Bearer [REDACTED]"],
   [/\bAuthorization:\s*Bearer\s+[A-Za-z0-9\-_.=]{8,}\b/gi, "Authorization: Bearer [REDACTED]"],
+  [/\baws[_-]?secret[_-]?access[_-]?key\b\s*[:=]\s*[A-Za-z0-9/+=]{20,}\b/gi, "aws_secret_access_key=[REDACTED]"],
   [/\b\d{8,12}:[A-Za-z0-9_-]{20,}\b/g, "[TELEGRAM_BOT_TOKEN_REDACTED]"],
   [/-----BEGIN (?:RSA|EC|DSA|OPENSSH|PGP)?\s*PRIVATE KEY-----[\s\S]*?-----END (?:RSA|EC|DSA|OPENSSH|PGP)?\s*PRIVATE KEY-----/gi, "[PRIVATE_KEY_REDACTED]"],
   [/\bAKIA[0-9A-Z]{16}\b/g, "[AWS_ACCESS_KEY_REDACTED]"],
   [/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[GITHUB_TOKEN_REDACTED]"],
+  [/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "[GITHUB_TOKEN_REDACTED]"],
   [/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, "[SLACK_TOKEN_REDACTED]"],
 ];
 

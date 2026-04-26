@@ -242,9 +242,14 @@ EPISODIC_SECRET_LIKE_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"-----BEGIN (?:RSA|EC|DSA|OPENSSH|PGP)?\s*PRIVATE KEY-----", re.IGNORECASE),
     re.compile(r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|pwd|secret)\b\s*[:=]\s*\S+", re.IGNORECASE),
     re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bsk-proj-[A-Za-z0-9\-_]{16,}\b"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    re.compile(r"\baws[_-]?secret[_-]?access[_-]?key\b\s*[:=]\s*[A-Za-z0-9/+=]{20,}\b", re.IGNORECASE),
+    re.compile(r"\bAuthorization:\s*Bearer\s+[A-Za-z0-9\-_.=]{16,}\b", re.IGNORECASE),
+    re.compile(r"\bBearer\s+[A-Za-z0-9\-_.=]{24,}\b", re.IGNORECASE),
 )
 EPISODIC_PII_LITE_PATTERNS: Tuple[Tuple[re.Pattern[str], str], ...] = (
     (

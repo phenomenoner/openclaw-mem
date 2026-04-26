@@ -24,12 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added operator-selectable importance-drift threshold profiles (`strict` default, `balanced`, `lenient`) to `optimize review`, `optimize evolution-review`, and `tools/optimize_assist_runner.py`, with profile metadata now embedded in policy-card JSON and compact text output.
 - Added a bounded historical baseline comparator for importance drift in optimize-assist promotion receipts (`promotion_gates.importance_drift_gate.baseline_comparator`) so the lane distinguishes transient spikes from persistent drift posture using recent native controller receipts.
 - Extended posture-review output to carry live importance-drift profile/baseline metadata and persistent-drift run counters without widening write authority.
+- Hardened secret-like detection for capture lanes by adding deterministic high-risk patterns (OpenAI `sk-proj` keys, `github_pat` tokens, AWS secret-access-key assignments, and long Bearer auth values) across mem-engine autoCapture and episodic CLI helpers, while keeping autoCapture receipts aggregate-only (`filteredOut.secrets_like`) so skip evidence stays bounded and non-leaking.
 
 ### Testing
 
 - Added optimize-review regression coverage for importance-drift JSON shape, top-bounded output, mismatch detection, text rendering, and read-only/query-only posture.
 - Added regression coverage for importance-drift gate pass/fail policy behavior, runner promotion-gate integration, and posture-review gate visibility.
 - Added regression coverage for deterministic profile pass/fail behavior, runner baseline-comparator transient-vs-persistent classification, parser flag propagation, and posture-review baseline surface fields.
+- Added secret-hardening regression coverage for episodic extraction/guardrails (new token families redacted with null payload, no secret echo in guard errors) plus mem-engine autoCapture receipt-boundedness/source-contract checks.
 
 ## [1.8.0] - 2026-04-18
 

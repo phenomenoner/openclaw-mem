@@ -60,6 +60,8 @@ Reference project: <https://github.com/win4r/memory-lancedb-pro>
 
 6) **Safety hardening**
    - Stronger secret detector + PII heuristics; capture redaction rules
+   - Partial shipped (2026-04-27): deterministic high-risk token coverage widened for `sk-proj`, `github_pat`, AWS secret-access-key assignments, and long Bearer auth values across mem-engine autoCapture + episodic helper guards.
+   - Verification surface: `tests/test_episodes_extract_sessions.py`, `tests/test_episodic_secret_detection.py`, `tests/test_mem_engine_auto_capture_tool_output.py`.
    - Acceptance: no obvious secrets captured in test corpus
 
 ### P2 — UX/Website completeness (nice, but helps adoption)

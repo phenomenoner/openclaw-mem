@@ -201,6 +201,97 @@ class TestEpisodesExtractSessionsCli(unittest.TestCase):
 
         conn.close()
 
+    def test_extract_sessions_redacts_project_keys_and_bearer_values_without_leak(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sessions_root = root / "sessions"
+            sessions_root.mkdir(parents=True, exist_ok=True)
+            session_file = sessions_root / "thread-secret-patterns.jsonl"
+            spool = root / "episodes.jsonl"
+            extract_state = root / "extract-state.json"
+            ingest_state = root / "ingest-state.json"
+
+            project_key = "sk-proj-" + ("A" * 24)
+            bearer_value = "B" * 32
+
+            lines = [
+                self._session_line(
+                    ts="2026-03-05T00:20:00Z",
+                    role="user",
+                    text=f"[SCOPE: proj-sec] {project_key}",
+                    session_key="sess-sec",
+                ),
+                self._session_line(
+                    ts="2026-03-05T00:20:01Z",
+                    role="assistant",
+                    text=f"[SCOPE: proj-sec] Authorization: Bearer {bearer_value}",
+                    session_key="sess-sec",
+                ),
+            ]
+            session_file.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in lines) + "\n", encoding="utf-8")
+
+            extract_out = self._run(
+                conn,
+                [
+                    "episodes",
+                    "extract-sessions",
+                    "--sessions-root",
+                    str(sessions_root),
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(extract_state),
+                    "--json",
+                ],
+            )
+            self.assertEqual(extract_out["payload_redacted"], 2)
+
+            spool_events = [json.loads(line) for line in spool.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(spool_events), 2)
+            for event in spool_events:
+                self.assertTrue(event["redacted"])
+                self.assertIsNone(event["payload"])
+                self.assertIn("[REDACTED_SECRET]", event["summary"])
+                serialized = json.dumps(event, ensure_ascii=False)
+                self.assertNotIn(project_key, serialized)
+                self.assertNotIn(bearer_value, serialized)
+
+            ingest_out = self._run(
+                conn,
+                [
+                    "episodes",
+                    "ingest",
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(ingest_state),
+                    "--json",
+                ],
+            )
+            self.assertEqual(ingest_out["inserted"], 2)
+
+            q_payload = self._run(
+                conn,
+                [
+                    "episodes",
+                    "query",
+                    "--scope",
+                    "proj-sec",
+                    "--session-id",
+                    "sess-sec",
+                    "--include-payload",
+                    "--json",
+                ],
+            )
+            self.assertEqual(q_payload["count"], 2)
+            for item in q_payload["items"]:
+                self.assertTrue(item["redacted"])
+                self.assertIsNone(item["payload"])
+                self.assertIn("[REDACTED_SECRET]", item["summary"])
+
+        conn.close()
+
     def test_extract_sessions_truncates_large_payload_by_cap(self):
         conn = _connect(":memory:")
         with tempfile.TemporaryDirectory() as td:

@@ -152,6 +152,7 @@ These are intentionally scoped so **one subagent** can ship them end-to-end (doc
 7) **AutoCapture hardening pass (false positives / secrets)**
 - Tighten secret filters and dedupe.
 - Add unit tests against known bad captures.
+- Latest shipped slice (2026-04-27): expanded deterministic secret signatures (`sk-proj`, `github_pat`, AWS secret-access-key assignments, long Bearer auth values) with regression checks that keep receipts/errors bounded and non-leaking.
 
 ---
 
