@@ -53,6 +53,9 @@ def test_tool_result_persist_hook_uses_shared_summary_helper_without_local_outpu
         r"\bconst\s+resultSummary\s*=\s*buildToolResultSummary\s*\(\s*toolName\s*,\s*event\.message\b",
         hook_body,
     ), "tool_result_persist hook must derive resultSummary from buildToolResultSummary"
+    assert len(re.findall(r"\bbuildToolResultSummary\s*\(", hook_body)) == 1, (
+        "tool_result_persist hook must invoke buildToolResultSummary exactly once"
+    )
     assert re.search(
         r"type:\s*[\"']tool\.result[\"'][\s\S]*?summary:\s*resultSummary",
         hook_body,
