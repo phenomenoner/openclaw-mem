@@ -105,9 +105,11 @@ Current first cut:
 - Add opt-in lifecycle writeback for records selected into the final pack: refresh `detail_json.lifecycle.last_used_at` / `used_count`, preserve `archived_at`, and never hard-delete.
 - Verify with focused engine and lifecycle tests before broader rollout or default changes.
 
-Latest lifecycle MVP archive-first progress (shipped, read-only):
-- `optimize review` now emits bounded `signals.soft_archive_candidates` proposals for stale low-importance rows with explicit `must_remember`, recent-use, and already-archived protections.
-- The slice remains proposal-only (`query_only_enforced=true`, `writes_performed=0`) and does not add a mutation path.
+Latest lifecycle MVP archive-first progress (shipped, governed lane):
+- `optimize review` emits bounded `signals.soft_archive_candidates` proposals for stale low-importance rows with explicit `must_remember`, recent-use, and already-archived protections.
+- `optimize evolution-review` emits bounded `set_soft_archive_candidate` proposals with `safe_for_auto_apply=false` by default.
+- `optimize governor-review` requires explicit `--approve-soft-archive` before any soft-archive candidate can become `approved_for_apply`.
+- `optimize assist-apply` now supports governed soft-archive mutation with reversible lifecycle writes only (`soft_archive_candidate`, `archived_at`, `archive_reason_code`) and apply-time protection rechecks; no hard-delete path is introduced.
 
 Focused verifier command for this slice:
-- `uv run --group dev python -m pytest tests/test_optimize_review.py tests/test_optimize_evolution_review.py -q`
+- `uv run --group dev python -m pytest tests/test_optimize_review.py tests/test_optimize_evolution_review.py tests/test_optimize_governor_review.py tests/test_optimize_assist_apply.py tests/test_optimize_assist_runner.py -q`

@@ -364,6 +364,12 @@ Acceptance criteria:
 - Archive is reversible; no hard delete in MVP.
 - Trust tier remains independent: “used often” does **not** automatically become `trusted`.
 
+Current optimize-side shipment (governed, bounded):
+- `optimize review` surfaces `signals.soft_archive_candidates` (read-only proposals).
+- `optimize evolution-review` emits `set_soft_archive_candidate` items with proposal-first posture.
+- `optimize governor-review` requires explicit `--approve-soft-archive` for approval.
+- `optimize assist-apply` can apply only governor-approved soft-archive items using reversible lifecycle metadata writes (`soft_archive_candidate`, `archived_at`, `archive_reason_code`) with apply-time protection rechecks and no hard delete.
+
 ## Next (engineering epics)
 
 ### 4) Provenance + trust tiers (defense-in-depth)
