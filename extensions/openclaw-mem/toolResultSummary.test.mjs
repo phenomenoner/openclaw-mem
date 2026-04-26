@@ -224,3 +224,40 @@ test('nested malformed JSON-like boundary keeps quoted output-key prose informat
 
   assert.equal(nestedTrueOutputSummary, 'memory_recall result captured (output redacted)');
 });
+
+test('array-first malformed JSON-like boundary keeps quoted output-key prose informative but still blocks true nested output keys', () => {
+  const arrayQuotedDocsSummary = buildToolResultSummary(
+    'memory_recall',
+    buildMessage(
+      '[{"note":"guide says labels "stdout": "sample" and "stderr": "sample" are docs labels"},{"status":"ok"}',
+    ),
+    true,
+    240,
+  );
+
+  assert.equal(
+    arrayQuotedDocsSummary.includes('guide says'),
+    true,
+    'array-first malformed JSON-like docs prose should preserve useful context',
+  );
+  assert.equal(
+    arrayQuotedDocsSummary.includes('result captured (output redacted)'),
+    false,
+    'array-first malformed JSON-like docs prose should not collapse to output redacted posture',
+  );
+
+  const syntheticNeedle = 'sk-proj-ARRAYROOTBOUNDARYNEEDLE1234567890';
+  const arrayTrueOutputSummary = buildToolResultSummary(
+    'memory_recall',
+    buildMessage(`[{"meta":"ok"},{"stdout":"synthetic trace line ${syntheticNeedle}"}`),
+    true,
+    240,
+  );
+
+  assert.equal(arrayTrueOutputSummary, 'memory_recall result captured (output redacted)');
+  assert.equal(
+    arrayTrueOutputSummary.includes(syntheticNeedle),
+    false,
+    'array-first malformed JSON-like true output-key summary must not leak synthetic needle',
+  );
+});

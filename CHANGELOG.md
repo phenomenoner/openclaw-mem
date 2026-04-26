@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened plugin tool-result summary behavior for structured JSON payloads: JSON bodies that carry output-like fields (`stdout`/`stderr` and aliases) now collapse to bounded `result captured (output redacted)` posture, while benign JSON/docs payloads without output fields remain informative.
 - Added a precision guard for docs/prose mentions of JSON-escaped output-key strings (for example `\"stdout\"`, `\"stderr\"`) so benign explanatory text stays informative instead of collapsing to redacted-output posture.
 - Tightened malformed-JSON fallback precision for tool-result summaries: JSON-like payloads that start with `{` but only mention quoted `"stdout"`/`"stderr"` inside prose string content now stay informative across both top-level and nested object/array contexts, while true key-like malformed output fields (including nested `stdout`/`stderr` keys in truncated JSON) still collapse to bounded redacted-output posture.
+- Extended malformed-JSON fallback boundary coverage to root array-first (`[`) payloads: malformed array docs/prose that only mention quoted `"stdout"`/`"stderr"` terms inside string content now stay informative, while malformed array payloads containing true nested output keys still collapse to bounded redacted-output posture without leaking synthetic high-risk needles.
 
 ### Testing
 
@@ -45,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended sidecar/plugin runtime coverage so structured JSON tool outputs with `stdout`/`stderr` fields are asserted end-to-end (`tool.result` JSONL no-leak + redacted-output collapse), and benign structured JSON/docs payloads are asserted to remain informative.
 - Extended sidecar/plugin runtime coverage with a negative-control case where benign docs/prose text mentions JSON-escaped `"stdout"`/`"stderr"` keys; verifier now asserts emitted `tool.result` JSONL stays informative and does not falsely collapse to redacted-output posture.
 - Extended sidecar/plugin runtime coverage with malformed-JSON boundary assertions: `{`-prefixed payloads with quoted `"stdout"`/`"stderr"` terms inside prose string content must remain informative in both top-level and nested object/array cases, while malformed key-like output fields (top-level and nested) still must collapse to bounded redacted-output posture.
+- Extended sidecar/plugin runtime coverage with malformed array-first boundary assertions: `[`-prefixed malformed payloads that quote `"stdout"`/`"stderr"` inside prose string content must remain informative, while malformed array payloads with real nested output keys must still collapse to bounded redacted-output posture and remain non-leaking in emitted JSONL.
 
 ## [1.8.0] - 2026-04-18
 
