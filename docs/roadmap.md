@@ -625,7 +625,7 @@ These are projects we referenced and **actually used** to shape features or arch
 - Daniel Miessler — *Personal AI Infrastructure (PAI)*: <https://github.com/danielmiessler/Personal_AI_Infrastructure>
   - Used as an architectural checklist (memory tiers, hooks, user/system separation, continuous improvement).
 
-- 好豪 — *MCP Tool Search：Claude Code 如何終結 Token 消耗大爆炸*: <https://haosquare.com/mcp-tool-search-claude-code/>
+- Hao Square — *MCP Tool Search for Claude Code*: <https://haosquare.com/mcp-tool-search-claude-code/>
   - Used to justify the “**card → manual**” split and dynamic discovery pattern for SOP/skills (context-size friendly).
 
 - `tobi/qmd`: <https://github.com/tobi/qmd>

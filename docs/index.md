@@ -26,12 +26,10 @@ $ openclaw-mem search "privacy timezone style" --json
 [Verify in 60 seconds](reality-check.md){ .md-button .md-button--primary }
 [Read the quickstart](quickstart.md){ .md-button }
 [Choose an install path](install-modes.md){ .md-button }
+[Traditional Chinese edition](zh/index.md){ .md-button }
 </div>
 
 </div>
-
-!!! tip "中文一句話"
-    `openclaw-mem` 是給 OpenClaw 的本地優先記憶層：把工具結果、決策、偏好與操作痕跡變成可搜尋、可引用、可回滾的記憶，而不是把一切丟給黑盒向量庫。
 
 ## Start here: one operator path
 
@@ -103,29 +101,21 @@ No mystery memory blob. Just records, search, timelines, and compact packs the a
 <div class="ocm-card" markdown="1">
 ### 1. Store the trail
 Capture observations into append-only JSONL, ingest them into SQLite, and keep durable receipts for tool outcomes, decisions, preferences, specs, and ops breadcrumbs.
-
-**中文：** 先把脈絡留下來，而且留下的是可檢查的紀錄。
 </div>
 
 <div class="ocm-card" markdown="1">
 ### 2. Find the signal
 Search locally with FTS, inspect timelines, fetch exact records, and avoid asking a remote model to rediscover context you already own.
-
-**中文：** 先本地搜尋，先看證據，再決定要不要升級語意召回。
 </div>
 
 <div class="ocm-card" markdown="1">
 ### 3. Pack context with receipts
 Build compact `ContextPack` bundles for the agent, with cited memories instead of mystery prompt stuffing.
-
-**中文：** 回填給 agent 的不是一坨雜訊，而是可引用、可追蹤的上下文包。
 </div>
 
 <div class="ocm-card" markdown="1">
 ### 4. Upgrade only when it pays
 Keep the sidecar as the safe default. Add the optional memory engine for hybrid recall, scoped retrieval, and policy-aware automation when you need more power.
-
-**中文：** 預設不搶 slot；真的需要 hybrid engine 時再升級。
 </div>
 
 </div>
@@ -189,25 +179,9 @@ The docs separate what is shipped, partial, experimental, and roadmap. No fake m
 
 </div>
 
-## 中文展示版
+## Traditional Chinese edition
 
-### 給 OpenClaw operator 的記憶基礎設施
-
-如果你已經讓 agent 做長線工作，你要的不是「它好像記得」，而是：
-
-- 記憶來源可以追；
-- 召回結果可以查；
-- 上下文可以打包；
-- 錯了可以回滾；
-- 本地資料不用被迫送進黑盒雲端。
-
-`openclaw-mem` 的產品楔子很簡單：**讓 agent 的長期脈絡變成一條可驗證的操作鏈。**
-
-先用 sidecar 捕捉與搜尋，證明價值後，再把 optional engine 打開做 hybrid recall 與更細的 policy 控制。這樣你得到的是「可治理的記憶」，不是另一個難以解釋的魔法層。
-
-## 中文對外定位
-
-**會留底的代理人記憶。** 擷取是 JSONL，召回是 `search → timeline → get`，上下文打包有 citation。五分鐘從 sidecar 起步；要不要升格成主記憶，看它有沒有掙到那個位子。
+The canonical documentation is English. A separately written Traditional Chinese edition is available for readers who prefer Chinese: [Traditional Chinese edition](zh/index.md).
 
 
 ## Current proof pack

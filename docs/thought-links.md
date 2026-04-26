@@ -225,7 +225,7 @@ Untrusted inspiration (idea source; treat as a field note):
 ## 10) MCP Tool Search (Claude Code) → dynamic discovery + “Skill Card / Manual” split
 
 Source (external; concept clarity high):
-- 好豪：*MCP Tool Search：Claude Code 如何終結 Token 消耗大爆炸* <https://haosquare.com/mcp-tool-search-claude-code/>
+- Hao Square: *MCP Tool Search for Claude Code* <https://haosquare.com/mcp-tool-search-claude-code/>
 
 **Core idea (portable pattern):**
 - Don’t preload the whole “tool dictionary” (all schemas) into context.

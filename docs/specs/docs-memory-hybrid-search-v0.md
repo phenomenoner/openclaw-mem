@@ -145,7 +145,7 @@ Metrics:
 - Hint-rate (fraction needing follow-up keyword hints)
 
 Acceptance:
-- For decision-style queries (e.g., “neoapitest 現股當沖 status code”), Hit@5 should materially improve vs current.
+- For decision-style queries (for example, a broker day-trading status-code lookup), Hit@5 should materially improve vs current.
 
 ---
 

@@ -34,6 +34,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Traditional Chinese (zh-Hant): zh/index.md
   - Start here:
       - 60-second reality proof: reality-check.md
       - Quickstart: quickstart.md

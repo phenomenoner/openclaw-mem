@@ -109,7 +109,7 @@ Related boundary: the shipped **verbatim semantic lane** remains a **sidecar ret
   - when route-auto carries `preferredCardRefs` / `coveredRawRefs`, the hook prefers the fresh synthesis card but keeps the covered-raw receipt visible
   - route hook is recommendation-only and fail-open (timeout/runtime failure does not block the turn)
   - skip trivial prompts (greetings/ack/emojis/HEARTBEAT/slash commands)
-    - robust to trailing emoji/punctuation (e.g. `好的👌`, `ok👍`, `hi～`, `收到!!`)
+    - robust to trailing emoji/punctuation (e.g. `ok👍`, `done!!`, `thanks...`)
     - punctuation-only prompts also skip (e.g. `？`, `…`)
   - recall tiers: `must_remember` → `nice_to_have` → (optional) `unknown` fallback
   - cap: <=6 memories
@@ -546,7 +546,7 @@ Rollback:
 
 ---
 
-## Sunrise rollout (slow-cook lane + cron “日出條款”)
+## Sunrise rollout (slow-cook lane + cron safeguard)
 
 We roll this out in **three stages** to keep the system safe and rollbackable.
 

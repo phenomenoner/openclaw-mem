@@ -5,8 +5,6 @@
 `openclaw-mem` turns agent work into a durable, searchable, auditable memory trail, then assembles bounded context bundles that are small enough to inject and easy to verify. Start with a local SQLite sidecar beside OpenClaw, keep your current memory backend, and promote to the optional mem engine only when hybrid recall and policy controls earn their keep.
 When you do promote the engine, the live-turn hook is framed as **Proactive Pack**: bounded pre-reply recall orchestration, not a separate hidden memory layer.
 
-> 中文：給 OpenClaw operator 的本地優先記憶層。工具結果、決策、偏好與操作痕跡都能留下可查證紀錄；先 sidecar、後 engine，不強迫第一天就換記憶槽。
-
 ## Start here
 
 1. **Verify locally in ~60 seconds:** [Reality check & status](docs/reality-check.md)
@@ -14,6 +12,7 @@ When you do promote the engine, the live-turn hook is framed as **Proactive Pack
 3. **Choose sidecar vs engine:** [Install modes](docs/install-modes.md)
 4. **Check what is automatic:** [Automation status](docs/automation-status.md)
 5. **See the product gaps:** [OpenClaw user improvement roadmap](docs/openclaw-user-improvement-roadmap.md)
+6. **Read in Traditional Chinese:** [Traditional Chinese edition](docs/zh/index.md)
 
 ## What is automatic today?
 
@@ -261,6 +260,7 @@ When a compaction receipt is later selected by `pack`, the response may include:
 - **Choose an install path:** [`docs/install-modes.md`](docs/install-modes.md)
 - **Detailed quickstart:** [`QUICKSTART.md`](QUICKSTART.md)
 - **Docs site:** <https://phenomenoner.github.io/openclaw-mem/>
+- **Traditional Chinese edition:** [`docs/zh/index.md`](docs/zh/index.md)
 - **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
 - **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
 - **Experimental GBrain sidecar:** [`docs/experimental/gbrain-sidecar/README.md`](docs/experimental/gbrain-sidecar/README.md)

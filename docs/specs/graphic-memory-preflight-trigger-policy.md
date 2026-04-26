@@ -1,4 +1,4 @@
-# Spec — Graphic Memory preflight trigger policy (deterministic, bilingual)
+# Spec — Graphic Memory preflight trigger policy (deterministic)
 
 ## Status
 - Version: v1.1
@@ -42,23 +42,21 @@ Skip trigger evaluation when query is clearly not a retrieval request, e.g.:
 ## Stage 1 — Keyword / pattern intent (high precision)
 Stage 1 is a **priority signal**, not a hard gate.
 
-Trigger signal if any of the following match (case-insensitive):
+Trigger signal if any of the following match (case-insensitive).
+
+This canonical spec lists the English keyword set only. Non-English/localized keyword sets may be configured separately.
 
 ### A) “doc / spec / decision” intent
 - English: `spec`, `docs`, `documentation`, `roadmap`, `decision`, `tech note`, `design`, `architecture`, `PRD`, `SOP`, `runbook`
-- 中文: `文件`, `文檔`, `規格`, `spec`, `PRD`, `roadmap`, `決策`, `紀錄`, `技術筆記`, `架構`, `設計`, `SOP`, `流程`
 
 ### B) “where is / find / locate / link” lookup intent
 - English: `where is`, `where are`, `find`, `locate`, `which file`, `link to`, `point me to`
-- 中文: `在哪`, `哪裡`, `找`, `搜尋`, `定位`, `哪個檔`, `連結`, `指到`, `出處`
 
 ### C) Dependency / relationship intent
 - English: `dependency`, `depends on`, `related`, `relationship`, `connect`, `tie to`, `how is X related`
-- 中文: `依賴`, `關聯`, `之間關係`, `怎麼連`, `串起來`, `相關`, `影響範圍`
 
 ### D) Verification / “is this true / confirm status” intent
 - English: `confirm`, `verify`, `is it true`, `did we`, `current status`, `latest`, `what changed`, `changelog`
-- 中文: `確認`, `驗證`, `是不是真的`, `我們有沒有`, `目前狀態`, `最新`, `改了什麼`, `變更`
 
 ### E) Direct references to stable operator artifacts
 - `DECISIONS`, `TECH_NOTES`, `PM`, `STATUS`, `INDEX`, `QUICKSTART`, `CHANGELOG`
