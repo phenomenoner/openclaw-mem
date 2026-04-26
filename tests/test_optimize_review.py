@@ -376,6 +376,121 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertEqual(rec["evidence"]["protected_recent_use"], 1)
         conn.close()
 
+    def test_optimize_review_emits_soft_archive_candidates_with_protections_and_top_bound(self):
+        conn = _connect(":memory:")
+
+        # candidates: stale + low-importance + no recent-use + not already archived
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(160),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Old low-value note candidate A",
+                "detail": {"importance": {"score": 0.15, "label": "ignore"}},
+            },
+        )
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(130),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Old low-value note candidate B",
+                "detail": {"importance": {"score": 0.45, "label": "nice_to_have"}},
+            },
+        )
+
+        # excluded: must_remember
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(170),
+                "kind": "decision",
+                "tool_name": "memory_store",
+                "summary": "Old critical decision should never be archive candidate",
+                "detail": {"importance": {"score": 0.91, "label": "must_remember"}},
+            },
+        )
+
+        # excluded: already archived
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(175),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Already archived item should not be re-proposed",
+                "detail": {
+                    "importance": {"score": 0.20, "label": "ignore"},
+                    "lifecycle": {"archived_at": _iso_days_ago(30)},
+                },
+            },
+        )
+
+        # excluded/protected: recent-use evidence in lifecycle shadow
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(140),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Old low-value note but selected recently",
+                "detail": {"importance": {"score": 0.20, "label": "ignore"}},
+            },
+        )
+        _insert_lifecycle_row(conn, selected_refs=["obs:5"])
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 1000,
+                "stale_days": 60,
+                "duplicate_min_count": 2,
+                "bloat_summary_chars": 240,
+                "bloat_detail_bytes": 4096,
+                "orphan_min_tokens": 2,
+                "miss_min_count": 2,
+                "lifecycle_limit": 50,
+                "scope": None,
+                "top": 1,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_review(conn, args)
+
+        out = json.loads(buf.getvalue())
+        soft_archive = out["signals"]["soft_archive_candidates"]
+
+        self.assertEqual(soft_archive["count"], 2)
+        self.assertEqual(soft_archive["stale_days_threshold"], 60)
+        self.assertEqual(soft_archive["low_importance_labels"], ["ignore", "nice_to_have"])
+        self.assertEqual(soft_archive["excluded_must_remember"], 1)
+        self.assertEqual(soft_archive["excluded_already_archived"], 1)
+        self.assertEqual(soft_archive["protected_recent_use"], 1)
+        self.assertTrue(soft_archive["proposal_only"])
+        self.assertEqual(len(soft_archive["items"]), 1)
+        self.assertEqual(soft_archive["items"][0]["id"], 1)
+        self.assertEqual(soft_archive["items"][0]["candidate_id"], "soft-archive-candidate-1")
+        self.assertIn("no_recent_use", soft_archive["items"][0]["reason_codes"])
+
+        rec = next(r for r in out.get("recommendations", []) if r["type"] == "stage_soft_archive_candidates")
+        self.assertEqual(rec["evidence"]["count"], 2)
+        self.assertEqual(rec["evidence"]["protected_recent_use"], 1)
+        self.assertEqual(rec["evidence"]["excluded_must_remember"], 1)
+        self.assertEqual(rec["evidence"]["excluded_already_archived"], 1)
+        self.assertEqual(len(rec["evidence"]["sample_ids"]), 1)
+
+        self.assertTrue(out["policy"]["query_only_enforced"])
+        self.assertEqual(out["policy"]["writes_performed"], 0)
+        self.assertEqual(out["policy"]["memory_mutation"], "none")
+        self.assertEqual(conn.execute("PRAGMA query_only").fetchone()[0], 0)
+        conn.close()
+
     def test_extract_recall_result_count_supports_common_schema_variants(self):
         cases = [
             ({"result_count": 3}, 3),

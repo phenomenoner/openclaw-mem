@@ -83,6 +83,11 @@ _IMPORTANCE_DRIFT_THRESHOLD_PROFILES: Dict[str, Dict[str, float]] = {
 
 _DEFAULT_IMPORTANCE_DRIFT_PROFILE = "strict"
 
+_SOFT_ARCHIVE_LOW_IMPORTANCE_LABELS: Set[str] = {
+    "ignore",
+    "nice_to_have",
+}
+
 
 _EPISODIC_RETENTION_DAYS: Dict[str, Optional[int]] = {
     "conversation.user": 60,
@@ -429,6 +434,28 @@ def _build_recommendations(report: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "sample_ids": [it["id"] for it in stale["items"][:5]],
                 },
                 "suggested_action": "Review candidates for archive/summary tagging (manual approval).",
+                "safe_for_auto_apply": False,
+            }
+        )
+
+    archive = report["signals"].get("soft_archive_candidates", {})
+    if archive.get("count", 0) > 0:
+        recs.append(
+            {
+                "type": "stage_soft_archive_candidates",
+                "priority": "low",
+                "confidence": 0.76,
+                "why": (
+                    f"{archive['count']} stale low-importance rows are eligible for reversible soft-archive proposals"
+                ),
+                "evidence": {
+                    "count": archive["count"],
+                    "protected_recent_use": archive.get("protected_recent_use", 0),
+                    "excluded_must_remember": archive.get("excluded_must_remember", 0),
+                    "excluded_already_archived": archive.get("excluded_already_archived", 0),
+                    "sample_ids": [it["id"] for it in archive.get("items", [])[:5]],
+                },
+                "suggested_action": "Keep proposal-only by default; review soft-archive candidates with governance before any write lane.",
                 "safe_for_auto_apply": False,
             }
         )
@@ -1452,6 +1479,10 @@ def build_memory_health_review(
         tool_name_norm = tool_name.strip().lower()
         recall_query = _extract_recall_query(detail_obj) if tool_name_norm == "memory_recall" else None
         recall_result_count = _extract_recall_result_count(detail_obj) if tool_name_norm == "memory_recall" else None
+        lifecycle_obj = detail_obj.get("lifecycle") if isinstance(detail_obj.get("lifecycle"), dict) else {}
+        lifecycle_archived_at = lifecycle_obj.get("archived_at") if isinstance(lifecycle_obj, dict) else None
+        if not isinstance(lifecycle_archived_at, str) or not lifecycle_archived_at.strip():
+            lifecycle_archived_at = None
         dt = _parse_iso_utc(r["ts"])
         age_days = None
         if dt is not None:
@@ -1477,6 +1508,7 @@ def build_memory_health_review(
             "importance_state": importance_state,
             "importance_score": importance_score,
             "importance_stored_label": importance_stored_label,
+            "lifecycle_archived_at": lifecycle_archived_at,
             "recall_query": recall_query,
             "recall_result_count": recall_result_count,
             "recent_use_count": int(recent_use_slot.get("count") or 0),
@@ -1523,6 +1555,44 @@ def build_memory_health_review(
         )
     stale_items.sort(key=lambda x: (x["age_days"], x["id"]), reverse=True)
     recent_use_items.sort(key=lambda x: (x["recent_use_count"], x["id"]), reverse=True)
+
+    # Archive-first lifecycle proposals (read-only): stale + low-importance + no recent-use + not already archived
+    soft_archive_items: List[Dict[str, Any]] = []
+    soft_archive_protected_recent_use = 0
+    soft_archive_excluded_must_remember = 0
+    soft_archive_excluded_already_archived = 0
+    for it in prepared:
+        if it["age_days"] is None or it["age_days"] < stale_days:
+            continue
+        if it["importance"] == "must_remember":
+            soft_archive_excluded_must_remember += 1
+            continue
+        if it.get("lifecycle_archived_at"):
+            soft_archive_excluded_already_archived += 1
+            continue
+        if it["importance"] not in _SOFT_ARCHIVE_LOW_IMPORTANCE_LABELS:
+            continue
+        if it.get("recent_use_count", 0) > 0:
+            soft_archive_protected_recent_use += 1
+            continue
+        soft_archive_items.append(
+            {
+                "candidate_id": f"soft-archive-candidate-{it['id']}",
+                "id": it["id"],
+                "age_days": it["age_days"],
+                "importance": it["importance"],
+                "kind": it["kind"],
+                "tool_name": it["tool_name"],
+                "summary_preview": it["summary_preview"],
+                "reason_codes": [
+                    "stale_age_threshold",
+                    "low_importance",
+                    "no_recent_use",
+                    "archive_first",
+                ],
+            }
+        )
+    soft_archive_items.sort(key=lambda x: (x["age_days"], x["id"]), reverse=True)
 
     # Duplication (fingerprint cluster, scope-isolated)
     fp_map: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
@@ -1747,6 +1817,16 @@ def build_memory_health_review(
                 "excluded_must_remember": excluded_must_remember,
                 "protected_recent_use": protected_from_stale,
                 "items": stale_items[:top],
+            },
+            "soft_archive_candidates": {
+                "count": len(soft_archive_items),
+                "stale_days_threshold": stale_days,
+                "low_importance_labels": sorted(_SOFT_ARCHIVE_LOW_IMPORTANCE_LABELS),
+                "excluded_must_remember": soft_archive_excluded_must_remember,
+                "excluded_already_archived": soft_archive_excluded_already_archived,
+                "protected_recent_use": soft_archive_protected_recent_use,
+                "proposal_only": True,
+                "items": soft_archive_items[:top],
             },
             "recent_use": {
                 "rows_with_recent_use": len(recent_use_items),
@@ -2254,6 +2334,7 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
     sig = report.get("signals", {})
 
     stale = sig.get("staleness", {})
+    soft_archive = sig.get("soft_archive_candidates", {})
     recent_use = sig.get("recent_use", {})
     dup = sig.get("duplication", {})
     bloat = sig.get("bloat", {})
@@ -2278,6 +2359,7 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
         (
             "signals: "
             f"stale={stale.get('count', 0)} (protected_recent_use={stale.get('protected_recent_use', 0)}) | "
+            f"soft_archive={soft_archive.get('count', 0)} (protected_recent_use={soft_archive.get('protected_recent_use', 0)}) | "
             f"recent_use={recent_use.get('rows_with_recent_use', 0)} rows | "
             f"duplicates={dup.get('groups', 0)} groups ({dup.get('duplicate_rows', 0)} extra rows) | "
             f"bloat={bloat.get('count', 0)} | "

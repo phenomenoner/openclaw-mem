@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened the experimental GBrain sidecar call wrapper against malformed JSON, oversized stdout, timeouts with large partial output, and non-zero calls with empty stderr while keeping fail-open receipts bounded.
 - Added `scripts/operator_template_demo.sh`, a synthetic one-command operator handoff template that generates a temporary decision/runbook workspace, ingests JSONL into an isolated DB, and emits a cited pack receipt without touching OpenClaw config or the host memory journal.
 - `optimize review` now emits bounded `signals.importance_drift` spot-checks (score-vs-label mismatch, missing/unparseable metadata, conservative high-risk under-label content detection, and normalized label distribution) while staying query-only and proposal-only.
+- `optimize review` now emits bounded read-only `signals.soft_archive_candidates` proposals for stale low-importance observations (`ignore` / `nice_to_have`) with explicit protections for `must_remember`, recently-used lifecycle rows, and already-archived rows; no write path was added and default behavior remains query-only/proposal-only.
 - `optimize evolution-review` now carries compact upstream importance-drift counters for operator visibility without widening apply behavior.
 - Added a deterministic read-only `importance_drift.policy_card` gate (`openclaw-mem.optimize.importance-drift-policy-card.v0`) with conservative count/rate thresholds and compact text-line rendering in optimize review/evolution outputs.
 - Wired the importance-drift gate into optimize-assist promotion/controller receipts as a non-mutating constraint (`promotion_gates.importance_drift_gate`) and surfaced it in posture review readiness checks.
@@ -38,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Testing
 
 - Added optimize-review regression coverage for importance-drift JSON shape, top-bounded output, mismatch detection, text rendering, and read-only/query-only posture.
+- Added optimize-review regression coverage for archive-first proposal candidates, including stale low-importance detection, `must_remember` exclusion, recent-use protection, already-archived exclusion, and `--top` bounded JSON output.
 - Added regression coverage for importance-drift gate pass/fail policy behavior, runner promotion-gate integration, and posture-review gate visibility.
 - Added regression coverage for deterministic profile pass/fail behavior, runner baseline-comparator transient-vs-persistent classification, parser flag propagation, and posture-review baseline surface fields.
 - Added secret-hardening regression coverage for episodic extraction/guardrails (new token families redacted with null payload, no secret echo in guard errors) plus mem-engine autoCapture receipt-boundedness/source-contract checks.

@@ -104,3 +104,10 @@ Current first cut:
 - Keep base rank-fusion behavior unchanged; use the record timestamp only as a deterministic tie-break inside fallback overflow selection.
 - Add opt-in lifecycle writeback for records selected into the final pack: refresh `detail_json.lifecycle.last_used_at` / `used_count`, preserve `archived_at`, and never hard-delete.
 - Verify with focused engine and lifecycle tests before broader rollout or default changes.
+
+Latest lifecycle MVP archive-first progress (shipped, read-only):
+- `optimize review` now emits bounded `signals.soft_archive_candidates` proposals for stale low-importance rows with explicit `must_remember`, recent-use, and already-archived protections.
+- The slice remains proposal-only (`query_only_enforced=true`, `writes_performed=0`) and does not add a mutation path.
+
+Focused verifier command for this slice:
+- `uv run --group dev python -m pytest tests/test_optimize_review.py tests/test_optimize_evolution_review.py -q`
