@@ -19,6 +19,8 @@ class TestOptimizeEvolutionReview(unittest.TestCase):
                 "45",
                 "--lifecycle-limit",
                 "90",
+                "--importance-drift-profile",
+                "balanced",
                 "--scope",
                 "team/alpha",
                 "--top",
@@ -30,6 +32,7 @@ class TestOptimizeEvolutionReview(unittest.TestCase):
         self.assertEqual(args.limit, 500)
         self.assertEqual(args.stale_days, 45)
         self.assertEqual(args.lifecycle_limit, 90)
+        self.assertEqual(args.importance_drift_profile, "balanced")
         self.assertEqual(args.scope, "team/alpha")
         self.assertEqual(args.top, 7)
 
@@ -75,6 +78,7 @@ class TestOptimizeEvolutionReview(unittest.TestCase):
         self.assertEqual(out["counts"]["importanceDriftMissingOrUnparseable"], 0)
         self.assertEqual(out["counts"]["importanceDriftHighRiskContent"], 0)
         self.assertEqual(out["importance_drift_policy"]["kind"], "openclaw-mem.optimize.importance-drift-policy-card.v0")
+        self.assertEqual(out["importance_drift_policy"]["profile"]["name"], "strict")
         self.assertTrue(out["importance_drift_policy"]["acceptable_for_promotion_apply"])
         self.assertEqual(out["items"][0]["action"], "set_stale_candidate")
         self.assertEqual(out["items"][0]["risk_level"], "low")

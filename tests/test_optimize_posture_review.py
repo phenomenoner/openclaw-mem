@@ -43,6 +43,16 @@ class TestOptimizePostureReview(unittest.TestCase):
                         "promotion_gates": {
                             "importance_drift_gate": {
                                 "passed": True,
+                                "profile": "balanced",
+                                "persistent_drift_detected": False,
+                                "baseline_comparator": {
+                                    "persistent_drift_detected": False,
+                                    "transient_spike_detected": False,
+                                },
+                                "policy_card": {
+                                    "threshold_profile": "balanced",
+                                    "profile": {"name": "balanced"},
+                                },
                             }
                         },
                         "family_state": {
@@ -69,6 +79,16 @@ class TestOptimizePostureReview(unittest.TestCase):
                     "promotion_gates": {
                         "importance_drift_gate": {
                             "passed": True,
+                            "profile": "balanced",
+                            "persistent_drift_detected": False,
+                            "baseline_comparator": {
+                                "persistent_drift_detected": False,
+                                "transient_spike_detected": False,
+                            },
+                            "policy_card": {
+                                "threshold_profile": "balanced",
+                                "profile": {"name": "balanced"},
+                            },
                         }
                     },
                 }),
@@ -103,10 +123,14 @@ class TestOptimizePostureReview(unittest.TestCase):
         self.assertEqual(out["kind"], "openclaw-mem.optimize.posture-review.v0")
         self.assertTrue(out["summary"]["near_ceiling_ready"])
         self.assertTrue(out["summary"]["importance_drift_gate_live"])
+        self.assertTrue(out["summary"]["importance_drift_baseline_live"])
         self.assertEqual(out["controller"]["mode"], "auto_low_risk")
         self.assertTrue(out["controller"]["importance_drift_gate_passed"])
+        self.assertEqual(out["controller"]["importance_drift_profile"], "balanced")
+        self.assertIn("importance_drift_baseline", out["controller"])
         self.assertEqual(out["counts"]["enabledFamilies"], 2)
         self.assertGreaterEqual(out["counts"]["importanceDriftGateGreenRuns"], 1)
+        self.assertGreaterEqual(out["counts"]["importanceDriftBaselineLiveRuns"], 1)
         conn.close()
 
 

@@ -6,6 +6,7 @@
 - Mode: hardening-first, fail-closed, verifier-backed
 - 2026-04-17 execution note: quarantine-path true E2E, deterministic rerun proof, overlap serialization proof, timeout containment proof, and atomic receipt-surface hardening/tests landed in the active runner slice; topology unchanged.
 - 2026-04-27 execution note: proposal-only importance-drift severity policy card + promotion gate landed as a non-mutating controller/posture constraint (`promotion_gates.importance_drift_gate`), with JSON/text surfaces and fail-closed threshold tests.
+- 2026-04-27 execution note: operator-configurable importance-drift profiles (`strict|balanced|lenient`) plus a bounded historical baseline comparator shipped across review/evolution/runner/posture receipts; drift posture now distinguishes transient spikes vs persistent evidence without widening mutation authority.
 
 ## Verdict
 Do not chase 9/10 by widening mutation breadth first.
@@ -130,8 +131,9 @@ Target outcome:
 Ship:
 - `signals.importance_drift.policy_card` in optimize review
 - mirrored `importance_drift_policy` in evolution review + compact text rendering line
-- runner promotion receipt field `promotion_gates.importance_drift_gate`
-- posture-review integration (`importanceDriftGateGreenRuns`, gate-live summary/reasons)
+- operator profile flags (`--importance-drift-profile`) for review/evolution/runner
+- runner promotion receipt field `promotion_gates.importance_drift_gate` with bounded `baseline_comparator`
+- posture-review integration (`importanceDriftGateGreenRuns`, baseline-live + persistent counters, gate-live summary/reasons)
 
 Why now:
 - closes the drift blind spot where low-risk autonomy could be promoted while known score/label drift remained proposal-only and un-gated

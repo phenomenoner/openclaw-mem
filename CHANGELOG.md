@@ -21,11 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `optimize evolution-review` now carries compact upstream importance-drift counters for operator visibility without widening apply behavior.
 - Added a deterministic read-only `importance_drift.policy_card` gate (`openclaw-mem.optimize.importance-drift-policy-card.v0`) with conservative count/rate thresholds and compact text-line rendering in optimize review/evolution outputs.
 - Wired the importance-drift gate into optimize-assist promotion/controller receipts as a non-mutating constraint (`promotion_gates.importance_drift_gate`) and surfaced it in posture review readiness checks.
+- Added operator-selectable importance-drift threshold profiles (`strict` default, `balanced`, `lenient`) to `optimize review`, `optimize evolution-review`, and `tools/optimize_assist_runner.py`, with profile metadata now embedded in policy-card JSON and compact text output.
+- Added a bounded historical baseline comparator for importance drift in optimize-assist promotion receipts (`promotion_gates.importance_drift_gate.baseline_comparator`) so the lane distinguishes transient spikes from persistent drift posture using recent native controller receipts.
+- Extended posture-review output to carry live importance-drift profile/baseline metadata and persistent-drift run counters without widening write authority.
 
 ### Testing
 
 - Added optimize-review regression coverage for importance-drift JSON shape, top-bounded output, mismatch detection, text rendering, and read-only/query-only posture.
 - Added regression coverage for importance-drift gate pass/fail policy behavior, runner promotion-gate integration, and posture-review gate visibility.
+- Added regression coverage for deterministic profile pass/fail behavior, runner baseline-comparator transient-vs-persistent classification, parser flag propagation, and posture-review baseline surface fields.
 
 ## [1.8.0] - 2026-04-18
 

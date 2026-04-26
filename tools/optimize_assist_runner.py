@@ -22,7 +22,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from openclaw_mem.optimization import build_importance_drift_policy_card
+from openclaw_mem.optimization import (
+    build_importance_drift_policy_card,
+    importance_drift_profile_names,
+    normalize_importance_drift_profile,
+)
 from openclaw_mem.optimize_assist_families import FAMILY_NAMES, candidate_family_from_item
 
 
@@ -429,6 +433,102 @@ def _rollback_replay_gate(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _importance_drift_baseline_comparator(
+    args: argparse.Namespace,
+    *,
+    runner_root: Optional[Path],
+    target_profile: str,
+    current_gate_passed: bool,
+) -> dict[str, Any]:
+    receipt_limit = max(1, min(50, int(getattr(args, "importance_drift_baseline_limit", 6) or 6)))
+    min_samples = max(1, min(50, int(getattr(args, "importance_drift_baseline_min_samples", 3) or 3)))
+    max_evidence = max(1, min(10, int(getattr(args, "importance_drift_baseline_max_evidence", 3) or 3)))
+    try:
+        persistent_hold_rate = float(getattr(args, "importance_drift_persistent_hold_rate", 0.6) or 0.6)
+    except Exception:
+        persistent_hold_rate = 0.6
+    persistent_hold_rate = min(1.0, max(0.0, persistent_hold_rate))
+
+    receipts: list[dict[str, Any]] = []
+    if isinstance(runner_root, Path) and runner_root.exists():
+        for path in runner_root.rglob("controller.json"):
+            payload = _load_json_file(path)
+            promotion_gates = payload.get("promotion_gates") if isinstance(payload.get("promotion_gates"), dict) else {}
+            importance_gate = promotion_gates.get("importance_drift_gate") if isinstance(promotion_gates.get("importance_drift_gate"), dict) else {}
+            if not importance_gate:
+                continue
+            passed = importance_gate.get("passed")
+            if not isinstance(passed, bool):
+                continue
+            policy_card = importance_gate.get("policy_card") if isinstance(importance_gate.get("policy_card"), dict) else {}
+            profile_name = (
+                ((policy_card.get("profile") or {}).get("name"))
+                if isinstance(policy_card.get("profile"), dict)
+                else None
+            ) or str(policy_card.get("threshold_profile") or "strict")
+            receipts.append(
+                {
+                    "ts": str(payload.get("ts") or payload.get("updated_at") or ""),
+                    "path": str(path),
+                    "passed": passed,
+                    "status": "accept" if passed else "hold",
+                    "profile": normalize_importance_drift_profile(profile_name),
+                }
+            )
+
+    receipts.sort(key=lambda x: (x.get("ts") or "", x.get("path") or ""), reverse=True)
+    receipts = receipts[:receipt_limit]
+    same_profile_receipts = [item for item in receipts if item.get("profile") == target_profile]
+    analysis_receipts = same_profile_receipts if same_profile_receipts else receipts
+    profile_fallback_used = len(same_profile_receipts) == 0 and len(receipts) > 0
+
+    sample_count = len(analysis_receipts)
+    hold_count = sum(1 for item in analysis_receipts if not bool(item.get("passed", False)))
+    pass_count = sum(1 for item in analysis_receipts if bool(item.get("passed", False)))
+    hold_rate = round((hold_count / sample_count), 4) if sample_count > 0 else None
+    has_sufficient_history = sample_count >= min_samples
+    persistent_drift_detected = bool(
+        (not current_gate_passed)
+        and has_sufficient_history
+        and hold_rate is not None
+        and hold_rate >= persistent_hold_rate
+    )
+    transient_spike_detected = bool(
+        (not current_gate_passed)
+        and has_sufficient_history
+        and hold_rate is not None
+        and hold_rate < persistent_hold_rate
+    )
+
+    return {
+        "kind": "openclaw-mem.optimize.importance-drift-baseline-comparator.v0",
+        "source": "controller_promotion_receipts",
+        "target_profile": target_profile,
+        "window": {
+            "receipt_limit": receipt_limit,
+            "scanned_receipts": len(receipts),
+            "samples_used": sample_count,
+            "same_profile_samples": len(same_profile_receipts),
+            "min_samples": min_samples,
+            "profile_fallback_used": profile_fallback_used,
+        },
+        "thresholds": {
+            "persistent_hold_rate_gte": persistent_hold_rate,
+        },
+        "metrics": {
+            "hold_count": hold_count,
+            "pass_count": pass_count,
+            "hold_rate": hold_rate,
+        },
+        "evidence": {
+            "status": "sufficient_history" if has_sufficient_history else "insufficient_history",
+            "receipts": analysis_receipts[:max_evidence],
+        },
+        "persistent_drift_detected": persistent_drift_detected,
+        "transient_spike_detected": transient_spike_detected,
+    }
+
+
 def _evaluate_promotion_gates(
     args: argparse.Namespace,
     *,
@@ -436,6 +536,7 @@ def _evaluate_promotion_gates(
     verifier: Optional[dict[str, Any]] = None,
     challenger: Optional[dict[str, Any]] = None,
     evolution: Optional[dict[str, Any]] = None,
+    runner_root: Optional[Path] = None,
 ) -> dict[str, Any]:
     verifier_summary = verifier.get("summary") if isinstance((verifier or {}).get("summary"), dict) else {}
     watchdog_stats = watchdog.get("stats") if isinstance(watchdog.get("stats"), dict) else {}
@@ -511,11 +612,32 @@ def _evaluate_promotion_gates(
             score_label_mismatch_count=int(evolution_counts.get("importanceDriftLabelMismatches") or upstream_importance.get("score_label_mismatch_count") or 0),
             missing_or_unparseable_count=int(evolution_counts.get("importanceDriftMissingOrUnparseable") or upstream_importance.get("missing_or_unparseable_count") or 0),
             high_risk_underlabel_count=int(evolution_counts.get("importanceDriftHighRiskContent") or upstream_importance.get("high_risk_content_mismatch_count") or 0),
+            profile=normalize_importance_drift_profile(getattr(args, "importance_drift_profile", "strict")),
         )
 
-    importance_drift_gate_passed = bool(importance_drift_policy.get("acceptable_for_promotion_apply", False))
+    importance_drift_profile = (
+        ((importance_drift_policy.get("profile") or {}).get("name"))
+        if isinstance(importance_drift_policy.get("profile"), dict)
+        else None
+    ) or str(importance_drift_policy.get("threshold_profile") or normalize_importance_drift_profile(getattr(args, "importance_drift_profile", "strict")))
+    importance_drift_profile = normalize_importance_drift_profile(importance_drift_profile)
+
+    current_importance_drift_passed = bool(importance_drift_policy.get("acceptable_for_promotion_apply", False))
+    importance_drift_baseline = _importance_drift_baseline_comparator(
+        args,
+        runner_root=runner_root,
+        target_profile=importance_drift_profile,
+        current_gate_passed=current_importance_drift_passed,
+    )
+    persistent_drift_detected = bool(importance_drift_baseline.get("persistent_drift_detected", False))
+    importance_drift_gate_passed = current_importance_drift_passed and not persistent_drift_detected
+
     if not importance_drift_gate_passed:
         reasons.append("importance_drift_policy_hold")
+        if persistent_drift_detected:
+            reasons.append("importance_drift_policy_hold_persistent")
+        elif bool(importance_drift_baseline.get("transient_spike_detected", False)):
+            reasons.append("importance_drift_policy_hold_transient")
 
     passed = precision_ok and repeated_miss_ok and rollback_ok and effect_missing_ok and challenger_ok and importance_drift_gate_passed
     return {
@@ -537,6 +659,9 @@ def _evaluate_promotion_gates(
             "repeated_miss_regression_pct_lte": float(getattr(args, "promotion_max_repeated_miss_regression_pct", 5.0) or 5.0),
             "effect_receipt_missing_pct_lte": float(getattr(args, "watchdog_max_missing_effect_receipts_pct", 0.0) or 0.0),
             "challenger_disagreements_lte": challenger_max_disagreements,
+            "importance_drift_baseline_receipt_limit": max(1, min(50, int(getattr(args, "importance_drift_baseline_limit", 6) or 6))),
+            "importance_drift_baseline_min_samples": max(1, min(50, int(getattr(args, "importance_drift_baseline_min_samples", 3) or 3))),
+            "importance_drift_persistent_hold_rate_gte": min(1.0, max(0.0, float(getattr(args, "importance_drift_persistent_hold_rate", 0.6) or 0.6))),
         },
         "challenger": {
             "required_for_promotion": challenger_required,
@@ -548,6 +673,9 @@ def _evaluate_promotion_gates(
         },
         "importance_drift_gate": {
             "passed": importance_drift_gate_passed,
+            "profile": importance_drift_profile,
+            "persistent_drift_detected": persistent_drift_detected,
+            "baseline_comparator": importance_drift_baseline,
             "policy_card": importance_drift_policy,
         },
         "native_verifier_present": verifier is not None,
@@ -625,6 +753,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=1000, help="Max observation rows to scan in evolution-review")
     p.add_argument("--stale-days", type=int, default=60, help="Staleness threshold in days")
     p.add_argument("--lifecycle-limit", type=int, default=200, help="Max lifecycle-shadow rows scanned")
+    p.add_argument("--importance-drift-profile", choices=importance_drift_profile_names(), default="strict", help="Importance-drift threshold profile passed to evolution review (default: strict)")
+    p.add_argument("--importance-drift-baseline-limit", type=int, default=6, help="Max prior controller receipts sampled for importance-drift baseline comparator (default: 6)")
+    p.add_argument("--importance-drift-baseline-min-samples", type=int, default=3, help="Minimum baseline samples before persistent/transient distinction is asserted (default: 3)")
+    p.add_argument("--importance-drift-persistent-hold-rate", type=float, default=0.6, help="Persistent drift is flagged when baseline hold rate meets/exceeds this ratio (default: 0.6)")
+    p.add_argument("--importance-drift-baseline-max-evidence", type=int, default=3, help="Max baseline receipt refs included in promotion gate evidence (default: 3)")
     p.add_argument("--top", type=int, default=10, help="Max governed candidates emitted")
     p.add_argument("--challenger-policy-mode", default="strict_v1", help="Shadow challenger policy mode (default: strict_v1)")
     p.add_argument("--challenger-max-disagreement-clusters", type=int, default=10, help="Max disagreement clusters written into challenger receipts (default: 10)")
@@ -672,6 +805,8 @@ def _build_evolution_cmd(args: argparse.Namespace) -> list[str]:
         str(args.stale_days),
         "--lifecycle-limit",
         str(args.lifecycle_limit),
+        "--importance-drift-profile",
+        str(getattr(args, "importance_drift_profile", "strict") or "strict"),
         "--top",
         str(args.top),
         "--json",
@@ -840,7 +975,14 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             _atomic_write_json(verifier_path, verifier_json)
 
             post_watchdog = _evaluate_watchdog(args, runner_root=runner_root, controller_mode=effective_controller_mode)
-            promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog, verifier=verifier_json, challenger=challenger_json, evolution=evolution_json)
+            promotion_gates = _evaluate_promotion_gates(
+                args,
+                watchdog=post_watchdog,
+                verifier=verifier_json,
+                challenger=challenger_json,
+                evolution=evolution_json,
+                runner_root=runner_root,
+            )
             _atomic_write_json(promotion_receipt_path, promotion_gates)
             promotion_gate_emit_path = str(getattr(args, "promotion_gate_receipt", "") or "").strip()
             if promotion_gate_emit_path:
@@ -975,6 +1117,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                     "paused": next_controller_mode == "paused_regression",
                     "promotion_gates_passed": bool(promotion_gates.get("passed")),
                     "importance_drift_gate_passed": bool(((promotion_gates.get("importance_drift_gate") or {}).get("passed"))),
+                    "importance_drift_profile": str(((promotion_gates.get("importance_drift_gate") or {}).get("profile") or "strict")),
+                    "importance_drift_persistent_drift_detected": bool(((promotion_gates.get("importance_drift_gate") or {}).get("persistent_drift_detected"))),
                     "soak_green_cycles": soak_green_cycles,
                     "regression_strikes": regression_strikes,
                 },

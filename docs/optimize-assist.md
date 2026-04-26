@@ -145,6 +145,7 @@ You can now promote the lane into default unattended low-risk mode with native i
 ```bash
 python tools/optimize_assist_runner.py \
   --controller-mode canary_apply \
+  --importance-drift-profile strict \
   --promote-when-gates-green \
   --promotion-gate-receipt /path/to/emitted-promotion-gates.json \
   --json
@@ -156,6 +157,7 @@ The runner now computes promotion metrics from first-party receipts produced in 
 - `rollback_replay_pass` from `verifier-bundle`
 - challenger agreement status when challenger agreement is required
 - read-only `importance_drift` posture via `importance_drift_policy` from the same evolution packet
+- bounded historical baseline evidence from recent controller receipts (`importance_drift_gate.baseline_comparator`)
 
 `--promotion-gate-receipt` is now an **output path only**.
 It emits the runner-computed promotion-gate artifact and is no longer accepted as authoritative input.
@@ -163,6 +165,7 @@ It emits the runner-computed promotion-gate artifact and is no longer accepted a
 When all thresholds are green, the controller promotes its persisted next mode to `auto_low_risk`.
 If `--challenger-require-agreement-for-promotion` is set, promotion also fails closed when the challenger lane reports disagreements above the configured threshold.
 If importance-drift policy is not acceptable (for example high-risk under-label detections or mismatch/missing rates above thresholds), promotion fails closed with `importance_drift_policy_hold` and receipts carry the policy card under `promotion_gates.importance_drift_gate.policy_card`.
+When baseline evidence is sufficient, the promotion receipt also classifies drift as transient (`transient_spike_detected`) vs persistent (`persistent_drift_detected`).
 
 ### Importance-drift policy card (proposal-only)
 
@@ -170,9 +173,10 @@ If importance-drift policy is not acceptable (for example high-risk under-label 
 - path: `signals.importance_drift.policy_card`
 - kind: `openclaw-mem.optimize.importance-drift-policy-card.v0`
 - posture: `mode=proposal_only_read_only`, `query_only_enforced=true`, `writes_performed=0`
+- profile selection: `--importance-drift-profile strict|balanced|lenient` (default: `strict`)
 
 `optimize evolution-review` mirrors the same card at `importance_drift_policy`, and text renderers show one compact line:
-- `importance_drift_gate=<accept|hold> acceptable=<true|false> rows=<n>`
+- `importance_drift_gate=<accept|hold> acceptable=<true|false> rows=<n> profile=<name>`
 
 ### Allow bounded apply
 
@@ -188,6 +192,10 @@ python tools/optimize_assist_runner.py --allow-apply --json
 - `--scope team/alpha`
 - `--limit 1000`
 - `--stale-days 60`
+- `--importance-drift-profile strict`
+- `--importance-drift-baseline-limit 6`
+- `--importance-drift-baseline-min-samples 3`
+- `--importance-drift-persistent-hold-rate 0.6`
 - `--max-rows-per-run 5`
 - `--max-rows-per-24h 20`
 - `--max-importance-adjustments-per-run 3`
@@ -217,7 +225,7 @@ python -m openclaw_mem optimize posture-review \
 This command:
 - reads controller state plus recent controller / verifier / challenger / assist receipts
 - summarizes whether Phase 8, 9, 10 surfaces are actually live
-- verifies recent importance-drift gate health from controller promotion receipts
+- verifies recent importance-drift gate health from controller promotion receipts, including profile/baseline metadata and persistent-drift counters
 - emits a bounded `near_ceiling_ready` verdict without changing memory state
 
 ## OpenClaw cron enablement

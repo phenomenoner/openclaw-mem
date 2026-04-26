@@ -5,7 +5,7 @@ from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 
 from openclaw_mem.cli import _connect, _insert_observation, build_parser, cmd_optimize_review
-from openclaw_mem.optimization import _extract_recall_result_count
+from openclaw_mem.optimization import _extract_recall_result_count, build_importance_drift_policy_card
 
 
 def _iso_days_ago(days: int) -> str:
@@ -73,6 +73,8 @@ class TestOptimizeReview(unittest.TestCase):
                 "5",
                 "--lifecycle-limit",
                 "44",
+                "--importance-drift-profile",
+                "balanced",
                 "--scope",
                 "finlife/mvp",
                 "--top",
@@ -90,8 +92,32 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertEqual(args.orphan_min_tokens, 4)
         self.assertEqual(args.miss_min_count, 5)
         self.assertEqual(args.lifecycle_limit, 44)
+        self.assertEqual(args.importance_drift_profile, "balanced")
         self.assertEqual(args.scope, "finlife/mvp")
         self.assertEqual(args.top, 7)
+
+    def test_importance_drift_profiles_change_policy_outcome_deterministically(self):
+        strict = build_importance_drift_policy_card(
+            rows_scanned=100,
+            score_label_mismatch_count=2,
+            missing_or_unparseable_count=0,
+            high_risk_underlabel_count=0,
+            profile="strict",
+        )
+        balanced = build_importance_drift_policy_card(
+            rows_scanned=100,
+            score_label_mismatch_count=2,
+            missing_or_unparseable_count=0,
+            high_risk_underlabel_count=0,
+            profile="balanced",
+        )
+
+        self.assertFalse(strict["acceptable_for_promotion_apply"])
+        self.assertEqual(strict["status"], "hold")
+        self.assertTrue(balanced["acceptable_for_promotion_apply"])
+        self.assertEqual(balanced["status"], "accept")
+        self.assertEqual(strict["profile"]["name"], "strict")
+        self.assertEqual(balanced["profile"]["name"], "balanced")
 
     def test_optimize_review_json_reports_signals_and_keeps_store_read_only(self):
         conn = _connect(":memory:")
@@ -768,6 +794,7 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertEqual(policy_card["memory_mutation"], "none")
         self.assertEqual(policy_card["status"], "hold")
         self.assertFalse(policy_card["acceptable_for_promotion_apply"])
+        self.assertEqual(policy_card["profile"]["name"], "strict")
         self.assertIn("high_risk_underlabel_count_exceeded", policy_card["reasons"])
         self.assertGreater(policy_card["metrics"]["high_risk_underlabel_rate_pct"], 0.0)
 

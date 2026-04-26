@@ -54,14 +54,34 @@ _IMPORTANCE_HIGH_RISK_UNDERLABEL_PATTERNS: List[tuple[str, re.Pattern[str]]] = [
     ("zh_token", re.compile(r"存取權杖|刷新權杖")),
 ]
 
-_IMPORTANCE_DRIFT_GATE_THRESHOLDS: Dict[str, float] = {
-    "score_label_mismatch_count_lte": 1.0,
-    "score_label_mismatch_rate_pct_lte": 2.0,
-    "missing_or_unparseable_count_lte": 0.0,
-    "missing_or_unparseable_rate_pct_lte": 0.0,
-    "high_risk_underlabel_count_lte": 0.0,
-    "high_risk_underlabel_rate_pct_lte": 0.0,
+_IMPORTANCE_DRIFT_THRESHOLD_PROFILES: Dict[str, Dict[str, float]] = {
+    "strict": {
+        "score_label_mismatch_count_lte": 1.0,
+        "score_label_mismatch_rate_pct_lte": 2.0,
+        "missing_or_unparseable_count_lte": 0.0,
+        "missing_or_unparseable_rate_pct_lte": 0.0,
+        "high_risk_underlabel_count_lte": 0.0,
+        "high_risk_underlabel_rate_pct_lte": 0.0,
+    },
+    "balanced": {
+        "score_label_mismatch_count_lte": 3.0,
+        "score_label_mismatch_rate_pct_lte": 5.0,
+        "missing_or_unparseable_count_lte": 1.0,
+        "missing_or_unparseable_rate_pct_lte": 2.0,
+        "high_risk_underlabel_count_lte": 0.0,
+        "high_risk_underlabel_rate_pct_lte": 0.0,
+    },
+    "lenient": {
+        "score_label_mismatch_count_lte": 5.0,
+        "score_label_mismatch_rate_pct_lte": 10.0,
+        "missing_or_unparseable_count_lte": 2.0,
+        "missing_or_unparseable_rate_pct_lte": 5.0,
+        "high_risk_underlabel_count_lte": 1.0,
+        "high_risk_underlabel_rate_pct_lte": 1.0,
+    },
 }
+
+_DEFAULT_IMPORTANCE_DRIFT_PROFILE = "strict"
 
 
 _EPISODIC_RETENTION_DAYS: Dict[str, Optional[int]] = {
@@ -200,16 +220,34 @@ def _importance_drift_rate_pct(count: int, rows_scanned: int) -> float:
     return round((max(0, int(count)) / total) * 100.0, 2)
 
 
+def importance_drift_profile_names() -> List[str]:
+    return list(_IMPORTANCE_DRIFT_THRESHOLD_PROFILES.keys())
+
+
+def normalize_importance_drift_profile(profile: Optional[str]) -> str:
+    raw = str(profile or "").strip().lower()
+    if raw in _IMPORTANCE_DRIFT_THRESHOLD_PROFILES:
+        return raw
+    return _DEFAULT_IMPORTANCE_DRIFT_PROFILE
+
+
+def importance_drift_thresholds_for_profile(profile: Optional[str]) -> Dict[str, float]:
+    profile_name = normalize_importance_drift_profile(profile)
+    return dict(_IMPORTANCE_DRIFT_THRESHOLD_PROFILES.get(profile_name) or _IMPORTANCE_DRIFT_THRESHOLD_PROFILES[_DEFAULT_IMPORTANCE_DRIFT_PROFILE])
+
+
 def build_importance_drift_policy_card(
     *,
     rows_scanned: int,
     score_label_mismatch_count: int,
     missing_or_unparseable_count: int,
     high_risk_underlabel_count: int,
+    profile: Optional[str] = None,
     thresholds: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     checked_rows = max(1, int(rows_scanned))
-    active_thresholds = dict(_IMPORTANCE_DRIFT_GATE_THRESHOLDS)
+    profile_name = normalize_importance_drift_profile(profile)
+    active_thresholds = importance_drift_thresholds_for_profile(profile_name)
     if isinstance(thresholds, dict):
         for key, value in thresholds.items():
             if key in active_thresholds:
@@ -264,6 +302,10 @@ def build_importance_drift_policy_card(
         "status": status,
         "severity": severity,
         "acceptable_for_promotion_apply": acceptable_for_promotion,
+        "threshold_profile": profile_name,
+        "profile": {
+            "name": profile_name,
+        },
         "metrics": metrics,
         "thresholds": active_thresholds,
         "checks": checks,
@@ -1336,6 +1378,7 @@ def build_memory_health_review(
     lifecycle_limit: int = 200,
     top: int = 10,
     scope: Optional[str] = None,
+    importance_drift_profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     row_limit = max(1, int(limit))
     stale_days = max(1, int(stale_days))
@@ -1668,6 +1711,7 @@ def build_memory_health_review(
         score_label_mismatch_count=len(importance_score_label_mismatch_items),
         missing_or_unparseable_count=len(importance_missing_or_unparseable_items),
         high_risk_underlabel_count=len(importance_high_risk_content_mismatch_items),
+        profile=importance_drift_profile,
     )
     coverage_pct = round((rows_scanned / total_rows) * 100, 1) if total_rows > 0 else 100.0
     warnings: List[Dict[str, Any]] = []
@@ -1770,6 +1814,7 @@ def build_evolution_review(
     lifecycle_limit: int = 200,
     top: int = 10,
     scope: Optional[str] = None,
+    importance_drift_profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     review = build_memory_health_review(
         conn,
@@ -1783,6 +1828,7 @@ def build_evolution_review(
         lifecycle_limit=lifecycle_limit,
         top=top,
         scope=scope,
+        importance_drift_profile=importance_drift_profile,
     )
 
     stale = ((review.get("signals") or {}).get("staleness") or {})
@@ -1796,6 +1842,7 @@ def build_evolution_review(
             score_label_mismatch_count=int(importance_drift.get("score_label_mismatch_count") or 0),
             missing_or_unparseable_count=int(importance_drift.get("missing_or_unparseable_count") or 0),
             high_risk_underlabel_count=int(importance_drift.get("high_risk_content_mismatch_count") or 0),
+            profile=importance_drift_profile,
         )
     )
     recommendations = list(review.get("recommendations") or [])
@@ -2169,6 +2216,11 @@ def render_evolution_review(report: Dict[str, Any]) -> str:
     counts = report.get("counts") or {}
     importance_drift_policy = report.get("importance_drift_policy") if isinstance(report.get("importance_drift_policy"), dict) else {}
     drift_policy_metrics = importance_drift_policy.get("metrics") if isinstance(importance_drift_policy.get("metrics"), dict) else {}
+    drift_policy_profile = (
+        ((importance_drift_policy.get("profile") or {}).get("name"))
+        if isinstance(importance_drift_policy.get("profile"), dict)
+        else None
+    ) or str(importance_drift_policy.get("threshold_profile") or "strict")
     lines = [
         "openclaw-mem optimize evolution-review (governed apply candidates)",
         (
@@ -2182,7 +2234,8 @@ def render_evolution_review(report: Dict[str, Any]) -> str:
         (
             f"importance_drift_gate={str(importance_drift_policy.get('status') or 'hold')} "
             f"acceptable={bool(importance_drift_policy.get('acceptable_for_promotion_apply', False))} "
-            f"rows={int(drift_policy_metrics.get('rows_scanned') or 0)}"
+            f"rows={int(drift_policy_metrics.get('rows_scanned') or 0)} "
+            f"profile={drift_policy_profile}"
         ),
     ]
     for item in list(report.get("items") or [])[:10]:
@@ -2209,6 +2262,11 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
     importance_drift = sig.get("importance_drift", {})
     importance_drift_policy = importance_drift.get("policy_card") if isinstance(importance_drift.get("policy_card"), dict) else {}
     drift_policy_metrics = importance_drift_policy.get("metrics") if isinstance(importance_drift_policy.get("metrics"), dict) else {}
+    drift_policy_profile = (
+        ((importance_drift_policy.get("profile") or {}).get("name"))
+        if isinstance(importance_drift_policy.get("profile"), dict)
+        else None
+    ) or str(importance_drift_policy.get("threshold_profile") or "strict")
 
     lines = [
         "openclaw-mem optimize review (recommendation-only)",
@@ -2232,7 +2290,8 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
         (
             f"importance_drift_gate={str(importance_drift_policy.get('status') or 'hold')} "
             f"acceptable={bool(importance_drift_policy.get('acceptable_for_promotion_apply', False))} "
-            f"rows={int(drift_policy_metrics.get('rows_scanned') or 0)}"
+            f"rows={int(drift_policy_metrics.get('rows_scanned') or 0)} "
+            f"profile={drift_policy_profile}"
         ),
     ]
 

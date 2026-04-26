@@ -45,6 +45,34 @@ def _write_signed_controller_state(path: Path, payload: dict[str, object], *, pr
     path.write_text(json.dumps(prepared), encoding="utf-8")
 
 
+def _write_controller_receipt(root: Path, *, name: str, passed: bool, profile: str = "strict") -> Path:
+    ts = runner._utcnow_iso()
+    policy_card = build_importance_drift_policy_card(
+        rows_scanned=50,
+        score_label_mismatch_count=0 if passed else 2,
+        missing_or_unparseable_count=0,
+        high_risk_underlabel_count=0,
+        profile=profile,
+    )
+    if not passed:
+        policy_card["acceptable_for_promotion_apply"] = False
+        policy_card["status"] = "hold"
+    payload = {
+        "ts": ts,
+        "promotion_gates": {
+            "importance_drift_gate": {
+                "passed": passed,
+                "profile": profile,
+                "policy_card": policy_card,
+            }
+        },
+    }
+    path = root / "history" / name / "controller.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def _evolution_payload(
     *,
     items: int = 1,
@@ -93,6 +121,16 @@ class TestOptimizeAssistRunner(unittest.TestCase):
                 "45",
                 "--lifecycle-limit",
                 "80",
+                "--importance-drift-profile",
+                "balanced",
+                "--importance-drift-baseline-limit",
+                "8",
+                "--importance-drift-baseline-min-samples",
+                "4",
+                "--importance-drift-persistent-hold-rate",
+                "0.75",
+                "--importance-drift-baseline-max-evidence",
+                "2",
                 "--top",
                 "4",
                 "--challenger-policy-mode",
@@ -137,6 +175,11 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         self.assertTrue(args.allow_apply)
         self.assertFalse(args.approve_importance)
         self.assertEqual(args.scope, "team/alpha")
+        self.assertEqual(args.importance_drift_profile, "balanced")
+        self.assertEqual(args.importance_drift_baseline_limit, 8)
+        self.assertEqual(args.importance_drift_baseline_min_samples, 4)
+        self.assertEqual(args.importance_drift_persistent_hold_rate, 0.75)
+        self.assertEqual(args.importance_drift_baseline_max_evidence, 2)
         self.assertEqual(args.challenger_policy_mode, "strict_v1")
         self.assertEqual(args.challenger_max_disagreement_clusters, 6)
         self.assertTrue(args.challenger_enforce_quarantine)
@@ -240,6 +283,8 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertEqual(out["controller"]["soak_green_cycles"], 0)
             self.assertEqual(out["controller"]["regression_strikes"], 0)
             self.assertTrue(out["controller"]["importance_drift_gate_passed"])
+            self.assertEqual(out["controller"]["importance_drift_profile"], "strict")
+            self.assertFalse(out["controller"]["importance_drift_persistent_drift_detected"])
             self.assertEqual(out["counts"]["evolution_candidates"], 2)
             self.assertEqual(out["counts"]["governor_approved"], 1)
             self.assertEqual(out["results"]["assist_result"], "dry_run")
@@ -255,10 +300,14 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             promotion_gates = json.loads((run_dir / "promotion-gates.json").read_text(encoding="utf-8"))
             self.assertIn("importance_drift_gate", promotion_gates)
             self.assertEqual(promotion_gates["importance_drift_gate"]["policy_card"]["kind"], "openclaw-mem.optimize.importance-drift-policy-card.v0")
+            self.assertEqual(promotion_gates["importance_drift_gate"]["profile"], "strict")
+            self.assertIn("baseline_comparator", promotion_gates["importance_drift_gate"])
+            self.assertIn("persistent_drift_detected", promotion_gates["importance_drift_gate"])
             self.assertIn("--dry-run", out["commands"]["assist_apply"])
             self.assertIn("--max-importance-adjustments-per-run", out["commands"]["assist_apply"])
             self.assertIn("--approve-importance", out["commands"]["governor_review"])
             self.assertIn("--policy-mode", out["commands"]["challenger_review"])
+            self.assertIn("--importance-drift-profile", out["commands"]["evolution_review"])
             self.assertIn("verifier_bundle", out["commands"])
             state = json.loads(Path(out["controller"]["state_ref"]).read_text(encoding="utf-8"))
             self.assertEqual(state["schema_version"], runner.CONTROLLER_STATE_SCHEMA_VERSION)
@@ -759,6 +808,76 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertIn("importance_drift_policy_hold", out["results"]["promotion_gate_reasons"])
             promotion_receipt = json.loads(Path(out["artifacts"]["promotion_gates"]).read_text(encoding="utf-8"))
             self.assertFalse(promotion_receipt["importance_drift_gate"]["passed"])
+
+    def test_importance_drift_baseline_comparator_distinguishes_transient_vs_persistent(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            args = SimpleNamespace(
+                promotion_min_manual_precision=0.9,
+                promotion_max_repeated_miss_regression_pct=5.0,
+                watchdog_max_missing_effect_receipts_pct=0.0,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
+                importance_drift_profile="strict",
+                importance_drift_baseline_limit=6,
+                importance_drift_baseline_min_samples=3,
+                importance_drift_persistent_hold_rate=0.6,
+                importance_drift_baseline_max_evidence=3,
+            )
+            watchdog = {
+                "stats": {
+                    "effect_items_total": 10,
+                    "regressed_effect_items": 0,
+                    "applied_runs": 1,
+                    "effect_receipt_missing_pct": 0.0,
+                }
+            }
+            verifier = {
+                "summary": {
+                    "rollback_replay_pass": True,
+                    "effect_receipt_missing_pct": 0.0,
+                    "cap_integrity_pass": True,
+                }
+            }
+            challenger = {
+                "counts": {"disagreements": 0},
+                "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False},
+            }
+            current_evolution = _evolution_payload(items=1, rows_scanned=50, score_label_mismatch_count=2)
+
+            _write_controller_receipt(root, name="run-1", passed=True)
+            _write_controller_receipt(root, name="run-2", passed=True)
+            _write_controller_receipt(root, name="run-3", passed=True)
+            transient = runner._evaluate_promotion_gates(
+                args,
+                watchdog=watchdog,
+                verifier=verifier,
+                challenger=challenger,
+                evolution=current_evolution,
+                runner_root=root,
+            )
+
+            self.assertFalse(transient["importance_drift_gate"]["passed"])
+            self.assertTrue(transient["importance_drift_gate"]["baseline_comparator"]["transient_spike_detected"])
+            self.assertFalse(transient["importance_drift_gate"]["baseline_comparator"]["persistent_drift_detected"])
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _write_controller_receipt(root, name="run-1", passed=False)
+            _write_controller_receipt(root, name="run-2", passed=False)
+            _write_controller_receipt(root, name="run-3", passed=True)
+            persistent = runner._evaluate_promotion_gates(
+                args,
+                watchdog=watchdog,
+                verifier=verifier,
+                challenger=challenger,
+                evolution=current_evolution,
+                runner_root=root,
+            )
+
+            self.assertFalse(persistent["importance_drift_gate"]["passed"])
+            self.assertTrue(persistent["importance_drift_gate"]["baseline_comparator"]["persistent_drift_detected"])
+            self.assertFalse(persistent["importance_drift_gate"]["baseline_comparator"]["transient_spike_detected"])
 
     def test_filter_governor_packet_quarantines_entire_importance_family(self):
         governor_json = {

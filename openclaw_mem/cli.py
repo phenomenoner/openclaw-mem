@@ -64,6 +64,7 @@ from openclaw_mem.optimization import (
     build_consolidation_review,
     build_evolution_review,
     build_memory_health_review,
+    importance_drift_profile_names,
     render_consolidation_review,
     render_evolution_review,
     render_memory_health_review,
@@ -1990,6 +1991,7 @@ def cmd_optimize_review(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         lifecycle_limit=int(getattr(args, "lifecycle_limit", 200)),
         top=int(getattr(args, "top", 10)),
         scope=getattr(args, "scope", None),
+        importance_drift_profile=str(getattr(args, "importance_drift_profile", "strict") or "strict"),
     )
 
     if args.json:
@@ -2030,6 +2032,7 @@ def cmd_optimize_evolution_review(conn: sqlite3.Connection, args: argparse.Names
         lifecycle_limit=int(getattr(args, "lifecycle_limit", 200)),
         top=int(getattr(args, "top", 10)),
         scope=getattr(args, "scope", None),
+        importance_drift_profile=str(getattr(args, "importance_drift_profile", "strict") or "strict"),
     )
 
     if args.json:
@@ -3380,9 +3383,40 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
         and isinstance(packet['promotion_gates'].get('importance_drift_gate'), dict)
         and bool(packet['promotion_gates']['importance_drift_gate'].get('passed', False))
     )
-    current_importance_drift_gate_passed = bool(
-        (((controller_state.get('promotion_gates') or {}).get('importance_drift_gate') or {}).get('passed'))
+    importance_drift_baseline_live_runs = sum(
+        1
+        for packet in controller_packets
+        if isinstance(packet.get('promotion_gates'), dict)
+        and isinstance(packet['promotion_gates'].get('importance_drift_gate'), dict)
+        and isinstance(packet['promotion_gates']['importance_drift_gate'].get('baseline_comparator'), dict)
     )
+    importance_drift_persistent_runs = sum(
+        1
+        for packet in controller_packets
+        if isinstance(packet.get('promotion_gates'), dict)
+        and isinstance(packet['promotion_gates'].get('importance_drift_gate'), dict)
+        and bool(packet['promotion_gates']['importance_drift_gate'].get('persistent_drift_detected', False))
+    )
+    current_importance_drift_gate = ((controller_state.get('promotion_gates') or {}).get('importance_drift_gate') or {})
+    current_importance_drift_gate_passed = bool(
+        current_importance_drift_gate.get('passed')
+    )
+    current_importance_drift_policy_card = (
+        current_importance_drift_gate.get('policy_card')
+        if isinstance(current_importance_drift_gate.get('policy_card'), dict)
+        else {}
+    )
+    current_importance_drift_profile = (
+        ((current_importance_drift_policy_card.get('profile') or {}).get('name'))
+        if isinstance(current_importance_drift_policy_card.get('profile'), dict)
+        else None
+    ) or str(current_importance_drift_policy_card.get('threshold_profile') or 'strict')
+    current_importance_drift_baseline = (
+        current_importance_drift_gate.get('baseline_comparator')
+        if isinstance(current_importance_drift_gate.get('baseline_comparator'), dict)
+        else {}
+    )
+    current_importance_drift_persistent = bool(current_importance_drift_gate.get('persistent_drift_detected', False))
     challenger_green = sum(
         1 for packet in challenger_packets
         if isinstance(packet.get('summary'), dict) and bool(packet['summary'].get('agreement_pass', False))
@@ -3427,6 +3461,9 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
             'soak_green_cycles': soak_green_cycles,
             'regression_strikes': regression_strikes,
             'importance_drift_gate_passed': current_importance_drift_gate_passed,
+            'importance_drift_profile': current_importance_drift_profile,
+            'importance_drift_persistent_drift_detected': current_importance_drift_persistent,
+            'importance_drift_baseline': current_importance_drift_baseline,
             'horizons': controller_state.get('horizons') if isinstance(controller_state.get('horizons'), dict) else {},
         },
         'families': {
@@ -3440,6 +3477,8 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
             'verifierGreenRuns': verifier_green,
             'challengerGreenRuns': challenger_green,
             'importanceDriftGateGreenRuns': importance_drift_gate_green,
+            'importanceDriftBaselineLiveRuns': importance_drift_baseline_live_runs,
+            'importanceDriftPersistentRuns': importance_drift_persistent_runs,
             'autoLowRiskCycles': auto_apply_cycles,
             'appliedCycles': applied_cycles,
         },
@@ -3450,6 +3489,7 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
             'phase10_multi_horizon_live': isinstance(controller_state.get('horizons'), dict),
             'phase11_posture_review_live': True,
             'importance_drift_gate_live': importance_drift_gate_green > 0 or current_importance_drift_gate_passed,
+            'importance_drift_baseline_live': importance_drift_baseline_live_runs > 0 or bool(current_importance_drift_baseline),
         },
         'reasons': [] if near_ceiling_ready else sorted(set([
             'mode_not_auto_low_risk' if current_mode != 'auto_low_risk' else '',
@@ -16393,6 +16433,7 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--orphan-min-tokens", dest="orphan_min_tokens", type=int, default=2, help="Minimum token count for weakly connected candidates (default: 2)")
     o.add_argument("--miss-min-count", dest="miss_min_count", type=int, default=2, help="Min repeated no-result memory_recall events per query/scope group (default: 2)")
     o.add_argument("--lifecycle-limit", dest="lifecycle_limit", type=int, default=200, help="Max pack_lifecycle_shadow rows scanned for recent-use protection (default: 200)")
+    o.add_argument("--importance-drift-profile", dest="importance_drift_profile", choices=importance_drift_profile_names(), default="strict", help="Importance-drift threshold profile (default: strict)")
     o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
     o.add_argument("--top", type=int, default=10, help="Max candidate rows/groups per signal in output (default: 10)")
     o.set_defaults(func=cmd_optimize_review)
@@ -16402,6 +16443,7 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--limit", type=int, default=1000, help="Max observation rows to scan (default: 1000)")
     o.add_argument("--stale-days", type=int, default=60, help="Staleness threshold in days (default: 60)")
     o.add_argument("--lifecycle-limit", dest="lifecycle_limit", type=int, default=200, help="Max pack_lifecycle_shadow rows scanned for recent-use protection (default: 200)")
+    o.add_argument("--importance-drift-profile", dest="importance_drift_profile", choices=importance_drift_profile_names(), default="strict", help="Importance-drift threshold profile (default: strict)")
     o.add_argument("--scope", default=None, help="Filter review to a normalized detail.scope token")
     o.add_argument("--top", type=int, default=10, help="Max governed candidates in output (default: 10)")
     o.set_defaults(func=cmd_optimize_evolution_review)
