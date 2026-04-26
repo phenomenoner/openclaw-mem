@@ -1,7 +1,9 @@
+import json
 from pathlib import Path
 import unittest
 
 PLUGIN_TS = Path(__file__).resolve().parents[1] / "extensions" / "openclaw-mem" / "index.ts"
+SECRET_GOLDEN = Path(__file__).resolve().parent / "data" / "SECRET_DETECTOR_GOLDEN.v1.json"
 
 
 class TestPluginEpisodicSpool(unittest.TestCase):
@@ -31,6 +33,18 @@ class TestPluginEpisodicSpool(unittest.TestCase):
         self.assertIn('if (isAgentExcluded(ctx.agentId, cfg)) return;', ts)
         self.assertIn('if (isAgentExcluded(event?.agentId ?? event?.agent_id, cfg)) return;', ts)
         self.assertNotIn("MEMORY.md", ts)
+
+    def test_plugin_redaction_patterns_cover_shared_secret_golden_corpus(self):
+        ts = PLUGIN_TS.read_text("utf-8")
+        corpus = json.loads(SECRET_GOLDEN.read_text("utf-8"))
+        self.assertEqual(corpus.get("schema"), "openclaw-mem.secret-detector-golden.v1")
+
+        for case in corpus.get("cases", []):
+            if case.get("class") != "high_risk":
+                continue
+            redaction_anchor = case.get("plugin", {}).get("redactionAnchor")
+            if redaction_anchor:
+                self.assertIn(redaction_anchor, ts, case.get("id", "unknown"))
 
 
 if __name__ == "__main__":

@@ -1,7 +1,15 @@
+import json
 import re
 from pathlib import Path
 
 INDEX_TS = Path(__file__).resolve().parents[1] / "extensions" / "openclaw-mem-engine" / "index.ts"
+SECRET_GOLDEN = Path(__file__).resolve().parent / "data" / "SECRET_DETECTOR_GOLDEN.v1.json"
+
+
+def _load_secret_golden() -> dict:
+    payload = json.loads(SECRET_GOLDEN.read_text("utf-8"))
+    assert payload.get("schema") == "openclaw-mem.secret-detector-golden.v1"
+    return payload
 
 
 def test_auto_capture_filters_tool_output_per_candidate_not_whole_message():
@@ -27,16 +35,21 @@ def test_auto_capture_strips_injected_auto_recall_artifacts_and_propagates_scope
 
 def test_auto_capture_secret_filters_and_receipt_surface_stay_bounded():
     ts = INDEX_TS.read_text("utf-8")
-
-    # Guardrail expansion: include common high-risk token families.
-    assert "sk-proj-" in ts
-    assert "github_pat_" in ts
-    assert "aws[_-]?secret[_-]?access[_-]?key" in ts
-    assert "Authorization:\\s*Bearer" in ts
+    corpus = _load_secret_golden()
 
     # Candidate-level secret skip remains explicit and count-based.
     assert "if (looksLikeSecret(candidate))" in ts
     assert "filteredOut.secrets_like += 1" in ts
+
+    for case in corpus["cases"]:
+        if case.get("class") != "high_risk":
+            continue
+        detector_anchor = case.get("mem_engine", {}).get("detectorAnchor")
+        redaction_anchor = case.get("mem_engine", {}).get("redactionAnchor")
+        if detector_anchor:
+            assert detector_anchor in ts, case["id"]
+        if redaction_anchor:
+            assert redaction_anchor in ts, case["id"]
 
     receipt_fn = re.search(
         r"function buildAutoCaptureLifecycleReceipt\([\s\S]*?\n}\n\nfunction renderAutoRecallReceiptComment",
@@ -50,4 +63,5 @@ def test_auto_capture_secret_filters_and_receipt_surface_stay_bounded():
     assert "candidateExtractionCount" in block
     assert "secrets_like" in block
     assert "storedCount" in block
-    assert "text:" not in block
+    for marker in corpus.get("receipt_expectations", {}).get("memEngineAutoCapture", {}).get("forbidFields", []):
+        assert marker not in block

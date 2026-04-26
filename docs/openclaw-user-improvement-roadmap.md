@@ -153,6 +153,10 @@ These are intentionally scoped so **one subagent** can ship them end-to-end (doc
 - Tighten secret filters and dedupe.
 - Add unit tests against known bad captures.
 - Latest shipped slice (2026-04-27): expanded deterministic secret signatures (`sk-proj`, `github_pat`, AWS secret-access-key assignments, long Bearer auth values) with regression checks that keep receipts/errors bounded and non-leaking.
+- Follow-up shipped (2026-04-27): shared synthetic corpus `tests/data/SECRET_DETECTOR_GOLDEN.v1.json` now anchors mem-engine + episodic + sidecar/plugin tests from one source of truth.
+- Focused verify commands:
+  - `python3 -m pytest tests/test_episodic_secret_detection.py tests/test_mem_engine_auto_capture_tool_output.py tests/test_plugin_episodic_spool.py -q`
+  - `node --test extensions/openclaw-mem-engine/secretDetectorGolden.test.mjs`
 
 ---
 
