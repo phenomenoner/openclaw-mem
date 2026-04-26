@@ -869,25 +869,25 @@
                 "type": "integer",
                 "minimum": 240,
                 "maximum": 2800,
-                "default": 1200
+                "default": 240
               },
               "maxItemsPerSection": {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 5,
-                "default": 3
+                "default": 2
               },
               "maxGoalChars": {
                 "type": "integer",
                 "minimum": 40,
                 "maximum": 600,
-                "default": 200
+                "default": 120
               },
               "maxItemChars": {
                 "type": "integer",
                 "minimum": 40,
                 "maximum": 400,
-                "default": 180
+                "default": 100
               }
             }
           }

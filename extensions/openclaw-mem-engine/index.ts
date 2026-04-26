@@ -410,10 +410,10 @@ const DEFAULT_RECALL_BUDGET_CONFIG: RecallBudgetConfig = {
 const DEFAULT_WORKING_SET_CONFIG: WorkingSetConfig = {
   enabled: false,
   persist: true,
-  maxChars: 1200,
-  maxItemsPerSection: 3,
-  maxGoalChars: 200,
-  maxItemChars: 180,
+  maxChars: 240,
+  maxItemsPerSection: 2,
+  maxGoalChars: 120,
+  maxItemChars: 100,
 };
 
 const DEFAULT_RECEIPTS_CONFIG: ReceiptsConfig = {
@@ -1375,6 +1375,23 @@ function dedupeStable(lines: string[], maxItems: number): string[] {
   return out;
 }
 
+function dedupeStableItems<T extends { line: string }>(items: T[], maxItems: number): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+
+  for (const item of items) {
+    const line = item.line.trim();
+    if (!line) continue;
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+    if (out.length >= maxItems) break;
+  }
+
+  return out;
+}
+
 function extractPromptOpenQuestions(prompt: string, maxItems: number, maxItemChars: number): string[] {
   const lines = prompt
     .split(/\r?\n/)
@@ -1392,6 +1409,7 @@ function buildWorkingSetBundle(input: {
 }): {
   slot: PackedMemorySlot | null;
   receipt: RecallWorkingSetReceipt;
+  consumedIds: string[];
 } {
   const disabledReceipt: RecallWorkingSetReceipt = {
     enabled: input.cfg.enabled,
@@ -1405,17 +1423,21 @@ function buildWorkingSetBundle(input: {
       nextActions: 0,
       openQuestions: 0,
     },
+    consumedCount: 0,
+    suppressedRecallCount: 0,
     persisted: false,
   };
 
   if (!input.cfg.enabled) {
-    return { slot: null, receipt: disabledReceipt };
+    return { slot: null, receipt: disabledReceipt, consumedIds: [] };
   }
 
   const maxItems = input.cfg.maxItemsPerSection;
   const maxItemChars = input.cfg.maxItemChars;
 
-  const goal = normalizeWorkingSetLine(input.prompt, input.cfg.maxGoalChars);
+  // The current user prompt is already in the model context; echoing it as a
+  // WorkingSet goal was pure context cost and encouraged answer verbosity.
+  const goal = "";
   const openQuestions = extractPromptOpenQuestions(input.prompt, Math.max(1, Math.min(3, maxItems)), maxItemChars);
 
   const sortedRows = [...input.rows]
@@ -1427,11 +1449,10 @@ function buildWorkingSetBundle(input: {
 
   const constraintCandidates = sortedRows
     .filter((row) => row.category === "preference" || row.category === "decision")
-    .map((row) => row.text)
-    .filter((text) =>
-      /(\b(?:must|only|never|don't|do not|avoid|required|forbid|forbidden)\b|必須|只能|不要|禁止|務必)/i.test(text),
+    .filter((row) =>
+      /(\b(?:must|only|never|don't|do not|avoid|required|forbid|forbidden)\b|必須|只能|不要|禁止|務必)/i.test(row.text),
     )
-    .map((text) => normalizeWorkingSetLine(text, maxItemChars));
+    .map((row) => ({ id: String(row.id ?? ""), line: normalizeWorkingSetLine(row.text, maxItemChars) }));
 
   const decisions = [...sortedRows]
     .filter((row) => row.category === "decision")
@@ -1442,20 +1463,33 @@ function buildWorkingSetBundle(input: {
       if (b.createdAt !== a.createdAt) return b.createdAt - a.createdAt;
       return a.id.localeCompare(b.id);
     })
-    .map((row) => normalizeWorkingSetLine(row.text, maxItemChars));
+    .map((row) => ({ id: String(row.id ?? ""), line: normalizeWorkingSetLine(row.text, maxItemChars) }));
 
   const nextActions = sortedRows
     .filter((row) => row.category === "todo")
-    .map((row) => normalizeWorkingSetLine(row.text, maxItemChars));
+    .map((row) => ({ id: String(row.id ?? ""), line: normalizeWorkingSetLine(row.text, maxItemChars) }));
 
-  const constraints = dedupeStable(constraintCandidates, maxItems);
-  const decisionsStable = dedupeStable(decisions, maxItems);
-  const nextActionsStable = dedupeStable(nextActions, maxItems);
+  const selectedConstraintItems = dedupeStableItems(constraintCandidates, maxItems);
+  const selectedDecisionItems = dedupeStableItems(decisions, maxItems);
+  const selectedNextActionItems = dedupeStableItems(nextActions, maxItems);
+  const constraints = selectedConstraintItems.map((item) => item.line);
+  const decisionsStable = selectedDecisionItems.map((item) => item.line);
+  const nextActionsStable = selectedNextActionItems.map((item) => item.line);
+  const consumedIds = [...selectedConstraintItems, ...selectedDecisionItems, ...selectedNextActionItems]
+    .map((item) => item.id.trim())
+    .filter(Boolean);
 
-  const lines: string[] = [
-    `[working_set v1] scope=${input.scope}`,
-    `updatedAt=${new Date(input.nowMs).toISOString()}`,
-  ];
+  if (constraints.length + decisionsStable.length + nextActionsStable.length === 0) {
+    return { slot: null, receipt: disabledReceipt, consumedIds: [] };
+  }
+
+  // Low-signal WorkingSets cost more than they stabilize. Keep single-item
+  // bundles only when they carry an explicit constraint.
+  if (consumedIds.length < 2 && constraints.length === 0) {
+    return { slot: null, receipt: disabledReceipt, consumedIds: [] };
+  }
+
+  const lines: string[] = [];
 
   if (goal) {
     lines.push(`goal: ${goal}`);
@@ -1483,7 +1517,7 @@ function buildWorkingSetBundle(input: {
 
   let text = lines.join("\n").trim();
   if (!text) {
-    return { slot: null, receipt: disabledReceipt };
+    return { slot: null, receipt: disabledReceipt, consumedIds: [] };
   }
 
   if (text.length > input.cfg.maxChars) {
@@ -1512,8 +1546,11 @@ function buildWorkingSetBundle(input: {
         nextActions: nextActionsStable.length,
         openQuestions: openQuestions.length,
       },
+      consumedCount: Array.from(new Set(consumedIds)).length,
+      suppressedRecallCount: 0,
       persisted: false,
     },
+    consumedIds: Array.from(new Set(consumedIds)),
   };
 }
 
@@ -1978,6 +2015,8 @@ type RecallWorkingSetReceipt = {
     nextActions: number;
     openQuestions: number;
   };
+  consumedCount: number;
+  suppressedRecallCount: number;
   persisted: boolean;
 };
 
@@ -2307,6 +2346,8 @@ function renderAutoRecallReceiptComment(receipt: RecallLifecycleReceipt, cfg: Re
           id: receipt.workingSet.id,
           chars: receipt.workingSet.chars,
           sections: receipt.workingSet.sections,
+          consumedCount: receipt.workingSet.consumedCount,
+          suppressedRecallCount: receipt.workingSet.suppressedRecallCount,
           persisted: receipt.workingSet.persisted,
         }
       : undefined,
@@ -6085,15 +6126,28 @@ const memoryPlugin = {
             }
 
             const workingSetRows = workingSetCfg.enabled
-              ? await db
-                  .listRecentByScopeCategories(scopeInfo.scope, ["preference", "decision", "todo"], 36)
-                  .catch(() => [] as MemoryScalarRow[])
+              ? selectedForInjection.map((hit) => hit.row).filter((row) => !isWorkingSetMemoryId(String(row.id ?? "")))
               : [];
+            const stickyWorkingSetRows = workingSetCfg.enabled
+              ? (
+                  await db
+                    .listRecentByScopeCategories(scopeInfo.scope, ["preference", "decision"], 12)
+                    .catch(() => [] as MemoryScalarRow[])
+                )
+                  .filter((row) => row.importance_label === "must_remember")
+                  .filter((row) => !isWorkingSetMemoryId(String(row.id ?? "")))
+                  .slice(0, 8)
+              : [];
+            const workingSetRowsById = new Map<string, MemoryScalarRow>();
+            for (const row of [...workingSetRows, ...stickyWorkingSetRows]) {
+              const id = String(row.id ?? "").trim();
+              if (id && !workingSetRowsById.has(id)) workingSetRowsById.set(id, row);
+            }
 
             const workingSetBundle = buildWorkingSetBundle({
               scope: scopeInfo.scope,
               prompt: trimmedPrompt,
-              rows: workingSetRows,
+              rows: Array.from(workingSetRowsById.values()),
               nowMs: recallNowMs,
               cfg: workingSetCfg,
             });
@@ -6142,6 +6196,8 @@ const memoryPlugin = {
                       nextActions: 0,
                       openQuestions: 0,
                     },
+                    consumedCount: 0,
+                    suppressedRecallCount: 0,
                     persisted: false,
                   }),
                   persisted: true,
@@ -6153,7 +6209,18 @@ const memoryPlugin = {
               }
             }
 
-            const memorySlots: PackedMemorySlot[] = selectedForInjection.map((hit) => {
+            const workingSetConsumedIds = new Set(workingSetBundle.consumedIds);
+            const memoryHitsForInjection = workingSetSlot
+              ? selectedForInjection.filter((hit) => !workingSetConsumedIds.has(String(hit.row.id ?? "").trim()))
+              : selectedForInjection;
+            if (workingSetReceipt && workingSetSlot) {
+              workingSetReceipt = {
+                ...workingSetReceipt,
+                suppressedRecallCount: selectedForInjection.length - memoryHitsForInjection.length,
+              };
+            }
+
+            const memorySlots: PackedMemorySlot[] = memoryHitsForInjection.map((hit) => {
               const normalizedImportance = toImportanceRecord(hit.row.importance);
               const normalizedLabel = resolveImportanceLabel(normalizedImportance, hit.row.importance_label);
               return {

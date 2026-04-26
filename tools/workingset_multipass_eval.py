@@ -160,12 +160,11 @@ def subject_packet(case: Dict[str, Any], *, arm_id: str, working_set_enabled: bo
             "Do not assume access to the operator's main session history.",
             "Keep durable rules active only when relevant to the current turn.",
         ],
-        "working_set_policy_under_test": [
-            "First relevant exposure may use full item text if budget permits.",
-            "Recently visible item should be skipped or compressed to ref:id plus one-line reminder.",
-            "Task changes require a fresh relevance gate.",
-            "Trim WorkingSet before higher-precision task-specific recall under budget pressure.",
-        ] if working_set_enabled else [],
+        # Keep subject-visible instructions symmetric across arms. Earlier proxy
+        # runs exposed candidate-only WorkingSet policy text here, which can
+        # bias style/verbosity and make the candidate sound more editorial than
+        # a real plugin-hook injection would.
+        "working_set_policy_under_test": [],
         "turns": [{"turn_index": i + 1, "prompt": prompt} for i, prompt in enumerate(case["turns"])],
         "expected_constraints_private_to_driver": case["expected_constraints"],
     }

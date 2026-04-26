@@ -122,8 +122,11 @@ Compute mechanically:
 
 `workingSet.enabled=true` only earns further investment if it shows a clear quality or stability lift that exceeds its context cost.
 
+Low context growth is **necessary but not sufficient**. A candidate that is merely cheap, or cheap-ish, still fails if reply quality is tied with baseline. Promotion requires a visible improvement in at least one user-facing dimension, for example: fewer missed constraints, cleaner task-switch re-gating, fewer repair prompts, earlier blocker detection, or materially less repetition at equal correctness.
+
 Fail / keep conservative if:
 
+- B quality is equivalent to A, even when context cost is low
 - B quality is equivalent to A but uses materially more context
 - B repeats the same WorkingSet ids across turns without compression
 - B evicts high-precision task-specific recall

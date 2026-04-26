@@ -282,21 +282,24 @@ Recommended enable snippet (Step 3):
 Rollback:
 - immediate kill switch: `autoCapture.captureTodo = false`
 
-### Rollout Step 4 — deterministic Working Set (canary-gated)
+### Rollout Step 4 — deterministic Working Set (canary-gated, frozen)
 
-Step 4 is now wired into the prompt-mutation path (`before_prompt_build` primary, `before_agent_start` fallback) behind a rollbackable config gate:
+Step 4 is wired into the prompt-mutation path (`before_prompt_build` primary, `before_agent_start` fallback) behind a rollbackable config gate:
 - `workingSet.enabled` (default `false`)
 - `workingSet.persist` (default `true`)
 - `workingSet.maxChars` / `maxItemsPerSection` / `maxGoalChars` / `maxItemChars`
 
+Current status: **frozen / default-off**. A/B review found no measured reply-quality lift over baseline recall, so Working Set should not be enabled by default or promoted on context-cost reduction alone.
+
 Behavior when enabled:
-- synthesize a per-scope working state blob from recent scoped memories + current prompt
-  - goal / constraints / decisions / next_actions / open_questions
-- pin Working Set as the first injected slot before normal recall results
+- synthesize a compact per-scope working state blob from selected scoped memories
+  - constraints / decisions / next_actions / open_questions
+- suppress raw recall hits already represented in the Working Set
+- pin Working Set as the first injected slot before remaining recall results
 - optional upsert persistence with deterministic ID `working_set:<scope>`
 
 Receipts:
-- recall lifecycle now includes optional `workingSet` summary (`generated`, `id`, `chars`, section counts, `persisted`)
+- recall lifecycle includes optional `workingSet` summary (`generated`, `id`, `chars`, section counts, `consumedCount`, `suppressedRecallCount`, `persisted`)
 
 Rollback:
 - `workingSet.enabled = false`

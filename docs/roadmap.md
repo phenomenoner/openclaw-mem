@@ -60,7 +60,7 @@ Acceptance criteria:
 - `memory_store/memory_recall/memory_forget` emit JSON receipts (filters, latency, counts).
 - M1 delivers a “concept → decisions/preferences” golden set where hybrid beats vector-only.
 - Scope hardening + receipt legibility are operator-debuggable (`scopeFallbackSuppressed`, `whySummary`, `whyTheseIds`).
-- Step4 Working Set rollout wiring exists behind config (`workingSet.enabled`) with rollbackable kill switch.
+- Step4 Working Set rollout wiring exists behind config (`workingSet.enabled`) with rollbackable kill switch. Current evaluation status: **frozen / default-off** after A/B review found no measured reply-quality lift over baseline recall.
 
 ### 1.7) Graphic Memory consumption (triggered preflight → pack integration)
 

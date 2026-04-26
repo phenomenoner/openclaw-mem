@@ -59,20 +59,23 @@ Guardrails:
 - Keep snapshot storage local-first and inspectable.
 - Do not make snapshots a prerequisite for simple sidecar use.
 
-### Slice 3 — WorkingSet selectivity before re-running A/B
+### Slice 3 — WorkingSet selectivity A/B conclusion
 
 Issue: `#67 workingSet A/B: no observed quality lift yet; consistent context-pressure cost`
-Internal eval plan: [WorkingSet multipass A/B eval plan v0 →](workingset-multipass-ab-eval-plan-v0.md)
+Eval plan: [WorkingSet multipass A/B eval plan v0 →](workingset-multipass-ab-eval-plan-v0.md)
 
-Why third:
-- Current evidence says WorkingSet adds context pressure without visible quality lift.
-- The right response is not deletion; it is making the feature smaller, more selective, and easier to turn off.
+Status: **frozen / default-off**.
 
-Acceptance criteria:
-- WorkingSet remains disabled or conservative by default unless a stronger win case is demonstrated.
-- Candidate selection is capped by tighter relevance / freshness / task-fit gates.
-- Receipts expose why each WorkingSet item was included and what was excluded by budget.
-- Re-run A/B only after the backbone is materially smaller and the multipass eval can measure repeated-context buildup across turns.
+Public conclusion:
+- WorkingSet remains available only behind `workingSet.enabled=false` by default.
+- A/B review did not show measured reply-quality lift over baseline recall.
+- The feature should not be promoted on lower context cost alone; promotion requires clear quality or stability improvement.
+- Further feature work is paused unless a future production-path evaluation shows a material win.
+
+Acceptance criteria now closed for this slice:
+- WorkingSet remains disabled by default.
+- Candidate selection was tightened and receipts expose consumed / suppressed recall counts.
+- Evaluation rule explicitly fails candidates that tie baseline quality, even if context growth is low.
 
 Guardrails:
 - Do not let WorkingSet become a second memory owner.

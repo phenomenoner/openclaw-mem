@@ -64,7 +64,7 @@ Recommended flow:
 ### Progress update (current cycle)
 - ✅ Scope hardening pass shipped (`skipFallbackOnInvalidScope` default-on + hardened scope-tag extraction).
 - ✅ Receipt UX pass shipped (`whySummary` + `whyTheseIds` + explicit fallback suppression markers).
-- ✅ Step4 wiring shipped behind canary flag (`workingSet.enabled`, deterministic synthesis + pinned injection + optional `working_set:<scope>` persistence).
+- ✅ Step4 wiring shipped behind canary flag (`workingSet.enabled`, deterministic synthesis + pinned injection + optional `working_set:<scope>` persistence). Current evaluation status: **frozen / default-off** because A/B review found no measured reply-quality lift over baseline recall.
 
 
 ### P0 — Immediate wins (days)

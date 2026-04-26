@@ -161,4 +161,28 @@ def test_scope_budget_contract_markers_present_in_ts_and_schema():
     assert budget["overflowAction"]["default"] == "truncate_oldest"
     assert working_set["enabled"]["default"] is False
     assert working_set["persist"]["default"] is True
-    assert working_set["maxItemsPerSection"]["default"] == 3
+    assert working_set["maxChars"]["default"] == 240
+    assert working_set["maxItemsPerSection"]["default"] == 2
+    assert working_set["maxGoalChars"]["default"] == 120
+    assert working_set["maxItemChars"]["default"] == 100
+
+
+def test_working_set_compression_markers_present():
+    ts = INDEX_TS.read_text("utf-8")
+
+    assert "maxChars: 240" in ts
+    assert "maxItemsPerSection: 2" in ts
+    assert "maxItemChars: 100" in ts
+    assert "const goal = \"\"" in ts
+    assert "dedupeStableItems" in ts
+    assert "selectedConstraintItems" in ts
+    assert "selectedDecisionItems" in ts
+    assert "selectedNextActionItems" in ts
+    assert "consumedIds" in ts
+    assert "workingSetConsumedIds" in ts
+    assert "selectedForInjection.filter((hit) => !workingSetConsumedIds.has" in ts
+    assert "constraints.length + decisionsStable.length + nextActionsStable.length === 0" in ts
+    assert "consumedIds.length < 2 && constraints.length === 0" in ts
+    assert "suppressedRecallCount" in ts
+    assert "stickyWorkingSetRows" in ts
+    assert "row.importance_label === \"must_remember\"" in ts
