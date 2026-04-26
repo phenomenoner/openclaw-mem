@@ -586,9 +586,13 @@ Deliverables:
   - `summary-only` (current default)
   - `head-tail` (bounded content)
 - Explicit allowlist/denylist support per tool, with redaction on.
+- Shipped hardening follow-up (2026-04-27): bounded black-box runtime checks for sidecar/plugin tool-result summaries now run against the shared secret-detector corpus to ensure high-risk patterns are redacted while benign docs text remains visible.
 
 Acceptance criteria:
 - Operators can enable aggressive pruning without losing the ability to recover key tool outcomes from `openclaw-mem`.
+- Focused verification stays cheap and deterministic:
+  - `python3 -m pytest tests/test_plugin_episodic_summary_runtime.py tests/test_plugin_episodic_spool.py tests/test_episodic_secret_detection.py -q`
+  - `node --test extensions/openclaw-mem/toolResultSummary.test.mjs`
 
 ### 11) Contract hardening (interface-first) — stable schemas + fail-fast validation
 

@@ -2,6 +2,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { buildToolResultSummary } from "./toolResultSummary.js";
 
 const DEFAULT_OUTPUT = "memory/openclaw-mem-observations.jsonl";
 const DEFAULT_EPISODIC_OUTPUT = "memory/openclaw-mem-episodes.jsonl";
@@ -323,17 +324,6 @@ function looksLikeFailureSignal(summary: string): boolean {
   const s = (summary || "").toLowerCase();
   if (!s) return false;
   return /(error|failed|failure|exception|traceback|timeout|rate\s*limit|429|denied)/i.test(s);
-}
-
-function buildToolResultSummary(toolName: string, message: unknown, redactSensitive: boolean, maxLength: number): string {
-  const raw = extractSummary(message, redactSensitive);
-  const compact = raw.replace(/\s+/g, " ").trim();
-  if (!compact) return `${toolName} result captured`;
-  if (compact.startsWith("{") || compact.startsWith("[")) return `${toolName} result captured`;
-  if (/(stdout|stderr|traceback|stack\s*trace|command output)/i.test(compact)) {
-    return `${toolName} result captured (output redacted)`;
-  }
-  return shortText(`${toolName}: ${compact}`, maxLength);
 }
 
 function buildAgentEndAlertSummary(maxLength: number): string {

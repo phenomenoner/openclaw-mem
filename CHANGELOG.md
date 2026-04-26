@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened secret-like detection for capture lanes by adding deterministic high-risk patterns (OpenAI `sk-proj` keys, `github_pat` tokens, AWS secret-access-key assignments, and long Bearer auth values) across mem-engine autoCapture and episodic CLI helpers, while keeping autoCapture receipts aggregate-only (`filteredOut.secrets_like`) so skip evidence stays bounded and non-leaking.
 - Added a shared synthetic secret-detector golden corpus (`tests/data/SECRET_DETECTOR_GOLDEN.v1.json`) and wired it into mem-engine source-contract guards, episodic CLI secret guard tests, and sidecar/plugin redaction coverage so drift is caught from one source of truth.
 - Expanded sidecar/plugin redaction coverage for `github_pat` and AWS secret-access-key assignment patterns to match the hardened high-risk corpus.
+- Added a bounded runtime-side black-box summary test for `extensions/openclaw-mem` (`toolResultSummary.js` + `toolResultSummary.test.mjs`) so episodic tool-result summaries are validated against the shared secret-detector golden corpus for leak suppression and benign-pass behavior.
 
 ### Testing
 
@@ -35,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regression coverage for deterministic profile pass/fail behavior, runner baseline-comparator transient-vs-persistent classification, parser flag propagation, and posture-review baseline surface fields.
 - Added secret-hardening regression coverage for episodic extraction/guardrails (new token families redacted with null payload, no secret echo in guard errors) plus mem-engine autoCapture receipt-boundedness/source-contract checks.
 - Added shared-golden regression checks in both Python and Node test lanes, including `extensions/openclaw-mem-engine/secretDetectorGolden.test.mjs`, so mem-engine and sidecar/plugin anchors stay in sync with the shared corpus.
+- Added sidecar/plugin behavioral runtime coverage for emitted tool-result summaries via `extensions/openclaw-mem/toolResultSummary.test.mjs` (invoked by `tests/test_plugin_episodic_summary_runtime.py`).
 
 ## [1.8.0] - 2026-04-18
 
