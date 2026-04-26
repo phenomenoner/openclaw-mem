@@ -9,10 +9,20 @@ NODE_BEHAVIOR_TEST = Path(__file__).resolve().parents[1] / "extensions" / "openc
 NODE_PERSIST_E2E_TEST = Path(__file__).resolve().parents[1] / "extensions" / "openclaw-mem" / "toolResultPersistE2E.test.mjs"
 
 
-def test_plugin_uses_shared_tool_result_summary_runtime_helper():
+def test_plugin_uses_public_tool_result_summary_runtime_surface():
     ts = INDEX_TS.read_text("utf-8")
-    assert 'import { buildToolResultSummary } from "./toolResultSummary.js";' in ts
-    assert "const resultSummary = buildToolResultSummary(toolName, event.message, redactSensitive, episodesSummaryMaxLength);" in ts
+
+    assert re.search(
+        r"import\s*\{\s*buildToolResultSummary\s*\}\s*from\s*[\"']\./toolResultSummary\.js[\"'];",
+        ts,
+    ), "index.ts must import buildToolResultSummary from ./toolResultSummary.js"
+    assert re.search(r"\bbuildToolResultSummary\s*\(", ts), "index.ts must call buildToolResultSummary"
+    assert not re.search(r"\bfunction\s+buildToolResultSummary\s*\(", ts), (
+        "index.ts must not define local buildToolResultSummary; use ./toolResultSummary.js export"
+    )
+    assert not re.search(r"\b(?:const|let|var)\s+buildToolResultSummary\s*=", ts), (
+        "index.ts must not rebind buildToolResultSummary locally"
+    )
 
 
 def test_tool_result_summary_exports_output_field_keys_symbol():
