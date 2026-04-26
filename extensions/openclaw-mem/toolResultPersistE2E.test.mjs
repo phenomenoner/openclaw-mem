@@ -57,7 +57,7 @@ function createFakeApi({ stateDir, pluginConfig }) {
   };
 }
 
-test('tool_result_persist runtime path writes redacted/non-leaking episodic tool.result lines', () => {
+test('tool_result_persist runtime path writes redacted/non-leaking episodic tool.result lines (including stdout/stderr collapse)', () => {
   const corpus = loadCorpus();
   const highRisk = corpus.cases.find(
     (entry) => entry.class === 'high_risk' && entry?.plugin?.redactionAnchor && (entry?.episodic?.leakNeedles || []).length > 0,
@@ -111,6 +111,21 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
     handler(
       {
         toolName: 'memory_recall',
+        toolCallId: 'call-stdout',
+        message: buildMessage(
+          `stdout: ${highRisk.sample}\nstderr: synthetic failure trace ${highRisk.episodic.leakNeedles?.[0] || 'needle'}`,
+        ),
+      },
+      {
+        sessionKey: 'session-1',
+        agentId: 'agent-1',
+        toolName: 'memory_recall',
+      },
+    );
+
+    handler(
+      {
+        toolName: 'memory_recall',
         toolCallId: 'call-benign',
         message: buildMessage(benign.sample),
       },
@@ -131,11 +146,13 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
 
     const parsed = rawLines.map((line) => ({ raw: line, json: JSON.parse(line) }));
     const resultRows = parsed.filter((row) => row.json.type === 'tool.result');
-    assert.equal(resultRows.length, 2, 'expected exactly two tool.result rows');
+    assert.equal(resultRows.length, 3, 'expected exactly three tool.result rows');
 
     const highRow = resultRows.find((row) => row.json?.payload?.tool_call_id === 'call-high');
+    const stdoutRow = resultRows.find((row) => row.json?.payload?.tool_call_id === 'call-stdout');
     const benignRow = resultRows.find((row) => row.json?.payload?.tool_call_id === 'call-benign');
     assert.ok(highRow, 'missing high-risk tool.result row');
+    assert.ok(stdoutRow, 'missing stdout/stderr-style tool.result row');
     assert.ok(benignRow, 'missing benign tool.result row');
 
     const highSummary = String(highRow.json.summary || '');
@@ -152,6 +169,26 @@ test('tool_result_persist runtime path writes redacted/non-leaking episodic tool
       assert.equal(highRow.raw.includes(needle), false, `high-risk JSONL row leaked needle: ${needle}`);
     }
     assert.equal(highRow.raw.includes(highRisk.sample), false, 'high-risk JSONL row leaked full sample');
+
+    const stdoutSummary = String(stdoutRow.json.summary || '');
+    const stdoutResultSummary = String(stdoutRow.json?.payload?.result_summary || '');
+    const expectedStdoutSummary = 'memory_recall result captured (output redacted)';
+
+    assert.equal(stdoutSummary, expectedStdoutSummary, 'stdout/stderr summary should collapse to bounded redacted posture');
+    assert.equal(
+      stdoutResultSummary,
+      expectedStdoutSummary,
+      'stdout/stderr payload summary should collapse to bounded redacted posture',
+    );
+    assert.equal(stdoutSummary.length <= summaryCap + 1, true, 'stdout/stderr summary should stay bounded');
+    assert.equal(stdoutRow.raw.includes('stdout:'), false, 'stdout/stderr JSONL row should not include raw stdout text');
+    assert.equal(stdoutRow.raw.includes('stderr:'), false, 'stdout/stderr JSONL row should not include raw stderr text');
+    for (const needle of highRisk.episodic.leakNeedles || []) {
+      assert.equal(stdoutSummary.includes(needle), false, `stdout/stderr summary leaked needle: ${needle}`);
+      assert.equal(stdoutResultSummary.includes(needle), false, `stdout/stderr payload summary leaked needle: ${needle}`);
+      assert.equal(stdoutRow.raw.includes(needle), false, `stdout/stderr JSONL row leaked needle: ${needle}`);
+    }
+    assert.equal(stdoutRow.raw.includes(highRisk.sample), false, 'stdout/stderr JSONL row leaked full sample');
 
     const benignSummary = String(benignRow.json.summary || '');
     const benignResultSummary = String(benignRow.json?.payload?.result_summary || '');
