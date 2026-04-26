@@ -174,6 +174,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         self.assertEqual(args.python, "python3")
         self.assertTrue(args.allow_apply)
         self.assertFalse(args.approve_importance)
+        self.assertFalse(args.approve_soft_archive)
         self.assertEqual(args.scope, "team/alpha")
         self.assertEqual(args.importance_drift_profile, "balanced")
         self.assertEqual(args.importance_drift_baseline_limit, 8)

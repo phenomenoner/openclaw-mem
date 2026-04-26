@@ -1912,6 +1912,7 @@ def build_evolution_review(
     )
 
     stale = ((review.get("signals") or {}).get("staleness") or {})
+    soft_archive = ((review.get("signals") or {}).get("soft_archive_candidates") or {})
     recent_use = ((review.get("signals") or {}).get("recent_use") or {})
     importance_drift = ((review.get("signals") or {}).get("importance_drift") or {})
     importance_drift_policy_card = (
@@ -1981,6 +1982,55 @@ def build_evolution_review(
                 risk_reasons.append("recent_use_conflict")
             else:
                 risk_reasons.append("no_recent_use_conflict")
+        elif action == "set_soft_archive_candidate":
+            lifecycle_patch = patch.get("lifecycle") if isinstance(patch.get("lifecycle"), dict) else {}
+            age_days = evidence.get("age_days")
+            recent_use_count = int(evidence.get("recent_use_count") or 0)
+            threshold = evidence.get("threshold_days")
+            importance_label = str(evidence.get("importance") or "")
+            lifecycle_archived_at = evidence.get("lifecycle_archived_at")
+            archive_reason_code = str(lifecycle_patch.get("archive_reason_code") or "")
+            if lifecycle_patch.get("soft_archive_candidate") is not True:
+                return {
+                    "risk_level": "high",
+                    "risk_reasons": ["invalid_soft_archive_patch"],
+                    "auto_apply_eligible": False,
+                    "safe_for_auto_apply": False,
+                }
+            if lifecycle_patch.get("set_archived_at") is not True:
+                return {
+                    "risk_level": "high",
+                    "risk_reasons": ["soft_archive_patch_missing_set_archived_at"],
+                    "auto_apply_eligible": False,
+                    "safe_for_auto_apply": False,
+                }
+            if archive_reason_code not in {"stale_low_importance", "operator_override"}:
+                return {
+                    "risk_level": "high",
+                    "risk_reasons": ["invalid_soft_archive_reason_code"],
+                    "auto_apply_eligible": False,
+                    "safe_for_auto_apply": False,
+                }
+            risk_reasons.extend(["bounded_soft_archive_patch", "archive_first_signal_present"])
+            if age_days is None or threshold is None:
+                risk_level = "medium"
+                risk_reasons.append("staleness_evidence_incomplete")
+            elif int(age_days) < int(threshold):
+                risk_level = "medium"
+                risk_reasons.append("below_staleness_threshold")
+            else:
+                risk_reasons.append("age_threshold_met")
+            if recent_use_count > 0:
+                risk_level = "medium"
+                risk_reasons.append("recent_use_conflict")
+            else:
+                risk_reasons.append("no_recent_use_conflict")
+            if importance_label == "must_remember":
+                risk_level = "medium"
+                risk_reasons.append("must_remember_protected")
+            if isinstance(lifecycle_archived_at, str) and lifecycle_archived_at.strip():
+                risk_level = "medium"
+                risk_reasons.append("already_archived")
         elif action == "adjust_importance_score":
             importance_patch = patch.get("importance") if isinstance(patch.get("importance"), dict) else {}
             try:
@@ -2115,6 +2165,59 @@ def build_evolution_review(
                 patch=item["patch"],
                 evidence=item["evidence"],
                 safe_for_auto_apply=True,
+            )
+        )
+        items.append(item)
+
+    soft_archive_threshold_days = int(soft_archive.get("stale_days_threshold") or threshold_days)
+    for raw in list(soft_archive.get("items") or [])[:top]:
+        if not isinstance(raw, dict):
+            continue
+        obs_id = int(raw.get("id") or 0)
+        if obs_id <= 0:
+            continue
+        candidate_obs_ids.add(obs_id)
+        item = {
+                "candidate_id": str(raw.get("candidate_id") or f"soft-archive-candidate-{obs_id}"),
+                "action": "set_soft_archive_candidate",
+                "confidence": 0.76,
+                "reasons": [
+                    "archive_first",
+                    "stale_low_importance",
+                    "recent_use_not_observed",
+                    f"older_than_{soft_archive_threshold_days}d",
+                ],
+                "target": {
+                    "observationId": obs_id,
+                    "recordRef": f"obs:{obs_id}",
+                    "scope": raw.get("scope"),
+                },
+                "patch": {
+                    "lifecycle": {
+                        "soft_archive_candidate": True,
+                        "set_archived_at": True,
+                        "archive_reason_code": "stale_low_importance",
+                    }
+                },
+                "evidence_refs": [f"obs:{obs_id}"],
+                "evidence": {
+                    "signal": "soft_archive_candidates",
+                    "age_days": raw.get("age_days"),
+                    "threshold_days": soft_archive_threshold_days,
+                    "recent_use_count": int(raw.get("recent_use_count") or 0),
+                    "importance": raw.get("importance"),
+                    "summary_preview": raw.get("summary_preview"),
+                    "lifecycle_archived_at": raw.get("lifecycle_archived_at"),
+                    "protected_recent_use_rows": int(soft_archive.get("protected_recent_use") or 0),
+                },
+        }
+        item.update(
+            classify_candidate(
+                action=item["action"],
+                target=item["target"],
+                patch=item["patch"],
+                evidence=item["evidence"],
+                safe_for_auto_apply=False,
             )
         )
         items.append(item)
@@ -2268,7 +2371,7 @@ def build_evolution_review(
             "memory_mutation": "none",
             "query_only_enforced": True,
             "governor_required": True,
-            "supported_apply_actions": ["set_stale_candidate", "adjust_importance_score"],
+            "supported_apply_actions": ["set_stale_candidate", "adjust_importance_score", "set_soft_archive_candidate"],
             "auto_apply_without_governor": False,
         },
         "counts": {

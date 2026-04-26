@@ -19,12 +19,16 @@ The lane runs this packet chain:
 The shipped write whitelist is currently limited to:
 - `detail_json.lifecycle.stale_candidate`
 - `detail_json.lifecycle.stale_reason_code`
+- `detail_json.lifecycle.soft_archive_candidate`
+- `detail_json.lifecycle.archived_at`
+- `detail_json.lifecycle.archive_reason_code`
 - `detail_json.importance.score`
 - `detail_json.importance.label`
 - bounded `detail_json.optimization.assist` metadata
 
 Current bounded low-risk families include:
 - stale lifecycle marking
+- governed soft-archive lifecycle marking (`set_soft_archive_candidate`, explicit governor flag required)
 - bounded importance downshift
 - score-label alignment with `delta = 0`
 
@@ -131,6 +135,7 @@ The runner now supports a bounded controller lane:
 
 It also persists bounded family-level state:
 - `stale_candidate`
+- `soft_archive_candidate`
 - `importance_downshift`
 - `score_label_alignment`
 
@@ -202,6 +207,7 @@ python tools/optimize_assist_runner.py --allow-apply --json
 - `--max-importance-adjustments-per-24h 10`
 - `--no-approve-importance`
 - `--no-approve-stale`
+- `--approve-soft-archive`
 - `--controller-mode canary_apply`
 - `--challenger-policy-mode strict_v1`
 - `--challenger-enforce-quarantine`

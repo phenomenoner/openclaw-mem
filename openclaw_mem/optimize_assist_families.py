@@ -4,6 +4,7 @@ from typing import Any, Mapping
 
 FAMILY_NAMES = (
     "stale_candidate",
+    "soft_archive_candidate",
     "importance_downshift",
     "score_label_alignment",
 )
@@ -14,6 +15,8 @@ def action_family_from_action_patch(action: Any, patch: Any) -> str:
     patch_obj = patch if isinstance(patch, Mapping) else {}
     if action_name == "set_stale_candidate":
         return "stale_candidate"
+    if action_name == "set_soft_archive_candidate":
+        return "soft_archive_candidate"
     if action_name == "adjust_importance_score":
         importance_patch = patch_obj.get("importance") if isinstance(patch_obj.get("importance"), Mapping) else {}
         reason_code = str(importance_patch.get("reason_code") or "").strip()

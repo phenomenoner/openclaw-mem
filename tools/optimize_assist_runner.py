@@ -749,6 +749,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-approve-importance", dest="approve_importance", action="store_false", help="Keep low-risk importance adjustments as proposal_only")
     p.add_argument("--approve-stale", dest="approve_stale", action="store_true", default=True, help="Approve stale candidates at governor stage (default: true)")
     p.add_argument("--no-approve-stale", dest="approve_stale", action="store_false", help="Keep stale candidates as proposal_only")
+    p.add_argument("--approve-soft-archive", dest="approve_soft_archive", action="store_true", default=False, help="Approve low-risk soft-archive candidates at governor stage (default: false)")
     p.add_argument("--scope", default=None, help="Optional normalized detail.scope filter")
     p.add_argument("--limit", type=int, default=1000, help="Max observation rows to scan in evolution-review")
     p.add_argument("--stale-days", type=int, default=60, help="Staleness threshold in days")
@@ -831,10 +832,12 @@ def _build_governor_cmd(args: argparse.Namespace, evolution_path: Path) -> list[
         args.operator,
         "--json",
     ]
-    if args.approve_importance:
+    if bool(getattr(args, "approve_importance", False)):
         cmd.append("--approve-importance")
-    if args.approve_stale:
+    if bool(getattr(args, "approve_stale", False)):
         cmd.append("--approve-stale")
+    if bool(getattr(args, "approve_soft_archive", False)):
+        cmd.append("--approve-soft-archive")
     return cmd
 
 

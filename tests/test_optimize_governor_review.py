@@ -21,6 +21,7 @@ class TestOptimizeGovernorReview(unittest.TestCase):
                 "--approve-refresh",
                 "--approve-importance",
                 "--approve-stale",
+                "--approve-soft-archive",
             ]
         )
         self.assertEqual(args.cmd, "optimize")
@@ -30,6 +31,7 @@ class TestOptimizeGovernorReview(unittest.TestCase):
         self.assertTrue(args.approve_refresh)
         self.assertTrue(args.approve_importance)
         self.assertTrue(args.approve_stale)
+        self.assertTrue(args.approve_soft_archive)
 
     def test_governor_review_defaults_refresh_to_proposal_only(self):
         conn = _connect(":memory:")
@@ -235,6 +237,70 @@ class TestOptimizeGovernorReview(unittest.TestCase):
         self.assertEqual(out["items"][0]["decision"], "proposal_only")
         self.assertIn("classifier_requires_review", out["items"][0]["reasons"])
         self.assertEqual(out["items"][0]["risk_reasons"], ["higher_value_memory_requires_review"])
+        conn.close()
+
+    def test_governor_review_soft_archive_requires_explicit_approval_flag(self):
+        conn = _connect(":memory:")
+        packet = {
+            "kind": "openclaw-mem.optimize.evolution-review.v0",
+            "items": [
+                {
+                    "candidate_id": "soft-archive-candidate-12",
+                    "action": "set_soft_archive_candidate",
+                    "risk_level": "low",
+                    "auto_apply_eligible": False,
+                    "target": {"observationId": 12, "recordRef": "obs:12"},
+                    "patch": {"lifecycle": {"soft_archive_candidate": True, "set_archived_at": True, "archive_reason_code": "stale_low_importance"}},
+                    "evidence_refs": ["obs:12"],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "evolution.json"
+            path.write_text(json.dumps(packet), encoding="utf-8")
+
+            args_default = type(
+                "Args",
+                (),
+                {
+                    "from_file": str(path),
+                    "governor": "lyria",
+                    "approve_refresh": False,
+                    "approve_importance": False,
+                    "approve_stale": False,
+                    "approve_soft_archive": False,
+                    "json": True,
+                },
+            )()
+            default_buf = io.StringIO()
+            with redirect_stdout(default_buf):
+                cmd_optimize_governor_review(conn, args_default)
+            out_default = json.loads(default_buf.getvalue())
+            self.assertEqual(out_default["counts"]["approvedForApply"], 0)
+            self.assertEqual(out_default["counts"]["proposalOnly"], 1)
+            self.assertIn("awaiting_governor_soft_archive_approval", out_default["items"][0]["reasons"])
+
+            args_approved = type(
+                "Args",
+                (),
+                {
+                    "from_file": str(path),
+                    "governor": "lyria",
+                    "approve_refresh": False,
+                    "approve_importance": False,
+                    "approve_stale": False,
+                    "approve_soft_archive": True,
+                    "json": True,
+                },
+            )()
+            approved_buf = io.StringIO()
+            with redirect_stdout(approved_buf):
+                cmd_optimize_governor_review(conn, args_approved)
+            out_approved = json.loads(approved_buf.getvalue())
+            self.assertEqual(out_approved["counts"]["approvedForApply"], 1)
+            self.assertEqual(out_approved["items"][0]["decision"], "approved_for_apply")
+            self.assertEqual(out_approved["items"][0]["recommended_action"], "set_soft_archive_candidate")
+            self.assertIn("approve_soft_archive_enabled", out_approved["items"][0]["reasons"])
         conn.close()
 
 

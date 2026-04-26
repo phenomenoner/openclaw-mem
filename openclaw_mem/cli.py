@@ -2128,6 +2128,7 @@ def _optimize_governor_review_item(
     approve_refresh: bool,
     approve_importance: bool,
     approve_stale: bool,
+    approve_soft_archive: bool,
     governor: str,
     index: int,
 ) -> Dict[str, Any]:
@@ -2179,6 +2180,42 @@ def _optimize_governor_review_item(
             else:
                 decision = 'proposal_only'
                 decision_reasons = ['stale_patch_valid', 'awaiting_governor_approval']
+    elif source_kind == 'openclaw-mem.optimize.evolution-review.v0' and action == 'set_soft_archive_candidate':
+        obs_id = int(target.get('observationId') or 0)
+        lifecycle_patch = patch.get('lifecycle') if isinstance(patch.get('lifecycle'), dict) else {}
+        archive_reason_code = str(lifecycle_patch.get('archive_reason_code') or '').strip()
+        if obs_id <= 0:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['missing_observation_id']
+        elif lifecycle_patch.get('soft_archive_candidate') is not True:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['invalid_soft_archive_patch']
+        elif lifecycle_patch.get('set_archived_at') is not True:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['soft_archive_patch_missing_set_archived_at']
+        elif archive_reason_code not in {'stale_low_importance', 'operator_override'}:
+            decision = 'blocked_high_risk'
+            risk_level = 'high'
+            decision_reasons = ['invalid_soft_archive_reason_code']
+        else:
+            if not evidence_refs:
+                evidence_refs = [f'obs:{obs_id}']
+            apply_lane = 'observations.assist'
+            if risk_level == 'high':
+                decision = 'blocked_high_risk'
+                decision_reasons = ['classifier_blocked_auto_apply']
+            elif risk_level != 'low':
+                decision = 'proposal_only'
+                decision_reasons = ['classifier_requires_review']
+            elif approve_soft_archive:
+                decision = 'approved_for_apply'
+                decision_reasons = ['soft_archive_patch_valid', 'approve_soft_archive_enabled']
+            else:
+                decision = 'proposal_only'
+                decision_reasons = ['soft_archive_patch_valid', 'awaiting_governor_soft_archive_approval']
     elif source_kind == 'openclaw-mem.optimize.evolution-review.v0' and action == 'adjust_importance_score':
         obs_id = int(target.get('observationId') or 0)
         importance_patch = patch.get('importance') if isinstance(patch.get('importance'), dict) else {}
@@ -2404,6 +2441,8 @@ def _optimize_effect_followup_action_family(item: Dict[str, Any]) -> str:
     proposal_id = str(item.get('proposal_id') or '')
     if proposal_id.startswith('stale-candidate-'):
         return 'set_stale_candidate'
+    if proposal_id.startswith('soft-archive-candidate-'):
+        return 'set_soft_archive_candidate'
     if proposal_id.startswith('importance-downshift-') or proposal_id.startswith('importance-upshift-'):
         return 'adjust_importance_score'
     return 'unknown'
@@ -2477,6 +2516,19 @@ def _optimize_effect_followup_item(
         else:
             effect_summary = 'insufficient_data'
             reasons.append('stale_mark_not_present')
+    elif family == 'set_soft_archive_candidate':
+        archived_at = lifecycle.get('archived_at') if isinstance(lifecycle.get('archived_at'), str) else None
+        current_signals['archived_at'] = archived_at
+        current_signals['archive_reason_code'] = lifecycle.get('archive_reason_code')
+        if current_recent_use_count > baseline_recent_use_count:
+            effect_summary = 'regressed'
+            reasons.append('recent_use_resurfaced_after_soft_archive')
+        elif archived_at:
+            effect_summary = 'neutral'
+            reasons.append('soft_archive_persisted_without_recent_use')
+        else:
+            effect_summary = 'insufficient_data'
+            reasons.append('soft_archive_not_present')
     elif family == 'adjust_importance_score':
         importance = detail.get('importance') if isinstance(detail.get('importance'), dict) else detail.get('importance')
         current_score = round(parse_importance_score(importance), 4)
@@ -2755,7 +2807,7 @@ def _optimize_assist_diff_summary(before_detail: Dict[str, Any], after_detail: D
     changes: List[Dict[str, Any]] = []
     before_lifecycle = before_detail.get('lifecycle') if isinstance(before_detail.get('lifecycle'), dict) else {}
     after_lifecycle = after_detail.get('lifecycle') if isinstance(after_detail.get('lifecycle'), dict) else {}
-    for key in ('stale_candidate', 'stale_reason_code'):
+    for key in ('stale_candidate', 'stale_reason_code', 'soft_archive_candidate', 'archived_at', 'archive_reason_code'):
         if before_lifecycle.get(key) != after_lifecycle.get(key):
             changes.append({'path': f'/lifecycle/{key}', 'before': before_lifecycle.get(key), 'after': after_lifecycle.get(key)})
     before_importance = before_detail.get('importance') if isinstance(before_detail.get('importance'), dict) else {}
@@ -2808,9 +2860,10 @@ def _optimize_assist_apply_item(
     operator: str,
     rollback_ref: str,
     applied_at: str,
+    recent_use_index: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     action = str(item.get('recommended_action') or '').strip()
-    if action not in {'set_stale_candidate', 'adjust_importance_score'}:
+    if action not in {'set_stale_candidate', 'adjust_importance_score', 'set_soft_archive_candidate'}:
         raise ValueError('unsupported_action_class')
 
     target = item.get('target') if isinstance(item.get('target'), dict) else {}
@@ -2868,6 +2921,66 @@ def _optimize_assist_apply_item(
             graded_at=applied_at,
             label=next_label,
         )
+    elif action == 'set_soft_archive_candidate':
+        lifecycle_patch = patch.get('lifecycle') if isinstance(patch.get('lifecycle'), dict) else {}
+        archive_reason_code = str(lifecycle_patch.get('archive_reason_code') or '').strip()
+        if lifecycle_patch.get('soft_archive_candidate') is not True:
+            raise ValueError('invalid_soft_archive_patch')
+        if lifecycle_patch.get('set_archived_at') is not True:
+            raise ValueError('soft_archive_patch_missing_set_archived_at')
+        if archive_reason_code not in {'stale_low_importance', 'operator_override'}:
+            raise ValueError('invalid_soft_archive_reason_code')
+
+        lifecycle_before = before_detail.get('lifecycle') if isinstance(before_detail.get('lifecycle'), dict) else {}
+        importance_label = label_from_score(parse_importance_score(before_detail.get('importance')))
+        if importance_label == 'must_remember':
+            return {
+                'observation_id': obs_id,
+                'proposal_id': str(item.get('candidate_id') or ''),
+                'before_detail_json': before_detail,
+                'after_detail_json': before_detail,
+                'before_sha256': _json_sha256(before_detail),
+                'after_sha256': _json_sha256(before_detail),
+                'diff_summary': [],
+                'applied': False,
+                'skip_reason': 'must_remember_protected',
+            }
+
+        archived_at_before = lifecycle_before.get('archived_at') if isinstance(lifecycle_before, dict) else None
+        if isinstance(archived_at_before, str) and archived_at_before.strip():
+            return {
+                'observation_id': obs_id,
+                'proposal_id': str(item.get('candidate_id') or ''),
+                'before_detail_json': before_detail,
+                'after_detail_json': before_detail,
+                'before_sha256': _json_sha256(before_detail),
+                'after_sha256': _json_sha256(before_detail),
+                'diff_summary': [],
+                'applied': False,
+                'skip_reason': 'already_archived_idempotent_skip',
+            }
+
+        evidence = item.get('evidence') if isinstance(item.get('evidence'), dict) else {}
+        evidence_recent_use_count = _optimize_policy_int(evidence.get('recent_use_count'), 0, min_value=0)
+        runtime_recent_use_count = int(((recent_use_index or {}).get(obs_id) or {}).get('count') or 0)
+        if runtime_recent_use_count > 0 or evidence_recent_use_count > 0:
+            return {
+                'observation_id': obs_id,
+                'proposal_id': str(item.get('candidate_id') or ''),
+                'before_detail_json': before_detail,
+                'after_detail_json': before_detail,
+                'before_sha256': _json_sha256(before_detail),
+                'after_sha256': _json_sha256(before_detail),
+                'diff_summary': [],
+                'applied': False,
+                'skip_reason': 'recent_use_conflict_protected',
+            }
+
+        lifecycle = after_detail.get('lifecycle') if isinstance(after_detail.get('lifecycle'), dict) else {}
+        lifecycle['soft_archive_candidate'] = True
+        lifecycle['archived_at'] = applied_at
+        lifecycle['archive_reason_code'] = archive_reason_code
+        after_detail['lifecycle'] = lifecycle
     after_detail['optimization'] = {
         **(after_detail.get('optimization') if isinstance(after_detail.get('optimization'), dict) else {}),
         'assist': {
@@ -2875,7 +2988,12 @@ def _optimize_assist_apply_item(
             'evidence_refs': [str(x) for x in list(item.get('evidence_refs') or []) if str(x)][:5],
             'applied_at': applied_at,
             'operator': operator,
+            'action': action,
             'rollback_ref': rollback_ref,
+            'soft_archive': {
+                'archive_reason_code': str(((patch.get('lifecycle') if isinstance(patch.get('lifecycle'), dict) else {}).get('archive_reason_code') or '')).strip() or None,
+                'archived_at': applied_at if action == 'set_soft_archive_candidate' else None,
+            },
             'effect': {
                 'measured_at': applied_at,
                 'effect_window': '24h',
@@ -2895,6 +3013,7 @@ def _optimize_assist_apply_item(
         'before_sha256': _json_sha256(before_detail),
         'after_sha256': _json_sha256(after_detail),
         'diff_summary': _optimize_assist_diff_summary(before_detail, after_detail),
+        'applied': True,
     }
 
 
@@ -2921,7 +3040,7 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
         item for item in all_items
         if str(item.get('decision') or '') == 'approved_for_apply'
         and str(item.get('apply_lane') or '') == lane
-        and str(item.get('recommended_action') or '') in {'set_stale_candidate', 'adjust_importance_score'}
+        and str(item.get('recommended_action') or '') in {'set_stale_candidate', 'adjust_importance_score', 'set_soft_archive_candidate'}
     ]
 
     target_rows = [int((item.get('target') or {}).get('observationId') or 0) for item in approved_items]
@@ -2958,6 +3077,8 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
         blocked_reasons.append('max_retries_per_packet_exceeded')
     before_hashes: Dict[str, str] = {}
     mutations_preview: List[Dict[str, Any]] = []
+    recent_use_meta = _recent_use_from_lifecycle(conn, lifecycle_limit=200)
+    recent_use_index = recent_use_meta.get('by_obs_id', {}) if isinstance(recent_use_meta, dict) else {}
     if unique_target_rows:
         rows = conn.execute(
             f"SELECT id, detail_json FROM observations WHERE id IN ({','.join(['?'] * len(unique_target_rows))})",
@@ -3031,7 +3152,9 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
     applied_action_counts: Dict[str, int] = {
         'set_stale_candidate': 0,
         'adjust_importance_score': 0,
+        'set_soft_archive_candidate': 0,
     }
+    skipped_by_protection: List[Dict[str, Any]] = []
 
     if blocked_reasons:
         result = 'aborted'
@@ -3049,27 +3172,49 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
                         operator=operator,
                         rollback_ref=str(rollback_path),
                         applied_at=ts_now,
+                        recent_use_index=recent_use_index,
                     )
-                    applied_rows += 1
                     action_name = str(item.get('recommended_action') or '')
-                    if action_name in applied_action_counts:
-                        applied_action_counts[action_name] += 1
-                    after_hashes[str(mutation['observation_id'])] = mutation['after_sha256']
-                    diff_summary.extend(mutation['diff_summary'])
-                    effect_receipts.append(
-                        _optimize_assist_effect_entry(
-                            run_id=run_id,
-                            item=item,
-                            mutation={**mutation, 'rollback_ref': str(rollback_path)},
-                            measured_at=ts_now,
-                            applied=True,
+                    if bool(mutation.get('applied', True)):
+                        applied_rows += 1
+                        if action_name in applied_action_counts:
+                            applied_action_counts[action_name] += 1
+                        after_hashes[str(mutation['observation_id'])] = mutation['after_sha256']
+                        diff_summary.extend(mutation['diff_summary'])
+                        effect_receipts.append(
+                            _optimize_assist_effect_entry(
+                                run_id=run_id,
+                                item=item,
+                                mutation={**mutation, 'rollback_ref': str(rollback_path)},
+                                measured_at=ts_now,
+                                applied=True,
+                            )
                         )
-                    )
-                    for entry in rollback_payload['mutations']:
-                        if int(entry.get('observation_id') or 0) == mutation['observation_id']:
-                            entry['after_detail_json'] = mutation['after_detail_json']
-                            entry['after_sha256'] = mutation['after_sha256']
-                            break
+                        for entry in rollback_payload['mutations']:
+                            if int(entry.get('observation_id') or 0) == mutation['observation_id']:
+                                entry['after_detail_json'] = mutation['after_detail_json']
+                                entry['after_sha256'] = mutation['after_sha256']
+                                break
+                    else:
+                        skipped_rows += 1
+                        after_hashes[str(mutation['observation_id'])] = mutation['after_sha256']
+                        skipped_by_protection.append(
+                            {
+                                'observation_id': int(mutation.get('observation_id') or 0),
+                                'candidate_id': str(item.get('candidate_id') or ''),
+                                'action': action_name,
+                                'reason': str(mutation.get('skip_reason') or 'protected_skip'),
+                            }
+                        )
+                        effect_receipts.append(
+                            _optimize_assist_effect_entry(
+                                run_id=run_id,
+                                item=item,
+                                mutation=None,
+                                measured_at=ts_now,
+                                applied=False,
+                            )
+                        )
             rollback_path.write_text(json.dumps(rollback_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
         except Exception as e:
             result = 'aborted'
@@ -3114,6 +3259,7 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
         'applied_rows': applied_rows,
         'skipped_rows': skipped_rows,
         'blocked_by_caps': sorted(set(blocked_reasons)),
+        'skipped_by_protection': skipped_by_protection,
         'applied_action_counts': applied_action_counts,
         'after_hashes': after_hashes,
         'rollback_ref': str(rollback_path),
@@ -3533,6 +3679,7 @@ def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namesp
             approve_refresh=bool(getattr(args, 'approve_refresh', False)),
             approve_importance=bool(getattr(args, 'approve_importance', False)),
             approve_stale=bool(getattr(args, 'approve_stale', False)),
+            approve_soft_archive=bool(getattr(args, 'approve_soft_archive', False)),
             governor=governor,
             index=i + 1,
         )
@@ -3562,6 +3709,7 @@ def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namesp
                     ('approve_refresh', bool(getattr(args, 'approve_refresh', False))),
                     ('approve_importance', bool(getattr(args, 'approve_importance', False))),
                     ('approve_stale', bool(getattr(args, 'approve_stale', False))),
+                    ('approve_soft_archive', bool(getattr(args, 'approve_soft_archive', False))),
                 )
                 if enabled
             ] or ['proposal_only'],
@@ -16491,6 +16639,7 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--approve-refresh", dest="approve_refresh", action="store_true", help="Approve low-risk refresh_card actions for apply consideration")
     o.add_argument("--approve-importance", dest="approve_importance", action="store_true", help="Approve bounded low-risk adjust_importance_score actions for assist apply")
     o.add_argument("--approve-stale", dest="approve_stale", action="store_true", help="Approve low-risk set_stale_candidate actions for assist apply")
+    o.add_argument("--approve-soft-archive", dest="approve_soft_archive", action="store_true", help="Approve low-risk set_soft_archive_candidate actions for assist apply")
     o.set_defaults(func=cmd_optimize_governor_review)
 
     o = osub.add_parser("assist-apply", help="Apply governor-approved low-risk observation updates with receipts and rollback")
