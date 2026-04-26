@@ -1,12 +1,12 @@
 # 櫻花刀舞 non-stop blade map — openclaw-mem backlog
 
-Status: **ACTIVE / LOCAL ONLY**  
+Status: **MERGED TO MAIN / PUSHED**  
 Date: 2026-04-26  
-Authority: CK requested non-stop development for backlog items; do not push remote without explicit later approval.
+Authority: CK requested non-stop development for backlog items and later explicitly approved pushing `main` to origin.
 
 ## Target
 
-Complete the selected `openclaw-mem` backlog locally, pass tests, merge to local `main`, install/enable locally, and update docs/skills. If restart is required, stop and ask CK.
+Complete the selected `openclaw-mem` backlog, pass tests, merge to `main`, install/enable locally, update docs/skills, and push after explicit approval. If restart is required, stop and ask CK.
 
 ## Queue
 
@@ -15,7 +15,7 @@ Complete the selected `openclaw-mem` backlog locally, pass tests, merge to local
 - Confirm local repo state.
 - Confirm Minion health.
 - Establish QA Minion code-review lane for every implementation phase.
-- Preserve local-only posture.
+- Preserve local-only posture until CK explicitly approves remote push.
 
 Acceptance:
 - Minion health receipt captured.
@@ -77,7 +77,7 @@ Acceptance:
 - Full verification receipt.
 - Local install/enable receipt.
 - Local git state reported.
-- No remote push unless explicitly approved.
+- Remote push only after explicit approval.
 
 ## Stop conditions
 
