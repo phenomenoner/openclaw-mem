@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded sidecar/plugin redaction coverage for `github_pat` and AWS secret-access-key assignment patterns to match the hardened high-risk corpus.
 - Added a bounded runtime-side black-box summary test for `extensions/openclaw-mem` (`toolResultSummary.js` + `toolResultSummary.test.mjs`) so episodic tool-result summaries are validated against the shared secret-detector golden corpus for leak suppression and benign-pass behavior.
 - Added a tiny fake-API end-to-end plugin harness test for `tool_result_persist` (`extensions/openclaw-mem/toolResultPersistE2E.test.mjs`) so emitted episodic `tool.result` JSONL rows are verified on disk for redaction, leak suppression, bounded summaries, explicit stdout/stderr-style summary collapse (`result captured (output redacted)` posture), and benign non-stdout text retention.
+- Hardened plugin tool-result summary behavior for structured JSON payloads: JSON bodies that carry output-like fields (`stdout`/`stderr` and aliases) now collapse to bounded `result captured (output redacted)` posture, while benign JSON/docs payloads without output fields remain informative.
 
 ### Testing
 
@@ -39,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added shared-golden regression checks in both Python and Node test lanes, including `extensions/openclaw-mem-engine/secretDetectorGolden.test.mjs`, so mem-engine and sidecar/plugin anchors stay in sync with the shared corpus.
 - Added sidecar/plugin behavioral runtime coverage for emitted tool-result summaries via `extensions/openclaw-mem/toolResultSummary.test.mjs` (invoked by `tests/test_plugin_episodic_summary_runtime.py`).
 - Added sidecar/plugin behavioral runtime coverage for the full `tool_result_persist` episodic append path via `extensions/openclaw-mem/toolResultPersistE2E.test.mjs` (invoked by `tests/test_plugin_episodic_summary_runtime.py` with `--experimental-strip-types`), including a stdout/stderr-style payload assertion that emitted `tool.result` summaries collapse to bounded redacted-output posture and never leak raw output needles into the JSONL record.
+- Extended sidecar/plugin runtime coverage so structured JSON tool outputs with `stdout`/`stderr` fields are asserted end-to-end (`tool.result` JSONL no-leak + redacted-output collapse), and benign structured JSON/docs payloads are asserted to remain informative.
 
 ## [1.8.0] - 2026-04-18
 

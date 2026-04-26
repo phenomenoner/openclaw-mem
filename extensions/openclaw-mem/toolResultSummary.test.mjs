@@ -98,3 +98,51 @@ test('stdout-like payload summary stays bounded and does not include secret-like
     );
   }
 });
+
+test('structured JSON stdout/stderr payloads collapse to redacted-output posture while benign JSON stays informative', () => {
+  const corpus = loadCorpus();
+  const firstHighRisk = corpus.cases.find((entry) => entry.class === 'high_risk');
+  assert.ok(firstHighRisk, 'expected at least one high-risk corpus case');
+
+  const structuredBlocked = buildToolResultSummary(
+    'memory_recall',
+    buildMessage(
+      JSON.stringify({
+        stdout: `trace ${firstHighRisk.sample}`,
+        stderr: `failure ${firstHighRisk.episodic?.leakNeedles?.[0] || 'needle'}`,
+        status: 'error',
+      }),
+    ),
+    true,
+    220,
+  );
+
+  assert.equal(structuredBlocked, 'memory_recall result captured (output redacted)');
+  for (const [idx, needle] of (firstHighRisk.episodic?.leakNeedles ?? []).entries()) {
+    assert.equal(
+      structuredBlocked.includes(needle),
+      false,
+      `structured JSON summary leaked forbidden needle #${idx + 1}`,
+    );
+  }
+
+  const structuredBenign = buildToolResultSummary(
+    'memory_recall',
+    buildMessage(
+      JSON.stringify({
+        doc_type: 'api_reference',
+        section: 'authentication',
+        guidance: 'Bearer token docs should explain rotation policy and vault usage.',
+      }),
+    ),
+    true,
+    220,
+  );
+
+  assert.equal(structuredBenign.includes('api_reference'), true, 'benign structured JSON should remain informative');
+  assert.equal(
+    structuredBenign.includes('result captured (output redacted)'),
+    false,
+    'benign structured JSON should not collapse to output redacted posture',
+  );
+});

@@ -41,11 +41,52 @@ function shortText(text, maxLength) {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength)}…`;
 }
 
+function hasStructuredOutputFields(value, depth = 0) {
+  if (depth > 5 || value == null) return false;
+
+  if (Array.isArray(value)) {
+    return value.some((item) => hasStructuredOutputFields(item, depth + 1));
+  }
+
+  if (typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      const key = String(k || "").toLowerCase().trim();
+      if (["stdout", "stderr", "raw_stdout", "raw_stderr", "tool_output", "command_output"].includes(key)) {
+        return true;
+      }
+      if (hasStructuredOutputFields(v, depth + 1)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export function buildToolResultSummary(toolName, message, redactSensitive, maxLength) {
   const raw = extractSummary(message, redactSensitive);
   const compact = raw.replace(/\s+/g, " ").trim();
   if (!compact) return `${toolName} result captured`;
-  if (compact.startsWith("{") || compact.startsWith("[")) return `${toolName} result captured`;
+
+  if (compact.startsWith("{") || compact.startsWith("[")) {
+    let parsed;
+    try {
+      parsed = JSON.parse(compact);
+    } catch {
+      parsed = undefined;
+    }
+
+    const structuredOutputHint = parsed !== undefined
+      ? hasStructuredOutputFields(parsed)
+      : /["']?(stdout|stderr|raw_stdout|raw_stderr|tool_output|command_output)["']?\s*:/i.test(compact);
+
+    if (structuredOutputHint) {
+      return `${toolName} result captured (output redacted)`;
+    }
+
+    return shortText(`${toolName}: ${compact}`, maxLength);
+  }
+
   if (/(stdout|stderr|traceback|stack\s*trace|command output)/i.test(compact)) {
     return `${toolName} result captured (output redacted)`;
   }
