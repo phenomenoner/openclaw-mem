@@ -5,6 +5,7 @@
 - Scope: shortest-path non-stop push from ~5.5-6/10 toward ~9/10 for `openclaw-mem` optimize-assist safe autonomy posture
 - Mode: hardening-first, fail-closed, verifier-backed
 - 2026-04-17 execution note: quarantine-path true E2E, deterministic rerun proof, overlap serialization proof, timeout containment proof, and atomic receipt-surface hardening/tests landed in the active runner slice; topology unchanged.
+- 2026-04-27 execution note: proposal-only importance-drift severity policy card + promotion gate landed as a non-mutating controller/posture constraint (`promotion_gates.importance_drift_gate`), with JSON/text surfaces and fail-closed threshold tests.
 
 ## Verdict
 Do not chase 9/10 by widening mutation breadth first.
@@ -122,6 +123,19 @@ Ship:
 Why fifth:
 - this is the last hardening sweep before a truthful 9/10 claim
 
+### Blade F — proposal-only importance-drift gate
+Target outcome:
+- importance drift is auditable as a deterministic read-only policy card and can block promotion/apply posture without mutating memory
+
+Ship:
+- `signals.importance_drift.policy_card` in optimize review
+- mirrored `importance_drift_policy` in evolution review + compact text rendering line
+- runner promotion receipt field `promotion_gates.importance_drift_gate`
+- posture-review integration (`importanceDriftGateGreenRuns`, gate-live summary/reasons)
+
+Why now:
+- closes the drift blind spot where low-risk autonomy could be promoted while known score/label drift remained proposal-only and un-gated
+
 ## Bundling guidance
 - Bundle Blade A with its negative regression test.
 - Bundle Blade B lock + atomic rename + digest in one pass.
@@ -142,6 +156,10 @@ Minimum named verifiers:
 - native promotion-truth completeness test
 - end-to-end runner smoke test without mocked subprocesses
 - missing-evidence gate-fail test
+- importance-drift policy-card threshold pass/fail test + runner/posture receipt propagation test
+
+Suggested focused verifier command:
+`python -m unittest tests.test_optimize_review tests.test_optimize_evolution_review tests.test_optimize_assist_runner tests.test_optimize_posture_review`
 
 ## Hardening review checklist
 Review every blade against:

@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from openclaw_mem.optimization import build_importance_drift_policy_card
 from openclaw_mem.optimize_assist_families import FAMILY_NAMES, candidate_family_from_item
 
 
@@ -434,6 +435,7 @@ def _evaluate_promotion_gates(
     watchdog: dict[str, Any],
     verifier: Optional[dict[str, Any]] = None,
     challenger: Optional[dict[str, Any]] = None,
+    evolution: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     verifier_summary = verifier.get("summary") if isinstance((verifier or {}).get("summary"), dict) else {}
     watchdog_stats = watchdog.get("stats") if isinstance(watchdog.get("stats"), dict) else {}
@@ -493,7 +495,29 @@ def _evaluate_promotion_gates(
         elif not challenger_agreement_pass:
             reasons.append("challenger_agreement_required")
 
-    passed = precision_ok and repeated_miss_ok and rollback_ok and effect_missing_ok and challenger_ok
+    evolution_source = (evolution or {}).get("source") if isinstance((evolution or {}).get("source"), dict) else {}
+    evolution_counts = (evolution or {}).get("counts") if isinstance((evolution or {}).get("counts"), dict) else {}
+    upstream_importance = (((evolution or {}).get("upstream_review") or {}).get("signals") or {}).get("importance_drift")
+    if not isinstance(upstream_importance, dict):
+        upstream_importance = {}
+    drift_policy_candidate = (evolution or {}).get("importance_drift_policy") if isinstance((evolution or {}).get("importance_drift_policy"), dict) else {}
+    if not drift_policy_candidate:
+        drift_policy_candidate = upstream_importance.get("policy_card") if isinstance(upstream_importance.get("policy_card"), dict) else {}
+    if drift_policy_candidate:
+        importance_drift_policy = json.loads(json.dumps(drift_policy_candidate, ensure_ascii=False))
+    else:
+        importance_drift_policy = build_importance_drift_policy_card(
+            rows_scanned=int(evolution_source.get("rows_scanned") or 0),
+            score_label_mismatch_count=int(evolution_counts.get("importanceDriftLabelMismatches") or upstream_importance.get("score_label_mismatch_count") or 0),
+            missing_or_unparseable_count=int(evolution_counts.get("importanceDriftMissingOrUnparseable") or upstream_importance.get("missing_or_unparseable_count") or 0),
+            high_risk_underlabel_count=int(evolution_counts.get("importanceDriftHighRiskContent") or upstream_importance.get("high_risk_content_mismatch_count") or 0),
+        )
+
+    importance_drift_gate_passed = bool(importance_drift_policy.get("acceptable_for_promotion_apply", False))
+    if not importance_drift_gate_passed:
+        reasons.append("importance_drift_policy_hold")
+
+    passed = precision_ok and repeated_miss_ok and rollback_ok and effect_missing_ok and challenger_ok and importance_drift_gate_passed
     return {
         "receipt_present": False,
         "receipt_path": None,
@@ -521,6 +545,10 @@ def _evaluate_promotion_gates(
             "promotion_ready": bool(challenger_summary.get("promotion_ready")) if isinstance((challenger or {}).get("summary"), dict) and "promotion_ready" in challenger_summary else False,
             "disagreements": challenger_disagreements,
             "quarantine_recommended": bool(challenger_summary.get("quarantine_recommended", False)),
+        },
+        "importance_drift_gate": {
+            "passed": importance_drift_gate_passed,
+            "policy_card": importance_drift_policy,
         },
         "native_verifier_present": verifier is not None,
         "native_inputs_present": effect_items_total > 0 and verifier is not None,
@@ -812,7 +840,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             _atomic_write_json(verifier_path, verifier_json)
 
             post_watchdog = _evaluate_watchdog(args, runner_root=runner_root, controller_mode=effective_controller_mode)
-            promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog, verifier=verifier_json, challenger=challenger_json)
+            promotion_gates = _evaluate_promotion_gates(args, watchdog=post_watchdog, verifier=verifier_json, challenger=challenger_json, evolution=evolution_json)
             _atomic_write_json(promotion_receipt_path, promotion_gates)
             promotion_gate_emit_path = str(getattr(args, "promotion_gate_receipt", "") or "").strip()
             if promotion_gate_emit_path:
@@ -946,6 +974,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                     "receipt_ref": str(controller_receipt_path),
                     "paused": next_controller_mode == "paused_regression",
                     "promotion_gates_passed": bool(promotion_gates.get("passed")),
+                    "importance_drift_gate_passed": bool(((promotion_gates.get("importance_drift_gate") or {}).get("passed"))),
                     "soak_green_cycles": soak_green_cycles,
                     "regression_strikes": regression_strikes,
                 },

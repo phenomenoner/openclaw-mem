@@ -40,6 +40,11 @@ class TestOptimizePostureReview(unittest.TestCase):
                         "mode": "auto_low_risk",
                         "soak_green_cycles": 2,
                         "regression_strikes": 0,
+                        "promotion_gates": {
+                            "importance_drift_gate": {
+                                "passed": True,
+                            }
+                        },
                         "family_state": {
                             "stale_candidate": {"enabled": True, "mode": "enabled", "reasons": []},
                             "importance_downshift": {"enabled": True, "mode": "enabled", "reasons": []},
@@ -58,7 +63,15 @@ class TestOptimizePostureReview(unittest.TestCase):
             run_dir = root / "2026-04-17" / "run-1"
             run_dir.mkdir(parents=True, exist_ok=True)
             (run_dir / "controller.json").write_text(
-                json.dumps({"ts": now, "next_mode": "auto_low_risk"}),
+                json.dumps({
+                    "ts": now,
+                    "next_mode": "auto_low_risk",
+                    "promotion_gates": {
+                        "importance_drift_gate": {
+                            "passed": True,
+                        }
+                    },
+                }),
                 encoding="utf-8",
             )
             (run_dir / "challenger.json").write_text(
@@ -89,8 +102,11 @@ class TestOptimizePostureReview(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["kind"], "openclaw-mem.optimize.posture-review.v0")
         self.assertTrue(out["summary"]["near_ceiling_ready"])
+        self.assertTrue(out["summary"]["importance_drift_gate_live"])
         self.assertEqual(out["controller"]["mode"], "auto_low_risk")
+        self.assertTrue(out["controller"]["importance_drift_gate_passed"])
         self.assertEqual(out["counts"]["enabledFamilies"], 2)
+        self.assertGreaterEqual(out["counts"]["importanceDriftGateGreenRuns"], 1)
         conn.close()
 
 

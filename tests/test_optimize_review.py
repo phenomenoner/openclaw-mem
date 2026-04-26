@@ -746,6 +746,7 @@ class TestOptimizeReview(unittest.TestCase):
 
         out = json.loads(buf.getvalue())
         drift = out["signals"]["importance_drift"]
+        policy_card = drift["policy_card"]
 
         self.assertEqual(
             set(drift["normalized_label_distribution"].keys()),
@@ -759,6 +760,16 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertEqual(drift["score_label_mismatch_count"], 2)
         self.assertEqual(drift["missing_or_unparseable_count"], 2)
         self.assertEqual(drift["high_risk_content_mismatch_count"], 2)
+
+        self.assertEqual(policy_card["kind"], "openclaw-mem.optimize.importance-drift-policy-card.v0")
+        self.assertEqual(policy_card["mode"], "proposal_only_read_only")
+        self.assertTrue(policy_card["query_only_enforced"])
+        self.assertEqual(policy_card["writes_performed"], 0)
+        self.assertEqual(policy_card["memory_mutation"], "none")
+        self.assertEqual(policy_card["status"], "hold")
+        self.assertFalse(policy_card["acceptable_for_promotion_apply"])
+        self.assertIn("high_risk_underlabel_count_exceeded", policy_card["reasons"])
+        self.assertGreater(policy_card["metrics"]["high_risk_underlabel_rate_pct"], 0.0)
 
         self.assertEqual(len(drift["score_label_mismatch_items"]), 1)
         self.assertEqual(len(drift["missing_or_unparseable_items"]), 1)
@@ -821,6 +832,51 @@ class TestOptimizeReview(unittest.TestCase):
         self.assertIn("importance_drift=label_mismatch:", text)
         self.assertIn("missing_or_unparseable:", text)
         self.assertIn("high_risk_content:", text)
+        self.assertIn("importance_drift_gate=", text)
+        conn.close()
+
+    def test_optimize_review_importance_drift_policy_card_passes_on_clean_sample(self):
+        conn = _connect(":memory:")
+        _insert_observation(
+            conn,
+            {
+                "ts": _iso_days_ago(1),
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Operator approved runbook index",
+                "detail": {"importance": {"score": 0.81, "label": "must_remember"}},
+            },
+        )
+        conn.commit()
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 1000,
+                "stale_days": 60,
+                "duplicate_min_count": 2,
+                "bloat_summary_chars": 240,
+                "bloat_detail_bytes": 4096,
+                "orphan_min_tokens": 2,
+                "miss_min_count": 2,
+                "lifecycle_limit": 20,
+                "scope": None,
+                "top": 10,
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_review(conn, args)
+
+        out = json.loads(buf.getvalue())
+        policy_card = out["signals"]["importance_drift"]["policy_card"]
+        self.assertEqual(policy_card["status"], "accept")
+        self.assertTrue(policy_card["acceptable_for_promotion_apply"])
+        self.assertEqual(policy_card["reasons"], [])
+        self.assertEqual(policy_card["metrics"]["rows_scanned"], 1)
         conn.close()
 
 

@@ -69,10 +69,13 @@ class TestOptimizeEvolutionReview(unittest.TestCase):
         out = json.loads(buf.getvalue())
         self.assertEqual(out["kind"], "openclaw-mem.optimize.evolution-review.v0")
         self.assertEqual(out["policy"]["memory_mutation"], "none")
+        self.assertEqual(out["policy"]["query_only_enforced"], True)
         self.assertEqual(out["counts"]["items"], 2)
         self.assertEqual(out["counts"]["importanceDriftLabelMismatches"], 0)
         self.assertEqual(out["counts"]["importanceDriftMissingOrUnparseable"], 0)
         self.assertEqual(out["counts"]["importanceDriftHighRiskContent"], 0)
+        self.assertEqual(out["importance_drift_policy"]["kind"], "openclaw-mem.optimize.importance-drift-policy-card.v0")
+        self.assertTrue(out["importance_drift_policy"]["acceptable_for_promotion_apply"])
         self.assertEqual(out["items"][0]["action"], "set_stale_candidate")
         self.assertEqual(out["items"][0]["risk_level"], "low")
         self.assertEqual(out["items"][0]["risk_reasons"][:2], ["bounded_lifecycle_patch", "age_threshold_signal_present"])
@@ -169,6 +172,43 @@ class TestOptimizeEvolutionReview(unittest.TestCase):
         self.assertEqual(alignment_items[0]["patch"]["importance"]["delta"], 0.0)
         self.assertEqual(alignment_items[0]["patch"]["importance"]["reason_code"], "label_alignment")
         self.assertEqual(alignment_items[0]["patch"]["importance"]["label"], "ignore")
+        conn.close()
+
+    def test_evolution_review_text_mentions_importance_drift_gate_line(self):
+        conn = _connect(":memory:")
+        stale_ts = (datetime.now(timezone.utc) - timedelta(days=120)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        _insert_observation(
+            conn,
+            {
+                "ts": stale_ts,
+                "kind": "note",
+                "tool_name": "memory_store",
+                "summary": "Old memory for renderer probe",
+                "detail": {
+                    "scope": "team/alpha",
+                    "importance": {"score": 0.41},
+                },
+            },
+        )
+
+        args = type(
+            "Args",
+            (),
+            {
+                "limit": 1000,
+                "stale_days": 60,
+                "lifecycle_limit": 50,
+                "scope": "team/alpha",
+                "top": 5,
+                "json": False,
+            },
+        )()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_optimize_evolution_review(conn, args)
+
+        text = buf.getvalue()
+        self.assertIn("importance_drift_gate=", text)
         conn.close()
 
 

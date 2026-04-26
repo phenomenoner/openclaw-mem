@@ -3373,6 +3373,16 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
         and packet['summary'].get('rollback_replay_pass') is not False
         and float(packet['summary'].get('effect_receipt_missing_pct') or 0.0) <= 0.0
     )
+    importance_drift_gate_green = sum(
+        1
+        for packet in controller_packets
+        if isinstance(packet.get('promotion_gates'), dict)
+        and isinstance(packet['promotion_gates'].get('importance_drift_gate'), dict)
+        and bool(packet['promotion_gates']['importance_drift_gate'].get('passed', False))
+    )
+    current_importance_drift_gate_passed = bool(
+        (((controller_state.get('promotion_gates') or {}).get('importance_drift_gate') or {}).get('passed'))
+    )
     challenger_green = sum(
         1 for packet in challenger_packets
         if isinstance(packet.get('summary'), dict) and bool(packet['summary'].get('agreement_pass', False))
@@ -3389,6 +3399,7 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
         and not quarantined_families
         and verifier_green >= 1
         and challenger_green >= 1
+        and (importance_drift_gate_green >= 1 or current_importance_drift_gate_passed)
         and soak_green_cycles >= 1
         and regression_strikes == 0
     )
@@ -3415,6 +3426,7 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
             'mode': current_mode,
             'soak_green_cycles': soak_green_cycles,
             'regression_strikes': regression_strikes,
+            'importance_drift_gate_passed': current_importance_drift_gate_passed,
             'horizons': controller_state.get('horizons') if isinstance(controller_state.get('horizons'), dict) else {},
         },
         'families': {
@@ -3427,6 +3439,7 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
             'quarantinedFamilies': len(quarantined_families),
             'verifierGreenRuns': verifier_green,
             'challengerGreenRuns': challenger_green,
+            'importanceDriftGateGreenRuns': importance_drift_gate_green,
             'autoLowRiskCycles': auto_apply_cycles,
             'appliedCycles': applied_cycles,
         },
@@ -3436,6 +3449,7 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
             'phase9_family_level_control_live': bool(family_state),
             'phase10_multi_horizon_live': isinstance(controller_state.get('horizons'), dict),
             'phase11_posture_review_live': True,
+            'importance_drift_gate_live': importance_drift_gate_green > 0 or current_importance_drift_gate_passed,
         },
         'reasons': [] if near_ceiling_ready else sorted(set([
             'mode_not_auto_low_risk' if current_mode != 'auto_low_risk' else '',
@@ -3443,6 +3457,7 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
             'family_quarantine_active' if quarantined_families else '',
             'native_verifier_not_green' if verifier_green == 0 else '',
             'challenger_not_green' if challenger_green == 0 else '',
+            'importance_drift_gate_not_green' if importance_drift_gate_green == 0 and not current_importance_drift_gate_passed else '',
             'soak_not_green' if soak_green_cycles < 1 else '',
             'regression_strikes_present' if regression_strikes > 0 else '',
         ]) - {''}),

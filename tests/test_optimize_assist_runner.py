@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch, Mock
 
 from openclaw_mem.cli import _connect, _insert_observation
+from openclaw_mem.optimization import build_importance_drift_policy_card
 from tools import optimize_assist_runner as runner
 
 
@@ -42,6 +43,32 @@ def _write_rollback_receipt(root: Path, *, passed: bool = True) -> Path:
 def _write_signed_controller_state(path: Path, payload: dict[str, object], *, prior_state: dict[str, object] | None = None) -> None:
     prepared = runner._prepare_controller_state(payload, prior_state=prior_state or {})
     path.write_text(json.dumps(prepared), encoding="utf-8")
+
+
+def _evolution_payload(
+    *,
+    items: int = 1,
+    rows_scanned: int = 20,
+    score_label_mismatch_count: int = 0,
+    missing_or_unparseable_count: int = 0,
+    high_risk_content_mismatch_count: int = 0,
+) -> dict[str, object]:
+    return {
+        "kind": "openclaw-mem.optimize.evolution-review.v0",
+        "source": {"rows_scanned": rows_scanned},
+        "counts": {
+            "items": items,
+            "importanceDriftLabelMismatches": score_label_mismatch_count,
+            "importanceDriftMissingOrUnparseable": missing_or_unparseable_count,
+            "importanceDriftHighRiskContent": high_risk_content_mismatch_count,
+        },
+        "importance_drift_policy": build_importance_drift_policy_card(
+            rows_scanned=rows_scanned,
+            score_label_mismatch_count=score_label_mismatch_count,
+            missing_or_unparseable_count=missing_or_unparseable_count,
+            high_risk_underlabel_count=high_risk_content_mismatch_count,
+        ),
+    }
 
 
 class TestOptimizeAssistRunner(unittest.TestCase):
@@ -212,6 +239,7 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertEqual(out["controller"]["next_mode"], "dry_run")
             self.assertEqual(out["controller"]["soak_green_cycles"], 0)
             self.assertEqual(out["controller"]["regression_strikes"], 0)
+            self.assertTrue(out["controller"]["importance_drift_gate_passed"])
             self.assertEqual(out["counts"]["evolution_candidates"], 2)
             self.assertEqual(out["counts"]["governor_approved"], 1)
             self.assertEqual(out["results"]["assist_result"], "dry_run")
@@ -224,6 +252,9 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertTrue((run_dir / "verifier.json").exists())
             self.assertTrue((run_dir / "promotion-gates.json").exists())
             self.assertTrue((run_dir / "controller.json").exists())
+            promotion_gates = json.loads((run_dir / "promotion-gates.json").read_text(encoding="utf-8"))
+            self.assertIn("importance_drift_gate", promotion_gates)
+            self.assertEqual(promotion_gates["importance_drift_gate"]["policy_card"]["kind"], "openclaw-mem.optimize.importance-drift-policy-card.v0")
             self.assertIn("--dry-run", out["commands"]["assist_apply"])
             self.assertIn("--max-importance-adjustments-per-run", out["commands"]["assist_apply"])
             self.assertIn("--approve-importance", out["commands"]["governor_review"])
@@ -668,6 +699,66 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             self.assertFalse(out["controller"]["promotion_gates_passed"])
             self.assertEqual(out["counts"]["challenger_disagreements"], 1)
             self.assertIn("challenger_agreement_required", out["results"]["promotion_gate_reasons"])
+
+    def test_run_pipeline_blocks_promotion_when_importance_drift_gate_holds(self):
+        with tempfile.TemporaryDirectory() as td:
+            _write_native_effect_history(Path(td), regressed=0, neutral=2)
+            rollback_receipt = _write_rollback_receipt(Path(td))
+            args = SimpleNamespace(
+                python="python3",
+                db="/tmp/openclaw-mem.sqlite",
+                runner_root=td,
+                operator="lyria",
+                allow_apply=True,
+                approve_importance=True,
+                approve_stale=True,
+                scope=None,
+                limit=100,
+                stale_days=60,
+                lifecycle_limit=50,
+                top=5,
+                challenger_policy_mode="strict_v1",
+                challenger_max_disagreement_clusters=10,
+                challenger_enforce_quarantine=True,
+                challenger_require_agreement_for_promotion=False,
+                challenger_max_disagreements_for_promotion=0,
+                disable_family=[],
+                enable_family=[],
+                max_rows_per_run=5,
+                max_rows_per_24h=20,
+                max_importance_adjustments_per_run=3,
+                max_importance_adjustments_per_24h=10,
+                controller_mode="canary_apply",
+                controller_state_path=None,
+                watchdog_window_hours=24,
+                watchdog_max_missing_effect_receipts_pct=0.0,
+                watchdog_max_regressed_effect_items=0,
+                rollback_replay_receipt=str(rollback_receipt),
+                promotion_gate_receipt=None,
+                promote_when_gates_green=True,
+                promotion_min_manual_precision=0.9,
+                promotion_max_repeated_miss_regression_pct=5.0,
+                soak_cycles_for_auto_low_risk=1,
+                regression_strikes_for_demotion=2,
+                lane="observations.assist",
+                json=True,
+            )
+            outputs = [
+                runner.CommandResult(argv=["evolution"], returncode=0, stdout=json.dumps(_evolution_payload(items=1, rows_scanned=50, high_risk_content_mismatch_count=1)), stderr=""),
+                runner.CommandResult(argv=["governor"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.governor-review.v0", "counts": {"approvedForApply": 1}}), stderr=""),
+                runner.CommandResult(argv=["challenger"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.challenger-review.v0", "counts": {"disagreements": 0}, "summary": {"agreement_pass": True, "promotion_ready": True, "quarantine_recommended": False}}), stderr=""),
+                runner.CommandResult(argv=["assist"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.assist.after.v1", "ts": runner._utcnow_iso(), "result": "applied", "applied_rows": 1, "skipped_rows": 0, "blocked_by_caps": [], "artifacts": {"effect_ref": ""}}), stderr=""),
+                runner.CommandResult(argv=["verifier"], returncode=0, stdout=json.dumps({"kind": "openclaw-mem.optimize.verifier-bundle.v0", "summary": {"effect_receipt_missing_pct": 0.0, "cap_integrity_pass": True, "rollback_replay_pass": True}}), stderr=""),
+            ]
+
+            with patch.object(runner, "_run", side_effect=outputs):
+                out = runner.run_pipeline(args)
+
+            self.assertFalse(out["controller"]["promotion_gates_passed"])
+            self.assertFalse(out["controller"]["importance_drift_gate_passed"])
+            self.assertIn("importance_drift_policy_hold", out["results"]["promotion_gate_reasons"])
+            promotion_receipt = json.loads(Path(out["artifacts"]["promotion_gates"]).read_text(encoding="utf-8"))
+            self.assertFalse(promotion_receipt["importance_drift_gate"]["passed"])
 
     def test_filter_governor_packet_quarantines_entire_importance_family(self):
         governor_json = {

@@ -54,6 +54,15 @@ _IMPORTANCE_HIGH_RISK_UNDERLABEL_PATTERNS: List[tuple[str, re.Pattern[str]]] = [
     ("zh_token", re.compile(r"存取權杖|刷新權杖")),
 ]
 
+_IMPORTANCE_DRIFT_GATE_THRESHOLDS: Dict[str, float] = {
+    "score_label_mismatch_count_lte": 1.0,
+    "score_label_mismatch_rate_pct_lte": 2.0,
+    "missing_or_unparseable_count_lte": 0.0,
+    "missing_or_unparseable_rate_pct_lte": 0.0,
+    "high_risk_underlabel_count_lte": 0.0,
+    "high_risk_underlabel_rate_pct_lte": 0.0,
+}
+
 
 _EPISODIC_RETENTION_DAYS: Dict[str, Optional[int]] = {
     "conversation.user": 60,
@@ -184,6 +193,82 @@ def _importance_high_risk_underlabel_hits(summary: str) -> List[str]:
         if pattern.search(summary):
             hits.append(code)
     return hits
+
+
+def _importance_drift_rate_pct(count: int, rows_scanned: int) -> float:
+    total = max(1, int(rows_scanned))
+    return round((max(0, int(count)) / total) * 100.0, 2)
+
+
+def build_importance_drift_policy_card(
+    *,
+    rows_scanned: int,
+    score_label_mismatch_count: int,
+    missing_or_unparseable_count: int,
+    high_risk_underlabel_count: int,
+    thresholds: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    checked_rows = max(1, int(rows_scanned))
+    active_thresholds = dict(_IMPORTANCE_DRIFT_GATE_THRESHOLDS)
+    if isinstance(thresholds, dict):
+        for key, value in thresholds.items():
+            if key in active_thresholds:
+                try:
+                    active_thresholds[key] = float(value)
+                except Exception:
+                    continue
+
+    metrics = {
+        "rows_scanned": checked_rows,
+        "score_label_mismatch_count": max(0, int(score_label_mismatch_count)),
+        "score_label_mismatch_rate_pct": _importance_drift_rate_pct(score_label_mismatch_count, checked_rows),
+        "missing_or_unparseable_count": max(0, int(missing_or_unparseable_count)),
+        "missing_or_unparseable_rate_pct": _importance_drift_rate_pct(missing_or_unparseable_count, checked_rows),
+        "high_risk_underlabel_count": max(0, int(high_risk_underlabel_count)),
+        "high_risk_underlabel_rate_pct": _importance_drift_rate_pct(high_risk_underlabel_count, checked_rows),
+    }
+
+    checks = {
+        "score_label_mismatch_count_within_threshold": metrics["score_label_mismatch_count"] <= active_thresholds["score_label_mismatch_count_lte"],
+        "score_label_mismatch_rate_within_threshold": metrics["score_label_mismatch_rate_pct"] <= active_thresholds["score_label_mismatch_rate_pct_lte"],
+        "missing_or_unparseable_count_within_threshold": metrics["missing_or_unparseable_count"] <= active_thresholds["missing_or_unparseable_count_lte"],
+        "missing_or_unparseable_rate_within_threshold": metrics["missing_or_unparseable_rate_pct"] <= active_thresholds["missing_or_unparseable_rate_pct_lte"],
+        "high_risk_underlabel_count_within_threshold": metrics["high_risk_underlabel_count"] <= active_thresholds["high_risk_underlabel_count_lte"],
+        "high_risk_underlabel_rate_within_threshold": metrics["high_risk_underlabel_rate_pct"] <= active_thresholds["high_risk_underlabel_rate_pct_lte"],
+    }
+
+    reasons: List[str] = []
+    if not checks["score_label_mismatch_count_within_threshold"]:
+        reasons.append("score_label_mismatch_count_exceeded")
+    if not checks["score_label_mismatch_rate_within_threshold"]:
+        reasons.append("score_label_mismatch_rate_exceeded")
+    if not checks["missing_or_unparseable_count_within_threshold"]:
+        reasons.append("missing_or_unparseable_count_exceeded")
+    if not checks["missing_or_unparseable_rate_within_threshold"]:
+        reasons.append("missing_or_unparseable_rate_exceeded")
+    if not checks["high_risk_underlabel_count_within_threshold"]:
+        reasons.append("high_risk_underlabel_count_exceeded")
+    if not checks["high_risk_underlabel_rate_within_threshold"]:
+        reasons.append("high_risk_underlabel_rate_exceeded")
+
+    acceptable_for_promotion = len(reasons) == 0
+    status = "accept" if acceptable_for_promotion else "hold"
+    severity = "none" if acceptable_for_promotion else ("high" if metrics["high_risk_underlabel_count"] > 0 else "medium")
+
+    return {
+        "kind": "openclaw-mem.optimize.importance-drift-policy-card.v0",
+        "mode": "proposal_only_read_only",
+        "query_only_enforced": True,
+        "writes_performed": 0,
+        "memory_mutation": "none",
+        "status": status,
+        "severity": severity,
+        "acceptable_for_promotion_apply": acceptable_for_promotion,
+        "metrics": metrics,
+        "thresholds": active_thresholds,
+        "checks": checks,
+        "reasons": reasons,
+    }
 
 
 def _preview(text: str, limit: int = 120) -> str:
@@ -1578,6 +1663,12 @@ def build_memory_health_review(
     importance_high_risk_content_mismatch_items.sort(key=lambda x: x["id"], reverse=True)
 
     rows_scanned = len(prepared)
+    importance_drift_policy_card = build_importance_drift_policy_card(
+        rows_scanned=rows_scanned,
+        score_label_mismatch_count=len(importance_score_label_mismatch_items),
+        missing_or_unparseable_count=len(importance_missing_or_unparseable_items),
+        high_risk_underlabel_count=len(importance_high_risk_content_mismatch_items),
+    )
     coverage_pct = round((rows_scanned / total_rows) * 100, 1) if total_rows > 0 else 100.0
     warnings: List[Dict[str, Any]] = []
     if total_rows > rows_scanned:
@@ -1655,6 +1746,7 @@ def build_memory_health_review(
                 "score_label_mismatch_items": importance_score_label_mismatch_items[:top],
                 "missing_or_unparseable_items": importance_missing_or_unparseable_items[:top],
                 "high_risk_content_mismatch_items": importance_high_risk_content_mismatch_items[:top],
+                "policy_card": importance_drift_policy_card,
             },
         },
         "policy": {
@@ -1696,6 +1788,16 @@ def build_evolution_review(
     stale = ((review.get("signals") or {}).get("staleness") or {})
     recent_use = ((review.get("signals") or {}).get("recent_use") or {})
     importance_drift = ((review.get("signals") or {}).get("importance_drift") or {})
+    importance_drift_policy_card = (
+        importance_drift.get("policy_card")
+        if isinstance(importance_drift.get("policy_card"), dict)
+        else build_importance_drift_policy_card(
+            rows_scanned=int(((review.get("source") or {}).get("rows_scanned") or 0)),
+            score_label_mismatch_count=int(importance_drift.get("score_label_mismatch_count") or 0),
+            missing_or_unparseable_count=int(importance_drift.get("missing_or_unparseable_count") or 0),
+            high_risk_underlabel_count=int(importance_drift.get("high_risk_content_mismatch_count") or 0),
+        )
+    )
     recommendations = list(review.get("recommendations") or [])
     items: List[Dict[str, Any]] = []
 
@@ -2037,6 +2139,7 @@ def build_evolution_review(
             "mode": "recommendation-first",
             "writes_performed": 0,
             "memory_mutation": "none",
+            "query_only_enforced": True,
             "governor_required": True,
             "supported_apply_actions": ["set_stale_candidate", "adjust_importance_score"],
             "auto_apply_without_governor": False,
@@ -2051,6 +2154,7 @@ def build_evolution_review(
             "importanceDriftMissingOrUnparseable": int(importance_drift.get("missing_or_unparseable_count") or 0),
             "importanceDriftHighRiskContent": int(importance_drift.get("high_risk_content_mismatch_count") or 0),
         },
+        "importance_drift_policy": importance_drift_policy_card,
         "items": items,
         "deferred": {
             "recommendation_types": [str(rec.get("type") or "") for rec in deferred_actions[:top]],
@@ -2063,6 +2167,8 @@ def build_evolution_review(
 
 def render_evolution_review(report: Dict[str, Any]) -> str:
     counts = report.get("counts") or {}
+    importance_drift_policy = report.get("importance_drift_policy") if isinstance(report.get("importance_drift_policy"), dict) else {}
+    drift_policy_metrics = importance_drift_policy.get("metrics") if isinstance(importance_drift_policy.get("metrics"), dict) else {}
     lines = [
         "openclaw-mem optimize evolution-review (governed apply candidates)",
         (
@@ -2072,6 +2178,11 @@ def render_evolution_review(report: Dict[str, Any]) -> str:
             f"importance_drift(label_mismatch={int(counts.get('importanceDriftLabelMismatches') or 0)},"
             f"missing_or_unparseable={int(counts.get('importanceDriftMissingOrUnparseable') or 0)},"
             f"high_risk_content={int(counts.get('importanceDriftHighRiskContent') or 0)})"
+        ),
+        (
+            f"importance_drift_gate={str(importance_drift_policy.get('status') or 'hold')} "
+            f"acceptable={bool(importance_drift_policy.get('acceptable_for_promotion_apply', False))} "
+            f"rows={int(drift_policy_metrics.get('rows_scanned') or 0)}"
         ),
     ]
     for item in list(report.get("items") or [])[:10]:
@@ -2096,6 +2207,8 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
     weak = sig.get("weakly_connected", {})
     misses = sig.get("repeated_misses", {})
     importance_drift = sig.get("importance_drift", {})
+    importance_drift_policy = importance_drift.get("policy_card") if isinstance(importance_drift.get("policy_card"), dict) else {}
+    drift_policy_metrics = importance_drift_policy.get("metrics") if isinstance(importance_drift_policy.get("metrics"), dict) else {}
 
     lines = [
         "openclaw-mem optimize review (recommendation-only)",
@@ -2115,6 +2228,11 @@ def render_memory_health_review(report: Dict[str, Any]) -> str:
             f"importance_drift=label_mismatch:{importance_drift.get('score_label_mismatch_count', 0)} "
             f"missing_or_unparseable:{importance_drift.get('missing_or_unparseable_count', 0)} "
             f"high_risk_content:{importance_drift.get('high_risk_content_mismatch_count', 0)}"
+        ),
+        (
+            f"importance_drift_gate={str(importance_drift_policy.get('status') or 'hold')} "
+            f"acceptable={bool(importance_drift_policy.get('acceptable_for_promotion_apply', False))} "
+            f"rows={int(drift_policy_metrics.get('rows_scanned') or 0)}"
         ),
     ]
 

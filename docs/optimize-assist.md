@@ -155,12 +155,24 @@ The runner now computes promotion metrics from first-party receipts produced in 
 - native regression-rate percentage from recent effect receipts
 - `rollback_replay_pass` from `verifier-bundle`
 - challenger agreement status when challenger agreement is required
+- read-only `importance_drift` posture via `importance_drift_policy` from the same evolution packet
 
 `--promotion-gate-receipt` is now an **output path only**.
 It emits the runner-computed promotion-gate artifact and is no longer accepted as authoritative input.
 
 When all thresholds are green, the controller promotes its persisted next mode to `auto_low_risk`.
 If `--challenger-require-agreement-for-promotion` is set, promotion also fails closed when the challenger lane reports disagreements above the configured threshold.
+If importance-drift policy is not acceptable (for example high-risk under-label detections or mismatch/missing rates above thresholds), promotion fails closed with `importance_drift_policy_hold` and receipts carry the policy card under `promotion_gates.importance_drift_gate.policy_card`.
+
+### Importance-drift policy card (proposal-only)
+
+`optimize review` now emits a deterministic read-only policy card:
+- path: `signals.importance_drift.policy_card`
+- kind: `openclaw-mem.optimize.importance-drift-policy-card.v0`
+- posture: `mode=proposal_only_read_only`, `query_only_enforced=true`, `writes_performed=0`
+
+`optimize evolution-review` mirrors the same card at `importance_drift_policy`, and text renderers show one compact line:
+- `importance_drift_gate=<accept|hold> acceptable=<true|false> rows=<n>`
 
 ### Allow bounded apply
 
@@ -205,6 +217,7 @@ python -m openclaw_mem optimize posture-review \
 This command:
 - reads controller state plus recent controller / verifier / challenger / assist receipts
 - summarizes whether Phase 8, 9, 10 surfaces are actually live
+- verifies recent importance-drift gate health from controller promotion receipts
 - emits a bounded `near_ceiling_ready` verdict without changing memory state
 
 ## OpenClaw cron enablement
