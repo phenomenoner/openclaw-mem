@@ -218,6 +218,7 @@ EPISODIC_ALLOWED_TYPES = {
     "tool.result",
     "ops.decision",
     "ops.alert",
+    "ops.observation",
 }
 EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES = 8 * 1024
 EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES = 4 * 1024
@@ -14731,6 +14732,117 @@ def cmd_episodes_append(conn: sqlite3.Connection, args: argparse.Namespace) -> N
     _emit(out, args.json)
 
 
+def cmd_episodes_append_session_store_receipt(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Append a low-cardinality OpenClaw session-store maintenance receipt.
+
+    This is an optional hardening bridge for newer OpenClaw builds that rotate
+    session store files. It records lifecycle/observability metadata only and
+    deliberately avoids ingesting `sessions.json` or `.bak.*` backup contents.
+    """
+
+    try:
+        scope = _normalize_episodic_scope(getattr(args, "scope", None) or "global")
+        ts_ms = _parse_ts_ms(getattr(args, "ts_ms", None))
+        agent_id = str(getattr(args, "agent_id", None) or "openclaw").strip() or "openclaw"
+        event_name = str(getattr(args, "event", None) or "session_store_rotated").strip()
+        if event_name not in {"session_store_rotated", "session_store_cleanup"}:
+            raise ValueError("--event must be session_store_rotated or session_store_cleanup")
+
+        store_path_raw = str(getattr(args, "store_path", None) or "").strip()
+        store_basename = _session_store_basename(store_path_raw)
+        size_bytes_raw = getattr(args, "size_bytes", None)
+        backup_count_raw = getattr(args, "backup_count", None)
+        size_bytes = int(size_bytes_raw) if size_bytes_raw is not None else None
+        backup_count = int(backup_count_raw) if backup_count_raw is not None else None
+        if size_bytes is not None and size_bytes < 0:
+            raise ValueError("--size-bytes must be >= 0")
+        if backup_count is not None and backup_count < 0:
+            raise ValueError("--backup-count must be >= 0")
+
+        payload_obj = {
+            "event": event_name,
+            "store_basename": store_basename,
+        }
+        if size_bytes is not None:
+            payload_obj["size_bytes"] = size_bytes
+        if backup_count is not None:
+            payload_obj["backup_count"] = backup_count
+
+        refs_obj = {"source": "openclaw_session_store_maintenance", "store_basename": store_basename}
+        payload_json, payload_bytes, _ = _episodic_bounded_json(
+            payload_obj,
+            cap_bytes=EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES,
+            label="payload",
+        )
+        refs_json, refs_bytes, _ = _episodic_bounded_json(
+            refs_obj,
+            cap_bytes=EPISODIC_DEFAULT_REFS_CAP_BYTES,
+            label="refs",
+        )
+        summary_parts = [event_name, f"store={store_basename}"]
+        if size_bytes is not None:
+            summary_parts.append(f"size_bytes={size_bytes}")
+        if backup_count is not None:
+            summary_parts.append(f"backup_count={backup_count}")
+        summary = " ".join(summary_parts)
+
+        event_id_raw = str(getattr(args, "event_id", "") or "").strip()
+        event_id = event_id_raw or f"session-store-{hashlib.sha256(f'{scope}:{agent_id}:{event_name}:{store_basename}:{ts_ms}:{size_bytes}:{backup_count}'.encode('utf-8')).hexdigest()[:24]}"
+        created_at = _utcnow_iso()
+        conn.execute(
+            """
+            INSERT INTO episodic_events (
+                event_id, ts_ms, scope, session_id, agent_id, type, summary,
+                payload_json, refs_json, redacted, schema_version, created_at, search_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+            """,
+            (
+                event_id,
+                ts_ms,
+                scope,
+                "openclaw-session-store",
+                agent_id,
+                "ops.observation",
+                summary,
+                payload_json,
+                refs_json,
+                EPISODIC_SCHEMA_VERSION,
+                created_at,
+                _episodic_build_search_text(summary=summary, payload_json=payload_json, refs_json=refs_json),
+            ),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as e:
+        _emit({"kind": "openclaw-mem.episodes.append-session-store-receipt.v0", "ok": False, "error": "event_id already exists", "detail": str(e)}, True)
+        sys.exit(1)
+    except ValueError as e:
+        _emit({"kind": "openclaw-mem.episodes.append-session-store-receipt.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(2)
+
+    _emit(
+        {
+            "kind": "openclaw-mem.episodes.append-session-store-receipt.v0",
+            "ts": _utcnow_iso(),
+            "version": {"openclaw_mem": __version__, "schema": "v0"},
+            "ok": True,
+            "event": {
+                "event_id": event_id,
+                "ts_ms": ts_ms,
+                "scope": scope,
+                "session_id": "openclaw-session-store",
+                "agent_id": agent_id,
+                "type": "ops.observation",
+                "summary": summary,
+                "payload_bytes": payload_bytes,
+                "refs_bytes": refs_bytes,
+                "schema_version": EPISODIC_SCHEMA_VERSION,
+                "redacted": False,
+            },
+        },
+        args.json,
+    )
+
+
 def _episodic_collect_search_fragments(value: Any, out: List[str], *, max_fragments: int = 48) -> None:
     if len(out) >= max_fragments or value is None:
         return
@@ -15645,6 +15757,33 @@ def _sanitize_episodic_conversation_text(text: str, *, role: str) -> Optional[st
     return cleaned or None
 
 
+def _session_store_basename(raw_path: str) -> str:
+    normalized = str(raw_path or "").strip().replace("\\", "/")
+    name = normalized.rsplit("/", 1)[-1].strip()
+    return name or "sessions.json"
+
+
+def _is_ignored_session_extract_path(path: Path) -> bool:
+    """Return True for OpenClaw session/runtime backup files that are not transcripts.
+
+    Newer OpenClaw builds may maintain session-store backups such as
+    `sessions.json.bak.<timestamp>` beside runtime state. Those files are
+    infrastructure receipts, not conversation transcripts. The extractor should
+    ignore them when operators point `--sessions-root` at a broad OpenClaw state
+    directory. The checks are intentionally path-name based so old OpenClaw
+    installations that do not create these files continue to behave unchanged.
+    """
+
+    name = path.name
+    if name == "sessions.json" or name.startswith("sessions.json.bak."):
+        return True
+    if ".checkpoint." in name:
+        return True
+    if ".bak." in name or name.endswith(".bak"):
+        return True
+    return False
+
+
 def _episodes_extract_sessions_once(
     *,
     sessions_root: Path,
@@ -15655,7 +15794,9 @@ def _episodes_extract_sessions_once(
 ) -> Dict[str, Any]:
     state = _read_json_file(state_path)
     files_state = state.get("files") if isinstance(state.get("files"), dict) else {}
-    files = sorted([p for p in sessions_root.rglob("*.jsonl") if p.is_file()], key=lambda p: str(p))
+    candidate_files = sorted([p for p in sessions_root.rglob("*.jsonl") if p.is_file()], key=lambda p: str(p))
+    files = [p for p in candidate_files if not _is_ignored_session_extract_path(p)]
+    ignored_files = len(candidate_files) - len(files)
 
     spool_path.parent.mkdir(parents=True, exist_ok=True)
     new_files_state: Dict[str, Any] = dict(files_state)
@@ -15670,6 +15811,7 @@ def _episodes_extract_sessions_once(
     payload_truncated = 0
     sanitized_dropped = 0
     trailing_partial_bytes = 0
+    ignored_files = int(ignored_files)
     errors_sample: List[str] = []
 
     lock_path = _episodic_lock_path(spool_path)
@@ -15851,6 +15993,7 @@ def _episodes_extract_sessions_once(
         },
         "files_seen": files_seen,
         "files_with_updates": files_with_updates,
+        "ignored_files": ignored_files,
         "lines_total": lines_total,
         "invalid_json": invalid_json,
         "unsupported_rows": unsupported_rows,
@@ -15940,6 +16083,7 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
                     "truncated": int(cycle.get("payload_truncated") or 0),
                     "cap_bytes": payload_cap,
                 },
+                "ignored": {"files": int(cycle.get("ignored_files") or 0)},
             },
         }
         _emit(out, args.json)
@@ -15960,6 +16104,7 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
         "payload_truncated": 0,
         "sanitized_dropped": 0,
         "trailing_partial_bytes": 0,
+        "ignored_files": 0,
     }
     errors_sample: List[str] = []
     last_cycle: Optional[Dict[str, Any]] = None
@@ -18000,6 +18145,21 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--refs-cap-bytes", type=int, default=EPISODIC_DEFAULT_REFS_CAP_BYTES, help="Refs size cap in bytes (default: 4096)")
     e.add_argument("--allow-tool-output", action="store_true", help="Allow tool-output/secret-like content (default: reject)")
     e.set_defaults(func=cmd_episodes_append)
+
+    e = esub.add_parser(
+        "append-session-store-receipt",
+        help="Append a low-cardinality OpenClaw session-store maintenance receipt (no backup content ingest)",
+    )
+    add_common(e)
+    e.add_argument("--scope", default="global", help="Scope token (default: global)")
+    e.add_argument("--agent-id", default="openclaw", help="Logical actor id (default: openclaw)")
+    e.add_argument("--event", default="session_store_rotated", choices=["session_store_rotated", "session_store_cleanup"], help="Receipt event name")
+    e.add_argument("--store-path", default="sessions.json", help="Session store path; only basename is recorded")
+    e.add_argument("--size-bytes", type=int, default=None, help="Optional session store size in bytes")
+    e.add_argument("--backup-count", type=int, default=None, help="Optional count of retained backups")
+    e.add_argument("--ts-ms", type=int, help="Event timestamp in unix ms (default: now)")
+    e.add_argument("--event-id", help="Stable event id (default: deterministic hash)")
+    e.set_defaults(func=cmd_episodes_append_session_store_receipt)
 
     e = esub.add_parser("extract-sessions", help="Tail OpenClaw session JSONL files into episodic spool (conversation fallback)")
     add_common(e)

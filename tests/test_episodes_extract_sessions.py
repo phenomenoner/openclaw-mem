@@ -553,6 +553,169 @@ MEDIA:/tmp/not-memory.png
 
         conn.close()
 
+    def test_extract_sessions_ignores_backup_and_checkpoint_files(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sessions_root = root / "sessions"
+            sessions_root.mkdir(parents=True, exist_ok=True)
+            good_file = sessions_root / "thread-good.jsonl"
+            backup_file = sessions_root / "thread.bak.123.jsonl"
+            checkpoint_file = sessions_root / "thread.checkpoint.abc.jsonl"
+            spool = root / "episodes.jsonl"
+            extract_state = root / "extract-state.json"
+
+            good_line = self._session_line(ts="2026-03-06T01:00:00Z", role="user", text="[SCOPE: proj-backup] keep me")
+            ignored_line = self._session_line(ts="2026-03-06T01:00:01Z", role="user", text="[SCOPE: proj-backup] ignore me")
+            good_file.write_text(json.dumps(good_line, ensure_ascii=False) + "\n", encoding="utf-8")
+            backup_file.write_text(json.dumps(ignored_line, ensure_ascii=False) + "\n", encoding="utf-8")
+            checkpoint_file.write_text(json.dumps(ignored_line, ensure_ascii=False) + "\n", encoding="utf-8")
+            # Newer OpenClaw session-store backups may appear beside runtime state.
+            # They are not JSONL transcripts and should never be treated as input.
+            (sessions_root / "sessions.json.bak.1770000000000").write_text("{}", encoding="utf-8")
+
+            out = self._run(
+                conn,
+                [
+                    "episodes",
+                    "extract-sessions",
+                    "--sessions-root",
+                    str(sessions_root),
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(extract_state),
+                    "--json",
+                ],
+            )
+            self.assertEqual(out["emitted"], 1)
+            self.assertEqual(out["ignored_files"], 2)
+            self.assertEqual(out["counters"]["ignored"]["files"], 2)
+            spool_events = [json.loads(line) for line in spool.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(spool_events), 1)
+            self.assertIn("keep me", spool_events[0]["summary"])
+            self.assertNotIn("ignore me", json.dumps(spool_events, ensure_ascii=False))
+
+        conn.close()
+
+    def test_extract_sessions_ignores_session_json_bak_jsonl(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sessions_root = root / "sessions"
+            sessions_root.mkdir(parents=True, exist_ok=True)
+            backup_file = sessions_root / "sessions.json.bak.1770000000000.jsonl"
+            spool = root / "episodes.jsonl"
+            extract_state = root / "extract-state.json"
+
+            ignored_line = self._session_line(ts="2026-03-06T01:05:00Z", role="user", text="[SCOPE: proj-backup] ignore store backup")
+            backup_file.write_text(json.dumps(ignored_line, ensure_ascii=False) + "\n", encoding="utf-8")
+
+            out = self._run(
+                conn,
+                [
+                    "episodes",
+                    "extract-sessions",
+                    "--sessions-root",
+                    str(sessions_root),
+                    "--file",
+                    str(spool),
+                    "--state",
+                    str(extract_state),
+                    "--json",
+                ],
+            )
+            self.assertEqual(out["emitted"], 0)
+            self.assertEqual(out["ignored_files"], 1)
+            self.assertTrue(spool.exists())
+            self.assertEqual(spool.read_text(encoding="utf-8"), "")
+
+        conn.close()
+
+    def test_append_session_store_receipt_uses_windows_basename_on_posix(self):
+        conn = _connect(":memory:")
+        out = self._run(
+            conn,
+            [
+                "episodes",
+                "append-session-store-receipt",
+                "--scope",
+                "global",
+                "--store-path",
+                r"C:\Users\ck\sessions.json",
+                "--json",
+            ],
+        )
+        self.assertTrue(out["ok"])
+        q = self._run(
+            conn,
+            [
+                "episodes",
+                "query",
+                "--scope",
+                "global",
+                "--session-id",
+                "openclaw-session-store",
+                "--include-payload",
+                "--json",
+            ],
+        )
+        item = q["items"][0]
+        self.assertEqual(item["payload"]["store_basename"], "sessions.json")
+        self.assertNotIn(r"C:\Users", json.dumps(item, ensure_ascii=False))
+        conn.close()
+
+    def test_append_session_store_receipt_records_low_cardinality_event(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            store_path = Path(td) / "sessions.json"
+            out = self._run(
+                conn,
+                [
+                    "episodes",
+                    "append-session-store-receipt",
+                    "--scope",
+                    "global",
+                    "--agent-id",
+                    "openclaw",
+                    "--store-path",
+                    str(store_path),
+                    "--size-bytes",
+                    "123456",
+                    "--backup-count",
+                    "3",
+                    "--json",
+                ],
+            )
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["event"]["type"], "ops.observation")
+            self.assertEqual(out["event"]["session_id"], "openclaw-session-store")
+
+            q = self._run(
+                conn,
+                [
+                    "episodes",
+                    "query",
+                    "--scope",
+                    "global",
+                    "--session-id",
+                    "openclaw-session-store",
+                    "--include-payload",
+                    "--json",
+                ],
+            )
+            self.assertEqual(q["count"], 1)
+            item = q["items"][0]
+            self.assertEqual(item["type"], "ops.observation")
+            self.assertIn("session_store_rotated", item["summary"])
+            self.assertEqual(item["payload"]["store_basename"], "sessions.json")
+            self.assertEqual(item["payload"]["size_bytes"], 123456)
+            self.assertEqual(item["payload"]["backup_count"], 3)
+            serialized = json.dumps(item, ensure_ascii=False)
+            self.assertNotIn(str(store_path.parent), serialized)
+
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

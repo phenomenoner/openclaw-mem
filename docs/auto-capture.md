@@ -107,6 +107,27 @@ Retention defaults:
 - `conversation.user`: 60d
 - `conversation.assistant`: 90d
 
+### Session-store maintenance hardening
+
+Recent OpenClaw versions may rotate or back up the session store beside live runtime state, for example `sessions.json` and `sessions.json.bak.<timestamp>`. Those files are infrastructure state, not conversation transcripts.
+
+`episodes extract-sessions` now skips session-store backup/checkpoint artifacts when `--sessions-root` is pointed at a broad OpenClaw state directory. Transcript-shaped backup/checkpoint files such as `sessions.json.bak.*.jsonl`, `*.checkpoint.*.jsonl`, and `*.bak*.jsonl` are ignored and counted in `counters.ignored.files` in the JSON receipt. Non-JSONL session-store files such as `sessions.json` or `sessions.json.bak.<timestamp>` are outside the transcript scan and are not read. This is additive: older OpenClaw installs that do not create these files behave as before.
+
+If you want session-store maintenance visibility without ingesting store contents, record a low-cardinality receipt instead:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem episodes append-session-store-receipt \
+  --scope global \
+  --agent-id openclaw \
+  --event session_store_rotated \
+  --store-path ~/.openclaw/sessions.json \
+  --size-bytes 123456 \
+  --backup-count 3 \
+  --json
+```
+
+The receipt writes one `ops.observation` row containing the event name, the store basename, and optional numeric `size_bytes` / `backup_count`. It never stores the full path, `sessions.json` contents, or `.bak.*` contents.
+
 ---
 
 ## Verification
