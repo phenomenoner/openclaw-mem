@@ -10,6 +10,7 @@ Note: This is a minimal implementation intended for M0+/Phase 3.
 
 from __future__ import annotations
 
+import heapq
 import math
 from array import array
 from typing import Iterable, List, Sequence, Tuple, Dict
@@ -53,18 +54,24 @@ def rank_cosine(
     """Rank (observation_id, score) by cosine similarity.
 
     items: iterable of (observation_id, vector_blob, vector_norm)
+
+    Results preserve the previous full-sort ordering: score descending, with
+    equal scores retaining input order. Internally this keeps only the best
+    ``limit`` rows while scanning, avoiding a full scored list/full sort for
+    bounded retrieval. Non-finite query norms, vector norms, or scores are
+    skipped, and non-positive limits return an empty result.
     """
     q = list(query_vec)
     qn = l2_norm(q)
-    if qn == 0.0:
+    if qn == 0.0 or not math.isfinite(qn) or limit <= 0:
         return []
 
-    scored: List[Tuple[int, float]] = []
+    top: List[Tuple[float, int, int]] = []
     q_dim = len(q)
-    for obs_id, blob, norm in items:
+    for seq, (obs_id, blob, norm) in enumerate(items):
         if not blob or not norm:
             continue
-        if norm == 0.0:
+        if norm == 0.0 or not math.isfinite(norm):
             continue
 
         try:
@@ -78,10 +85,19 @@ def rank_cosine(
             continue
 
         s = dot(q, v) / (qn * norm)
-        scored.append((obs_id, float(s)))
+        score = float(s)
+        if not math.isfinite(score):
+            # Non-finite scores cannot be ordered safely in the bounded heap.
+            continue
 
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return scored[:limit]
+        entry = (score, -seq, int(obs_id))
+        if len(top) < limit:
+            heapq.heappush(top, entry)
+        elif entry > top[0]:
+            heapq.heapreplace(top, entry)
+
+    top.sort(key=lambda x: (-x[0], -x[1]))
+    return [(obs_id, score) for score, _, obs_id in top]
 
 
 def rank_rrf(

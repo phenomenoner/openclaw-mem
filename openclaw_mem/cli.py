@@ -4587,11 +4587,7 @@ def _docs_collect_markdown_files(raw_paths: List[str]) -> Tuple[List[Path], List
     return files, missing
 
 
-def _docs_git_root(path: Path, cache: Dict[str, Optional[Path]]) -> Optional[Path]:
-    key = str(path.parent.resolve())
-    if key in cache:
-        return cache[key]
-
+def _docs_git_root_subprocess(path: Path, cache: Dict[str, Optional[Path]], key: str) -> Optional[Path]:
     p = subprocess.run(
         ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
         capture_output=True,
@@ -4609,6 +4605,53 @@ def _docs_git_root(path: Path, cache: Dict[str, Optional[Path]]) -> Optional[Pat
     root = Path(root_raw).expanduser().resolve()
     cache[key] = root
     return root
+
+
+def _docs_git_env_requires_fallback() -> bool:
+    return any(name in os.environ for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_CEILING_DIRECTORIES"))
+
+
+def _docs_git_root(path: Path, cache: Dict[str, Optional[Path]]) -> Optional[Path]:
+    parent = path.parent.resolve()
+    key = str(parent)
+    if _docs_git_env_requires_fallback():
+        return _docs_git_root_subprocess(path, cache, key)
+
+    if key in cache:
+        return cache[key]
+
+    visited: List[str] = []
+    cur = parent
+    while True:
+        cur_key = str(cur)
+        if cur_key in cache:
+            root = cache[cur_key]
+            for item in visited:
+                cache[item] = root
+            return root
+
+        visited.append(cur_key)
+        git_marker = cur / ".git"
+        if git_marker.is_dir():
+            root = cur
+            for item in visited:
+                cache[item] = root
+            return root
+
+        if git_marker.exists():
+            # Worktrees and submodules commonly expose .git as a file. Preserve
+            # git's own interpretation for these and other non-directory cases.
+            return _docs_git_root_subprocess(path, cache, key)
+
+        if cur.parent == cur:
+            # Unknown topology: fall back to git so unusual discovery rules keep
+            # current behavior, then cache the discovered answer for this path.
+            root = _docs_git_root_subprocess(path, cache, key)
+            for item in visited:
+                cache.setdefault(item, root)
+            return root
+
+        cur = cur.parent
 
 
 def _docs_repo_relpath(path: Path, git_cache: Dict[str, Optional[Path]]) -> Tuple[str, str]:
@@ -4871,6 +4914,33 @@ def _docs_fts_rows(
     return [dict(r) for r in rows]
 
 
+def _docs_vec_candidates_exist(
+    conn: sqlite3.Connection,
+    *,
+    model: str,
+    scope_repos: Optional[Iterable[str]] = None,
+) -> bool:
+    repo_filter = _docs_scope_repos(scope_repos)
+    if repo_filter:
+        placeholders = ",".join(["?"] * len(repo_filter))
+        row = conn.execute(
+            f"""
+            SELECT 1
+            FROM docs_embeddings e
+            JOIN docs_chunks c ON c.id = e.chunk_rowid
+            WHERE e.model = ? AND c.repo IN ({placeholders})
+            LIMIT 1
+            """,
+            (model, *repo_filter),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT 1 FROM docs_embeddings WHERE model = ? LIMIT 1",
+            (model,),
+        ).fetchone()
+    return row is not None
+
+
 def _docs_vec_rows(
     conn: sqlite3.Connection,
     *,
@@ -4882,19 +4952,21 @@ def _docs_vec_rows(
     repo_filter = _docs_scope_repos(scope_repos)
     if repo_filter:
         placeholders = ",".join(["?"] * len(repo_filter))
+        query_dim = len(query_vec)
         emb_rows = conn.execute(
             f"""
             SELECT e.chunk_rowid, e.vector, e.norm
             FROM docs_embeddings e
             JOIN docs_chunks c ON c.id = e.chunk_rowid
-            WHERE e.model = ? AND c.repo IN ({placeholders})
+            WHERE e.model = ? AND e.dim = ? AND c.repo IN ({placeholders})
             """,
-            (model, *repo_filter),
+            (model, query_dim, *repo_filter),
         ).fetchall()
     else:
+        query_dim = len(query_vec)
         emb_rows = conn.execute(
-            "SELECT chunk_rowid, vector, norm FROM docs_embeddings WHERE model = ?",
-            (model,),
+            "SELECT chunk_rowid, vector, norm FROM docs_embeddings WHERE model = ? AND dim = ?",
+            (model, query_dim),
         ).fetchall()
 
     ranked = rank_cosine(
@@ -4941,12 +5013,13 @@ def cmd_docs_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     api_key = _get_api_key()
     if api_key:
-        try:
-            client = OpenAIEmbeddingsClient(api_key=api_key, base_url=getattr(args, "base_url", defaults.openai_base_url()))
-            query_vec = client.embed([query], model=model)[0]
-            vec_rows = _docs_vec_rows(conn, query_vec=query_vec, model=model, top_k=vec_k, scope_repos=scope_repos)
-        except Exception as e:
-            vec_error = str(e)
+        if _docs_vec_candidates_exist(conn, model=model, scope_repos=scope_repos):
+            try:
+                client = OpenAIEmbeddingsClient(api_key=api_key, base_url=getattr(args, "base_url", defaults.openai_base_url()))
+                query_vec = client.embed([query], model=model)[0]
+                vec_rows = _docs_vec_rows(conn, query_vec=query_vec, model=model, top_k=vec_k, scope_repos=scope_repos)
+            except Exception as e:
+                vec_error = str(e)
     else:
         vec_error = "missing_api_key"
 
@@ -5909,9 +5982,10 @@ def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         query_vec = client.embed([args.query], model=model)[0]
 
     # Load embeddings
+    query_dim = len(query_vec)
     items = conn.execute(
-        "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ?",
-        (model,),
+        "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ? AND dim = ?",
+        (model, query_dim),
     ).fetchall()
 
     ranked = rank_cosine(
@@ -6078,20 +6152,20 @@ def _hybrid_retrieve(
     vec_ids: List[int] = []
     vec_en_ids: List[int] = []
 
-    vec_rows = conn.execute(
-        "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ?",
+    vec_exists = conn.execute(
+        "SELECT 1 FROM observation_embeddings WHERE model = ? LIMIT 1",
         (model,),
-    ).fetchall()
+    ).fetchone() is not None
 
-    vec_en_rows = []
+    vec_en_exists = False
     if query_en:
-        vec_en_rows = conn.execute(
-            "SELECT observation_id, vector, norm FROM observation_embeddings_en WHERE model = ?",
+        vec_en_exists = conn.execute(
+            "SELECT 1 FROM observation_embeddings_en WHERE model = ? LIMIT 1",
             (model,),
-        ).fetchall()
+        ).fetchone() is not None
 
-    need_vec = bool(vec_rows)
-    need_vec_en = bool(query_en and (vec_en_rows or vec_rows))
+    need_vec = vec_exists
+    need_vec_en = bool(query_en and (vec_en_exists or vec_exists))
 
     api_key = _get_api_key()
     if api_key and (need_vec or need_vec_en):
@@ -6108,6 +6182,11 @@ def _hybrid_retrieve(
             raise RuntimeError(str(e)) from e
 
         if need_vec:
+            query_dim = len(query_vec)
+            vec_rows = conn.execute(
+                "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ? AND dim = ?",
+                (model, query_dim),
+            ).fetchall()
             vec_ranked = rank_cosine(
                 query_vec=query_vec,
                 items=((int(r[0]), r[1], float(r[2])) for r in vec_rows),
@@ -6116,8 +6195,18 @@ def _hybrid_retrieve(
             vec_ids = [rid for rid, _ in vec_ranked]
 
         if query_en_vec is not None and need_vec_en:
+            query_en_dim = len(query_en_vec)
+            vec_en_rows = conn.execute(
+                "SELECT observation_id, vector, norm FROM observation_embeddings_en WHERE model = ? AND dim = ?",
+                (model, query_en_dim),
+            ).fetchall()
             # Backward-compatible fallback when dedicated EN table is not populated.
-            search_rows = vec_en_rows if vec_en_rows else vec_rows
+            search_rows = vec_en_rows
+            if not search_rows and not vec_en_exists:
+                search_rows = conn.execute(
+                    "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ? AND dim = ?",
+                    (model, query_en_dim),
+                ).fetchall()
 
             vec_en_ranked = rank_cosine(
                 query_vec=query_en_vec,
@@ -14767,17 +14856,17 @@ def _episodes_vector_rankings(
     candidate_limit: int,
     base_url: Optional[str],
 ) -> Dict[str, Any]:
-    rows = conn.execute(
+    has_rows = conn.execute(
         """
-        SELECT emb.event_row_id, emb.vector, emb.norm
+        SELECT 1
         FROM episodic_event_embeddings emb
         JOIN episodic_events e ON e.id = emb.event_row_id
         WHERE emb.model = ? AND e.scope = ?
-        ORDER BY emb.event_row_id ASC
+        LIMIT 1
         """,
         (model, scope),
-    ).fetchall()
-    if not rows:
+    ).fetchone() is not None
+    if not has_rows:
         return {
             "vector_status": "missing_embeddings",
             "vec_ids": [],
@@ -14811,6 +14900,18 @@ def _episodes_vector_rankings(
             "vec_en_scores": {},
         }
 
+    query_dim = len(query_vec)
+    rows = conn.execute(
+        """
+        SELECT emb.event_row_id, emb.vector, emb.norm
+        FROM episodic_event_embeddings emb
+        JOIN episodic_events e ON e.id = emb.event_row_id
+        WHERE emb.model = ? AND emb.dim = ? AND e.scope = ?
+        ORDER BY emb.event_row_id ASC
+        """,
+        (model, query_dim, scope),
+    ).fetchall()
+
     vec_ranked = rank_cosine(
         query_vec=query_vec,
         items=((int(r[0]), r[1], float(r[2])) for r in rows),
@@ -14821,9 +14922,20 @@ def _episodes_vector_rankings(
 
     vec_en_ranked: List[Tuple[int, float]] = []
     if query_en_vec is not None:
+        query_en_dim = len(query_en_vec)
+        vec_en_rows = rows if query_en_dim == query_dim else conn.execute(
+            """
+            SELECT emb.event_row_id, emb.vector, emb.norm
+            FROM episodic_event_embeddings emb
+            JOIN episodic_events e ON e.id = emb.event_row_id
+            WHERE emb.model = ? AND emb.dim = ? AND e.scope = ?
+            ORDER BY emb.event_row_id ASC
+            """,
+            (model, query_en_dim, scope),
+        ).fetchall()
         vec_en_ranked = rank_cosine(
             query_vec=query_en_vec,
-            items=((int(r[0]), r[1], float(r[2])) for r in rows),
+            items=((int(r[0]), r[1], float(r[2])) for r in vec_en_rows),
             limit=max(1, int(candidate_limit)),
         )
     vec_en_ids = [rid for rid, _ in vec_en_ranked]

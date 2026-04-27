@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-04-27
+
 ### Changed
 
+- Reduced retrieval/search latency by skipping docs vector embedding calls when no matching stored docs embeddings exist for the requested model/scope, adding query-dimension SQL filters to docs/observation/episodic vector reads, bounding `rank_cosine` top-k selection without changing finite-score ordering, and avoiding repeated `git rev-parse` calls during normal-repo docs ingest.
+- Note: when docs search has no stored vector candidates, it now intentionally preserves FTS-only output without surfacing embedding-auth errors, because no vector call is needed in that path.
 - Optimized `route auto` for live prompt-hook use by adding a compact JSON payload mode, having mem-engine `autoRecall.routeAuto` call that compact path, and skipping broad transcript `OR` fallback for long prompt queries so fail-open routing does not turn common multi-token prompts into expensive catch-all searches.
 - Added an `observations(tool_name, ts)` index for graph readiness support-plane checks and explicit routeAuto timeout receipt fields (`timeoutHit`, `signal`, `killed`) for clearer operations diagnosis.
 
 ### Testing
 
+- Added vector/search latency regression coverage for docs no-vector early skip, scoped vector-candidate equivalence, mixed-dimension filtering, legacy zero/NULL-dim skip posture, episodic English-query dimension filtering, bounded `rank_cosine` golden behavior, and docs ingest git-root fallback behavior.
+- Added `scripts/rank_cosine_microbench.py` for timestamped synthetic rank-cosine latency receipts.
 - Added regression coverage for compact route-auto graph and transcript payload shapes, broad transcript fallback suppression on long route-auto queries, the graph readiness support-plane index, and routeAuto timeout receipts.
 
 ## [1.9.0] - 2026-04-27

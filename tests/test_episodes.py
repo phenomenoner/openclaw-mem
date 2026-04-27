@@ -4,7 +4,9 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from openclaw_mem.cli import _connect, build_parser
+from openclaw_mem.vector import l2_norm, pack_f32
+
+from openclaw_mem.cli import _connect, _episodes_vector_rankings, build_parser
 
 
 class TestEpisodesCli(unittest.TestCase):
@@ -530,6 +532,122 @@ class TestEpisodesCli(unittest.TestCase):
         self.assertIn("vector", session["matched_items"][0]["match"]["lanes"])
         self.assertIn("trace", out)
         self.assertGreaterEqual(len(out["trace"]["vec_top_k"]), 1)
+        conn.close()
+
+    def test_episodes_vector_rankings_filters_to_query_dimension_and_skips_legacy_zero_dim_rows(self):
+        conn = _connect(":memory:")
+        for idx, (summary, dim, vec, norm) in enumerate(
+            [
+                ("good semantic event", 2, [1.0, 0.0], 1.0),
+                ("wrong dimension event", 3, [1.0, 0.0, 0.0], 1.0),
+                ("legacy zero dim event", 0, [], 0.0),
+            ],
+            start=1,
+        ):
+            self._run(
+                conn,
+                [
+                    "episodes",
+                    "append",
+                    "--scope",
+                    "proj-dim",
+                    "--session-id",
+                    f"sess-{idx}",
+                    "--agent-id",
+                    "lyria",
+                    "--type",
+                    "conversation.user",
+                    "--summary",
+                    summary,
+                    "--json",
+                ],
+            )
+            conn.execute(
+                "INSERT INTO episodic_event_embeddings (event_row_id, model, dim, vector, norm, search_text_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (idx, "test-model", dim, pack_f32(vec), norm, f"hash-{idx}", "2026-03-22T00:00:00+00:00"),
+            )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0] for _ in texts]
+
+        model_count = conn.execute("SELECT COUNT(*) FROM episodic_event_embeddings WHERE model = ?", ("test-model",)).fetchone()[0]
+        dim_count = conn.execute("SELECT COUNT(*) FROM episodic_event_embeddings WHERE model = ? AND dim = ?", ("test-model", 2)).fetchone()[0]
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            out = _episodes_vector_rankings(
+                conn,
+                scope="proj-dim",
+                query="semantic",
+                query_en=None,
+                model="test-model",
+                candidate_limit=10,
+                base_url="https://example.com/v1",
+            )
+
+        self.assertEqual(model_count, 3)
+        self.assertEqual(dim_count, 1)
+        self.assertEqual(out["vector_status"], "ok")
+        self.assertEqual(out["vec_ids"], [1])
+        conn.close()
+
+    def test_episodes_vector_rankings_filters_separate_english_query_dimension(self):
+        conn = _connect(":memory:")
+        for idx, (summary, dim, vec, norm) in enumerate(
+            [
+                ("base semantic event", 2, [1.0, 0.0], 1.0),
+                ("english semantic event", 3, [0.0, 1.0, 0.0], 1.0),
+            ],
+            start=1,
+        ):
+            self._run(
+                conn,
+                [
+                    "episodes",
+                    "append",
+                    "--scope",
+                    "proj-dim-en",
+                    "--session-id",
+                    f"sess-en-{idx}",
+                    "--agent-id",
+                    "lyria",
+                    "--type",
+                    "conversation.user",
+                    "--summary",
+                    summary,
+                    "--json",
+                ],
+            )
+            conn.execute(
+                "INSERT INTO episodic_event_embeddings (event_row_id, model, dim, vector, norm, search_text_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (idx, "test-model", dim, pack_f32(vec), norm, f"hash-en-{idx}", "2026-03-22T00:00:00+00:00"),
+            )
+        conn.commit()
+
+        class _FakeEmbedClient:
+            def __init__(self, api_key: str, base_url: str = ""):
+                pass
+
+            def embed(self, texts, model):
+                return [[1.0, 0.0], [0.0, 1.0, 0.0]][: len(texts)]
+
+        with patch("openclaw_mem.cli._get_api_key", return_value="test-key"), patch("openclaw_mem.cli.OpenAIEmbeddingsClient", _FakeEmbedClient):
+            out = _episodes_vector_rankings(
+                conn,
+                scope="proj-dim-en",
+                query="semantic",
+                query_en="semantic english",
+                model="test-model",
+                candidate_limit=10,
+                base_url="https://example.com/v1",
+            )
+
+        self.assertEqual(out["vector_status"], "ok")
+        self.assertEqual(out["vec_ids"], [1])
+        self.assertEqual(out["vec_en_ids"], [2])
         conn.close()
 
     def test_episodes_search_hybrid_fails_open_to_lexical_when_vector_unavailable(self):

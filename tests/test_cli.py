@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, _pack_graph_resolve_scope, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export, cmd_graph_synth, cmd_graph_lint
+from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, _pack_graph_resolve_scope, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export, cmd_graph_synth, cmd_graph_lint, cmd_vsearch
 
 
 class TestCliM0(unittest.TestCase):
@@ -3515,6 +3515,59 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(detail["importance"]["method"], "manual-via-cli")
         self.assertIn("graded_at", detail["importance"])
 
+        conn.close()
+
+    def test_vsearch_filters_to_query_dimension_and_skips_zero_dim_rows(self):
+        conn = _connect(":memory:")
+        for idx, summary in [(1, "good vector"), (2, "wrong dimension"), (3, "legacy zero dim")]:
+            _insert_observation(
+                conn,
+                {
+                    "ts": "2026-02-05T00:00:00Z",
+                    "kind": "fact",
+                    "tool_name": "memory_store",
+                    "summary": summary,
+                    "detail": {},
+                },
+            )
+
+        from openclaw_mem.vector import pack_f32, l2_norm
+
+        for obs_id, dim, vec, norm in [
+            (1, 2, [1.0, 0.0], l2_norm([1.0, 0.0])),
+            (2, 3, [1.0, 0.0, 0.0], l2_norm([1.0, 0.0, 0.0])),
+            (3, 0, [], 0.0),
+        ]:
+            conn.execute(
+                "INSERT INTO observation_embeddings (observation_id, model, dim, vector, norm, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (obs_id, "test-model", dim, pack_f32(vec), norm, "2026-02-05T00:00:00Z"),
+            )
+        conn.commit()
+
+        args = type(
+            "Args",
+            (),
+            {
+                "query": "semantic",
+                "query_vector_json": "[1.0, 0.0]",
+                "query_vector_file": None,
+                "model": "test-model",
+                "limit": 10,
+                "base_url": "https://example.com/v1",
+                "json": True,
+            },
+        )()
+
+        model_count = conn.execute("SELECT COUNT(*) FROM observation_embeddings WHERE model = ?", ("test-model",)).fetchone()[0]
+        dim_count = conn.execute("SELECT COUNT(*) FROM observation_embeddings WHERE model = ? AND dim = ?", ("test-model", 2)).fetchone()[0]
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_vsearch(conn, args)
+        out = json.loads(buf.getvalue())
+
+        self.assertEqual(model_count, 3)
+        self.assertEqual(dim_count, 1)
+        self.assertEqual([r["id"] for r in out], [1])
         conn.close()
 
     def test_store_persists_english_embedding_when_text_en_present(self):
