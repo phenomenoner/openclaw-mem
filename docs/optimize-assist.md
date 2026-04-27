@@ -236,6 +236,32 @@ This command:
 - verifies recent importance-drift gate health from controller promotion receipts, including profile/baseline metadata and persistent-drift counters
 - emits a bounded `near_ceiling_ready` verdict without changing memory state
 
+## Canary advisory report
+
+Canary cron can now end with a read-only advisory report:
+
+```bash
+python -m openclaw_mem optimize canary-advisory \
+  --posture-file /path/to/posture.json \
+  --verifier-file /path/to/verifier.json \
+  --json
+```
+
+Or, when a runner root carries `posture.json` and recent `verifier.json` receipts:
+
+```bash
+python -m openclaw_mem optimize canary-advisory \
+  --runner-root ~/.openclaw/memory/openclaw-mem/optimize-assist-runner \
+  --json
+```
+
+The report emits `openclaw-mem.optimize.canary-advisory.v0` with `overall_status` plus per-feature decisions for:
+- `soft_archive_canary`
+- `lifecycle_mvp`
+- `optimizer_gates`
+
+Statuses are `can_enable`, `monitor_only`, or `not_ready`, each with deterministic reasons and evidence refs. The command performs no writes, keeps Working Set frozen/default-off, and treats hard delete as forbidden.
+
 ## OpenClaw cron enablement
 
 Use an isolated cron lane that runs exactly one `exec`.

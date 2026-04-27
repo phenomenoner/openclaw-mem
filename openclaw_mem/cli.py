@@ -3730,6 +3730,192 @@ def cmd_optimize_posture_review(conn: sqlite3.Connection, args: argparse.Namespa
     _emit(out, True)
 
 
+
+def _optimize_advisory_load_packet(path_value: Any) -> Dict[str, Any]:
+    if not path_value:
+        return {}
+    path = Path(os.path.expanduser(str(path_value)))
+    payload = _optimize_verifier_load_json(path)
+    if payload:
+        payload.setdefault('_path', str(path))
+    return payload if isinstance(payload, dict) else {}
+
+
+def _optimize_advisory_status(status: str, reasons: List[str], evidence_refs: List[str]) -> Dict[str, Any]:
+    return {
+        'status': status,
+        'can_enable': status == 'can_enable',
+        'reasons': sorted(set(reason for reason in reasons if reason)),
+        'evidence_refs': [ref for ref in evidence_refs if ref],
+    }
+
+
+def _optimize_build_canary_advisory(posture: Dict[str, Any], verifier: Dict[str, Any]) -> Dict[str, Any]:
+    posture_summary = posture.get('summary') if isinstance(posture.get('summary'), dict) else {}
+    posture_counts = posture.get('counts') if isinstance(posture.get('counts'), dict) else {}
+    posture_reasons = list(posture.get('reasons') or []) if isinstance(posture.get('reasons'), list) else []
+    posture_artifacts = posture.get('artifacts') if isinstance(posture.get('artifacts'), dict) else {}
+    families = posture.get('families') if isinstance(posture.get('families'), dict) else {}
+    family_state = families.get('state') if isinstance(families.get('state'), dict) else {}
+    verifier_summary = verifier.get('summary') if isinstance(verifier.get('summary'), dict) else {}
+    verifier_counts = verifier.get('counts') if isinstance(verifier.get('counts'), dict) else {}
+
+    verifier_available = str(verifier.get('kind') or '') == 'openclaw-mem.optimize.verifier-bundle.v0'
+    posture_available = str(posture.get('kind') or '') == 'openclaw-mem.optimize.posture-review.v0'
+    applied_counts = verifier_summary.get('applied_action_counts') if isinstance(verifier_summary.get('applied_action_counts'), dict) else {}
+    if not applied_counts and isinstance(families.get('verifier_applied_action_counts'), dict):
+        applied_counts = families.get('verifier_applied_action_counts')
+    soft_archive_actions = int(applied_counts.get('set_soft_archive_candidate') or posture_counts.get('softArchiveActionsObserved') or 0)
+    soft_archive_slot = family_state.get('soft_archive_candidate') if isinstance(family_state.get('soft_archive_candidate'), dict) else {}
+    soft_archive_enabled = bool(soft_archive_slot.get('enabled', False))
+    soft_archive_quarantined = str(soft_archive_slot.get('mode') or '') == 'quarantined'
+
+    cap_pass = verifier_summary.get('cap_integrity_pass')
+    rollback_pass = verifier_summary.get('rollback_replay_pass')
+    no_hard_delete_pass = verifier_summary.get('no_hard_delete_pass')
+    effect_missing_pct = float(verifier_summary.get('effect_receipt_missing_pct') or 0.0) if verifier_summary else None
+    verifier_green = bool(verifier_available and cap_pass is True and rollback_pass is True and no_hard_delete_pass is True and effect_missing_pct == 0.0)
+    hard_failure = bool(
+        (verifier_available and (cap_pass is False or rollback_pass is False or no_hard_delete_pass is False or (effect_missing_pct is not None and effect_missing_pct > 0.0)))
+        or soft_archive_quarantined
+        or int(posture_counts.get('quarantinedFamilies') or 0) > 0
+        or int((posture.get('controller') if isinstance(posture.get('controller'), dict) else {}).get('regression_strikes') or 0) > 0
+    )
+
+    evidence_refs = [
+        str(verifier.get('_path') or posture_artifacts.get('latest_verifier_ref') or ''),
+        str(posture.get('_path') or posture_artifacts.get('controller_state_ref') or ''),
+        str(posture_artifacts.get('latest_controller_ref') or ''),
+        str(posture_artifacts.get('latest_challenger_ref') or ''),
+    ]
+
+    features: Dict[str, Dict[str, Any]] = {}
+    soft_reasons: List[str] = []
+    if not verifier_available:
+        soft_reasons.append('missing_verifier_bundle')
+    if not posture_available:
+        soft_reasons.append('missing_posture_review')
+    if cap_pass is False:
+        soft_reasons.append('cap_integrity_failed')
+    if rollback_pass is False:
+        soft_reasons.append('rollback_replay_failed')
+    elif verifier_available and rollback_pass is not True:
+        soft_reasons.append('rollback_replay_inconclusive')
+    if no_hard_delete_pass is False:
+        soft_reasons.append('no_hard_delete_failed')
+    elif verifier_available and no_hard_delete_pass is not True:
+        soft_reasons.append('no_hard_delete_inconclusive')
+    if effect_missing_pct is not None and effect_missing_pct > 0.0:
+        soft_reasons.append('effect_receipts_missing')
+    if soft_archive_quarantined:
+        soft_reasons.append('soft_archive_family_quarantined')
+    if soft_archive_actions <= 0:
+        soft_reasons.append('no_soft_archive_actions_observed')
+    if not soft_archive_enabled:
+        soft_reasons.append('soft_archive_family_not_enabled')
+    if hard_failure or not verifier_available or not posture_available:
+        soft_status = 'not_ready'
+    elif verifier_green and soft_archive_actions > 0 and soft_archive_enabled:
+        soft_status = 'can_enable'
+    else:
+        soft_status = 'monitor_only'
+    features['soft_archive_canary'] = _optimize_advisory_status(soft_status, soft_reasons, evidence_refs)
+
+    lifecycle_reasons = list(posture_reasons)
+    near_ready = bool(posture_summary.get('near_ceiling_ready', False))
+    controller = posture.get('controller') if isinstance(posture.get('controller'), dict) else {}
+    if str(controller.get('mode') or '') != 'auto_low_risk':
+        lifecycle_reasons.append('controller_not_auto_low_risk')
+    if hard_failure:
+        lifecycle_reasons.append('safety_gate_failed')
+    if not posture_available:
+        lifecycle_reasons.append('missing_posture_review')
+    if not verifier_available:
+        lifecycle_reasons.append('missing_verifier_bundle')
+    elif not verifier_green:
+        lifecycle_reasons.append('verifier_not_green')
+    if near_ready and verifier_green and not hard_failure:
+        lifecycle_status = 'can_enable'
+    elif posture_available and not hard_failure and verifier_green:
+        lifecycle_status = 'monitor_only'
+    elif posture_available and verifier_available and not hard_failure:
+        lifecycle_status = 'monitor_only'
+    else:
+        lifecycle_status = 'not_ready'
+    features['lifecycle_mvp'] = _optimize_advisory_status(lifecycle_status, lifecycle_reasons, evidence_refs)
+
+    gate_reasons: List[str] = []
+    if not verifier_green:
+        gate_reasons.append('verifier_not_green')
+    if not bool(posture_summary.get('importance_drift_gate_live', False)):
+        gate_reasons.append('importance_drift_gate_not_live')
+    if not bool(posture_summary.get('importance_drift_baseline_live', False)):
+        gate_reasons.append('importance_drift_baseline_not_live')
+    if int(posture_counts.get('challengerGreenRuns') or 0) <= 0:
+        gate_reasons.append('challenger_not_green')
+    if int(posture_counts.get('quarantinedFamilies') or 0) > 0:
+        gate_reasons.append('family_quarantine_active')
+    if hard_failure or not verifier_available or not posture_available:
+        gate_status = 'not_ready'
+    elif not gate_reasons:
+        gate_status = 'can_enable'
+    else:
+        gate_status = 'monitor_only'
+    features['optimizer_gates'] = _optimize_advisory_status(gate_status, gate_reasons, evidence_refs)
+
+    if any(feature['status'] == 'not_ready' for feature in features.values()):
+        overall = 'not_ready'
+    elif all(feature['status'] == 'can_enable' for feature in features.values()):
+        overall = 'can_enable'
+    else:
+        overall = 'monitor_only'
+
+    return {
+        'kind': 'openclaw-mem.optimize.canary-advisory.v0',
+        'ts': _utcnow_iso(),
+        'version': {'openclaw_mem': __version__, 'schema': 'v0'},
+        'policy': {
+            'mode': 'canary_advisory',
+            'writes_performed': 0,
+            'memory_mutation': 'none',
+            'read_only': True,
+            'working_set': 'disabled_frozen',
+            'hard_delete': 'forbidden',
+        },
+        'source': {
+            'posture_kind': str(posture.get('kind') or ''),
+            'verifier_kind': str(verifier.get('kind') or ''),
+            'posture_ref': posture.get('_path') or None,
+            'verifier_ref': verifier.get('_path') or None,
+            'verifier_items': int(verifier_counts.get('items') or 0),
+        },
+        'overall_status': overall,
+        'features': features,
+    }
+
+
+def cmd_optimize_canary_advisory(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    runner_root = Path(os.path.expanduser(str(getattr(args, 'runner_root', None) or DEFAULT_OPTIMIZE_ASSIST_RUN_DIR + '-runner')))
+    window_hours = _optimize_policy_int(getattr(args, 'window_hours', 72), 72, min_value=1)
+    top = _optimize_policy_int(getattr(args, 'top', 20), 20, min_value=1)
+    since_ts = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+    posture = _optimize_advisory_load_packet(getattr(args, 'posture_file', None))
+    verifier = _optimize_advisory_load_packet(getattr(args, 'verifier_file', None))
+    if not posture:
+        posture = _optimize_advisory_load_packet(runner_root / 'posture.json')
+    if not verifier:
+        verifier_packets = _optimize_posture_recent_packets(runner_root, 'verifier.json', since_ts=since_ts, top=top)
+        verifier = verifier_packets[0] if verifier_packets else {}
+    out = _optimize_build_canary_advisory(posture, verifier)
+    if bool(args.json):
+        _emit(out, True)
+        return
+    print(f"overall_status: {out['overall_status']}")
+    for name, feature in out['features'].items():
+        reasons = ','.join(feature.get('reasons') or []) or 'none'
+        print(f"{name}: {feature.get('status')} reasons={reasons}")
+
 def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _ = conn
     try:
@@ -16752,6 +16938,15 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--top", type=int, default=20, help="Max recent receipts to inspect per receipt family (default: 20)")
     o.set_defaults(func=cmd_optimize_posture_review)
 
+    o = osub.add_parser("canary-advisory", help="Emit per-feature canary readiness advice from verifier/posture receipts (no writes)")
+    add_common(o)
+    o.add_argument("--runner-root", dest="runner_root", default=DEFAULT_OPTIMIZE_ASSIST_RUN_DIR + "-runner", help="Runner root carrying posture/verifier receipts (default: ~/.openclaw/memory/openclaw-mem/optimize-assist-runner)")
+    o.add_argument("--posture-file", dest="posture_file", default=None, help="Optional posture-review JSON path (default: runner-root/posture.json)")
+    o.add_argument("--verifier-file", dest="verifier_file", default=None, help="Optional verifier-bundle JSON path (default: latest runner verifier.json)")
+    o.add_argument("--window-hours", dest="window_hours", type=int, default=72, help="Recent verifier receipt window inspected when --verifier-file is absent (default: 72)")
+    o.add_argument("--top", type=int, default=20, help="Max recent verifier receipts to inspect when --verifier-file is absent (default: 20)")
+    o.set_defaults(func=cmd_optimize_canary_advisory)
+
     def add_self_surface_common(s: argparse.ArgumentParser) -> None:
         add_common(s)
         s.add_argument("--scope", default=None, help="Optional scope filter for DB/file evidence")
@@ -17885,8 +18080,9 @@ def main() -> None:
     args = build_parser().parse_args()
     cmd = getattr(args, "cmd", None)
     self_cmd = getattr(args, "self_cmd", None)
+    optimize_cmd = getattr(args, "optimize_cmd", None)
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd == "capsule" or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd == "capsule" or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

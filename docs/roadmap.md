@@ -61,6 +61,7 @@ Acceptance criteria:
 - M1 delivers a “concept → decisions/preferences” golden set where hybrid beats vector-only.
 - Scope hardening + receipt legibility are operator-debuggable (`scopeFallbackSuppressed`, `whySummary`, `whyTheseIds`).
 - Step4 Working Set rollout wiring exists behind config (`workingSet.enabled`) with rollbackable kill switch. Current evaluation status: **frozen / default-off** after A/B review found no measured reply-quality lift over baseline recall.
+- Optimize-assist canary readiness now has a read-only advisory surface (`optimize canary-advisory`) so future cron reports can state which lifecycle/soft-archive features are enableable, monitor-only, or not ready, with reasons and receipt evidence refs.
 
 ### 1.7) Graphic Memory consumption (triggered preflight → pack integration)
 
