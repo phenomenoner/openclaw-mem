@@ -19,13 +19,13 @@ If you want the slot-owner lane, that is `openclaw-mem-engine` — same family, 
 openclaw plugins install -l ./extensions/openclaw-mem
 ```
 
-### Marketplace package
-
-After publishing to ClawHub package marketplace:
+### ClawHub bundle package
 
 ```bash
-openclaw plugins install @phenomenoner/openclaw-mem
+openclaw bundles install clawhub:openclaw-mem-lyria
 ```
+
+This marketplace path installs the sidecar capture plugin. Install the optional `openclaw-mem-engine` from the GitHub repo only after reading the engine docs and choosing the memory-slot migration boundary deliberately.
 
 ## Minimal config
 

@@ -34,36 +34,45 @@ This repo runs CI in **locked** mode:
   ```
 - Create GitHub Release page (notes from CHANGELOG).
 
-## Optional ClawHub package publish (`extensions/openclaw-mem` / `extensions/openclaw-mem-engine`)
-If the plugin packages are part of the release, publish from the plugin folders rather than the repo root:
+## Optional ClawHub marketplace publish
+
+Default marketplace posture is **sidecar-first**:
+
+- Update the existing bundle slug: `openclaw-mem-lyria`.
+- Bundle only the lightweight `extensions/openclaw-mem` capture plugin plus docs.
+- Do **not** publish `openclaw-mem-engine` as the default marketplace path; point advanced users to GitHub after they deliberately choose the memory-slot migration boundary.
+
+Prepare a small bundle staging folder with:
+
+- `openclaw.bundle.json`
+- `package.json` with `name: "openclaw-mem-lyria"`
+- `README.md` explaining sidecar-first install, config, rollback, and GitHub engine path
+- `extensions/openclaw-mem/`
+- selected docs such as `QUICKSTART.md`, `CHANGELOG.md`, `docs/auto-capture.md`, `docs/install-modes.md`, `docs/deployment.md`, and `docs/mem-engine.md`
+
+Publish the bundle:
 
 ```bash
-clawhub package publish ./extensions/openclaw-mem \
-  --family code-plugin \
-  --name @phenomenoner/openclaw-mem \
+clawhub package publish <bundle-staging-folder> \
+  --family bundle-plugin \
+  --name openclaw-mem-lyria \
   --display-name "OpenClaw Mem" \
   --version X.Y.Z \
   --changelog "<short release note>" \
-  --tags latest \
+  --bundle-format directory \
+  --host-targets openclaw \
   --source-repo phenomenoner/openclaw-mem \
   --source-commit <git-sha> \
-  --source-ref main \
-  --source-path extensions/openclaw-mem
+  --source-ref vX.Y.Z
 ```
 
+Install command shown by ClawHub should remain:
+
 ```bash
-clawhub package publish ./extensions/openclaw-mem-engine \
-  --family code-plugin \
-  --name @phenomenoner/openclaw-mem-engine \
-  --display-name "OpenClaw Mem Engine" \
-  --version 0.0.1 \
-  --changelog "<short release note>" \
-  --tags latest \
-  --source-repo phenomenoner/openclaw-mem \
-  --source-commit <git-sha> \
-  --source-ref main \
-  --source-path extensions/openclaw-mem-engine
+openclaw bundles install clawhub:openclaw-mem-lyria
 ```
+
+Engine publication can be reopened later as a separate product surface, but it is not the default release checklist item.
 
 ## Why this exists
 We prefer reproducible builds. Locked-mode CI will fail fast if `uv.lock` is stale.
