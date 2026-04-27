@@ -410,6 +410,27 @@ class TestAutonomousDefaultRoutingCli(unittest.TestCase):
                 self.assertEqual(candidate["graph_consumption"]["coveredRawRefs"], ["obs:1", "obs:2"])
                 self.assertEqual(candidate["graph_consumption"]["cards"][0]["recordRef"], "obs:3")
                 self.assertEqual(candidate["graph_consumption"]["cards"][0]["title"], "Route auto synthesis card")
+
+                compact = self._run(
+                    conn,
+                    [
+                        "--db",
+                        str(db_path),
+                        "--json",
+                        "route",
+                        "auto",
+                        "graph semantic memory",
+                        "--scope",
+                        "proj-x",
+                        "--support-window-hours",
+                        "100000",
+                        "--compact",
+                    ],
+                )
+                compact_candidate = compact["inputs"]["graph_match"]["result"]["candidates"][0]
+                self.assertEqual(compact["selection"]["selected_lane"], "graph_match")
+                self.assertEqual(compact_candidate["graph_consumption"]["preferredCardRefs"], ["obs:3"])
+                self.assertNotIn("supporting_records", compact_candidate)
             finally:
                 conn.close()
 
@@ -464,6 +485,78 @@ class TestAutonomousDefaultRoutingCli(unittest.TestCase):
             self.assertEqual(out["selection"]["selected_lane"], "episodes_search")
             self.assertTrue(out["selection"]["fail_open"])
             self.assertEqual(out["inputs"]["graph_match_skipped_reason"], "graph_not_ready")
+        finally:
+            conn.close()
+
+    def test_observations_tool_ts_index_exists_for_route_readiness(self):
+        conn = _connect(":memory:")
+        try:
+            indexes = {row[1] for row in conn.execute("PRAGMA index_list(observations)").fetchall()}
+            self.assertIn("idx_observations_tool_ts", indexes)
+        finally:
+            conn.close()
+
+    def test_route_auto_skips_broad_transcript_or_fallback_for_long_queries(self):
+        conn = _connect(":memory:")
+        try:
+            self._insert_episode(
+                conn,
+                event_id="ev-broad-1",
+                ts_ms=1000,
+                scope="proj-x",
+                session_id="sess-broad",
+                summary="alpha-only transcript hit",
+                payload={"text": "alpha"},
+            )
+            out = self._run(
+                conn,
+                [
+                    "--db",
+                    ":memory:",
+                    "--json",
+                    "route",
+                    "auto",
+                    "alpha beta gamma delta",
+                    "--scope",
+                    "proj-x",
+                ],
+            )
+            self.assertEqual(out["selection"]["selected_lane"], "none")
+            self.assertEqual(out["selection"]["reason"], "no_graph_candidate_or_transcript_hit")
+        finally:
+            conn.close()
+
+    def test_route_auto_compact_keeps_hook_shape_without_full_episode_items(self):
+        conn = _connect(":memory:")
+        try:
+            self._insert_episode(
+                conn,
+                event_id="ev-compact-1",
+                ts_ms=1000,
+                scope="proj-x",
+                session_id="sess-compact",
+                summary="Need transcript recall compact payload",
+                payload={"text": "transcript recall compact payload"},
+            )
+            out = self._run(
+                conn,
+                [
+                    "--db",
+                    ":memory:",
+                    "--json",
+                    "route",
+                    "auto",
+                    "transcript recall compact",
+                    "--scope",
+                    "proj-x",
+                    "--compact",
+                ],
+            )
+            self.assertEqual(out["selection"]["selected_lane"], "episodes_search")
+            session = out["inputs"]["episodes_search"]["result"]["sessions"][0]
+            self.assertEqual(session["session_id"], "sess-compact")
+            self.assertEqual(len(session["matched_items"]), 1)
+            self.assertNotIn("payload", session["matched_items"][0])
         finally:
             conn.close()
 

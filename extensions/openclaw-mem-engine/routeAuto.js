@@ -93,6 +93,9 @@ async function defaultRunner({ command, args, timeoutMs }) {
       stderr: String(err?.stderr || ""),
       errorCode: typeof err?.code === "string" ? err.code : null,
       errorMessage: String(err?.message || err),
+      timedOut: err?.killed === true || err?.signal === "SIGTERM" || String(err?.message || "").includes("timed out"),
+      signal: typeof err?.signal === "string" ? err.signal : null,
+      killed: Boolean(err?.killed),
     };
   }
 }
@@ -126,6 +129,7 @@ function buildArgs({ query, scope, base }) {
   } else {
     args.push("--global");
   }
+  args.push("--compact");
   return args;
 }
 
@@ -271,6 +275,9 @@ export async function runRouteAuto({ query, scope, config, runner = defaultRunne
       reason: payload?.selection?.reason ? compactText(payload.selection.reason, 120) : null,
       errorCode: result.errorCode,
       errorMessage: result.ok ? null : compactText(result.errorMessage, 180),
+      timeoutHit: Boolean(result.timedOut),
+      signal: result.signal || null,
+      killed: Boolean(result.killed),
       latencyMs: Date.now() - started,
       timeoutMs: base.timeoutMs,
       command: base.command,

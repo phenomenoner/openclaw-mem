@@ -903,6 +903,8 @@ def _init_db(conn: sqlite3.Connection) -> None:
     if "lang" not in obs_cols:
         conn.execute("ALTER TABLE observations ADD COLUMN lang TEXT")
 
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_observations_tool_ts ON observations(tool_name, ts);")
+
     conn.execute(
         """
         CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts
@@ -13188,6 +13190,90 @@ def _route_auto_enrich_graph_match_payload(
     return payload
 
 
+def _route_auto_compact_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the minimal route-auto shape needed by the prompt hook.
+
+    The full route-auto payload is useful for CLI/debug inspection, but the hot
+    prompt hook only needs selection metadata plus small graph/session summaries.
+    Keeping this compact avoids large stdout/JSON parse costs on every turn.
+    """
+    full_inputs = payload.get("inputs") if isinstance(payload.get("inputs"), dict) else {}
+    graph_payload = full_inputs.get("graph_match") if isinstance(full_inputs.get("graph_match"), dict) else None
+    episodes_payload = full_inputs.get("episodes_search") if isinstance(full_inputs.get("episodes_search"), dict) else None
+
+    compact_inputs: Dict[str, Any] = {
+        "graph_match_skipped_reason": full_inputs.get("graph_match_skipped_reason"),
+    }
+
+    if graph_payload:
+        graph_result = graph_payload.get("result") if isinstance(graph_payload.get("result"), dict) else {}
+        candidates: List[Dict[str, Any]] = []
+        for candidate in list(graph_result.get("candidates") or []):
+            if not isinstance(candidate, dict):
+                continue
+            item: Dict[str, Any] = {
+                "rank": candidate.get("rank"),
+                "candidateRef": candidate.get("candidateRef"),
+                "title": candidate.get("title"),
+                "why_relevant": candidate.get("why_relevant"),
+                "explanation_path": candidate.get("explanation_path"),
+            }
+            if isinstance(candidate.get("graph_consumption"), dict):
+                item["graph_consumption"] = candidate.get("graph_consumption")
+            candidates.append(item)
+        compact_inputs["graph_match"] = {
+            "result": {
+                "count": int(graph_result.get("count") or 0),
+                "candidates": candidates,
+            }
+        }
+    else:
+        compact_inputs["graph_match"] = None
+
+    if episodes_payload:
+        episodes_result = episodes_payload.get("result") if isinstance(episodes_payload.get("result"), dict) else {}
+        sessions: List[Dict[str, Any]] = []
+        for session in list(episodes_result.get("sessions") or []):
+            if not isinstance(session, dict):
+                continue
+            matched_items = []
+            for item in list(session.get("matched_items") or [])[:1]:
+                if not isinstance(item, dict):
+                    continue
+                matched_items.append(
+                    {
+                        "summary": item.get("summary"),
+                        "match": {
+                            "snippet": ((item.get("match") or {}) if isinstance(item.get("match"), dict) else {}).get("snippet"),
+                        },
+                    }
+                )
+            sessions.append(
+                {
+                    "rank": session.get("rank"),
+                    "session_id": session.get("session_id"),
+                    "summary": session.get("summary"),
+                    "matched_items": matched_items,
+                }
+            )
+        compact_inputs["episodes_search"] = {
+            "result": {
+                "count": int(episodes_result.get("count") or 0),
+                "sessions": sessions,
+            }
+        }
+    else:
+        compact_inputs["episodes_search"] = None
+
+    return {
+        "kind": payload.get("kind"),
+        "ts": payload.get("ts"),
+        "query": payload.get("query"),
+        "selection": payload.get("selection"),
+        "inputs": compact_inputs,
+    }
+
+
 
 def cmd_route_auto(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
@@ -13239,6 +13325,7 @@ def cmd_route_auto(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         per_session_limit=episodes_per_session_limit,
         search_limit=episodes_search_limit,
         include_payload=bool(getattr(args, "include_payload", False)),
+        broad_fallback_max_tokens=3,
     )
 
     graph_result = (graph_payload or {}).get("result") or {}
@@ -13281,7 +13368,7 @@ def cmd_route_auto(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     }
 
     if bool(args.json):
-        _emit(payload, True)
+        _emit(_route_auto_compact_payload(payload) if bool(getattr(args, "compact", False)) else payload, True)
         return
 
     summary_parts = [
@@ -14623,6 +14710,7 @@ def _episodes_search_match_rows(
     scope: str,
     query: str,
     search_limit: int,
+    broad_fallback_max_tokens: Optional[int] = None,
 ) -> List[sqlite3.Row]:
     sql = (
         "SELECT e.id, e.event_id, e.ts_ms, e.scope, e.session_id, e.agent_id, e.type, e.summary, "
@@ -14653,6 +14741,8 @@ def _episodes_search_match_rows(
         return rows
 
     tokens = [t for t in re.sub(r"[^\w\s]", " ", query, flags=re.UNICODE).split() if t]
+    if broad_fallback_max_tokens is not None and len(tokens) > max(0, int(broad_fallback_max_tokens)):
+        return []
     if len(tokens) > 1:
         or_query = " OR ".join(tokens)
         try:
@@ -14780,6 +14870,7 @@ def _episodes_search_payload(
     model: Optional[str] = None,
     k: int = 60,
     base_url: Optional[str] = None,
+    broad_fallback_max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     retrieval_mode = str(mode or "lexical").strip().lower() or "lexical"
     if retrieval_mode not in {"lexical", "hybrid", "vector"}:
@@ -14793,6 +14884,7 @@ def _episodes_search_payload(
             scope=scope,
             query=query,
             search_limit=search_limit,
+            broad_fallback_max_tokens=broad_fallback_max_tokens,
         )
     fts_ids = [int(r["id"]) for r in fts_rows]
     fts_score_map = {
@@ -17919,6 +18011,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--episodes-per-session-limit", type=int, default=3, help="Max transcript hits to keep per session (default: 3)")
     r.add_argument("--episodes-search-limit", type=int, default=40, help="Max raw transcript hits before grouping (default: 40)")
     r.add_argument("--include-payload", action="store_true", help="Include payload objects in transcript matched items")
+    r.add_argument("--compact", action="store_true", help="Emit the minimal route-auto payload needed by prompt hooks")
     r.set_defaults(func=cmd_route_auto)
 
     sp = sub.add_parser("store", help="Proactively store a memory")

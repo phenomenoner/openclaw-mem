@@ -76,6 +76,21 @@ Never store:
 - Mutation, when enabled, must route through `openclaw-mem optimize assist-apply` with governor-approved packets, receipts, and rollback.
 - Do not collapse scout, governor, and writer roles into one hidden background step.
 
+## Engine dataset safety snapshot note
+Before risky mem-engine dataset operations such as mass writeback, reindex, migration, or checkout drills, create an explicit local snapshot:
+
+```bash
+openclaw-mem engine snapshot create --tag <safe-tag> --reason "before risky operation" --json
+```
+
+- `checkout` and `delete` are fail-closed and require `--yes`.
+- Snapshot receipts include bounded file/hash evidence, not raw memory text.
+- Free-form `--reason` is not persisted or emitted in create/list receipts.
+- If checkout changes the active dataset, expect `restartRequired: true` and ask the operator before restarting OpenClaw.
+
+## WorkingSet eval note
+For WorkingSet policy changes, use the isolated multipass eval bundle (`tools/workingset_multipass_eval.py`) rather than judging from the main operator session. Keep subject-agent traces blinded (`TRANSCRIPTS_A/B.jsonl`) and keep `RUN_META.json`, `SUBJECT_PACKETS.jsonl`, and `TURN_TELEMETRY.jsonl` out of the judge-facing bundle until unblinding.
+
 ## Bounded context packing default
 When the task needs a bounded working bundle rather than a single fact lookup:
 - prefer `openclaw-mem pack --trace`

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Optimized `route auto` for live prompt-hook use by adding a compact JSON payload mode, having mem-engine `autoRecall.routeAuto` call that compact path, and skipping broad transcript `OR` fallback for long prompt queries so fail-open routing does not turn common multi-token prompts into expensive catch-all searches.
+- Added an `observations(tool_name, ts)` index for graph readiness support-plane checks and explicit routeAuto timeout receipt fields (`timeoutHit`, `signal`, `killed`) for clearer operations diagnosis.
+
+### Testing
+
+- Added regression coverage for compact route-auto graph and transcript payload shapes, broad transcript fallback suppression on long route-auto queries, the graph readiness support-plane index, and routeAuto timeout receipts.
+
 ## [1.9.0] - 2026-04-27
 
 ### Changed

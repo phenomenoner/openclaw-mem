@@ -47,6 +47,8 @@ Today this capability is powered by mem-engine controls such as:
 
 Those knobs exist to keep runtime recall useful without letting it become opaque.
 
+Operationally, `autoRecall.routeAuto` uses the compact route-auto payload path for prompt hooks. Timeout or subprocess failures are fail-open and recorded in receipts, including explicit timeout fields for diagnosis.
+
 ## Eligibility posture
 
 Use Proactive Pack when all of these are true:

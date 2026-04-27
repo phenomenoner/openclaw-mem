@@ -65,6 +65,7 @@ test("runRouteAuto builds transcript hint block from fake runner", async () => {
       assert.equal(args[3], "readiness bridge");
       assert.equal(args[4], "--scope");
       assert.equal(args[5], "openclaw-mem");
+      assert.equal(args[6], "--compact");
       assert.equal(timeoutMs, 500);
       return { ok: true, exitCode: 0, stdout: JSON.stringify(payload), stderr: "", errorCode: null, errorMessage: null };
     },
@@ -138,4 +139,27 @@ test("runRouteAuto fails open on runner error", async () => {
   assert.equal(result.receipt.selectedLane, "none");
   assert.equal(result.receipt.injected, false);
   assert.equal(result.receipt.errorCode, "ENOENT");
+});
+
+test("runRouteAuto marks timeout receipts explicitly", async () => {
+  const result = await runRouteAuto({
+    query: "graph semantic memory",
+    scope: "global",
+    config: { enabled: true, timeoutMs: 250 },
+    runner: async () => ({
+      ok: false,
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      errorCode: null,
+      errorMessage: "Command timed out after 250ms",
+      timedOut: true,
+      signal: "SIGTERM",
+      killed: true,
+    }),
+  });
+
+  assert.equal(result.receipt.timeoutHit, true);
+  assert.equal(result.receipt.signal, "SIGTERM");
+  assert.equal(result.receipt.killed, true);
 });

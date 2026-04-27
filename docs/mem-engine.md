@@ -104,7 +104,7 @@ Related boundary: the shipped **verbatim semantic lane** remains a **sidecar ret
 - Hook: `before_prompt_build` on current OpenClaw, with `before_agent_start` retained as a legacy fallback
 - Default: **on** (but gated by heuristics)
 - Behavior:
-  - optional `autoRecall.routeAuto` hook can call `openclaw-mem route auto` before normal recall and inject a compact synthesis-aware routing hint block
+  - optional `autoRecall.routeAuto` hook calls `openclaw-mem route auto --compact` before normal recall and injects a compact synthesis-aware routing hint block
   - dual registration is deduped by run/session key so sequential `before_prompt_build` then legacy `before_agent_start` does not double-inject
   - when route-auto carries `preferredCardRefs` / `coveredRawRefs`, the hook prefers the fresh synthesis card but keeps the covered-raw receipt visible
   - route hook is recommendation-only and fail-open (timeout/runtime failure does not block the turn)
