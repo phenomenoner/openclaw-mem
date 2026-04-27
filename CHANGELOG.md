@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-04-27
+
 ### Changed
 
 - Hardened episodic conversation auto-capture so runtime recall blocks, channel metadata envelopes, internal delivery markers, and assistant control-only replies are stripped before events enter the episodic spool.
