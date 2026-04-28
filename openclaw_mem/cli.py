@@ -19387,8 +19387,14 @@ def main() -> None:
     cmd = getattr(args, "cmd", None)
     self_cmd = getattr(args, "self_cmd", None)
     optimize_cmd = getattr(args, "optimize_cmd", None)
+    dream_lite_cmd = getattr(args, "dream_lite_cmd", None)
+    dream_lite_apply_cmd = getattr(args, "dream_lite_apply_cmd", None)
+    dream_lite_no_db = cmd == "dream-lite" and (
+        dream_lite_cmd == "director"
+        or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
+    )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd == "capsule" or cmd == "dream-lite" or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd == "capsule" or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

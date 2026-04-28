@@ -673,5 +673,42 @@ class TestDreamLiteApplyPhase1(unittest.TestCase):
         conn.close()
 
 
+
+    def test_cli_main_dream_lite_apply_run_uses_global_db(self):
+        import subprocess
+        import sys
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            db_path = root / "mem.sqlite"
+            init = subprocess.run([
+                sys.executable, "-m", "openclaw_mem", "--db", str(db_path), "store", "alpha source", "--json"
+            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=False)
+            self.assertEqual(init.returncode, 0, init.stderr)
+            compile_run = subprocess.run([
+                sys.executable, "-m", "openclaw_mem", "--db", str(db_path), "graph", "synth", "compile", "--query", "alpha", "--title", "Alpha", "--summary", "Alpha"
+            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=False)
+            self.assertEqual(compile_run.returncode, 0, compile_run.stderr)
+            card_ref = json.loads(compile_run.stdout)["cardRef"]
+            newer = subprocess.run([
+                sys.executable, "-m", "openclaw_mem", "--db", str(db_path), "store", "alpha newer source", "--json"
+            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=False)
+            self.assertEqual(newer.returncode, 0, newer.stderr)
+            now = datetime.now(timezone.utc).isoformat()
+            plan = root / "plan.json"
+            witness = root / "witness.json"
+            run_dir = root / "runs"
+            plan.write_text(json.dumps({
+                "kind":"openclaw-mem.dream-lite.apply.v0","run_id":"plan-cli","ts":now,"mode":"dry_run","result":"planned","recommended_action":"refresh_card","governor_decision":"approved_for_apply","apply_lane":"graph.synth.refresh","target":{"recordRef":card_ref,"before_hash":None},"snapshot_ref":None,"rollback_ref":None,"sidecar_witness_ref":None,"writes_performed":0,"policy":{"read_only":True,"memory_mutation":"none","authority_mutation":"none"}
+            }), encoding="utf-8")
+            witness.write_text(json.dumps({"kind":"openclaw-mem.self-reflection.dream-witness.v0","plan_run_id":"plan-cli","verdict":"ok","coherence_risk":"low","reasons":[]}), encoding="utf-8")
+            run = subprocess.run([
+                sys.executable, "-m", "openclaw_mem", "--db", str(db_path), "dream-lite", "apply", "run", "--plan", str(plan), "--witness", str(witness), "--run-dir", str(run_dir), "--json"
+            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=False)
+            self.assertEqual(run.returncode, 0, run.stderr + run.stdout)
+            out = json.loads(run.stdout)
+            self.assertEqual(out["result"], "applied")
+            self.assertEqual(out["writes_performed"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
