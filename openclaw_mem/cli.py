@@ -4017,6 +4017,13 @@ def _dream_lite_now(args: argparse.Namespace) -> str:
     return value or _utcnow_iso()
 
 
+def _dream_lite_parse_since_hours(value: Any, default: int = 24) -> int:
+    raw = str(value if value is not None else default).strip().lower()
+    if raw.endswith('h'):
+        raw = raw[:-1]
+    return _optimize_policy_int(raw, default, min_value=1)
+
+
 def _dream_lite_run_id(args: argparse.Namespace, prefix: str = 'dream-lite') -> str:
     value = str(getattr(args, 'run_id', None) or os.environ.get('OPENCLAW_MEM_FAKE_RUN_ID') or '').strip()
     return value or f'{prefix}-{uuid.uuid4()}'
@@ -4210,6 +4217,370 @@ def cmd_dream_lite_apply_verify(conn: sqlite3.Connection, args: argparse.Namespa
     print(f"dream-lite apply verify: {out['status']} reasons={','.join(reasons) or 'none'}")
 
 
+DEFAULT_DREAM_LITE_APPLY_RUN_DIR = os.path.expanduser('~/.openclaw/memory/openclaw-mem/dream-lite-apply')
+DEFAULT_DREAM_DIRECTOR_REHEARSAL_DIR = os.path.expanduser('~/.openclaw/memory/openclaw-mem/dream-director-rehearsal')
+
+
+def _dream_lite_snapshot_synth_card(conn: sqlite3.Connection, record_ref: str) -> Dict[str, Any]:
+    oid = _graph_parse_record_ref(record_ref)
+    row = _graph_fetch_rows_by_ids(conn, [oid]).get(oid)
+    if row is None:
+        raise ValueError('missing_synthesis_card')
+    detail = _pack_parse_detail_json(row['detail_json'])
+    synth = detail.get('graph_synthesis') if isinstance(detail.get('graph_synthesis'), dict) else {}
+    if not synth:
+        raise ValueError('record_is_not_synthesis_card')
+    return {
+        'recordRef': record_ref,
+        'rowid': oid,
+        'summary': str(row['summary'] or ''),
+        'detail_json': detail,
+        'detail_sha256': _json_sha256(detail),
+        'status': str(synth.get('status') or ''),
+    }
+
+
+def _dream_lite_load_witness(
+    path_value: Optional[str],
+    *,
+    allow_missing: bool = False,
+    plan_run_id: Optional[str] = None,
+    apply_run_id: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+    if not path_value:
+        if allow_missing:
+            return None, []
+        return None, ['missing_witness']
+    try:
+        payload = _dream_lite_load_json(path_value)
+    except Exception as e:
+        return None, [f'invalid_witness:{e}']
+    reasons: List[str] = []
+    if str(payload.get('kind') or '') != 'openclaw-mem.self-reflection.dream-witness.v0':
+        reasons.append('unsupported_witness_kind')
+    verdict = str(payload.get('verdict') or '')
+    if verdict != 'ok':
+        reasons.append(f'witness_verdict_{verdict or "missing"}')
+    if str(payload.get('coherence_risk') or 'unknown') == 'high':
+        reasons.append('witness_high_coherence_risk')
+    witness_plan = str(payload.get('plan_run_id') or payload.get('apply_run_id') or '').strip()
+    witness_apply = str(payload.get('apply_run_id') or '').strip()
+    if plan_run_id and witness_plan and witness_plan != str(plan_run_id):
+        reasons.append('witness_plan_binding_mismatch')
+    if plan_run_id and not witness_plan:
+        reasons.append('witness_plan_binding_required')
+    if apply_run_id and witness_apply and witness_apply not in (str(apply_run_id), str(plan_run_id or '')):
+        reasons.append('witness_apply_binding_mismatch')
+    return payload, reasons
+
+
+def _dream_lite_apply_recent_receipts(run_dir: Path, *, since_ts: datetime, suffix: str = '.after.json') -> List[Dict[str, Any]]:
+    receipts: List[Dict[str, Any]] = []
+    if not run_dir.exists():
+        return receipts
+    for path in sorted(run_dir.rglob(f'*{suffix}')):
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        ts_value = _parse_iso_utc(payload.get('ts'))
+        if ts_value is None or ts_value < since_ts:
+            continue
+        payload['_path'] = str(path)
+        receipts.append(payload)
+    return receipts
+
+
+def _dream_lite_recent_apply_write_count(run_dir: Path, *, since_ts: datetime) -> int:
+    return sum(
+        int(receipt.get('writes_performed') or 0)
+        for receipt in _dream_lite_apply_recent_receipts(run_dir, since_ts=since_ts, suffix='.after.json')
+        if str(receipt.get('kind') or '') == 'openclaw-mem.dream-lite.apply.after.v0' and str(receipt.get('result') or '') == 'applied'
+    )
+
+
+def cmd_dream_lite_apply_run(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    run_dir = Path(os.path.expanduser(str(getattr(args, 'run_dir', None) or DEFAULT_DREAM_LITE_APPLY_RUN_DIR)))
+    run_dir.mkdir(parents=True, exist_ok=True)
+    run_id = _dream_lite_run_id(args, 'dream-lite-apply-run')
+    ts_now = _dream_lite_now(args)
+    stamp = _utcnow_compact()
+    before_path = run_dir / f'{stamp}-{run_id}.before.json'
+    rollback_path = run_dir / f'{stamp}-{run_id}.rollback.json'
+    after_path = run_dir / f'{stamp}-{run_id}.after.json'
+    blocked: List[str] = []
+    plan: Dict[str, Any] = {}
+    witness: Optional[Dict[str, Any]] = None
+    target_ref = None
+    before_snapshot: Dict[str, Any] = {}
+    refresh_payload = None
+    after_snapshot = None
+    result = 'aborted'
+    writes_performed = 0
+
+    try:
+        plan = _dream_lite_load_json(getattr(args, 'plan', None) or getattr(args, 'from_file', None))
+        blocked.extend(_dream_lite_verify_apply_receipt(plan))
+        if str(plan.get('result') or '') != 'planned':
+            blocked.append('plan_result_must_be_planned')
+        plan_ts = _parse_iso_utc(plan.get('ts'))
+        ttl_hours = _optimize_policy_int(getattr(args, 'approval_ttl_hours', 24), 24, min_value=1)
+        if plan_ts is None:
+            blocked.append('plan_ts_required')
+        elif datetime.now(timezone.utc) - plan_ts > timedelta(hours=ttl_hours):
+            blocked.append('governor_approval_ttl_expired')
+        max_writes = _optimize_policy_int(getattr(args, 'max_writes_per_24h', 3), 3, min_value=1)
+        recent_writes = _dream_lite_recent_apply_write_count(run_dir, since_ts=datetime.now(timezone.utc) - timedelta(hours=24))
+        # A refresh writes two observation rows semantically: insert replacement + supersede old card.
+        if recent_writes + 2 > max_writes:
+            blocked.append('max_refresh_writes_per_24h_exceeded')
+        witness, witness_reasons = _dream_lite_load_witness(
+            getattr(args, 'witness', None),
+            allow_missing=bool(getattr(args, 'allow_missing_witness', False)),
+            plan_run_id=str(plan.get('run_id') or ''),
+            apply_run_id=run_id,
+        )
+        blocked.extend(witness_reasons)
+        target = plan.get('target') if isinstance(plan.get('target'), dict) else {}
+        target_ref = str(target.get('recordRef') or '').strip()
+        if target_ref:
+            before_snapshot = _dream_lite_snapshot_synth_card(conn, target_ref)
+            planned_hash = target.get('before_hash')
+            if planned_hash and str(planned_hash) != str(before_snapshot.get('detail_sha256')):
+                blocked.append('before_hash_mismatch')
+        else:
+            blocked.append('missing_target_ref')
+    except Exception as e:
+        blocked.append(str(e))
+
+    before_payload = {
+        'kind': 'openclaw-mem.dream-lite.apply.before.v0',
+        'run_id': run_id,
+        'ts': ts_now,
+        'plan_ref': getattr(args, 'plan', None) or getattr(args, 'from_file', None),
+        'witness_ref': getattr(args, 'witness', None),
+        'target_ref': target_ref,
+        'before_snapshot': before_snapshot,
+        'blocked_reasons': blocked,
+        'writes_performed': 0,
+        'policy': {'mode': 'dream_lite_apply_wet_canary', 'read_only': False, 'memory_mutation': 'pending' if not blocked else 'none', 'authority_mutation': 'none'},
+    }
+    before_path.write_text(json.dumps(before_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+    rollback_payload = {
+        'kind': 'openclaw-mem.dream-lite.apply.rollback.v0',
+        'rollback_id': f'{run_id}-rollback',
+        'apply_run_id': run_id,
+        'ts': ts_now,
+        'target_ref': target_ref,
+        'before_snapshot': before_snapshot,
+        'new_record_ref': None,
+        'restore_payload_ref': str(rollback_path),
+        'writes_performed': 0,
+    }
+
+    if blocked:
+        result = 'aborted'
+    else:
+        try:
+            refresh_payload = _graph_synth_refresh_payload(conn, record_ref=str(target_ref or ''), force=bool(getattr(args, 'force', False)))
+            refresh_result = refresh_payload.get('result') if isinstance(refresh_payload, dict) else {}
+            refreshed = bool((refresh_result or {}).get('refreshed'))
+            new_ref = str((refresh_result or {}).get('recordRef') or '').strip()
+            rollback_payload['new_record_ref'] = new_ref or None
+            # Close the crash window: rollback material must be durable before DB commit.
+            rollback_path.write_text(json.dumps(rollback_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+            if refreshed:
+                conn.commit()
+                writes_performed = 2
+                result = 'applied'
+            else:
+                conn.rollback()
+                result = 'noop'
+            if new_ref:
+                try:
+                    after_snapshot = _dream_lite_snapshot_synth_card(conn, new_ref)
+                except Exception:
+                    after_snapshot = {'recordRef': new_ref, 'snapshot_error': 'unavailable'}
+        except Exception as e:
+            conn.rollback()
+            blocked.append(str(e))
+            result = 'aborted'
+
+    rollback_path.write_text(json.dumps(rollback_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    after_payload = {
+        'kind': 'openclaw-mem.dream-lite.apply.after.v0',
+        'run_id': run_id,
+        'ts': _utcnow_iso(),
+        'result': result,
+        'target_ref': target_ref,
+        'blocked_reasons': blocked,
+        'before_ref': str(before_path),
+        'rollback_ref': str(rollback_path),
+        'witness_ref': getattr(args, 'witness', None),
+        'witness': witness,
+        'before_hash': before_snapshot.get('detail_sha256') if before_snapshot else None,
+        'after_snapshot': after_snapshot,
+        'refresh_payload': refresh_payload,
+        'writes_performed': writes_performed,
+        'policy': {
+            'mode': 'dream_lite_apply_wet_canary',
+            'read_only': False,
+            'memory_mutation': 'graph_refresh_applied' if writes_performed else 'none',
+            'authority_mutation': 'none',
+            'supported_action_classes': ['refresh_card'],
+        },
+    }
+    after_path.write_text(json.dumps(after_payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    _emit(after_payload, bool(args.json))
+
+
+def cmd_dream_lite_apply_rollback(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    ts_now = _dream_lite_now(args)
+    try:
+        rollback = _dream_lite_load_json(getattr(args, 'rollback', None) or getattr(args, 'from_file', None))
+        if str(rollback.get('kind') or '') != 'openclaw-mem.dream-lite.apply.rollback.v0':
+            raise ValueError('unsupported_rollback_kind')
+        before = rollback.get('before_snapshot') if isinstance(rollback.get('before_snapshot'), dict) else {}
+        target_ref = str(rollback.get('target_ref') or before.get('recordRef') or '').strip()
+        old_detail = before.get('detail_json') if isinstance(before.get('detail_json'), dict) else None
+        if not target_ref or old_detail is None:
+            raise ValueError('rollback_missing_before_snapshot')
+        _graph_update_observation_detail(conn, rowid=_graph_parse_record_ref(target_ref), detail=old_detail, summary=str(before.get('summary') or ''))
+        new_ref = str(rollback.get('new_record_ref') or '').strip()
+        if new_ref:
+            try:
+                new_oid = _graph_parse_record_ref(new_ref)
+                row = _graph_fetch_rows_by_ids(conn, [new_oid]).get(new_oid)
+                if row is not None:
+                    detail = _pack_parse_detail_json(row['detail_json'])
+                    synth = detail.get('graph_synthesis') if isinstance(detail.get('graph_synthesis'), dict) else {}
+                    if synth:
+                        lifecycle = synth.get('lifecycle') if isinstance(synth.get('lifecycle'), dict) else {}
+                        synth['status'] = 'rolled_back'
+                        synth['rolled_back_at'] = ts_now
+                        synth['lifecycle'] = {**lifecycle, 'rolled_back_from_apply_run': rollback.get('apply_run_id')}
+                        detail['graph_synthesis'] = synth
+                        _graph_update_observation_detail(conn, rowid=new_oid, detail=detail, summary=str(row['summary'] or ''))
+            except Exception:
+                pass
+        conn.commit()
+        out = {
+            'kind': 'openclaw-mem.dream-lite.apply.rollback-applied.v0',
+            'ts': ts_now,
+            'apply_run_id': rollback.get('apply_run_id'),
+            'target_ref': target_ref,
+            'new_record_ref': new_ref or None,
+            'result': 'rolled_back',
+            'writes_performed': 1,
+            'policy': {'mode': 'rollback', 'hard_delete': 'forbidden', 'authority_mutation': 'none'},
+        }
+    except Exception as e:
+        conn.rollback()
+        out = {
+            'kind': 'openclaw-mem.dream-lite.apply.rollback-applied.v0',
+            'ts': ts_now,
+            'result': 'aborted',
+            'blocked_reasons': [str(e)],
+            'writes_performed': 0,
+            'policy': {'mode': 'rollback', 'hard_delete': 'forbidden', 'authority_mutation': 'none'},
+        }
+    run_dir_value = getattr(args, 'run_dir', None)
+    if run_dir_value:
+        run_dir = Path(os.path.expanduser(str(run_dir_value)))
+        run_dir.mkdir(parents=True, exist_ok=True)
+        apply_id = str(out.get('apply_run_id') or 'unknown')
+        receipt_path = run_dir / f"{_utcnow_compact()}-{apply_id}.rollback-applied.json"
+        receipt_path.write_text(json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+        out['receipt_ref'] = str(receipt_path)
+    _emit(out, bool(args.json))
+
+
+def cmd_dream_lite_apply_verify_window(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    run_dir = Path(os.path.expanduser(str(getattr(args, 'run_dir', None) or DEFAULT_DREAM_LITE_APPLY_RUN_DIR)))
+    hours = _dream_lite_parse_since_hours(getattr(args, 'since_hours', None) or getattr(args, 'since', 24), 24)
+    since_ts = datetime.now(timezone.utc) - timedelta(hours=hours)
+    receipts = [
+        r for r in _dream_lite_apply_recent_receipts(run_dir, since_ts=since_ts, suffix='.after.json')
+        if str(r.get('kind') or '') == 'openclaw-mem.dream-lite.apply.after.v0'
+    ]
+    rollback_receipts = [
+        r for r in _dream_lite_apply_recent_receipts(run_dir, since_ts=since_ts, suffix='.rollback-applied.json')
+        if str(r.get('kind') or '') == 'openclaw-mem.dream-lite.apply.rollback-applied.v0'
+    ]
+    rolled_back_apply_ids = {str(r.get('apply_run_id') or '') for r in rollback_receipts if str(r.get('result') or '') == 'rolled_back'}
+    reasons: List[str] = []
+    applied = 0
+    for receipt in receipts:
+        path_label = str(receipt.get('_path') or '')
+        if str(receipt.get('result') or '') == 'applied':
+            applied += 1
+            for key in ('before_ref', 'rollback_ref', 'witness_ref'):
+                ref = str(receipt.get(key) or '')
+                if not ref:
+                    reasons.append(f'missing_{key}:{path_label}')
+                elif key != 'witness_ref' and not Path(ref).exists():
+                    reasons.append(f'{key}_not_found:{path_label}')
+            loaded_refs: Dict[str, Dict[str, Any]] = {}
+            for key, expected_kind in (
+                ('before_ref', 'openclaw-mem.dream-lite.apply.before.v0'),
+                ('rollback_ref', 'openclaw-mem.dream-lite.apply.rollback.v0'),
+            ):
+                ref = str(receipt.get(key) or '')
+                if ref and Path(ref).exists():
+                    try:
+                        obj = json.loads(Path(ref).read_text(encoding='utf-8'))
+                        loaded_refs[key] = obj if isinstance(obj, dict) else {}
+                        if str(obj.get('kind') or '') != expected_kind:
+                            reasons.append(f'{key}_kind_mismatch:{path_label}')
+                    except Exception:
+                        reasons.append(f'{key}_unreadable:{path_label}')
+            before_obj = loaded_refs.get('before_ref') or {}
+            rollback_obj = loaded_refs.get('rollback_ref') or {}
+            before_snapshot = before_obj.get('before_snapshot') if isinstance(before_obj.get('before_snapshot'), dict) else {}
+            rollback_snapshot = rollback_obj.get('before_snapshot') if isinstance(rollback_obj.get('before_snapshot'), dict) else {}
+            before_hash = str(receipt.get('before_hash') or '')
+            snapshot_hash = str(before_snapshot.get('detail_sha256') or '')
+            rollback_hash = str(rollback_snapshot.get('detail_sha256') or '')
+            if before_hash and snapshot_hash and before_hash != snapshot_hash:
+                reasons.append(f'before_hash_mismatch:{path_label}')
+            if snapshot_hash and rollback_hash and snapshot_hash != rollback_hash:
+                reasons.append(f'rollback_before_hash_mismatch:{path_label}')
+            if str(rollback_obj.get('apply_run_id') or '') and str(rollback_obj.get('apply_run_id') or '') != str(receipt.get('run_id') or ''):
+                reasons.append(f'rollback_apply_run_id_mismatch:{path_label}')
+            if not str(rollback_obj.get('apply_run_id') or ''):
+                reasons.append(f'missing_rollback_apply_run_id:{path_label}')
+            if not before_hash:
+                reasons.append(f'missing_before_hash:{path_label}')
+            if not snapshot_hash:
+                reasons.append(f'missing_before_snapshot_hash:{path_label}')
+            if not rollback_hash:
+                reasons.append(f'missing_rollback_snapshot_hash:{path_label}')
+            witness = receipt.get('witness') if isinstance(receipt.get('witness'), dict) else {}
+            if str(witness.get('verdict') or '') != 'ok':
+                reasons.append(f'witness_not_ok:{path_label}')
+            if int(receipt.get('writes_performed') or 0) < 2:
+                reasons.append(f'applied_writes_count_mismatch:{path_label}')
+            rollback_ref = str(receipt.get('rollback_ref') or '')
+            if rollback_ref and not Path(rollback_ref).exists():
+                reasons.append(f'rollback_missing_for_applied:{path_label}')
+        if str(receipt.get('result') or '') == 'rolled_back' and str(receipt.get('run_id') or '') not in rolled_back_apply_ids:
+            reasons.append(f'missing_rollback_applied_receipt:{path_label}')
+    status = 'fail' if reasons else ('inconclusive' if not receipts else 'pass')
+    out = {
+        'kind': 'openclaw-mem.dream-lite.apply.verify-window.v0',
+        'ts': _utcnow_iso(),
+        'status': status,
+        'window_hours': hours,
+        'counts': {'receipts': len(receipts), 'applied': applied, 'rollbackApplied': len(rollback_receipts)},
+        'reasons': reasons,
+        'writes_performed': 0,
+        'policy': {'mode': 'verify_window_only', 'read_only': True, 'memory_mutation': 'none', 'authority_mutation': 'none'},
+    }
+    _emit(out, bool(args.json))
+
+
 _DREAM_DIRECTOR_AUTHORITY_SURFACES = ('SOUL.md', 'AGENTS.md', 'MEMORY.md', 'TOOLS.md', 'USER.md', 'IDENTITY.md')
 
 
@@ -4391,6 +4762,87 @@ def cmd_dream_lite_director_checkpoint(conn: sqlite3.Connection, args: argparse.
         _emit(out, True)
         return
     print(f"dream-lite director checkpoint: blocked={','.join(out.get('blocked_reasons') or []) or 'none'}")
+
+def cmd_dream_lite_director_apply(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    rehearsal_dir = Path(os.path.expanduser(str(getattr(args, 'rehearsal_dir', None) or DEFAULT_DREAM_DIRECTOR_REHEARSAL_DIR)))
+    rehearsal_dir.mkdir(parents=True, exist_ok=True)
+    run_id = _dream_lite_run_id(args, 'dream-director-rehearsal')
+    ts_now = _dream_lite_now(args)
+    blocked: List[str] = []
+    checkpoint: Dict[str, Any] = {}
+    staged: Dict[str, Any] = {}
+    snapshots: List[Dict[str, Any]] = []
+    try:
+        checkpoint = _dream_lite_load_json(getattr(args, 'checkpoint', None) or getattr(args, 'from_file', None))
+        if str(checkpoint.get('kind') or '') != 'openclaw-mem.dream-director.checkpoint.v0':
+            blocked.append('unsupported_checkpoint_kind')
+        staged_ref = str(checkpoint.get('staged_patch_ref') or '').strip()
+        if not staged_ref:
+            blocked.append('missing_staged_patch_ref')
+        else:
+            staged = _dream_lite_load_json(staged_ref)
+            if str(staged.get('kind') or '') != 'openclaw-mem.dream-director.staged-patch.v0':
+                blocked.append('unsupported_staged_patch_kind')
+            raw = json.dumps(staged, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+            sha = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+            if sha != str(checkpoint.get('staged_patch_sha256') or ''):
+                blocked.append('staged_patch_hash_mismatch')
+        patches = staged.get('patches') if isinstance(staged.get('patches'), list) else []
+        touches_authority = any(_dream_director_patch_touches_authority(patch) for patch in patches)
+        checkpoint_required = bool(checkpoint.get('checkpoint_required')) or bool(staged.get('checkpoint_required')) or touches_authority
+        if checkpoint_required and not bool(getattr(args, 'allow_authority_rehearsal', False)):
+            blocked.append('authority_rehearsal_requires_explicit_flag')
+        for patch in patches:
+            if not isinstance(patch, dict):
+                continue
+            target_path = str(patch.get('path') or patch.get('target') or '').strip()
+            if not target_path:
+                continue
+            if _dream_director_patch_touches_authority(patch):
+                path = Path(target_path)
+                if not path.is_absolute():
+                    path = Path.cwd() / path
+                snapshot: Dict[str, Any] = {
+                    'path': str(path),
+                    'exists': path.exists(),
+                    'sha256': None,
+                    'snapshot_ref': None,
+                }
+                if path.exists() and path.is_file():
+                    data = path.read_bytes()
+                    snapshot['sha256'] = hashlib.sha256(data).hexdigest()
+                    snap_path = rehearsal_dir / f'{run_id}-{path.name}.snapshot'
+                    snap_path.write_bytes(data)
+                    snapshot['snapshot_ref'] = str(snap_path)
+                snapshots.append(snapshot)
+    except Exception as e:
+        blocked.append(str(e))
+
+    artifact = {
+        'kind': 'openclaw-mem.dream-director.rehearsal.v0',
+        'rehearsal_id': run_id,
+        'ts': ts_now,
+        'checkpoint_ref': getattr(args, 'checkpoint', None) or getattr(args, 'from_file', None),
+        'checkpoint_required': bool(checkpoint.get('checkpoint_required')) or bool(staged.get('checkpoint_required')) or any(_dream_director_patch_touches_authority(patch) for patch in (staged.get('patches') if isinstance(staged.get('patches'), list) else [])),
+        'blocked_reasons': blocked,
+        'staged_patch': staged,
+        'authority_snapshots': snapshots,
+        'live_mutation': False,
+        'writes_performed': 0,
+        'policy': {
+            'mode': 'director_rehearsal_only',
+            'read_only': True,
+            'memory_mutation': 'none',
+            'authority_mutation': 'none',
+            'canonization': 'deferred',
+        },
+    }
+    artifact_path = rehearsal_dir / f'{run_id}.rehearsal.json'
+    artifact_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    artifact['artifact_ref'] = str(artifact_path)
+    _emit(artifact, bool(args.json))
+
 
 def cmd_optimize_policy_loop(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     review_limit = _optimize_policy_int(getattr(args, "review_limit", 1000), 1000, min_value=1)
@@ -12426,7 +12878,11 @@ def _graph_eval_synthesis_card(conn: sqlite3.Connection, row: sqlite3.Row) -> Di
         or lifecycle.get('supersededBy')
     )
     refresh_of = lifecycle.get('refresh_of') or lifecycle.get('refreshOf')
-    if superseded_by or str(synth.get('status') or '').strip().lower() == 'superseded':
+    synth_status = str(synth.get('status') or '').strip().lower()
+    if synth_status == 'rolled_back':
+        status = 'rolled_back'
+        reasons = ['rolled_back'] + [r for r in reasons if r != 'rolled_back']
+    elif superseded_by or synth_status == 'superseded':
         status = 'superseded'
         reasons = ['superseded'] + [r for r in reasons if r != 'superseded']
     elif reasons:
@@ -17691,10 +18147,10 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--top", type=int, default=20, help="Max recent verifier receipts to inspect when --verifier-file is absent (default: 20)")
     o.set_defaults(func=cmd_optimize_canary_advisory)
 
-    sp = sub.add_parser("dream-lite", help="Plan-only Dream Lite apply and Dream Director dry-run surfaces")
+    sp = sub.add_parser("dream-lite", help="Dream Lite governed apply and Dream Director rehearsal surfaces")
     dlsub = sp.add_subparsers(dest="dream_lite_cmd", required=True)
 
-    dla = dlsub.add_parser("apply", help="Plan and verify Dream Lite apply receipts (no writes in v0)")
+    dla = dlsub.add_parser("apply", help="Plan, run, rollback, and verify Dream Lite apply receipts")
     apply_sub = dla.add_subparsers(dest="dream_lite_apply_cmd", required=True)
 
     a = apply_sub.add_parser("plan", help="Plan one governor-approved refresh_card apply candidate (no writes)")
@@ -17706,12 +18162,36 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
     a.set_defaults(func=cmd_dream_lite_apply_plan)
 
-    a = apply_sub.add_parser("verify", help="Verify a Phase-1 Dream Lite apply receipt")
+    a = apply_sub.add_parser("verify", help="Verify a Phase-1 receipt or a recent wet-run receipt window")
     add_common(a)
     a.add_argument("--receipt", default=None, help="Apply receipt JSON path")
     a.add_argument("--from-file", dest="from_file", default=None, help="Alias for --receipt")
+    a.add_argument("--since", dest="since", default=None, help="Verify recent wet-run after receipts in this many hours (accepts 24 or 24h)")
+    a.add_argument("--run-dir", dest="run_dir", default=DEFAULT_DREAM_LITE_APPLY_RUN_DIR, help="Wet-run receipt directory for --since")
     a.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
-    a.set_defaults(func=cmd_dream_lite_apply_verify)
+    a.set_defaults(func=lambda conn, args: cmd_dream_lite_apply_verify_window(conn, args) if getattr(args, 'since', None) is not None else cmd_dream_lite_apply_verify(conn, args))
+
+    a = apply_sub.add_parser("run", help="Wet-run one planned refresh_card canary with witness and rollback receipts")
+    add_common(a)
+    a.add_argument("--plan", default=None, help="Phase-1 apply plan receipt JSON path")
+    a.add_argument("--from-file", dest="from_file", default=None, help="Alias for --plan")
+    a.add_argument("--witness", default=None, help="Dream witness JSON path")
+    a.add_argument("--allow-missing-witness", dest="allow_missing_witness", action="store_true", help="Explicitly allow missing witness (not default)")
+    a.add_argument("--run-dir", dest="run_dir", default=DEFAULT_DREAM_LITE_APPLY_RUN_DIR, help="Receipt directory")
+    a.add_argument("--max-writes-per-24h", dest="max_writes_per_24h", type=int, default=3, help="Rolling 24h write cap; refresh writes count as insert+supersede update (default: 3)")
+    a.add_argument("--approval-ttl-hours", dest="approval_ttl_hours", type=int, default=24, help="Max plan/governor approval age before wet-run (default: 24)")
+    a.add_argument("--force", action="store_true", help="Pass force through to graph synth refresh")
+    a.add_argument("--run-id", dest="run_id", default=None, help="Deterministic run id for tests/receipts")
+    a.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
+    a.set_defaults(func=cmd_dream_lite_apply_run)
+
+    a = apply_sub.add_parser("rollback", help="Rollback a Dream Lite wet-run from a rollback receipt")
+    add_common(a)
+    a.add_argument("--rollback", default=None, help="Rollback receipt JSON path")
+    a.add_argument("--from-file", dest="from_file", default=None, help="Alias for --rollback")
+    a.add_argument("--run-dir", dest="run_dir", default=DEFAULT_DREAM_LITE_APPLY_RUN_DIR, help="Directory for rollback-applied receipt")
+    a.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
+    a.set_defaults(func=cmd_dream_lite_apply_rollback)
 
     dld = dlsub.add_parser("director", help="Dream Director observation and checkpoint planning (no writes)")
     director_sub = dld.add_subparsers(dest="dream_lite_director_cmd", required=True)
@@ -17746,6 +18226,16 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--run-id", dest="run_id", default=None, help="Deterministic checkpoint id for tests/receipts")
     d.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
     d.set_defaults(func=cmd_dream_lite_director_checkpoint)
+
+    d = director_sub.add_parser("apply", help="Materialize a checkpoint-gated Director rehearsal artifact (no live authority mutation)")
+    add_common(d)
+    d.add_argument("--checkpoint", default=None, help="Director checkpoint JSON path")
+    d.add_argument("--from-file", dest="from_file", default=None, help="Alias for --checkpoint")
+    d.add_argument("--rehearsal-dir", dest="rehearsal_dir", default=DEFAULT_DREAM_DIRECTOR_REHEARSAL_DIR, help="Rehearsal artifact directory")
+    d.add_argument("--allow-authority-rehearsal", dest="allow_authority_rehearsal", action="store_true", help="Required when checkpoint says authority rehearsal is needed")
+    d.add_argument("--run-id", dest="run_id", default=None, help="Deterministic rehearsal id for tests/receipts")
+    d.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
+    d.set_defaults(func=cmd_dream_lite_director_apply)
 
     def add_self_surface_common(s: argparse.ArgumentParser) -> None:
         add_common(s)

@@ -457,3 +457,21 @@ Allow Dream Director candidates to apply to authority surfaces only through expl
 - Runtime/system topology: unchanged in this spec.
 - Live cron topology: unchanged.
 - Authority/document topology: changed by defining the next apply-capable product gate.
+
+## Phase 2→5 implementation notes (v1.9.3 target)
+
+Phase 2 wet-run canary changes the Phase 1 posture from "plan-only" to a narrow governed write lane for `refresh_card` only.
+
+Important semantics:
+- `graph synth refresh` is not an in-place single-row edit. It inserts a replacement synthesis card and marks the previous card superseded.
+- Dream Lite counts that as two graph-memory writes: replacement insert + old-card supersede update.
+- `apply run` recomputes the live `before_hash` from the target synthesis card at run time. If a plan carries a non-null `target.before_hash`, it must match the live hash or the run aborts.
+- `apply run` enforces a rolling 24h write cap and plan TTL before mutation.
+- Witness gating is blocking by default: missing / flagged / high-risk witness aborts unless an explicit missing-witness override is supplied.
+- Rollback restores the old card detail JSON and marks the replacement card `rolled_back`; hard delete is forbidden.
+- `verify --since` is a receipt-window verifier for wet-run receipts, while `verify --receipt` remains the Phase 1 plan receipt verifier.
+
+Phase 5 first cut remains rehearsal-only:
+- `dream-lite director apply` materializes a rehearsal artifact from a checkpointed staged patch.
+- `--allow-authority-rehearsal` permits rehearsal artifact generation for authority-surface patches; it does not enable live authority-file mutation.
+- Rehearsal receipts carry snapshots and `live_mutation=false`, `writes_performed=0` for authority files.

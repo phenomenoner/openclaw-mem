@@ -98,6 +98,7 @@ nav:
       - Graphic memory compiled synthesis layer (v0): specs/graphic-memory-compiled-synthesis-v0.md
       - Dream Lite apply + self-reflection sidecar (v0): specs/dream-lite-apply-self-reflection-sidecar-v0.md
       - Dream Lite apply phase-1 working packet: specs/dream-lite-apply-phase1-working-packet-v0.md
+      - Dream Lite phase2-5 working packet: specs/dream-lite-phase2-5-worker-packet-v0.md
       - Mem-engine versioning safety net: specs/mem-engine-versioning-safety-net-v0.md
       - Topology auto-extract (v0): specs/topology-auto-extract-v0.md
       - Self-optimizing memory loop (v0): specs/self-optimizing-memory-loop-v0.md

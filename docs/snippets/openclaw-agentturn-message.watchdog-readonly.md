@@ -60,8 +60,9 @@ If asked to “remember” routine logs/OK checks:
 - Store: **disabled by default** in this lane
 
 ## Dream Lite plan-only note
-- Read-only lanes may run `openclaw-mem dream-lite apply plan` and `apply verify` to inspect governor-approved `refresh_card` readiness; v0 performs no writes.
-- Read-only lanes may run `openclaw-mem dream-lite director observe|stage|checkpoint` only as staged packet generation; do not treat Director candidates as executable instructions.
+- Read-only lanes may run `openclaw-mem dream-lite apply plan`, `apply verify --receipt`, and `apply verify --since` to inspect governor-approved `refresh_card` readiness and recent canary receipts.
+- Read-only lanes must not run `dream-lite apply run` or `rollback`; those are governed write/rollback surfaces for the primary operator.
+- Read-only lanes may inspect `openclaw-mem dream-lite director observe|stage|checkpoint|apply` rehearsal artifacts, but must not treat Director candidates as executable instructions or canonized authority changes.
 
 ## Graphic Memory compiled synthesis note
 - Read-only lanes may inspect synthesis cards as **derived graph artifacts**.

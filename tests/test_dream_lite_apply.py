@@ -2,12 +2,14 @@ import io
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
 from openclaw_mem.cli import (
     _connect,
+    _insert_observation,
     build_parser,
     cmd_dream_lite_apply_plan,
     cmd_dream_lite_apply_verify,
@@ -348,6 +350,326 @@ class TestDreamLiteApplyPhase1(unittest.TestCase):
             self.assertTrue(ckpt["checkpoint_required"])
             self.assertFalse(ckpt["live_mutation"])
             self.assertEqual(ckpt["writes_performed"], 0)
+        conn.close()
+
+
+
+    def test_apply_run_with_witness_refreshes_and_rollback_marks_new_card(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            db_path = root / "mem.sqlite"
+            conn = _connect(str(db_path))
+            _insert_observation(conn, {"kind": "note", "summary": "alpha source", "tool_name": "memory_store", "detail": {}})
+            compile_args = build_parser().parse_args([
+                "--db", str(db_path), "graph", "--json", "synth", "compile",
+                "--query", "alpha", "--title", "Alpha synthesis", "--summary", "Alpha synthesis",
+            ])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                compile_args.func(conn, compile_args)
+            card_ref = json.loads(buf.getvalue())["cardRef"]
+            _insert_observation(conn, {"kind": "note", "summary": "alpha newer source", "tool_name": "memory_store", "detail": {}})
+            plan = root / "plan.json"
+            witness = root / "witness.json"
+            run_dir = root / "runs"
+            now = datetime.now(timezone.utc).isoformat()
+            plan.write_text(json.dumps({
+                "kind": "openclaw-mem.dream-lite.apply.v0",
+                "run_id": "plan-1",
+                "ts": now,
+                "mode": "dry_run",
+                "result": "planned",
+                "blocked_reason": None,
+                "candidate_id": "c1",
+                "recommended_action": "refresh_card",
+                "governor_decision": "approved_for_apply",
+                "apply_lane": "graph.synth.refresh",
+                "target": {"recordRef": card_ref, "before_hash": None},
+                "snapshot_ref": None,
+                "rollback_ref": None,
+                "sidecar_witness_ref": None,
+                "writes_performed": 0,
+                "policy": {"read_only": True, "memory_mutation": "none", "authority_mutation": "none"},
+            }), encoding="utf-8")
+            witness.write_text(json.dumps({
+                "kind": "openclaw-mem.self-reflection.dream-witness.v0",
+                "witness_id": "w1",
+                "apply_run_id": "plan-1",
+                "ts": now,
+                "verdict": "ok",
+                "coherence_risk": "low",
+                "reasons": [],
+            }), encoding="utf-8")
+            run_args = build_parser().parse_args([
+                "--db", str(db_path), "dream-lite", "apply", "run",
+                "--plan", str(plan), "--witness", str(witness), "--run-dir", str(run_dir),
+                "--run-id", "apply-1", "--json",
+            ])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                run_args.func(conn, run_args)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["result"], "applied")
+            self.assertEqual(out["writes_performed"], 2)
+            rollback_ref = out["rollback_ref"]
+            new_ref = out["refresh_payload"]["result"]["recordRef"]
+
+            rollback_args = build_parser().parse_args([
+                "--db", str(db_path), "dream-lite", "apply", "rollback",
+                "--rollback", rollback_ref, "--run-dir", str(run_dir), "--json",
+            ])
+            rb_buf = io.StringIO()
+            with redirect_stdout(rb_buf):
+                rollback_args.func(conn, rollback_args)
+            rb = json.loads(rb_buf.getvalue())
+            self.assertEqual(rb["result"], "rolled_back")
+            self.assertTrue(Path(rb["receipt_ref"]).exists())
+            verify_args = build_parser().parse_args(["dream-lite", "apply", "verify", "--since", "24h", "--run-dir", str(run_dir), "--json"])
+            verify_buf = io.StringIO()
+            with redirect_stdout(verify_buf):
+                verify_args.func(conn, verify_args)
+            verify_out = json.loads(verify_buf.getvalue())
+            self.assertEqual(verify_out["status"], "pass")
+            new_row = conn.execute("SELECT detail_json FROM observations WHERE id = ?", (int(new_ref.split(":", 1)[1]),)).fetchone()
+            new_detail = json.loads(new_row["detail_json"] or "{}")
+            self.assertEqual(new_detail["graph_synthesis"]["status"], "rolled_back")
+            conn.close()
+
+    def test_apply_run_blocks_missing_or_flagged_witness(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            plan = root / "plan.json"
+            plan.write_text(json.dumps({
+                "kind": "openclaw-mem.dream-lite.apply.v0",
+                "run_id": "plan-1",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "mode": "dry_run",
+                "result": "planned",
+                "recommended_action": "refresh_card",
+                "governor_decision": "approved_for_apply",
+                "apply_lane": "graph.synth.refresh",
+                "target": {"recordRef": "obs:999", "before_hash": None},
+                "snapshot_ref": None,
+                "rollback_ref": None,
+                "sidecar_witness_ref": None,
+                "writes_performed": 0,
+                "policy": {"read_only": True, "memory_mutation": "none", "authority_mutation": "none"},
+            }), encoding="utf-8")
+            args = build_parser().parse_args(["dream-lite", "apply", "run", "--plan", str(plan), "--run-dir", str(root / "runs"), "--json"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+            self.assertEqual(out["result"], "aborted")
+            self.assertIn("missing_witness", out["blocked_reasons"])
+        conn.close()
+
+    def test_director_apply_rehearsal_requires_flag_and_checks_hash(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            staged = root / "staged.json"
+            checkpoint = root / "checkpoint.json"
+            staged_payload = {
+                "kind": "openclaw-mem.dream-director.staged-patch.v0",
+                "stage_id": "s1",
+                "ts": NOW,
+                "source_candidate_ref": None,
+                "candidate_count": 1,
+                "patches": [{"path": "AGENTS.md", "op": "note", "text": "x"}],
+                "risk_classes": ["authority_surface"],
+                "checkpoint_required": True,
+                "blocked_reasons": [],
+                "writes_performed": 0,
+                "policy": {"read_only": True},
+            }
+            staged.write_text(json.dumps(staged_payload, sort_keys=True), encoding="utf-8")
+            checkpoint.write_text(json.dumps({
+                "kind": "openclaw-mem.dream-director.checkpoint.v0",
+                "checkpoint_id": "ck1",
+                "ts": NOW,
+                "staged_patch_ref": str(staged),
+                "staged_patch_sha256": "bad",
+                "checkpoint_required": True,
+                "blocked_reasons": [],
+                "live_mutation": False,
+                "writes_performed": 0,
+                "policy": {"read_only": True},
+            }), encoding="utf-8")
+            args = build_parser().parse_args(["dream-lite", "director", "apply", "--checkpoint", str(checkpoint), "--rehearsal-dir", str(root / "rehearsal"), "--json"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+            self.assertIn("staged_patch_hash_mismatch", out["blocked_reasons"])
+            self.assertIn("authority_rehearsal_requires_explicit_flag", out["blocked_reasons"])
+            self.assertFalse(out["live_mutation"])
+            self.assertEqual(out["writes_performed"], 0)
+        conn.close()
+
+
+
+    def test_apply_verify_since_rejects_fake_applied_receipt_with_missing_refs(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td)
+            fake = run_dir / "fake.after.json"
+            fake.write_text(json.dumps({
+                "kind": "openclaw-mem.dream-lite.apply.after.v0",
+                "run_id": "fake",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "result": "applied",
+                "before_ref": str(run_dir / "missing.before.json"),
+                "rollback_ref": str(run_dir / "missing.rollback.json"),
+                "witness_ref": str(run_dir / "witness.json"),
+                "witness": {"verdict": "ok"},
+                "writes_performed": 2,
+            }), encoding="utf-8")
+            args = build_parser().parse_args(["dream-lite", "apply", "verify", "--since", "24h", "--run-dir", str(run_dir), "--json"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+        self.assertEqual(out["status"], "fail")
+        self.assertTrue(any("before_ref_not_found" in r for r in out["reasons"]))
+        self.assertTrue(any("rollback_ref_not_found" in r for r in out["reasons"]))
+        conn.close()
+
+    def test_apply_run_rejects_unbound_witness(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            plan = root / "plan.json"
+            witness = root / "witness.json"
+            plan.write_text(json.dumps({
+                "kind": "openclaw-mem.dream-lite.apply.v0",
+                "run_id": "plan-1",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "mode": "dry_run",
+                "result": "planned",
+                "recommended_action": "refresh_card",
+                "governor_decision": "approved_for_apply",
+                "apply_lane": "graph.synth.refresh",
+                "target": {"recordRef": "obs:999", "before_hash": None},
+                "snapshot_ref": None,
+                "rollback_ref": None,
+                "sidecar_witness_ref": None,
+                "writes_performed": 0,
+                "policy": {"read_only": True, "memory_mutation": "none", "authority_mutation": "none"},
+            }), encoding="utf-8")
+            witness.write_text(json.dumps({
+                "kind": "openclaw-mem.self-reflection.dream-witness.v0",
+                "plan_run_id": "other-plan",
+                "verdict": "ok",
+                "coherence_risk": "low",
+                "reasons": [],
+            }), encoding="utf-8")
+            args = build_parser().parse_args(["dream-lite", "apply", "run", "--plan", str(plan), "--witness", str(witness), "--run-dir", str(root / "runs"), "--json"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+        self.assertEqual(out["result"], "aborted")
+        self.assertIn("witness_plan_binding_mismatch", out["blocked_reasons"])
+        conn.close()
+
+
+
+    def test_apply_verify_since_rejects_before_hash_mismatch(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td)
+            before = run_dir / "x.before.json"
+            rollback = run_dir / "x.rollback.json"
+            before.write_text(json.dumps({
+                "kind": "openclaw-mem.dream-lite.apply.before.v0",
+                "run_id": "x",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "before_snapshot": {"detail_sha256": "real-hash"},
+                "writes_performed": 0,
+            }), encoding="utf-8")
+            rollback.write_text(json.dumps({
+                "kind": "openclaw-mem.dream-lite.apply.rollback.v0",
+                "apply_run_id": "x",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "before_snapshot": {"detail_sha256": "real-hash"},
+                "writes_performed": 0,
+            }), encoding="utf-8")
+            after = run_dir / "x.after.json"
+            after.write_text(json.dumps({
+                "kind": "openclaw-mem.dream-lite.apply.after.v0",
+                "run_id": "x",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "result": "applied",
+                "before_ref": str(before),
+                "rollback_ref": str(rollback),
+                "witness_ref": str(run_dir / "witness.json"),
+                "witness": {"verdict": "ok"},
+                "before_hash": "tampered-hash",
+                "writes_performed": 2,
+            }), encoding="utf-8")
+            args = build_parser().parse_args(["dream-lite", "apply", "verify", "--since", "24h", "--run-dir", str(run_dir), "--json"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+        self.assertEqual(out["status"], "fail")
+        self.assertTrue(any("before_hash_mismatch" in r for r in out["reasons"]))
+        conn.close()
+
+
+
+    def test_apply_verify_since_empty_window_is_inconclusive(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            args = build_parser().parse_args(["dream-lite", "apply", "verify", "--since", "24h", "--run-dir", td, "--json"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+        self.assertEqual(out["status"], "inconclusive")
+        conn.close()
+
+    def test_apply_verify_since_rejects_rollback_continuity_mismatch(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td)
+            ts = datetime.now(timezone.utc).isoformat()
+            before = run_dir / "x.before.json"
+            rollback = run_dir / "x.rollback.json"
+            after = run_dir / "x.after.json"
+            before.write_text(json.dumps({"kind":"openclaw-mem.dream-lite.apply.before.v0","ts":ts,"before_snapshot":{"detail_sha256":"h1"}}), encoding="utf-8")
+            rollback.write_text(json.dumps({"kind":"openclaw-mem.dream-lite.apply.rollback.v0","apply_run_id":"other","ts":ts,"before_snapshot":{"detail_sha256":"h2"}}), encoding="utf-8")
+            after.write_text(json.dumps({"kind":"openclaw-mem.dream-lite.apply.after.v0","run_id":"x","ts":ts,"result":"applied","before_ref":str(before),"rollback_ref":str(rollback),"witness_ref":"w","witness":{"verdict":"ok"},"before_hash":"h1","writes_performed":2}), encoding="utf-8")
+            args = build_parser().parse_args(["dream-lite", "apply", "verify", "--since", "24h", "--run-dir", str(run_dir), "--json"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+        self.assertEqual(out["status"], "fail")
+        self.assertTrue(any("rollback_apply_run_id_mismatch" in r for r in out["reasons"]))
+        self.assertTrue(any("rollback_before_hash_mismatch" in r for r in out["reasons"]))
+        conn.close()
+
+    def test_director_apply_rescans_authority_paths_even_when_checkpoint_false(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            staged = root / "staged.json"
+            checkpoint = root / "checkpoint.json"
+            staged_payload = {"kind":"openclaw-mem.dream-director.staged-patch.v0","stage_id":"s","ts":NOW,"source_candidate_ref":None,"candidate_count":1,"patches":[{"path":"AGENTS.md","op":"note","text":"x"}],"risk_classes":["journal_only"],"checkpoint_required":False,"blocked_reasons":[],"writes_performed":0,"policy":{"read_only":True}}
+            staged.write_text(json.dumps(staged_payload, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+            import hashlib
+            sha = hashlib.sha256(json.dumps(staged_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+            checkpoint.write_text(json.dumps({"kind":"openclaw-mem.dream-director.checkpoint.v0","checkpoint_id":"c","ts":NOW,"staged_patch_ref":str(staged),"staged_patch_sha256":sha,"checkpoint_required":False,"blocked_reasons":[],"live_mutation":False,"writes_performed":0,"policy":{"read_only":True}}), encoding="utf-8")
+            args = build_parser().parse_args(["dream-lite", "director", "apply", "--checkpoint", str(checkpoint), "--rehearsal-dir", str(root / "r"), "--json"])
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            out = json.loads(buf.getvalue())
+        self.assertTrue(out["checkpoint_required"])
+        self.assertIn("authority_rehearsal_requires_explicit_flag", out["blocked_reasons"])
         conn.close()
 
 

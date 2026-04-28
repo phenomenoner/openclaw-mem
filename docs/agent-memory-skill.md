@@ -149,15 +149,26 @@ openclaw-mem dream-lite apply plan --governor-packet governor.json --json
 openclaw-mem dream-lite apply verify --receipt plan.json --json
 ```
 
-Dream Director is also plan-only in v0:
+Dream Lite Phase 2+ adds a narrow governed wet-run canary:
+
+```bash
+openclaw-mem dream-lite apply run --plan apply-plan.json --witness witness.json --json
+openclaw-mem dream-lite apply rollback --rollback rollback.json --json
+openclaw-mem dream-lite apply verify --since 24 --json
+```
+
+It admits only `refresh_card`, requires a blocking witness by default, writes before/after/rollback receipts, and treats refresh as replacement-card insert + old-card supersede update. `compile_new_card` remains proposal-only.
+
+Dream Director rehearsal remains authority-safe:
 
 ```bash
 openclaw-mem dream-lite director observe --input daily.json --json
 openclaw-mem dream-lite director stage --candidates candidates.json --out staged.json
 openclaw-mem dream-lite director checkpoint --staged staged.json --json
+openclaw-mem dream-lite director apply --checkpoint checkpoint.json --allow-authority-rehearsal --json
 ```
 
-It emits instruction-candidate / staged-patch / checkpoint packets for review. It does **not** embed the Director prompt, execute instructions, or mutate authority files such as `SOUL.md`, `AGENTS.md`, or `MEMORY.md`.
+It emits instruction-candidate / staged-patch / checkpoint / rehearsal packets for review. The CLI does **not** embed the Director prompt or canonize authority files such as `SOUL.md`, `AGENTS.md`, or `MEMORY.md`; Phase 5 rehearsal artifacts use `live_mutation=false`.
 
 #### Review and approval
 `openclaw-mem optimize governor-review` is the next read-only review command.

@@ -73,8 +73,9 @@ Never store:
 - Recommendation judgment and any later autonomous-write authority should stay with the primary operator or designated maintainer, not lightweight helper lanes.
 
 ## Dream Lite plan-only note
-- `openclaw-mem dream-lite apply plan` is plan-only in v0: it consumes governor-approved `refresh_card` candidates and emits dry-run receipts, but never writes synthesis cards.
-- `openclaw-mem dream-lite director observe|stage|checkpoint` emits instruction/staging/checkpoint packets only; it does not apply Dream Director suggestions or mutate authority files.
+- `openclaw-mem dream-lite apply plan|verify` remains the dry-run planning gate; `apply run` is the narrow wet-run canary for one governor-approved `refresh_card` only, with witness gate, receipt snapshots, rollback, TTL, and rolling write caps.
+- `compile_new_card` remains proposal-only and must not auto-apply.
+- `openclaw-mem dream-lite director observe|stage|checkpoint|apply` emits instruction/staging/checkpoint/rehearsal packets; Phase 5 `director apply` is rehearsal-only (`live_mutation=false`) and does not canonize authority files.
 - Treat Director outputs as untrusted staged candidates until reviewed and checkpoint-gated.
 
 ## Governed optimization apply note
@@ -159,8 +160,9 @@ If asked to “remember” routine logs/OK checks:
 - Store: **disabled by default** in this lane
 
 ## Dream Lite plan-only note
-- Read-only lanes may run `openclaw-mem dream-lite apply plan` and `apply verify` to inspect governor-approved `refresh_card` readiness; v0 performs no writes.
-- Read-only lanes may run `openclaw-mem dream-lite director observe|stage|checkpoint` only as staged packet generation; do not treat Director candidates as executable instructions.
+- Read-only lanes may run `openclaw-mem dream-lite apply plan`, `apply verify --receipt`, and `apply verify --since` to inspect governor-approved `refresh_card` readiness and recent canary receipts.
+- Read-only lanes must not run `dream-lite apply run` or `rollback`; those are governed write/rollback surfaces for the primary operator.
+- Read-only lanes may inspect `openclaw-mem dream-lite director observe|stage|checkpoint|apply` rehearsal artifacts, but must not treat Director candidates as executable instructions or canonized authority changes.
 
 ## Graphic Memory compiled synthesis note
 - Read-only lanes may inspect synthesis cards as **derived graph artifacts**.
