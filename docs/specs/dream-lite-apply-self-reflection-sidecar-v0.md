@@ -184,12 +184,13 @@ Required fields:
 - `recommended_action`: must be `refresh_card` in v0
 - `governor_decision`: must be `approved_for_apply`
 - `target.recordRef`
-- `target.before_hash`
+- `target.before_hash` (`null` is allowed in Phase 1 dry-run planning)
 - `dry_run.diff_summary`
-- `snapshot_ref`
-- `sidecar_witness_ref`
+- `snapshot_ref` (`null` allowed for dry-run / aborted Phase 1 receipts)
+- `sidecar_witness_ref` (`null` allowed for dry-run / aborted Phase 1 receipts)
+- `writes_performed` (must be `0` in Phase 1)
 - `after_hash` when applied
-- `rollback_ref`
+- `rollback_ref` (`null` allowed for dry-run / aborted Phase 1 receipts)
 - `blocked_reason` when aborted
 
 ### Rollback artifact
@@ -253,6 +254,34 @@ Rules:
 - candidate patches must be staged and reviewable before live mutation.
 - authority-surface candidates must set `checkpoint_required = true`.
 
+
+### Staged patch packet
+
+Kind: `openclaw-mem.dream-director.staged-patch.v0`
+
+Required fields:
+- `stage_id`
+- `ts`
+- `source_candidate_ref`
+- `candidate_count`
+- `patches[]`
+- `risk_classes[]`
+- `checkpoint_required`
+- `writes_performed` (must be `0`)
+
+### Director checkpoint packet
+
+Kind: `openclaw-mem.dream-director.checkpoint.v0`
+
+Required fields:
+- `checkpoint_id`
+- `ts`
+- `staged_patch_ref`
+- `staged_patch_sha256`
+- `checkpoint_required`
+- `live_mutation` (must be `false` in Phase 1)
+- `writes_performed` (must be `0`)
+
 ## Safety gates
 Any failed gate aborts before mutation.
 
@@ -274,6 +303,8 @@ Default caps:
 - `max_refresh_writes_per_24h = 3`
 - `max_diff_lines = 200`
 - `max_retries_per_candidate = 1`
+- `max_director_candidates_per_observe = 20`
+- `max_director_patch_bytes = 40000`
 
 ## Self-mode sidecar synergy
 The sidecar should make the feature feel alive without becoming authority.
@@ -298,28 +329,47 @@ Product interpretation:
 - Self sidecar explains what the change means to the agent's self-model.
 - Dream Director proposes character / setting edits as staged candidates, not live authority.
 
+
+### Phase 1 wired surface
+Phase 1 wires only plan-only / staged-only surfaces:
+- `dream-lite apply plan`
+- `dream-lite apply verify --receipt`
+- `dream-lite director observe`
+- `dream-lite director stage`
+- `dream-lite director checkpoint`
+
+The later `apply run`, `apply rollback`, `verify --since`, and `director apply` surfaces remain deferred until wet-run governance is reopened.
+
 ## UX / demo flow
+
+Phase 1 plan-only flow:
 
 ```bash
 openclaw-mem graph synth recommend --json > recommend.json
-openclaw-mem optimize governor-review --recommendations recommend.json --json > governor.json
-openclaw-mem dream-lite apply plan --governor-packet governor.json --out apply-plan.json
-openclaw-mem dream-lite apply run --plan apply-plan.json
-openclaw-mem dream-lite apply verify --since 24h
+openclaw-mem optimize governor-review --from-file recommend.json --approve-refresh --json > governor.json
+openclaw-mem dream-lite apply plan --governor-packet governor.json --out apply-plan.json --json
+openclaw-mem dream-lite apply verify --receipt apply-plan.json --json
 ```
 
-Extended director flow:
+Phase 1 Dream Director staged-only flow:
 
 ```bash
-openclaw-mem dream-lite director observe --since 24h --out director-candidates.json
-openclaw-mem dream-lite director stage --candidates director-candidates.json --out staged.patch
-openclaw-mem dream-lite director checkpoint --patch staged.patch --out checkpoint.json
+openclaw-mem dream-lite director observe --input daily.json --out director-candidates.json --json
+openclaw-mem dream-lite director stage --candidates director-candidates.json --out staged.json --json
+openclaw-mem dream-lite director checkpoint --staged staged.json --out checkpoint.json --json
+```
+
+Future Phase 2+ deferred flow:
+
+```bash
+openclaw-mem dream-lite apply run --plan apply-plan.json
+openclaw-mem dream-lite apply verify --since 24h
 openclaw-mem dream-lite director apply --checkpoint checkpoint.json
 ```
 
-Demo success line:
+Phase 1 demo success line:
 
-> One stale synthesis card refreshes itself through a governor-approved, sidecar-witnessed, rollbackable receipt chain.
+> One stale synthesis-card refresh is planned through a governor-approved, zero-write receipt; one Dream Director packet is staged and checkpointed without mutating authority files.
 
 A reviewer should be able to answer in under 30 seconds:
 - What changed?

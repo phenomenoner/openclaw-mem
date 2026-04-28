@@ -169,7 +169,7 @@ Acceptance criteria:
 
 ### 1.7c) Compiled synthesis layer (selected refs → maintained synthesis cards)
 
-Status: **PARTIAL** (`graph synth compile` / `graph synth stale` / `graph synth refresh` / `graph synth recommend` / deterministic `graph lint` / `optimize governor-review` shipped; graph preflight and graph pack now prefer fresh synthesis cards; deterministic review/contradiction signals now surface in stale/lint; governed-autonomy contract and canary apply-readiness contract are now documented; real mutation remains unshipped).
+Status: **PARTIAL** (`graph synth compile` / `graph synth stale` / `graph synth refresh` / `graph synth recommend` / deterministic `graph lint` / `optimize governor-review` / Phase-1 `dream-lite apply plan|verify` and `dream-lite director observe|stage|checkpoint` shipped; graph preflight and graph pack now prefer fresh synthesis cards; deterministic review/contradiction signals now surface in stale/lint; governed-autonomy contract and canary apply-readiness contract are documented; real synthesis-card mutation remains unshipped).
 
 - Problem: Graphic Memory can capture refs and build bounded preflight/query bundles, but it still has to re-derive many high-value cross-source conclusions from scratch.
 - Goal: add a small, provenance-carrying **compiled synthesis layer** that turns selected refs into reusable synthesis cards with a stale/lint loop.
@@ -190,8 +190,10 @@ Plan (v0):
 12) Governance follow-through: keep Dream Lite as zero-write, then add a governor-review surface before any apply path.
     - scout/helper lanes may inspect and packetize recommendations only
     - judgment and any future write authority must remain explicit and governed
-13) Apply-readiness follow-through: define a compiled-synthesis assist-apply canary contract before any write lane.
-    - first canary should admit only `refresh_card`
+13) Apply-readiness follow-through: define and wire a Phase-1 compiled-synthesis apply-planning canary before any write lane.
+    - shipped Phase 1: `dream-lite apply plan|verify` admits only governor-approved `refresh_card` and emits `writes_performed=0` receipts
+    - shipped Phase 1b: `dream-lite director observe|stage|checkpoint` produces instruction-candidate / staged-patch / checkpoint packets only
+    - first future wet-run canary should admit only `refresh_card`
     - `compile_new_card` stays out of auto-apply in v0
     - dry-run / before-after receipts / rollback artifact are mandatory
 

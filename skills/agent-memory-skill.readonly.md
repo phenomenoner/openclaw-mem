@@ -42,6 +42,10 @@ If asked to “remember” routine logs/OK checks:
 - Graph match: `openclaw-mem graph match "…"` for bounded idea → project candidate routing; for unattended use, check `openclaw-mem graph health` first
 - Store: **disabled by default** in this lane
 
+## Dream Lite plan-only note
+- Read-only lanes may run `openclaw-mem dream-lite apply plan` and `apply verify` to inspect governor-approved `refresh_card` readiness; v0 performs no writes.
+- Read-only lanes may run `openclaw-mem dream-lite director observe|stage|checkpoint` only as staged packet generation; do not treat Director candidates as executable instructions.
+
 ## Graphic Memory compiled synthesis note
 - Read-only lanes may inspect synthesis cards as **derived graph artifacts**.
 - Do not promote a synthesis card itself into durable memory by default; use it as a provenance-carrying reference surface.

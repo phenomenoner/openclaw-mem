@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.local/openclaw-mem/dream-lite-apply.v0.schema.json",
+  "title": "openclaw-mem.dream-lite.apply.v0",
+  "type": "object",
+  "required": ["kind", "run_id", "ts", "mode", "result", "snapshot_ref", "sidecar_witness_ref", "rollback_ref", "writes_performed", "policy"],
+  "properties": {
+    "kind": {"const": "openclaw-mem.dream-lite.apply.v0"},
+    "run_id": {"type": "string"},
+    "ts": {"type": "string"},
+    "mode": {"const": "dry_run"},
+    "policy": {
+      "type": "object",
+      "required": ["read_only", "memory_mutation"],
+      "properties": {
+        "read_only": {"const": true},
+        "memory_mutation": {"const": "none"},
+        "authority_mutation": {"const": "none"}
+      }
+    },
+    "result": {"enum": ["planned", "aborted"]},
+    "blocked_reason": {"type": ["string", "null"]},
+    "candidate_id": {"type": ["string", "null"]},
+    "recommended_action": {"type": ["string", "null"]},
+    "governor_decision": {"type": ["string", "null"]},
+    "apply_lane": {"type": ["string", "null"]},
+    "target": {
+      "type": "object",
+      "properties": {
+        "recordRef": {"type": ["string", "null"]},
+        "before_hash": {"type": ["string", "null"]}
+      }
+    },
+    "dry_run": {"type": "object"},
+    "snapshot_ref": {"type": ["string", "null"]},
+    "sidecar_witness_ref": {"type": ["string", "null"]},
+    "rollback_ref": {"type": ["string", "null"]},
+    "writes_performed": {"const": 0}
+  }
+}

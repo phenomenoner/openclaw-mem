@@ -10,6 +10,23 @@ It is intentionally narrow:
 
 ## What it does
 
+Dream Lite compiled-synthesis maintenance has a separate Phase-1 plan-only lane:
+
+```bash
+openclaw-mem dream-lite apply plan --governor-packet governor.json --json
+openclaw-mem dream-lite apply verify --receipt plan.json --json
+```
+
+This lane consumes `optimize governor-review` packets, admits only `approved_for_apply` + `refresh_card`, and emits receipts with `writes_performed=0`. It does not refresh synthesis cards in v0.
+
+Dream Director staging is also zero-write:
+
+```bash
+openclaw-mem dream-lite director observe --input daily.json --json
+openclaw-mem dream-lite director stage --candidates candidates.json --out staged.json
+openclaw-mem dream-lite director checkpoint --staged staged.json --json
+```
+
 The lane runs this packet chain:
 
 1. `openclaw-mem optimize evolution-review`

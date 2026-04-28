@@ -3997,6 +3997,401 @@ def cmd_optimize_governor_review(conn: sqlite3.Connection, args: argparse.Namesp
         )
     print("\n".join(lines))
 
+
+def _dream_lite_load_json(path_value: Optional[str]) -> Dict[str, Any]:
+    if path_value:
+        raw = Path(path_value).read_text(encoding='utf-8')
+    else:
+        raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw or '{}')
+    except Exception as e:
+        raise ValueError(f'invalid_json: {e}') from e
+    if not isinstance(payload, dict):
+        raise ValueError('packet must be a JSON object')
+    return payload
+
+
+def _dream_lite_now(args: argparse.Namespace) -> str:
+    value = str(getattr(args, 'now', None) or os.environ.get('OPENCLAW_MEM_FAKE_NOW') or '').strip()
+    return value or _utcnow_iso()
+
+
+def _dream_lite_run_id(args: argparse.Namespace, prefix: str = 'dream-lite') -> str:
+    value = str(getattr(args, 'run_id', None) or os.environ.get('OPENCLAW_MEM_FAKE_RUN_ID') or '').strip()
+    return value or f'{prefix}-{uuid.uuid4()}'
+
+
+def _dream_lite_write_optional(path_value: Optional[str], payload: Dict[str, Any]) -> None:
+    if not path_value:
+        return
+    path = Path(path_value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+
+
+def _dream_lite_governor_packet(path_value: Optional[str]) -> Dict[str, Any]:
+    payload = _dream_lite_load_json(path_value)
+    if str(payload.get('kind') or '') != 'openclaw-mem.optimize.governor-review.v0':
+        raise ValueError('unsupported governor packet kind')
+    if not isinstance(payload.get('items'), list):
+        raise ValueError('governor packet items must be a list')
+    return payload
+
+
+def _dream_lite_item_is_refresh_apply_eligible(item: Dict[str, Any]) -> bool:
+    target = item.get('target') if isinstance(item.get('target'), dict) else {}
+    return (
+        str(item.get('decision') or '') == 'approved_for_apply'
+        and str(item.get('recommended_action') or '') == 'refresh_card'
+        and str(item.get('apply_lane') or '') == 'graph.synth.refresh'
+        and bool(str(target.get('recordRef') or '').strip())
+    )
+
+
+def _dream_lite_apply_plan_payload(packet: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+    items = [item if isinstance(item, dict) else {} for item in (packet.get('items') or [])]
+    eligible = [item for item in items if _dream_lite_item_is_refresh_apply_eligible(item)]
+    approved_compile = [
+        item for item in items
+        if str(item.get('decision') or '') == 'approved_for_apply'
+        and str(item.get('recommended_action') or '') == 'compile_new_card'
+    ]
+    run_id = _dream_lite_run_id(args, 'dream-lite-apply')
+    ts = _dream_lite_now(args)
+    packet_sha = _json_sha256(packet)
+    blocked_reason = None
+    candidate: Dict[str, Any] = {}
+    result = 'planned'
+    if len(eligible) == 0:
+        result = 'aborted'
+        blocked_reason = 'compile_new_card_not_apply_eligible_in_v0' if approved_compile else 'no_eligible_refresh_card_candidate'
+    elif len(eligible) > 1:
+        result = 'aborted'
+        blocked_reason = 'max_candidates_per_run_exceeded'
+    else:
+        candidate = eligible[0]
+
+    target = candidate.get('target') if isinstance(candidate.get('target'), dict) else {}
+    receipt = {
+        'kind': 'openclaw-mem.dream-lite.apply.v0',
+        'run_id': run_id,
+        'ts': ts,
+        'mode': 'dry_run',
+        'result': result,
+        'blocked_reason': blocked_reason,
+        'candidate_id': candidate.get('candidate_id') if candidate else None,
+        'recommended_action': candidate.get('recommended_action') if candidate else None,
+        'governor_decision': candidate.get('decision') if candidate else None,
+        'apply_lane': candidate.get('apply_lane') if candidate else None,
+        'recommendation_packet_ref': (packet.get('source') or {}).get('fromFile') if isinstance(packet.get('source'), dict) else None,
+        'governor_packet_ref': str(getattr(args, 'governor_packet', None) or getattr(args, 'from_file', None) or '') or None,
+        'packet_sha256': packet_sha,
+        'target': {
+            'recordRef': target.get('recordRef') if candidate else None,
+            'before_hash': None,
+        },
+        'dry_run': {
+            'diff_summary': [],
+            'message': 'phase1_plan_only_no_card_io',
+        },
+        'snapshot_ref': None,
+        'sidecar_witness_ref': None,
+        'sidecar_witness': {
+            'verdict': 'missing',
+            'phase1_required': False,
+        },
+        'rollback_ref': None,
+        'after_hash': None,
+        'writes_performed': 0,
+        'policy': {
+            'mode': 'dream_lite_apply_plan_only',
+            'read_only': True,
+            'memory_mutation': 'none',
+            'authority_mutation': 'none',
+            'supported_action_classes': ['refresh_card'],
+        },
+        'counts': {
+            'eligible_candidates': len(eligible),
+            'items': len(items),
+        },
+    }
+    return receipt
+
+
+def cmd_dream_lite_apply_plan(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    try:
+        packet = _dream_lite_governor_packet(getattr(args, 'governor_packet', None) or getattr(args, 'from_file', None))
+        out = _dream_lite_apply_plan_payload(packet, args)
+    except Exception as e:
+        out = {
+            'kind': 'openclaw-mem.dream-lite.apply.v0',
+            'run_id': _dream_lite_run_id(args, 'dream-lite-apply'),
+            'ts': _dream_lite_now(args),
+            'mode': 'dry_run',
+            'result': 'aborted',
+            'blocked_reason': str(e),
+            'writes_performed': 0,
+            'policy': {'mode': 'dream_lite_apply_plan_only', 'read_only': True, 'memory_mutation': 'none'},
+        }
+    _dream_lite_write_optional(getattr(args, 'out', None), out)
+    if bool(args.json):
+        _emit(out, True)
+        return
+    print(f"dream-lite apply plan: result={out.get('result')} blocked_reason={out.get('blocked_reason') or 'none'}")
+
+
+def _dream_lite_verify_apply_receipt(receipt: Dict[str, Any]) -> List[str]:
+    reasons: List[str] = []
+    if str(receipt.get('kind') or '') != 'openclaw-mem.dream-lite.apply.v0':
+        reasons.append('unsupported_receipt_kind')
+    if str(receipt.get('mode') or '') != 'dry_run':
+        reasons.append('mode_must_be_dry_run_in_phase1')
+    if 'writes_performed' not in receipt:
+        reasons.append('missing_writes_performed')
+    elif int(receipt.get('writes_performed') or 0) != 0:
+        reasons.append('writes_performed_must_be_zero_in_phase1')
+    policy = receipt.get('policy') if isinstance(receipt.get('policy'), dict) else {}
+    if policy.get('read_only') is not True:
+        reasons.append('policy_read_only_required')
+    if str(policy.get('memory_mutation') or '') != 'none':
+        reasons.append('memory_mutation_must_be_none')
+    if str(policy.get('authority_mutation') or 'none') != 'none':
+        reasons.append('authority_mutation_must_be_none')
+    for field in ('snapshot_ref', 'rollback_ref', 'sidecar_witness_ref'):
+        if field not in receipt:
+            reasons.append(f'missing_{field}')
+    action = receipt.get('recommended_action')
+    result = str(receipt.get('result') or '')
+    if action not in (None, 'refresh_card'):
+        reasons.append('unsupported_recommended_action')
+    if result == 'planned':
+        if action != 'refresh_card':
+            reasons.append('planned_receipt_requires_refresh_card')
+        if str(receipt.get('governor_decision') or '') != 'approved_for_apply':
+            reasons.append('planned_receipt_requires_approved_for_apply')
+        if str(receipt.get('apply_lane') or '') != 'graph.synth.refresh':
+            reasons.append('planned_receipt_requires_graph_synth_refresh_lane')
+        target = receipt.get('target') if isinstance(receipt.get('target'), dict) else {}
+        record_ref = str(target.get('recordRef') or '').strip()
+        if not record_ref:
+            reasons.append('planned_receipt_requires_recordRef')
+        if any(name in record_ref for name in _DREAM_DIRECTOR_AUTHORITY_SURFACES):
+            reasons.append('planned_receipt_target_must_not_be_authority_surface')
+    elif result == 'aborted':
+        if not str(receipt.get('blocked_reason') or '').strip():
+            reasons.append('aborted_receipt_requires_blocked_reason')
+    else:
+        reasons.append('unsupported_phase1_result')
+    return reasons
+
+
+def cmd_dream_lite_apply_verify(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    try:
+        receipt = _dream_lite_load_json(getattr(args, 'receipt', None) or getattr(args, 'from_file', None))
+        reasons = _dream_lite_verify_apply_receipt(receipt)
+    except Exception as e:
+        receipt = {}
+        reasons = [str(e)]
+    out = {
+        'kind': 'openclaw-mem.dream-lite.apply.verify.v0',
+        'ts': _dream_lite_now(args),
+        'status': 'pass' if not reasons else 'fail',
+        'reasons': reasons,
+        'receipt_id': receipt.get('run_id') if isinstance(receipt, dict) else None,
+        'writes_performed': 0,
+        'policy': {'mode': 'verify_only', 'read_only': True, 'memory_mutation': 'none'},
+    }
+    if bool(args.json):
+        _emit(out, True)
+        return
+    print(f"dream-lite apply verify: {out['status']} reasons={','.join(reasons) or 'none'}")
+
+
+_DREAM_DIRECTOR_AUTHORITY_SURFACES = ('SOUL.md', 'AGENTS.md', 'MEMORY.md', 'TOOLS.md', 'USER.md', 'IDENTITY.md')
+
+
+def _dream_director_patch_touches_authority(patch: Any) -> bool:
+    path = ''
+    if isinstance(patch, dict):
+        path = str(patch.get('path') or patch.get('target') or patch.get('file') or '')
+    elif isinstance(patch, str):
+        path = patch
+    return any(name in path for name in _DREAM_DIRECTOR_AUTHORITY_SURFACES)
+
+
+def _dream_director_normalize_candidate(raw: Dict[str, Any], index: int) -> Dict[str, Any]:
+    risk_class = str(raw.get('risk_class') or 'journal_only')
+    apply_lane = str(raw.get('apply_lane') or 'auto_draft')
+    patches = raw.get('candidate_patches') if isinstance(raw.get('candidate_patches'), list) else []
+    touches_authority = risk_class in ('authority_surface', 'safety_surface') or any(
+        _dream_director_patch_touches_authority(patch) for patch in patches
+    )
+    checkpoint_required = bool(raw.get('checkpoint_required')) or touches_authority
+    if touches_authority:
+        apply_lane = 'checkpoint_gated'
+        if risk_class == 'journal_only':
+            risk_class = 'authority_surface'
+    return {
+        'candidate_id': str(raw.get('candidate_id') or f'director-candidate-{index}'),
+        'scene_notes': list(raw.get('scene_notes') or []),
+        'reinforce': list(raw.get('reinforce') or []),
+        'cross_out': list(raw.get('cross_out') or []),
+        'fill_in': list(raw.get('fill_in') or []),
+        'candidate_patches': patches,
+        'risk_class': risk_class,
+        'apply_lane': apply_lane,
+        'checkpoint_required': checkpoint_required,
+        'rationale_refs': list(raw.get('rationale_refs') or raw.get('source_refs') or []),
+    }
+
+
+def cmd_dream_lite_director_observe(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    try:
+        payload = _dream_lite_load_json(getattr(args, 'input', None) or getattr(args, 'from_file', None))
+    except Exception as e:
+        payload = {'_load_error': str(e)}
+    proposals = payload.get('proposals') if isinstance(payload.get('proposals'), list) else []
+    max_candidates = _optimize_policy_int(getattr(args, 'max_candidates', 20), 20, min_value=1)
+    candidates = [_dream_director_normalize_candidate(p if isinstance(p, dict) else {}, i + 1) for i, p in enumerate(proposals[:max_candidates])]
+    out = {
+        'kind': 'openclaw-mem.dream-director.instruction-candidate.v0',
+        'candidate_id': _dream_lite_run_id(args, 'dream-director'),
+        'ts': _dream_lite_now(args),
+        'observation_window': payload.get('observation_window') or getattr(args, 'since', None) or 'unspecified',
+        'source_refs': list(payload.get('source_refs') or []),
+        'scene_notes': list(payload.get('scene_notes') or []),
+        'reinforce': list(payload.get('reinforce') or []),
+        'cross_out': list(payload.get('cross_out') or []),
+        'fill_in': list(payload.get('fill_in') or []),
+        'candidate_patches': [patch for c in candidates for patch in c.get('candidate_patches', [])],
+        'candidates': candidates,
+        'risk_class': 'journal_only' if not candidates else 'mixed',
+        'apply_lane': 'auto_draft',
+        'checkpoint_required': any(bool(c.get('checkpoint_required')) for c in candidates),
+        'writes_performed': 0,
+        'policy': {
+            'mode': 'dream_director_observe_only',
+            'read_only': True,
+            'prompt_embedded': False,
+            'memory_mutation': 'none',
+            'authority_mutation': 'none',
+        },
+    }
+    _dream_lite_write_optional(getattr(args, 'out', None), out)
+    if bool(args.json):
+        _emit(out, True)
+        return
+    print(f"dream-lite director observe: candidates={len(candidates)} checkpoint_required={out['checkpoint_required']}")
+
+
+def cmd_dream_lite_director_stage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    try:
+        payload = _dream_lite_load_json(getattr(args, 'candidates', None) or getattr(args, 'from_file', None))
+        if str(payload.get('kind') or '') != 'openclaw-mem.dream-director.instruction-candidate.v0':
+            raise ValueError('unsupported instruction candidate kind')
+        candidates = payload.get('candidates') if isinstance(payload.get('candidates'), list) else []
+        patches: List[Any] = []
+        risk_classes: List[str] = []
+        blocked: List[str] = []
+        max_patch_bytes = _optimize_policy_int(getattr(args, 'max_patch_bytes', 40000), 40000, min_value=1)
+        for candidate in candidates:
+            c = candidate if isinstance(candidate, dict) else {}
+            candidate_patches = list(c.get('candidate_patches') or [])
+            touches_authority = any(_dream_director_patch_touches_authority(patch) for patch in candidate_patches)
+            risk_class = str(c.get('risk_class') or 'journal_only')
+            if touches_authority and risk_class == 'journal_only':
+                risk_class = 'authority_surface'
+            risk_classes.append(risk_class)
+            checkpoint_required = bool(c.get('checkpoint_required')) or touches_authority
+            apply_lane = str(c.get('apply_lane') or 'auto_draft')
+            if apply_lane not in ('auto_draft', 'checkpoint_gated'):
+                blocked.append('unsupported_apply_lane')
+            if risk_class in ('authority_surface', 'safety_surface') and not checkpoint_required:
+                blocked.append('authority_candidate_requires_checkpoint')
+            for patch in candidate_patches:
+                patches.append(patch)
+        patch_bytes = len(json.dumps(patches, ensure_ascii=False, sort_keys=True).encode('utf-8'))
+        if patch_bytes > max_patch_bytes:
+            blocked.append('max_patch_bytes_exceeded')
+        out = {
+            'kind': 'openclaw-mem.dream-director.staged-patch.v0',
+            'stage_id': _dream_lite_run_id(args, 'dream-director-stage'),
+            'ts': _dream_lite_now(args),
+            'source_candidate_ref': getattr(args, 'candidates', None) or getattr(args, 'from_file', None),
+            'candidate_count': len(candidates),
+            'patches': [] if blocked else patches,
+            'risk_classes': sorted(set(risk_classes)),
+            'checkpoint_required': any(r in ('authority_surface', 'safety_surface') for r in risk_classes),
+            'blocked_reasons': blocked,
+            'writes_performed': 0,
+            'policy': {'mode': 'stage_only', 'read_only': True, 'memory_mutation': 'none', 'authority_mutation': 'none'},
+        }
+    except Exception as e:
+        out = {
+            'kind': 'openclaw-mem.dream-director.staged-patch.v0',
+            'stage_id': _dream_lite_run_id(args, 'dream-director-stage'),
+            'ts': _dream_lite_now(args),
+            'candidate_count': 0,
+            'patches': [],
+            'risk_classes': [],
+            'checkpoint_required': False,
+            'blocked_reasons': [str(e)],
+            'writes_performed': 0,
+            'policy': {'mode': 'stage_only', 'read_only': True, 'memory_mutation': 'none', 'authority_mutation': 'none'},
+        }
+    _dream_lite_write_optional(getattr(args, 'out', None), out)
+    if bool(args.json):
+        _emit(out, True)
+        return
+    print(f"dream-lite director stage: patches={len(out.get('patches') or [])} blocked={','.join(out.get('blocked_reasons') or []) or 'none'}")
+
+
+def cmd_dream_lite_director_checkpoint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    staged_ref = getattr(args, 'staged', None) or getattr(args, 'patch', None) or getattr(args, 'from_file', None)
+    try:
+        payload = _dream_lite_load_json(staged_ref)
+        if str(payload.get('kind') or '') != 'openclaw-mem.dream-director.staged-patch.v0':
+            raise ValueError('unsupported staged patch kind')
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        sha = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+        blocked = list(payload.get('blocked_reasons') or [])
+        out = {
+            'kind': 'openclaw-mem.dream-director.checkpoint.v0',
+            'checkpoint_id': _dream_lite_run_id(args, 'dream-director-checkpoint'),
+            'ts': _dream_lite_now(args),
+            'staged_patch_ref': staged_ref,
+            'staged_patch_sha256': sha,
+            'checkpoint_required': bool(payload.get('checkpoint_required')),
+            'blocked_reasons': blocked,
+            'live_mutation': False,
+            'writes_performed': 0,
+            'policy': {'mode': 'checkpoint_only', 'read_only': True, 'memory_mutation': 'none', 'authority_mutation': 'none'},
+        }
+    except Exception as e:
+        out = {
+            'kind': 'openclaw-mem.dream-director.checkpoint.v0',
+            'checkpoint_id': _dream_lite_run_id(args, 'dream-director-checkpoint'),
+            'ts': _dream_lite_now(args),
+            'staged_patch_ref': staged_ref,
+            'staged_patch_sha256': None,
+            'checkpoint_required': False,
+            'blocked_reasons': [str(e)],
+            'live_mutation': False,
+            'writes_performed': 0,
+            'policy': {'mode': 'checkpoint_only', 'read_only': True, 'memory_mutation': 'none', 'authority_mutation': 'none'},
+        }
+    _dream_lite_write_optional(getattr(args, 'out', None), out)
+    if bool(args.json):
+        _emit(out, True)
+        return
+    print(f"dream-lite director checkpoint: blocked={','.join(out.get('blocked_reasons') or []) or 'none'}")
+
 def cmd_optimize_policy_loop(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     review_limit = _optimize_policy_int(getattr(args, "review_limit", 1000), 1000, min_value=1)
     writeback_limit = _optimize_policy_int(getattr(args, "writeback_limit", 500), 500, min_value=1)
@@ -17296,6 +17691,62 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--top", type=int, default=20, help="Max recent verifier receipts to inspect when --verifier-file is absent (default: 20)")
     o.set_defaults(func=cmd_optimize_canary_advisory)
 
+    sp = sub.add_parser("dream-lite", help="Plan-only Dream Lite apply and Dream Director dry-run surfaces")
+    dlsub = sp.add_subparsers(dest="dream_lite_cmd", required=True)
+
+    dla = dlsub.add_parser("apply", help="Plan and verify Dream Lite apply receipts (no writes in v0)")
+    apply_sub = dla.add_subparsers(dest="dream_lite_apply_cmd", required=True)
+
+    a = apply_sub.add_parser("plan", help="Plan one governor-approved refresh_card apply candidate (no writes)")
+    add_common(a)
+    a.add_argument("--governor-packet", dest="governor_packet", default=None, help="Governor packet JSON path")
+    a.add_argument("--from-file", dest="from_file", default=None, help="Alias for --governor-packet")
+    a.add_argument("--out", default=None, help="Optional output receipt path")
+    a.add_argument("--run-id", dest="run_id", default=None, help="Deterministic run id for tests/receipts")
+    a.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
+    a.set_defaults(func=cmd_dream_lite_apply_plan)
+
+    a = apply_sub.add_parser("verify", help="Verify a Phase-1 Dream Lite apply receipt")
+    add_common(a)
+    a.add_argument("--receipt", default=None, help="Apply receipt JSON path")
+    a.add_argument("--from-file", dest="from_file", default=None, help="Alias for --receipt")
+    a.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
+    a.set_defaults(func=cmd_dream_lite_apply_verify)
+
+    dld = dlsub.add_parser("director", help="Dream Director observation and checkpoint planning (no writes)")
+    director_sub = dld.add_subparsers(dest="dream_lite_director_cmd", required=True)
+
+    d = director_sub.add_parser("observe", help="Emit instruction candidates from a deterministic observation packet")
+    add_common(d)
+    d.add_argument("--input", default=None, help="Observation input JSON path")
+    d.add_argument("--from-file", dest="from_file", default=None, help="Alias for --input")
+    d.add_argument("--since", default=None, help="Observation window label when input omits one")
+    d.add_argument("--max-candidates", dest="max_candidates", type=int, default=20, help="Max proposal candidates to preserve (default: 20)")
+    d.add_argument("--out", default=None, help="Optional output candidates path")
+    d.add_argument("--run-id", dest="run_id", default=None, help="Deterministic candidate id for tests/receipts")
+    d.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
+    d.set_defaults(func=cmd_dream_lite_director_observe)
+
+    d = director_sub.add_parser("stage", help="Convert instruction candidates into a staged JSON patch envelope")
+    add_common(d)
+    d.add_argument("--candidates", default=None, help="Instruction candidate JSON path")
+    d.add_argument("--from-file", dest="from_file", default=None, help="Alias for --candidates")
+    d.add_argument("--max-patch-bytes", dest="max_patch_bytes", type=int, default=40000, help="Max staged patch payload bytes (default: 40000)")
+    d.add_argument("--out", default=None, help="Optional staged JSON output path")
+    d.add_argument("--run-id", dest="run_id", default=None, help="Deterministic stage id for tests/receipts")
+    d.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
+    d.set_defaults(func=cmd_dream_lite_director_stage)
+
+    d = director_sub.add_parser("checkpoint", help="Hash a staged patch envelope and emit checkpoint metadata")
+    add_common(d)
+    d.add_argument("--staged", default=None, help="Staged patch JSON path")
+    d.add_argument("--patch", default=None, help="Backward-compatible alias for --staged")
+    d.add_argument("--from-file", dest="from_file", default=None, help="Alias for --staged")
+    d.add_argument("--out", default=None, help="Optional checkpoint output path")
+    d.add_argument("--run-id", dest="run_id", default=None, help="Deterministic checkpoint id for tests/receipts")
+    d.add_argument("--now", default=None, help="Deterministic timestamp for tests/receipts")
+    d.set_defaults(func=cmd_dream_lite_director_checkpoint)
+
     def add_self_surface_common(s: argparse.ArgumentParser) -> None:
         add_common(s)
         s.add_argument("--scope", default=None, help="Optional scope filter for DB/file evidence")
@@ -18447,7 +18898,7 @@ def main() -> None:
     self_cmd = getattr(args, "self_cmd", None)
     optimize_cmd = getattr(args, "optimize_cmd", None)
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd == "capsule" or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd == "capsule" or cmd == "dream-lite" or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

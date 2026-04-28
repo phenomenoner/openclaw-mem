@@ -141,6 +141,24 @@ Possible recommendations:
 - `compile_new_card`
 - `no_action`
 
+#### Dream Lite apply planning (v0)
+`openclaw-mem dream-lite apply plan` is the Phase-1 plan-only bridge after `governor-review`. It consumes a governor packet and emits a dry-run receipt for at most one `approved_for_apply` + `refresh_card` candidate. It performs **no synthesis-card writes**.
+
+```bash
+openclaw-mem dream-lite apply plan --governor-packet governor.json --json
+openclaw-mem dream-lite apply verify --receipt plan.json --json
+```
+
+Dream Director is also plan-only in v0:
+
+```bash
+openclaw-mem dream-lite director observe --input daily.json --json
+openclaw-mem dream-lite director stage --candidates candidates.json --out staged.json
+openclaw-mem dream-lite director checkpoint --staged staged.json --json
+```
+
+It emits instruction-candidate / staged-patch / checkpoint packets for review. It does **not** embed the Director prompt, execute instructions, or mutate authority files such as `SOUL.md`, `AGENTS.md`, or `MEMORY.md`.
+
 #### Review and approval
 `openclaw-mem optimize governor-review` is the next read-only review command.
 It consumes recommendation packets and emits explicit approval decisions without performing mutation.

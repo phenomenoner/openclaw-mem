@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.local/openclaw-mem/dream-director-checkpoint.v0.schema.json",
+  "title": "openclaw-mem.dream-director.checkpoint.v0",
+  "type": "object",
+  "required": ["kind", "checkpoint_id", "ts", "staged_patch_sha256", "live_mutation", "writes_performed", "policy"],
+  "properties": {
+    "kind": {"const": "openclaw-mem.dream-director.checkpoint.v0"},
+    "checkpoint_id": {"type": "string"},
+    "ts": {"type": "string"},
+    "staged_patch_ref": {"type": ["string", "null"]},
+    "staged_patch_sha256": {"type": ["string", "null"]},
+    "checkpoint_required": {"type": "boolean"},
+    "blocked_reasons": {"type": "array"},
+    "live_mutation": {"const": false},
+    "writes_performed": {"const": 0},
+    "policy": {"type": "object"}
+  }
+}

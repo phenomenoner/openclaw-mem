@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.local/openclaw-mem/dream-director-instruction-candidate.v0.schema.json",
+  "title": "openclaw-mem.dream-director.instruction-candidate.v0",
+  "type": "object",
+  "required": ["kind", "candidate_id", "ts", "observation_window", "writes_performed", "policy"],
+  "properties": {
+    "kind": {"const": "openclaw-mem.dream-director.instruction-candidate.v0"},
+    "candidate_id": {"type": "string"},
+    "ts": {"type": "string"},
+    "observation_window": {"type": "string"},
+    "source_refs": {"type": "array"},
+    "scene_notes": {"type": "array"},
+    "reinforce": {"type": "array"},
+    "cross_out": {"type": "array"},
+    "fill_in": {"type": "array"},
+    "candidate_patches": {"type": "array"},
+    "candidates": {"type": "array"},
+    "checkpoint_required": {"type": "boolean"},
+    "writes_performed": {"const": 0},
+    "policy": {"type": "object"}
+  }
+}

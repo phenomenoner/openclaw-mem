@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openclaw.local/openclaw-mem/dream-director-staged-patch.v0.schema.json",
+  "title": "openclaw-mem.dream-director.staged-patch.v0",
+  "type": "object",
+  "required": ["kind", "stage_id", "ts", "candidate_count", "patches", "checkpoint_required", "writes_performed", "policy"],
+  "properties": {
+    "kind": {"const": "openclaw-mem.dream-director.staged-patch.v0"},
+    "stage_id": {"type": "string"},
+    "ts": {"type": "string"},
+    "source_candidate_ref": {"type": ["string", "null"]},
+    "candidate_count": {"type": "integer"},
+    "patches": {"type": "array"},
+    "risk_classes": {"type": "array"},
+    "checkpoint_required": {"type": "boolean"},
+    "blocked_reasons": {"type": "array"},
+    "writes_performed": {"const": 0},
+    "policy": {"type": "object"}
+  }
+}
