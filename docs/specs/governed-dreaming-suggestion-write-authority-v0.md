@@ -154,13 +154,16 @@ A reader should be able to answer:
 4. why Dream Lite does not imply autonomous mutation
 5. what artifact must exist before any future apply lane is allowed
 
-## Non-goals
-- no new background jobs in this phase
-- no new write command in this phase
-- no graph/store topology change
+## Non-goals / retired phase constraints
+Historical v0 governance originally held "no new background jobs" and "no topology change" while the lane was plan-only.
+That constraint is retired for the Dream Lite v1.9.4+ staging schedule: a deterministic cron-runner job may run read-only scout/governor/plan staging plus receipt-window verification.
+
+Still non-goals:
+- no unattended wet-run mutation without a valid plan + witness + canary gates
+- no graph/store topology ownership change
 - no attempt to automate the user’s whole world-model
 - no role ambiguity between scout and governor
 
 ## Topology statement
-- runtime/system topology: unchanged
-- this spec changes authority/governance truth only
+- runtime/system topology changed after v1.9.4: deterministic cron-runner daily staging/verify at 03:20 Asia/Taipei is allowed
+- the scheduled job is read-only for planning; write-capable `apply run` remains governed by plan + witness + rollback receipts
