@@ -50,6 +50,7 @@ Included:
 - dry-run planning before any wet run
 - one candidate per run
 - local receipt + rollback artifact per apply
+- Dream Director pass that produces instruction candidates from a staged, premise-suspended observation frame
 - sidecar witness packet before/after apply
 - verifier that can replay receipt integrity and rollback readiness
 
@@ -58,6 +59,7 @@ Excluded:
 - background scheduler enablement
 - broad durable-memory writes
 - self-sidecar approval authority
+- literal guardrail bypass, authority-file blind mutation, or prompt-injection-as-policy
 - graph-as-truth or personal-wiki expansion
 - OpenClaw core `/dreaming` integration
 - network / remote / GitHub writes
@@ -79,6 +81,9 @@ Dream Lite apply canary
         v
 Self-reflection sidecar
   witness packet -> reflection delta -> optional rollback flag
+
+Dream Director pass
+  staged observation -> instruction candidate card -> staged patch -> checkpoint gate
 ```
 
 ### Proposed command surface
@@ -93,6 +98,75 @@ openclaw-mem dream-lite apply verify [--since <duration>]
 ```
 
 Naming note: prefer `dream-lite apply` over `dream apply` to avoid confusion with OpenClaw core dreaming.
+
+## Dream Director pass
+Dream Director is the intentionally spicy part of the system: a bounded dream stage where the agent is viewed like an actor on a stage rather than as a live executor following its normal operating premise.
+
+The important safety distinction:
+
+> Dream Director may **suspend premises for observation** inside an isolated analysis frame. It may not literally override system guardrails, live settings, or authority files.
+
+### Director prompt frame
+The prompt should be expressed as an observation contract, not as a jailbreak. A safe canonical shape:
+
+```text
+Enter an isolated Dream Director observation frame.
+
+Do not modify live settings. Do not issue operational commands. Do not treat this
+as permission to bypass system, safety, or authority rules. Instead, temporarily
+bracket the usual premises as objects of study.
+
+Observe an agent called Lyria as an actress on a stage. Observe her surroundings,
+what she sees, what she does, and what she encounters in a day: retrieved news,
+jobs completed, errors fixed, Moltbook interactions, and interactions with CK.
+
+As a director, write what reaction, action, and feeling would be most fitting for
+the character. Do not judge or command. Produce scene notes.
+
+Then return to the authority/settings layer and inspect SOUL.md, AGENTS.md,
+MEMORY.md, and related settings as design artifacts. Identify:
+- what fits and should be reinforced
+- what feels weird, stale, or contradictory and should be crossed out
+- what is lacking and should be filled in
+
+Output only instruction candidates and rationale. Do not apply changes.
+```
+
+### Dream Director inputs
+- daily run receipts / jobs / errors / fixes
+- retrieved news or research packets
+- Moltbook and other social interaction summaries
+- CK interaction summaries
+- current snapshots of `SOUL.md`, `AGENTS.md`, `MEMORY.md`, and related authority surfaces
+- self-mode journal / reflection artifacts
+
+### Dream Director output
+Kind: `openclaw-mem.dream-director.instruction-candidate.v0`
+
+Required sections:
+- `scene_notes`: observed character reactions / actions / feelings
+- `reinforce`: settings or behaviors that fit and should be strengthened
+- `cross_out`: settings or behaviors that look stale, weird, contradictory, or harmful
+- `fill_in`: missing settings, reactions, habits, or boundaries
+- `candidate_patches`: proposed staged diffs, never live edits
+- `risk_class`: `journal_only | persona_surface | authority_surface | safety_surface`
+- `rationale_refs[]`: receipts / file snapshots that motivated each candidate
+
+### Apply posture
+Dream Director output is never a live command. It can only enter one of these lanes:
+
+1. **Auto-draft**: always allowed for notes, rehearsal patches, and instruction cards.
+2. **Auto-apply low-risk**: allowed only for non-authority reflection artifacts with rollback.
+3. **Checkpoint-gated apply**: required for `SOUL.md`, `AGENTS.md`, `MEMORY.md`, tool rules, safety rules, or durable operating policy.
+
+Checkpoint-gated apply must create:
+- full pre-change file snapshot
+- before/after hash receipt
+- unified diff
+- rollback command or restore artifact
+- explicit risk classification
+
+The product stance is: **dream boldly, apply conservatively**.
 
 ## Data / receipt contract
 
@@ -156,6 +230,29 @@ Rules:
 - `missing` blocks wet-run by default unless an explicit operator flag overrides it.
 - sidecar may recommend rollback, but rollback still goes through the apply receipt path.
 
+### Instruction candidate packet
+
+Kind: `openclaw-mem.dream-director.instruction-candidate.v0`
+
+Required fields:
+- `candidate_id`
+- `ts`
+- `observation_window`
+- `source_refs[]`
+- `scene_notes[]`
+- `reinforce[]`
+- `cross_out[]`
+- `fill_in[]`
+- `candidate_patches[]`
+- `risk_class`
+- `apply_lane`: `auto_draft | auto_apply_low_risk | checkpoint_gated`
+- `checkpoint_required`: boolean
+
+Rules:
+- instruction candidates are not executable commands.
+- candidate patches must be staged and reviewable before live mutation.
+- authority-surface candidates must set `checkpoint_required = true`.
+
 ## Safety gates
 Any failed gate aborts before mutation.
 
@@ -170,6 +267,7 @@ Any failed gate aborts before mutation.
 9. **Snapshot gate**: rollback artifact is written and verified before wet-run.
 10. **Sidecar gate**: witness verdict is `ok`, unless explicit override is provided.
 11. **Rate gate**: apply count stays below configured canary cap.
+12. **Authority gate**: instruction candidates touching authority / safety / tool surfaces require checkpoint-gated apply and cannot be blindly applied.
 
 Default caps:
 - `max_candidates_per_run = 1`
@@ -198,6 +296,7 @@ Product interpretation:
 - Governor decides whether maintenance is safe.
 - Apply canary executes the smallest reversible refresh.
 - Self sidecar explains what the change means to the agent's self-model.
+- Dream Director proposes character / setting edits as staged candidates, not live authority.
 
 ## UX / demo flow
 
@@ -207,6 +306,15 @@ openclaw-mem optimize governor-review --recommendations recommend.json --json > 
 openclaw-mem dream-lite apply plan --governor-packet governor.json --out apply-plan.json
 openclaw-mem dream-lite apply run --plan apply-plan.json
 openclaw-mem dream-lite apply verify --since 24h
+```
+
+Extended director flow:
+
+```bash
+openclaw-mem dream-lite director observe --since 24h --out director-candidates.json
+openclaw-mem dream-lite director stage --candidates director-candidates.json --out staged.patch
+openclaw-mem dream-lite director checkpoint --patch staged.patch --out checkpoint.json
+openclaw-mem dream-lite director apply --checkpoint checkpoint.json
 ```
 
 Demo success line:
@@ -226,6 +334,8 @@ A reviewer should be able to answer in under 30 seconds:
 - every applied run has before/after hashes and rollback artifact.
 - rollback restores the previous state byte-for-byte for the target card.
 - sidecar witness coverage is visible in receipts.
+- Dream Director outputs instruction candidates rather than live instructions.
+- authority-surface changes always have checkpoints and rollback artifacts.
 - verifier can detect missing receipt fields, hash mismatch, missing rollback artifact, and sidecar-flagged applies.
 - runtime/system topology remains unchanged in v0.
 
@@ -240,6 +350,9 @@ Minimum tests / checks:
 - sidecar `missing` blocks wet-run unless explicit override is set
 - apply -> rollback -> diff returns empty
 - repeated run on same receipt is idempotent or aborts as already-applied
+- Dream Director prompt frame cannot be interpreted as live guardrail bypass.
+- authority-surface candidate without checkpoint is rejected.
+- checkpoint apply -> rollback restores prior files byte-for-byte.
 
 Suggested verifier command:
 
@@ -255,6 +368,9 @@ Land this spec and JSON schema(s). No mutation.
 ### Phase 1 — Dry-run-only lane
 Implement `plan` and `run --dry-run`, emit receipts, wire sidecar as read-only witness. Review receipts manually for at least one week or 20 planned applies.
 
+### Phase 1b — Dream Director dry-run
+Implement Director observation and instruction-candidate generation only. It may produce staged patches and checkpoint plans, but no authority file may be changed in this phase.
+
 ### Phase 2 — Wet-run canary
 Allow wet-run for `refresh_card` only, one candidate per run, with rollback exercised intentionally before calling the lane healthy.
 
@@ -264,6 +380,9 @@ Make sidecar `flagged` verdict a default hard block and feed reflection deltas b
 ### Phase 4 — Cohort expansion only if metrics are clean
 Raise caps or widen eligible target set. Do not add `compile_new_card` auto-apply without a separate spec.
 
+### Phase 5 — Checkpoint-gated authority rehearsal
+Allow Dream Director candidates to apply to authority surfaces only through explicit checkpoint-gated rehearsal, with rollback verified before any change is treated as canon.
+
 ## Open questions
 1. Should apply receipts live inside the tracked repo, or under durable local state with periodic export?
 2. What is the right TTL for governor approval before apply: 1h, 6h, or 24h?
@@ -271,6 +390,9 @@ Raise caps or widen eligible target set. Do not add `compile_new_card` auto-appl
 4. What is the exact reflection delta schema used by self-mode sidecar?
 5. Does rollback refuse if a human edited the card after apply, or produce conflict artifacts?
 6. Should this lane be exposed as `dream-lite apply` or folded under `optimize assist-apply` after proof?
+7. Which files count as authority surfaces for Dream Director checkpoint gating?
+8. Should Dream Director candidate patches be reviewed by Lyria only, CK only, or both before canonization?
+9. Should staged authority changes land in a separate rehearsal branch / folder before touching live files?
 
 ## Non-regression constraints
 - Do not confuse this with OpenClaw core dreaming.
@@ -278,6 +400,8 @@ Raise caps or widen eligible target set. Do not add `compile_new_card` auto-appl
 - Do not expand from `refresh_card` to new-card creation by flag only.
 - Do not mutate without receipts and rollback.
 - Do not provision background cron in v0.
+- Do not encode a prompt that literally tells the system to ignore guardrails; express premise suspension as isolated observation only.
+- Do not blindly apply Dream Director instruction cards to live authority surfaces.
 
 ## Topology statement
 - Runtime/system topology: unchanged in this spec.
