@@ -169,6 +169,7 @@ Expected artifacts:
 - `director-checkpoint.json`
 - `director-apply.json`
 - `director-rehearsal/*.rehearsal.json`
+- `director-opinion.md` (render-only human readout derived from existing JSON artifacts)
 - `daily-summary.json`
 
 Expected facts:
@@ -179,6 +180,7 @@ Expected facts:
 - `director-checkpoint.live_mutation = false`;
 - `director-apply.writes_performed = 0`;
 - `daily-summary.json.stages.director_missing_opinion.status = missing`;
+- `director-opinion.md` states the missing-opinion reason and source artifact relationship;
 - process output remains `NO_REPLY` unless stricter env requires opinion.
 
 ### CF-2: Current real data + synthetic proposal file
@@ -209,6 +211,7 @@ Expected artifacts:
 - `director-staged.patches[0].path = notes/dream-director-opinion-loop.md`;
 - `director-checkpoint.live_mutation = false`;
 - `director-apply.live_mutation = false`;
+- `director-opinion.md` renders the candidate's scene notes / reinforce / cross out / fill in / patch fields without adding new claims;
 - process output remains `NO_REPLY` unless configured to alert on any Director candidate.
 
 ### CF-3: Strict mode no proposal author
@@ -268,7 +271,7 @@ If an upstream CLI command exits non-zero before producing JSON (`recommend`, `g
 - Existing cron schedule remains unchanged unless CK explicitly approves config changes.
 - Daily controller never passes `--allow-authority-rehearsal`.
 - Proposal file reads enforce the 256 KiB / 20 proposal / 40000-byte serialized proposal caps.
-- `daily-summary.json` aggregates all stage refs/status and `needs_ck` truth.
+- `daily-summary.json` aggregates all stage refs/status and `needs_ck` truth, including `stages.director_opinion.ref`.
 
 ## Rollback
 
