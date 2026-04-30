@@ -134,4 +134,4 @@ Guardrails in this slice:
 If you need the deeper design rationale, see:
 - [Architecture](architecture.md)
 - [Mem Engine](mem-engine.md)
-- [Verbatim semantic lane v0 spec](specs/verbatim-semantic-lane-v0.md)
+- Verbatim semantic lane v0 spec (maintainer archive)

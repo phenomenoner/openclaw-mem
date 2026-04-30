@@ -419,10 +419,10 @@ Status (current):
 - results are marked `source_kind=operator`, `trust_tier=trusted`
 - embeddings are optional/fail-open (FTS-only still works)
 
-- Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
+- Spec: Docs memory hybrid search v0 (maintainer archive; not part of the public evaluator path)
 - Ops guide: [mem-engine-admin-ops.md](mem-engine-admin-ops.md#docs-memory-cold-lane-installable)
-- Operational hardening note: [Scoped docs search starvation — root cause, first fix, and verifier (2026-03-21)](archive/notes/2026-03-21_scoped-docs-search-filter-after-limit-starvation.md)
-- Next design slice: [Docs cold lane — scope pushdown v1](specs/docs-cold-lane-scope-pushdown-v1.md)
+- Operational hardening note: scoped docs search starvation root cause and verifier (maintainer archive)
+- Next design slice: docs cold lane scope pushdown v1 (maintainer archive)
 - Stance: **no local LLM**; rerank (if needed) is remote + bounded.
 
 ---
@@ -475,17 +475,17 @@ Fail-open UX:
   - `--force-fields` (comma-separated): restrict overwrite to selected fields (default safe subset: `importance,importance_label,scope,category`; `trust_tier` must be explicit).
 - Writeback receipts should report: `forceOverwrite`, `forceFields`, `updated`, `skipped`, `overwritten`, `overwrittenFields`, and missing IDs.
 
-#### Wei Ji memory preflight (optional, now hookable)
+#### Governance memory preflight (optional, now hookable)
 
-`openclaw-mem-engine` can now call Wei Ji automatically **before** `memory_store` writes.
+`openclaw-mem-engine` can now call an operator-configured governance preflight automatically **before** `memory_store` writes.
 
 Purpose:
 - move governance to the dangerous moment right before memory becomes system truth
-- reduce operator memory burden (the flow asks Wei Ji first)
+- reduce operator memory burden (the flow asks the governance preflight first)
 - keep the lane rollbackable and bounded
 
 Config gate:
-- `plugins.entries.openclaw-mem-engine.config.weijiMemoryPreflight`
+- `plugins.entries.openclaw-mem-engine.config.memoryPreflight`
 
 Recommended host posture:
 - `enabled: true`
@@ -494,18 +494,18 @@ Recommended host posture:
 - `failOnRejected: false`
 
 That gives an **advisory-first** live lane:
-- Wei Ji runs automatically
+- governance preflight runs automatically
 - runtime failure does not brick memory writes
-- receipts still expose what Wei Ji said
+- receipts still expose the preflight verdict
 
 Receipts surface:
-- `memory_store.details.receipt.weiJiMemoryPreflight`
-- blocked receipts should carry Wei Ji `traceId` plus the engine `intent_id`, so operator approval reuse can retry the same governed memory intent instead of spawning opaque duplicate review items
+- `memory_store.details.receipt.memoryPreflight`
+- blocked receipts should carry preflight trace metadata plus the engine `intent_id`, so operator approval reuse can retry the same governed memory intent instead of spawning opaque duplicate review items
 
 Blocking modes:
 - `failMode: "closed"` blocks on runtime/subprocess failure
-- `failOnQueued: true` blocks if Wei Ji queues review
-- `failOnRejected: true` blocks if Wei Ji rejects
+- `failOnQueued: true` blocks if the preflight queues review
+- `failOnRejected: true` blocks if the preflight rejects
 
 Rollback:
 - disable the config gate, then restart the gateway

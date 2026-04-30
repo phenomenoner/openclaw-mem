@@ -371,7 +371,7 @@ wheels = [
 ]
 
 [[package]]
-name = "openclaw-mem"
+name = "openclaw-context-pack"
 version = "1.9.5"
 source = { editable = "." }
 

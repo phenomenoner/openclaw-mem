@@ -49,11 +49,11 @@ Status: **DONE (M1 shipped)**.
 
 Add-on (critical UX win, no local LLM):
 - **Docs memory**: index operator-authored repos (DECISIONS / roadmaps / specs) as a recall surface and include it as a cold lane.
-  - Spec: [Docs memory (hybrid search v0) →](specs/docs-memory-hybrid-search-v0.md)
+  - Spec: Docs memory hybrid search v0 (maintainer archive)
   - Operational note: scoped retrieval starvation in the plugin was hardened in Slice 1 (`ef614f4`) via bounded overfetch before scope filtering.
   - Slice 2 first cut now lands repo-allowlist pushdown in `openclaw-mem docs search` plus plugin-side repo pushdown wiring, while retaining residual plugin filtering as defense-in-depth.
   - Deferred optimization item: shrink reliance on scoped overfetch only after the broader docs-cold-lane / memory-engine development line reaches a later stable stage; treat this as optimization-phase work, not near-term delivery pressure.
-  - Spec: [Docs cold lane — scope pushdown v1 →](specs/docs-cold-lane-scope-pushdown-v1.md)
+  - Spec: Docs cold lane scope pushdown v1 (maintainer archive)
 
 Acceptance criteria:
 - Slot switch + rollback is one line (`plugins.slots.memory`).
@@ -160,7 +160,7 @@ Status: **DONE** (v1.4.0 first production slice).
 
 Artifacts:
 - Reference: `docs/verbatim-semantic-lane.md`
-- Spec: `docs/specs/verbatim-semantic-lane-v0.md`
+- Spec: Verbatim semantic lane v0 (maintainer archive)
 
 Acceptance criteria:
 - episodic hybrid recall is additive, read-only, scope-aware, and redaction-safe
@@ -286,7 +286,7 @@ Shipped v0.1 slice:
 - outputs structured report `openclaw-mem.optimize.review.v0` with recommendations (no mutation)
 
 Artifacts:
-- Spec: `docs/specs/self-optimizing-memory-loop-v0.md`
+- Spec: Self-optimizing memory loop v0 (maintainer archive)
 
 Acceptance criteria:
 - proposal generation does not mutate source truth by default
@@ -324,7 +324,7 @@ Goal: turn the implicit pipeline into an explicit policy.
 
 Add-on (debuggability + governance):
 - **Episodic events ledger** (append-only session timeline; summary-first; scope-isolated)
-  - Spec: [Episodic events ledger (v0) →](specs/episodic-events-ledger-v0.md)
+  - Spec: Episodic events ledger v0 (maintainer archive)
 
 Deliverables:
 - A short spec of promotion rules (what moves up tiers, and why)

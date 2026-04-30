@@ -359,5 +359,5 @@ This lane does **not** authorize:
 
 - [Deployment guide](deployment.md)
 - [Automation status](automation-status.md)
-- [Self-optimizing memory loop](specs/self-optimizing-memory-loop-v0.md)
-- [Assist-mode contract](specs/self-optimizing-memory-assist-mode-contract-v1.md)
+- Self-optimizing memory loop (maintainer archive)
+- Assist-mode contract (maintainer archive)
