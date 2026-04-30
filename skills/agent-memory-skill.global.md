@@ -39,6 +39,14 @@ Never store:
 - Treat session-store rotation / cleanup as observability only. If it needs to be recorded, use `openclaw-mem episodes append-session-store-receipt`, which stores an `ops.observation` row with only the store basename and optional numeric size / backup-count fields.
 - Older OpenClaw versions that do not emit these files are unaffected; this hardening is additive and no-op when the artifacts are absent.
 
+
+## Installation / command availability
+- PyPI distribution name: `openclaw-context-pack`.
+- Console command after install: `openclaw-mem`.
+- Python import package: `openclaw_mem`.
+- If the CLI is missing in an agent lane, first try `pip install openclaw-context-pack` in that lane's virtual environment; do not rename commands to `openclaw-context-pack`.
+- For source checkouts, `uv sync --locked` remains the repo-maintainer path; packaged users should prefer PyPI.
+
 ## Tool mapping
 - Recall (L1): `memory_recall(query)`
 - Store (L1): `memory_store(text, category, importance, scope)`

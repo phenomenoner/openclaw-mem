@@ -99,6 +99,14 @@ If recall/docs results are weak, conflicting, or low-confidence:
 
 ---
 
+
+## Installation / command availability
+- PyPI distribution name: `openclaw-context-pack`.
+- Console command after install: `openclaw-mem`.
+- Python import package: `openclaw_mem`.
+- If the CLI is missing in an agent lane, first try `pip install openclaw-context-pack` in that lane's virtual environment; do not rename commands to `openclaw-context-pack`.
+- For source checkouts, `uv sync --locked` remains the repo-maintainer path; packaged users should prefer PyPI.
+
 ## Tool mapping (OpenClaw tools vs openclaw-mem CLI)
 
 ### If you are an OpenClaw agent (tools)
