@@ -17928,6 +17928,9 @@ def build_parser() -> argparse.ArgumentParser:
         "Global flags also work before the command:\n"
         "  openclaw-mem --db /tmp/mem.sqlite --json status\n"
         "\n"
+        "Nested command note: for nested families such as episodes, place shared flags after the final action:\n"
+        "  openclaw-mem episodes embed --db /tmp/mem.sqlite --json\n"
+        "\n"
         "Input JSONL (one per line) for ingest:\n"
         "  {\"ts\":\"2026-02-04T13:00:00Z\", \"kind\":\"tool\", \"tool_name\":\"cron.list\", \"summary\":\"cron list called\", \"detail\":{...}}\n"
     )
@@ -17942,11 +17945,24 @@ def build_parser() -> argparse.ArgumentParser:
     # Global flags (before the subcommand). These are merged with per-command flags.
     p.add_argument("--db", dest="db_global", default=None, help="SQLite DB path")
     p.add_argument("--json", dest="json_global", action="store_true", help="Structured JSON output")
+    # Keep historical Namespace shape (`args.db` / `args.json` exist even when
+    # omitted) while nested child parsers use SUPPRESS so they do not overwrite
+    # parent-level values.
+    p.set_defaults(db=None, json=False)
 
     def add_common(sp: argparse.ArgumentParser) -> None:
-        # Allow flags after the subcommand too.
-        sp.add_argument("--db", default=None, help="SQLite DB path")
-        sp.add_argument("--json", action="store_true", help="Structured JSON output")
+        # Allow shared flags after the subcommand too.
+        #
+        # Important: nested subcommands (for example `episodes embed`) also call
+        # add_common(). If the child parser installs a default value for the same
+        # destination, argparse can overwrite a parent-level value such as:
+        #
+        #   openclaw-mem episodes --db /tmp/isolated.sqlite embed
+        #
+        # with the child default (`None`). SUPPRESS preserves whichever parser
+        # actually saw the flag, and main() falls back only after parsing is done.
+        sp.add_argument("--db", default=argparse.SUPPRESS, help="SQLite DB path")
+        sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
 
     sub = p.add_subparsers(dest="cmd", required=True)
 

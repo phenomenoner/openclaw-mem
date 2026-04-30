@@ -122,4 +122,4 @@ That is the direction we want.
 - [openclaw-mem and OpenClaw 2026.4.15](openclaw-2026-4-15-comparison.md)
 - [About openclaw-mem](about.md)
 - [Ecosystem fit](ecosystem-fit.md)
-- [Context supply chain blueprint](context-supply-chain-blueprint.md)
+- Context supply chain blueprint (maintainer archive; not part of the public evaluator path)

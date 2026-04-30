@@ -196,7 +196,7 @@ The canonical documentation is English. A separately written Traditional Chinese
 
 If you are evaluating the project beyond the 5-minute demo, start with the current proof assets:
 
-- [Trust-policy synthetic proof](showcase/trust-policy-synthetic-proof.md)
+- [Trust-policy synthetic proof](showcase/trust-policy-synthetic-proof.md) and [LongMemEval_s retrieval slice](showcase/longmemeval-s-retrieval-slice.md)
 - [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md)
 - [Command-aware compaction proof](showcase/command-aware-compaction-proof.md)
 - [Metrics JSON](showcase/artifacts/trust-aware-context-pack.metrics.json)

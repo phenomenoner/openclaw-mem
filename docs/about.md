@@ -118,7 +118,7 @@ The local-first posture keeps the base layer simple:
 - [OpenClaw 2026.4.15 comparison](openclaw-2026-4-15-comparison.md)
 - [Choose an install path](install-modes.md)
 - [Proactive Pack](proactive-pack.md)
-- [v2 blueprint](context-supply-chain-blueprint.md)
+- Context supply chain blueprint (maintainer archive; not part of the public evaluator path)
 - [Quickstart](quickstart.md)
 - [Reality check & status](reality-check.md)
 - [Deployment guide](deployment.md)

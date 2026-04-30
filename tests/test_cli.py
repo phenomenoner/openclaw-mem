@@ -11,6 +11,29 @@ from contextlib import redirect_stdout
 from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, _pack_graph_resolve_scope, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export, cmd_graph_synth, cmd_graph_lint, cmd_vsearch
 
 
+class TestParserContracts(unittest.TestCase):
+    def test_nested_episodes_db_flag_preserves_parent_value(self):
+        parser = build_parser()
+
+        parent = parser.parse_args(["episodes", "--db", "/tmp/parent.sqlite", "embed"])
+        child = parser.parse_args(["episodes", "embed", "--db", "/tmp/child.sqlite"])
+        global_arg = parser.parse_args(["--db", "/tmp/global.sqlite", "episodes", "embed"])
+
+        self.assertEqual(parent.db, "/tmp/parent.sqlite")
+        self.assertEqual(child.db, "/tmp/child.sqlite")
+        self.assertEqual(global_arg.db_global, "/tmp/global.sqlite")
+        self.assertIsNone(global_arg.db)
+
+    def test_nested_episodes_json_flag_preserves_parent_value(self):
+        parser = build_parser()
+
+        parent = parser.parse_args(["episodes", "--json", "embed"])
+        child = parser.parse_args(["episodes", "embed", "--json"])
+
+        self.assertTrue(parent.json)
+        self.assertTrue(child.json)
+
+
 class TestCliM0(unittest.TestCase):
     def test_schema_contains_english_embeddings_table(self):
         conn = _connect(":memory:")

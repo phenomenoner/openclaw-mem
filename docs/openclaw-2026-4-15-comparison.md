@@ -76,7 +76,7 @@ We want to keep, deepen, and improve the parts that remain distinctly valuable:
 - [About openclaw-mem](about.md)
 - [Proactive Pack](proactive-pack.md)
 - [Ecosystem fit](ecosystem-fit.md)
-- [Context supply chain blueprint](context-supply-chain-blueprint.md)
+- Context supply chain blueprint (maintainer archive; not part of the public evaluator path)
 - [Mem Engine reference](mem-engine.md)
 
 ## Short version

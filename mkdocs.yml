@@ -69,6 +69,7 @@ nav:
   - Proactive Pack: proactive-pack.md
   - Showcase:
       - Trust-policy synthetic proof: showcase/trust-policy-synthetic-proof.md
+      - LongMemEval_s retrieval slice: showcase/longmemeval-s-retrieval-slice.md
       - Trust-aware pack proof: showcase/trust-aware-context-pack-proof.md
       - Trust-aware proof artifacts: showcase/artifacts/index.md
       - Inside-Out demo: showcase/inside-out-demo.md

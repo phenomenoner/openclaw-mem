@@ -4,6 +4,14 @@ This folder holds the raw proof assets for the canonical trust-aware pack walkth
 
 ## Files
 
+### LongMemEval_s retrieval slice
+
+- [20-example retrieval comparison](longmemeval-s-20-retrieval-comparison.json)
+
+Use the narrated walkthrough for context:
+- [LongMemEval_s retrieval slice](../longmemeval-s-retrieval-slice.md)
+
+
 ### Trust-aware context pack
 
 - [Synthetic fixture](trust-aware-context-pack.synthetic.jsonl)

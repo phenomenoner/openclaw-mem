@@ -130,8 +130,8 @@ Status: **ROADMAP**.
 
 Plan (v0):
 1) Build a `topology-seed` from deterministic sources:
-   - `/root/.openclaw/cron/jobs.json` (job ids, schedules, delivery targets)
-   - playbook cron job specs (`openclaw-async-coding-playbook/cron/jobs/*.md`)
+   - OpenClaw cron registry (job ids, schedules, delivery targets)
+   - maintainer cron job specs (operator archive)
    - workspace repo roots (git + directory metadata only)
 2) Output a small YAML/JSON file + receipt (counts, provenance groups).
 3) Optional: “suggest-only” diff against a curated topology file.
@@ -244,7 +244,7 @@ Acceptance criteria:
 - Rollback is one command (disable the job / remove profile) and restores baseline behavior.
 
 Artifacts:
-- Ops backlog (host): `/root/.openclaw/workspace/openclaw-async-coding-playbook/projects/openclaw-ops/ops/PRODUCT_GAPS_BACKLOG.md`
+- Ops backlog: maintainer archive (not part of the public evaluator path)
 
 ### 1.5) Writeback + recall policy loop (M1.5)
 
@@ -307,7 +307,7 @@ Status: **DONE** (baseline shipped; operator-curated benchmark packet landed on 
 - [x] **Ingest summary (text + JSON)** with at least:
   - `total_seen`, `graded_filled`, `skipped_existing`, `skipped_disabled`, `scorer_errors`, `label_counts`
 - [ ] Small before/after benchmark set (operator-rated precision on `must_remember` + spot-check `ignore`)
-  - Pointers: `docs/thought-links.md` and `docs/rerank-poc-plan.md`
+  - Pointer: `docs/thought-links.md`; rerank proof-of-concept notes remain in the maintainer archive.
 
 Acceptance criteria:
 - Turning the feature on/off is a one-line env var change.

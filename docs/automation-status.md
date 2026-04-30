@@ -1,6 +1,6 @@
 # Automation status (main-only) — what is automatic vs cron vs not yet wired
 
-This page is the operator-facing truth for `openclaw-mem` on our host.
+This page summarizes which `openclaw-mem` capabilities are automatic, scheduled, or manual. It intentionally avoids host-specific job IDs and private paths.
 
 The system is intentionally split into layers:
 - **Plugin (sidecar)** captures observations.
@@ -11,7 +11,7 @@ The system is intentionally split into layers:
 These happen automatically once the OpenClaw plugin is enabled.
 
 - Capture: writes JSONL observations
-  - output: `/root/.openclaw/memory/openclaw-mem-observations.jsonl`
+  - output: OpenClaw state memory directory (operator-configured)
 - Backend annotations (observability): tags memory backend + memory tool actions
 - Redaction/denoise:
   - `captureMessage=false`
@@ -26,33 +26,32 @@ What this layer does *not* do:
 These are automated via OpenClaw cron jobs (so the system works without manual CLI calls).
 
 ### Harvest + triage (main)
-- MAIN baseline: `a9f3066a-43ac-40b3-aacc-dcfa44e9106e` (`:05`)
-  - code root: `/root/.openclaw/workspace/openclaw-mem` (main)
-  - DB: `/root/.openclaw/memory/openclaw-mem.sqlite`
-  - receipts: `/root/.openclaw/memory/openclaw-mem/{harvest_last.json,triage_last.json}`
+- Main baseline: scheduled by the operator
+  - code root: repository checkout
+  - DB: OpenClaw memory state directory
+  - receipts: OpenClaw memory state directory
 
 ### Feature lanes (A-fast / A-deep, main-governed)
-- A-fast: `57d3e88c-4278-414a-8e33-c091baae7887`
-- A-deep: `30adb125-88b9-4f2f-a644-5271baab7c0b`
+- A-fast / A-deep: optional operator-managed lanes
 - governance: lane packets converge to `main`; no long-lived `dev` integration branch contract
 - lock: `openclaw-mem-dev-feature` + global heavy-python guard (legacy lock name retained)
 
 ### AI compression (derived artifact)
-- Job: `58a7c87c-d1b2-4c9c-96fd-6ecccf623b85` (daily 00:35 Asia/Taipei)
-- Output (derived): `/root/.openclaw/workspace/memory/compressed/YYYY-MM-DD.md`
-- Receipt: `/root/.openclaw/workspace/memory/compressed/receipts/YYYY-MM-DD.json`
+- Schedule: operator-defined
+- Output (derived): workspace memory/compressed directory
+- Receipt: workspace memory/compressed receipts directory
 - Governance: derived-by-default, no durable promotion (see `docs/ai-compression.md`)
 
 ### Graphic Memory — auto-capture (git commits)
-- Job: `01761d59-adfc-4413-bd12-2ecd616e3029` (2/day: 01:13, 13:13 Asia/Taipei)
-- Spec: `/root/.openclaw/workspace/openclaw-async-coding-playbook/cron/jobs/01761d59-adfc-4413-bd12-2ecd616e3029.md`
-- DB: `/root/.openclaw/memory/openclaw-mem.sqlite`
+- Schedule: operator-defined
+- Spec: maintainer/operator archive
+- DB: OpenClaw memory state directory
 - State cursor (default): `OPENCLAW_STATE_DIR/memory/openclaw-mem/graph-capture-state.json`
 
 ### Graphic Memory — auto-capture (markdown index-only)
-- Job: `04e3d483-40bc-4d51-822e-4a1eb2252a7b` (q12h)
-- Spec: `/root/.openclaw/workspace/openclaw-async-coding-playbook/cron/jobs/04e3d483-40bc-4d51-822e-4a1eb2252a7b.md`
-- DB: `/root/.openclaw/memory/openclaw-mem.sqlite`
+- Schedule: operator-defined
+- Spec: maintainer/operator archive
+- DB: OpenClaw memory state directory
 - State cursor (default): `OPENCLAW_STATE_DIR/memory/openclaw-mem/graph-capture-md-state.json`
 
 ## 3) Exists (CLI) but NOT yet auto-wired (waiting for further decisions)

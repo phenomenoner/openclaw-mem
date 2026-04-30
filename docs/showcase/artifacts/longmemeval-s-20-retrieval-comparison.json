@@ -1,0 +1,57 @@
+{
+  "schema": "openclaw-mem.showcase.longmemeval-s-retrieval-comparison.v1",
+  "dataset": {
+    "name": "LongMemEval longmemeval_s.json",
+    "source": "https://github.com/xiaowu0162/LongMemEval",
+    "variant": "longmemeval_s",
+    "sample_size": 20,
+    "selection": "mixed question_type slice from the public small split",
+    "question_type_distribution": {
+      "knowledge-update": 4,
+      "multi-session": 4,
+      "single-session-assistant": 3,
+      "single-session-preference": 3,
+      "single-session-user": 3,
+      "temporal-reasoning": 3
+    }
+  },
+  "task": {
+    "kind": "retrieval_only_session_level",
+    "query": "question text only",
+    "gold": "answer_session_ids",
+    "metrics": ["recall_at_1", "recall_at_3", "recall_at_5", "mrr"],
+    "non_goals": ["QA generation", "answer grading", "full LongMemEval leaderboard claim"]
+  },
+  "results": {
+    "lexical_session_baseline": {
+      "recall_at_1": 0.8,
+      "recall_at_3": 0.85,
+      "recall_at_5": 0.85,
+      "mrr": 0.8374579124579125
+    },
+    "openclaw_mem_raw_fts_fixed": {
+      "recall_at_1": 0.7,
+      "recall_at_3": 0.85,
+      "recall_at_5": 0.95,
+      "mrr": 0.7949999999999999
+    },
+    "openclaw_mem_vector": {
+      "recall_at_1": 0.65,
+      "recall_at_3": 0.9,
+      "recall_at_5": 0.9,
+      "mrr": 0.7583333333333334
+    },
+    "openclaw_mem_hybrid": {
+      "recall_at_1": 0.8,
+      "recall_at_3": 0.95,
+      "recall_at_5": 1.0,
+      "mrr": 0.8766666666666666
+    }
+  },
+  "verification_notes": [
+    "The 47-row embedding smoke passed with persisted embedding delta equal to the embed receipt count.",
+    "The 20-example run embedded 1025 episodic rows; all successful embed receipt deltas matched persisted counts.",
+    "A CLI --db provenance incident was found during harness development and cleaned up before this artifact was prepared.",
+    "This artifact is a bounded product proof, not a full benchmark claim."
+  ]
+}
