@@ -1,17 +1,16 @@
 # openclaw-mem
 
-**Memory your agent can’t lie about — a local context supply chain you can grep, diff, and roll back.**
+**Memory your agent can’t lie about — Store / Pack / Observe for local, cited, rollbackable context.**
 
-`openclaw-mem` turns agent work into a durable, searchable, auditable memory trail, then assembles bounded context bundles that are small enough to inject and easy to verify. Start with a local SQLite sidecar beside OpenClaw, keep your current memory backend, and promote to the optional mem engine only when hybrid recall and policy controls earn their keep.
-When you do promote the engine, the live-turn hook is framed as **Proactive Pack**: bounded pre-reply recall orchestration, not a separate hidden memory layer.
+`openclaw-mem` turns agent work into a durable local memory trail, then builds bounded `ContextPack` bundles with citations, trust-policy receipts, and traceable include/exclude reasons. Start with a plain SQLite sidecar beside OpenClaw. Promote to the optional mem engine only after the local proof earns the extra surface.
 
 ## Start here
 
-1. **Verify locally in ~60 seconds:** [Reality check & status](docs/reality-check.md)
-2. **Run the CLI path:** [Quickstart](QUICKSTART.md)
-3. **Choose sidecar vs engine:** [Install modes](docs/install-modes.md)
-4. **Check what is automatic:** [Automation status](docs/automation-status.md)
-5. **See the product gaps:** [OpenClaw user improvement roadmap](docs/openclaw-user-improvement-roadmap.md)
+1. **Run the local benchmark:** [Plain-vanilla ContextPack benchmark](docs/showcase/plain-vanilla-context-pack-benchmark.md)
+2. **Check shipped vs partial status:** [Reality check & status](docs/reality-check.md)
+3. **Run the CLI path:** [Quickstart](QUICKSTART.md)
+4. **Choose sidecar vs engine:** [Install modes](docs/install-modes.md)
+5. **Check what is automatic:** [Automation status](docs/automation-status.md)
 6. **Read in Traditional Chinese:** [Traditional Chinese edition](docs/zh/index.md)
 
 ## What is automatic today?
@@ -27,10 +26,10 @@ When you do promote the engine, the live-turn hook is framed as **Proactive Pack
 
 - **Local-first by default** — JSONL + SQLite, no external database required.
 - **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
-- **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, graph-aware synthesis preference, protected fresh tails, and trace-backed debugging.
+- **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, trust-policy receipts, and trace-backed debugging.
 - **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, sanitize runtime artifacts, and keep rollback simple.
 - **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
-- **Governed continuity side-car** — optional `continuity` surface for derived self/continuity inspection, adjudication, public-safe summaries, and explicit weaken/rebind/retire receipts.
+- **Advanced labs are opt-in** — graph routing, GBrain, continuity, Dream Lite, and deeper optimization lanes stay out of the first evaluation path.
 
 ## Why this exists
 
@@ -73,6 +72,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
 - every include/exclude decision stays inspectable through receipts and trace output
 
 Full proof path:
+- [Plain-vanilla ContextPack benchmark](docs/showcase/plain-vanilla-context-pack-benchmark.md)
 - [Trust-aware pack proof](docs/showcase/trust-aware-context-pack-proof.md)
 - [Command-aware compaction proof](docs/showcase/command-aware-compaction-proof.md)
 - [Metrics JSON](docs/showcase/artifacts/trust-aware-context-pack.metrics.json)
@@ -89,79 +89,25 @@ The product loop is simple and stable:
 
 When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
 
-## Experimental GBrain sidecar
+## Advanced labs
 
-`openclaw-mem` also ships an **experimental GBrain sidecar**.
-It is **not enabled by default**, carries **no stability guarantee**, and is still documented as an experimental rollout rather than a default product path.
+The first-time evaluator path is **Store / Pack / Observe**. Everything below is opt-in after the core proof is clear.
 
-For teams that want to test two bounded additions, it currently offers:
+Advanced lanes currently include:
 
-- a **read-only GBrain lookup** that can add extra Pack candidates without changing `ContextPack`
-- a **restricted background-job bridge** for one deterministic helper lane at a time
+- **Graph routing** for topology-aware recall experiments.
+- **GBrain sidecar** for bounded read-only lookup and restricted helper-job experiments.
+- **Governed continuity side-car** for derived continuity inspection and public-safe summaries.
+- **Dream Lite / deeper optimize loops** for research-grade memory maintenance workflows.
 
-Use it when you want to evaluate whether GBrain can improve retrieval support or bounded helper execution without changing memory ownership.
-Do not treat it as a second truth store, a backend replacement, or a general-purpose job runner.
+These lanes are not required for the 5-minute benchmark, the sidecar install path, or the basic `ContextPack` contract. Treat them as labs until your use case needs them.
 
 Read more:
+- [Product positioning](PRODUCT_POSITIONING.md)
+- [Architecture](docs/architecture.md)
+- [Context pack](docs/context-pack.md)
 - [Experimental GBrain sidecar](docs/experimental/gbrain-sidecar/README.md)
-- [Optional Mem Engine + GBrain mirror](docs/mem-engine.md)
-
-## Governed continuity side-car
-
-`openclaw-mem` also ships an optional derived continuity lane.
-This is not a second truth store, and it is not presented as consciousness.
-It is a governed side-car that helps operators inspect what continuity claims the system is currently making, how strong those claims are allowed to be, and when those claims should be weakened, rebound, or retired.
-
-Core operator surfaces:
-
-```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity current --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity attachment-map --snapshot <snapshot.json> --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity adjudication --snapshot <snapshot.json> --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity public-summary --snapshot <snapshot.json> --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity explain --snapshot <snapshot.json> --stance <id> --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity sensitivity --snapshot <snapshot.json> --stance <id> --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity patterns --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity triggers --snapshot <snapshot.json> --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity interventions --snapshot <snapshot.json> --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity compare-sessions --left-scope <scope-a> --left-session-id <session-a> --right-scope <scope-b> --right-session-id <session-b> --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity wording-lint --snapshot <snapshot.json> --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity release-history --json
-```
-
-Control-plane activation is explicit and starts autonomous snapshot + receipt generation under `~/.openclaw/memory/openclaw-mem/self-model-sidecar/` until you disable it:
-
-```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity enable --cadence-seconds 300 --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity status --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem continuity disable --json
-```
-
-For the real 72h endurance gate, run the self-closing soak controller instead of hand-counting receipts. It advances one autorun cycle per wake, writes status under `~/.openclaw/memory/openclaw-mem/self-model-sidecar/soak/`, emits a clear warning on anomalous gaps/drift, and disables its own cron job after a healthy 72h window closes:
-
-```bash
-python3 tools/self_model_sidecar_soak_controller.py \
-  --repo-root /root/.openclaw/workspace/openclaw-mem \
-  --run-dir /root/.openclaw/memory/openclaw-mem/self-model-sidecar \
-  --cadence-seconds 300 \
-  --target-hours 72
-```
-
-Use it when you need auditable continuity receipts, migration comparison, or public-safe hedged summaries, not when you need a new source of truth. The lane stays rebuildable from memory-of-record by design.
-
-Updated operator loop:
-- `continuity explain` answers why one claim exists, including adjudication reasons and release history.
-- `continuity sensitivity` measures fragility by removing top evidence and recomputing the claim state.
-- `continuity patterns`, `triggers`, and `interventions` turn persisted receipts into a governed operator loop instead of raw JSON archaeology.
-- `continuity wording-lint` catches selfhood inflation and missing hedges before copy leaves the operator lane.
-
-Example:
-
-```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem pack "What changed this week?" --limit 6 --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem artifact stash --from ./tool-output.txt --json
-uv run --python 3.13 --frozen -- python -m openclaw_mem artifact peek ocm_artifact:v1:sha256:<64hex> --json
-```
+- [Optional Mem Engine](docs/mem-engine.md)
 
 ## OpenClaw 2026.4.15 and `openclaw-mem`
 
@@ -250,7 +196,9 @@ When a compaction receipt is later selected by `pack`, the response may include:
 - `compaction_policy_hints` for advisory family-level guidance (`git_diff`, `test_failures`, `long_logs`, `generic`)
 - `trace.extensions.compaction_sideband` / `compaction_policy_hints` for auditable preference receipts
 
-## Start here
+## More links
+
+### Core and adoption
 
 - **Why openclaw-mem still exists:** [`docs/why-openclaw-mem-still-exists.md`](docs/why-openclaw-mem-still-exists.md)
 - **OpenClaw 2026.4.15 comparison:** [`docs/openclaw-2026-4-15-comparison.md`](docs/openclaw-2026-4-15-comparison.md)
@@ -263,14 +211,17 @@ When a compaction receipt is later selected by `pack`, the response may include:
 - **Traditional Chinese edition:** [`docs/zh/index.md`](docs/zh/index.md)
 - **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
 - **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
-- **Experimental GBrain sidecar:** [`docs/experimental/gbrain-sidecar/README.md`](docs/experimental/gbrain-sidecar/README.md)
-- **Continuity side-car ops lane:** [`skills/self-model-sidecar.ops.md`](skills/self-model-sidecar.ops.md)
-- **GBrain sidecar ops lane:** [`skills/gbrain-sidecar.ops.md`](skills/gbrain-sidecar.ops.md)
 - **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
 - **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
 - **Pack policy contract:** [`docs/specs/context-pack-policy-v1.1.md`](docs/specs/context-pack-policy-v1.1.md)
 - **Optional Mem Engine:** [`docs/mem-engine.md`](docs/mem-engine.md)
 - **Release notes:** <https://github.com/phenomenoner/openclaw-mem/releases>
+
+### Advanced labs
+
+- **Experimental GBrain sidecar:** [`docs/experimental/gbrain-sidecar/README.md`](docs/experimental/gbrain-sidecar/README.md)
+- **Continuity side-car ops lane:** [`skills/self-model-sidecar.ops.md`](skills/self-model-sidecar.ops.md)
+- **GBrain sidecar ops lane:** [`skills/gbrain-sidecar.ops.md`](skills/gbrain-sidecar.ops.md)
 
 ## License
 

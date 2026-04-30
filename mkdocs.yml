@@ -36,17 +36,18 @@ nav:
   - Home: index.md
   - Traditional Chinese (zh-Hant): zh/index.md
   - Start here:
+      - Plain-vanilla benchmark: showcase/plain-vanilla-context-pack-benchmark.md
       - 60-second reality proof: reality-check.md
       - Quickstart: quickstart.md
       - Choose an install path: install-modes.md
       - Automation status: automation-status.md
-      - Product roadmap: openclaw-user-improvement-roadmap.md
   - Why openclaw-mem still exists: why-openclaw-mem-still-exists.md
   - OpenClaw 2026.4.15 comparison: openclaw-2026-4-15-comparison.md
   - About: about.md
   - Proactive Pack: proactive-pack.md
   - Governed optimize assist: optimize-assist.md
   - Showcase:
+      - Plain-vanilla benchmark: showcase/plain-vanilla-context-pack-benchmark.md
       - Trust-aware pack proof: showcase/trust-aware-context-pack-proof.md
       - Trust-aware proof artifacts: showcase/artifacts/index.md
       - Inside-Out demo: showcase/inside-out-demo.md

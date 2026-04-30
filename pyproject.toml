@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "openclaw-mem"
 version = "1.9.5"
-description = "CLI-first memory store + search prototype for OpenClaw"
+description = "Local-first Store / Pack / Observe memory sidecar for cited, rollbackable OpenClaw context"
 requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }

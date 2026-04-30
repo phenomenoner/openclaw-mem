@@ -23,7 +23,7 @@ $ openclaw-mem search "privacy timezone style" --json
 </div>
 
 <div class="ocm-ctas" markdown="1">
-[Verify in 60 seconds](reality-check.md){ .md-button .md-button--primary }
+[Run the benchmark](showcase/plain-vanilla-context-pack-benchmark.md){ .md-button .md-button--primary }
 [Read the quickstart](quickstart.md){ .md-button }
 [Choose an install path](install-modes.md){ .md-button }
 [Traditional Chinese edition](zh/index.md){ .md-button }
@@ -35,10 +35,10 @@ $ openclaw-mem search "privacy timezone style" --json
 
 If you are evaluating `openclaw-mem`, take the shortest trustworthy route:
 
-1. **Verify the local proof** — run the [60-second reality check](reality-check.md) with a temporary SQLite DB.
-2. **Install the sidecar** — follow the [quickstart](quickstart.md), then choose a [sidecar / engine / hybrid install path](install-modes.md).
-3. **Check what is automatic** — read the [automation status](automation-status.md) before assuming anything is wired into the live agent loop.
-4. **Track the product arc** — use the [product-facing roadmap](openclaw-user-improvement-roadmap.md) for current gaps and next bets.
+1. **Run the local benchmark** — use the [plain-vanilla ContextPack benchmark](showcase/plain-vanilla-context-pack-benchmark.md) with synthetic memory only.
+2. **Verify shipped status** — run the [60-second reality check](reality-check.md) with a temporary SQLite DB.
+3. **Install the sidecar** — follow the [quickstart](quickstart.md), then choose a [sidecar / engine / hybrid install path](install-modes.md).
+4. **Check what is automatic** — read the [automation status](automation-status.md) before assuming anything is wired into the live agent loop.
 
 ## What runs automatically today?
 
@@ -152,9 +152,16 @@ If your agent only has one short chat, no ops trail, no audit need, and no repea
 
 ## See it, don’t just believe it
 
-Start with the [60-second reality proof](reality-check.md), then use these deeper demos when you want to inspect richer behavior.
+Start with the [plain-vanilla ContextPack benchmark](showcase/plain-vanilla-context-pack-benchmark.md), then use these deeper demos when you want to inspect richer behavior.
 
 <div class="ocm-grid" markdown="1">
+
+<div class="ocm-card" markdown="1">
+### Plain-vanilla ContextPack benchmark
+A synthetic, privacy-safe benchmark comparing vanilla packing with trust-aware packing.
+
+[Run the benchmark](showcase/plain-vanilla-context-pack-benchmark.md)
+</div>
 
 <div class="ocm-card" markdown="1">
 ### 5-minute Inside-Out demo
@@ -188,6 +195,7 @@ The canonical documentation is English. A separately written Traditional Chinese
 
 If you are evaluating the project beyond the 5-minute demo, start with the current proof assets:
 
+- [Plain-vanilla ContextPack benchmark](showcase/plain-vanilla-context-pack-benchmark.md)
 - [Trust-aware pack proof](showcase/trust-aware-context-pack-proof.md)
 - [Command-aware compaction proof](showcase/command-aware-compaction-proof.md)
 - [Metrics JSON](showcase/artifacts/trust-aware-context-pack.metrics.json)
@@ -197,14 +205,15 @@ If you are evaluating the project beyond the 5-minute demo, start with the curre
 
 ## Adoption path
 
-1. **Run the demo** — prove the recall-and-pack contract on synthetic data.
+1. **Run the benchmark** — prove the trust-aware pack contract on synthetic data.
 2. **Install the sidecar** — capture and harvest observations beside your current OpenClaw memory slot.
 3. **Use local recall first** — search, timeline, get, and pack before reaching for heavier systems.
 4. **Promote carefully** — enable the optional engine only when hybrid recall and policy controls justify the added surface.
 
 ## Start here
 
-- [Inside-Out demo](showcase/inside-out-demo.md) — fastest proof of the product contract
+- [Plain-vanilla ContextPack benchmark](showcase/plain-vanilla-context-pack-benchmark.md) — fastest proof of the product contract
+- [Inside-Out demo](showcase/inside-out-demo.md) — richer walkthrough of the product contract
 - [Choose an install path](install-modes.md) — sidecar, engine, or hybrid adoption
 - [Quickstart](quickstart.md) — CLI-first local setup
 - [Reality check & status](reality-check.md) — honest maturity map
