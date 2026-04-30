@@ -91,6 +91,18 @@ Daily controller remains silent on ordinary no-op green runs, but it should emit
 
 Default: do not alert only because the proposal author is missing. Record it as an artifact so the product loop is observable without creating daily noise.
 
+#### Human-facing notification contract
+
+Any Dream Director text that may be sent to a human must be concise and decision-shaped. Do not forward raw `director-opinion.md`, `daily-summary.json`, stage counts, schema fields, or receipt dumps into chat. The human-facing message must contain only:
+
+1. **Suggestions** — what the system recommends, in executive-summary language.
+2. **Recommended handling** — the operator/assistant recommendation and the reason.
+3. **Choice request** — the concrete options the human can pick from.
+
+The message must also distinguish **run time** from **delivery time**. A daily run generated at 03:20 Asia/Taipei may be reviewed or surfaced later, but the title/body must not call it a “morning” report unless it is delivered in the morning. Prefer neutral wording such as `Dream Director daily review` plus `run window: <timestamp>`.
+
+Operationally: ordinary no-op / rehearsal-only runs stay silent. If a notification is warranted, the assistant should synthesize from `daily-summary.json` + `director-opinion.md` into the three-part contract above and ask for a choice before product/authority mutation.
+
 ### Blade 5 — Future opinion author seam
 Add an explicit seam, but do not enable an LLM lane in deterministic cron by default:
 
@@ -169,7 +181,7 @@ Expected artifacts:
 - `director-checkpoint.json`
 - `director-apply.json`
 - `director-rehearsal/*.rehearsal.json`
-- `director-opinion.md` (render-only human readout derived from existing JSON artifacts)
+- `director-opinion.md` (concise render-only human readout: suggestions, recommended handling, choice request; JSON artifacts keep machine detail)
 - `daily-summary.json`
 
 Expected facts:
@@ -180,7 +192,7 @@ Expected facts:
 - `director-checkpoint.live_mutation = false`;
 - `director-apply.writes_performed = 0`;
 - `daily-summary.json.stages.director_missing_opinion.status = missing`;
-- `director-opinion.md` states the missing-opinion reason and source artifact relationship;
+- `director-opinion.md` states the missing-opinion/no-op in concise executive-summary form and does not dump raw stage counts;
 - process output remains `NO_REPLY` unless stricter env requires opinion.
 
 ### CF-2: Current real data + synthetic proposal file
@@ -211,7 +223,7 @@ Expected artifacts:
 - `director-staged.patches[0].path = notes/dream-director-opinion-loop.md`;
 - `director-checkpoint.live_mutation = false`;
 - `director-apply.live_mutation = false`;
-- `director-opinion.md` renders the candidate's scene notes / reinforce / cross out / fill in / patch fields without adding new claims;
+- `director-opinion.md` renders candidate suggestions, recommended handling, and choices without dumping raw stage fields or adding new claims;
 - process output remains `NO_REPLY` unless configured to alert on any Director candidate.
 
 ### CF-3: Strict mode no proposal author

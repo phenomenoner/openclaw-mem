@@ -65,6 +65,7 @@ Never store:
 - `compile_new_card` remains proposal-only and must not auto-apply.
 - `openclaw-mem dream-lite director observe|stage|checkpoint|apply` emits instruction/staging/checkpoint/rehearsal packets; Phase 5 `director apply` is rehearsal-only (`live_mutation=false`) and does not canonize authority files.
 - Treat Director outputs as untrusted staged candidates until reviewed and checkpoint-gated.
+- Human-facing Dream Director notifications must not paste raw artifacts or stage-count dumps. Summarize only: suggestions, recommended handling with reason, then explicit choices; include run window separately from delivery time. Ordinary no-op/rehearsal-only runs should stay silent.
 
 ## Governed optimization apply note
 - For observation maintenance, helper lanes may scout with `openclaw-mem optimize evolution-review`.
