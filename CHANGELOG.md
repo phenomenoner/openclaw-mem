@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.5] - 2026-04-30
+
+### Changed
+
+- Published the project to PyPI under the distribution name `openclaw-context-pack` while preserving the `openclaw_mem` Python import package and `openclaw-mem` console command.
+- Documented the packaged install flow across README, Quickstart, install-mode docs, landing docs, and agent-facing memory instruction cards.
+- Added a bounded LongMemEval_s 20-example retrieval proof artifact showing the hybrid lane improving recall@3, recall@5, and MRR over the lexical session baseline on that slice.
+- Hardened nested CLI flag parsing so `openclaw-mem episodes --db X embed` and `openclaw-mem episodes embed --db X` both preserve the intended isolated DB path.
+- Cleaned touched public docs surfaces to avoid host-specific paths, cron UUIDs, and maintainer-only links.
+
+### Testing
+
+- Verified PyPI live install from a clean virtual environment with `pip install openclaw-context-pack`, `import openclaw_mem`, and `openclaw-mem --db ... status --json`.
+- Built wheel/sdist and passed `twine check dist/*`.
+- Ran full test suite: `566 passed, 1 skipped`.
+- Ran MkDocs strict build, public docs safety grep, generated agent-skill asset freshness checks, and `git diff --check`.
+
 ## [1.9.1] - 2026-04-27
 
 ### Changed
@@ -191,7 +208,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regression coverage in `tests/test_graph_match_cli.py` for scope-filter fallback via repo-root inference when `detail.scope` is missing.
 - Added file-backed persistence coverage in `tests/test_cli.py` for `graph synth compile` and `graph synth refresh`.
 - Re-ran `python3 -m unittest tests/test_graph_match_cli.py tests/test_autonomous_default_routing_cli.py tests/test_cli.py`.
-- Re-ran host-local proof against `/root/.openclaw/memory/openclaw-mem.sqlite`; `graph match` and `route auto` now surface `graph_match`, and host-local patched proof shows `preferredCardRefs` / `coveredRawRefs`.
+- Re-ran host-local proof against an operator memory SQLite DB; `graph match` and `route auto` now surface `graph_match`, and host-local patched proof shows `preferredCardRefs` / `coveredRawRefs`.
 
 ## [1.4.1] - 2026-04-09
 
