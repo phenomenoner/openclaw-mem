@@ -21,8 +21,8 @@ Start with the lightest path that solves your problem.
 
 ### What changes
 
-- clone repo
-- `uv sync --locked`
+- install the packaged CLI with `pip install openclaw-context-pack`
+- or clone the repo and run `uv sync --locked` for repository fixtures
 - generate or provide a JSONL file
 - run local recall commands against SQLite
 
@@ -34,7 +34,14 @@ Start with the lightest path that solves your problem.
 
 ### First step
 
-Go to [Quickstart](quickstart.md).
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install openclaw-context-pack
+openclaw-mem --db /tmp/openclaw-mem-demo.sqlite status --json
+```
+
+Then go to [Quickstart](quickstart.md).
 
 ### Rollback
 

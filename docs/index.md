@@ -68,6 +68,7 @@ Most agent memory demos feel magical until the first production question lands:
 A memory layer should show its work. The core loop stays deliberately plain:
 
 ```bash
+pip install openclaw-context-pack
 openclaw-mem search "timezone privacy demo style" --json
 openclaw-mem timeline --limit 5 --json
 openclaw-mem pack "write the demo plan" --json

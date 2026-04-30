@@ -9,9 +9,21 @@ If you are still deciding how to adopt it, read [Choose an install path](install
 ## Prerequisites
 
 - Python 3.10+ (recommended: Python 3.13)
-- [uv](https://github.com/astral-sh/uv)
+- `pip` for the packaged CLI path
+- [uv](https://github.com/astral-sh/uv) only if you want to run the repository proof fixture directly
 
-## 1) Clone and install
+## 1) Install the packaged CLI
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install openclaw-context-pack
+openclaw-mem --db /tmp/openclaw-mem-quickstart.sqlite status --json
+```
+
+The PyPI distribution is `openclaw-context-pack`; it installs the `openclaw_mem` Python package and the `openclaw-mem` console command.
+
+If you want to run the bundled synthetic fixture from this repository instead, clone the repo too:
 
 ```bash
 git clone https://github.com/phenomenoner/openclaw-mem.git
@@ -24,7 +36,7 @@ uv sync --locked
 ```bash
 DB=/tmp/openclaw-mem-quickstart.sqlite
 
-uv run --python 3.13 --frozen -- python -m openclaw_mem ingest \
+openclaw-mem ingest \
   --db "$DB" \
   --json \
   --file ./docs/showcase/artifacts/trust-aware-context-pack.synthetic.jsonl
@@ -38,7 +50,7 @@ What this gives you:
 ## 3) Build the pack without trust gating
 
 ```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
+openclaw-mem pack \
   --db "$DB" \
   --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
   --limit 5 \
@@ -56,7 +68,7 @@ In the synthetic proof, this ungated pack still admits one **quarantined** row b
 ## 4) Build the pack with trust gating on
 
 ```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
+openclaw-mem pack \
   --db "$DB" \
   --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
   --limit 5 \

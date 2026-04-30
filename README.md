@@ -47,6 +47,17 @@ Long-running agents do not just forget. They also accumulate memory that quietly
 
 You can prove the core behavior locally without touching OpenClaw config.
 
+For the packaged CLI:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install openclaw-context-pack
+openclaw-mem --db /tmp/openclaw-mem-demo.sqlite status --json
+```
+
+For the repository proof fixture:
+
 ```bash
 git clone https://github.com/phenomenoner/openclaw-mem.git
 cd openclaw-mem
