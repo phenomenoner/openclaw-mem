@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Plain-vanilla ContextPack benchmark on synthetic memory only.
+"""Trust-policy synthetic proof on synthetic memory only.
 
-This benchmark deliberately avoids any live OpenClaw memory path. It ingests the
+This proof deliberately avoids any live OpenClaw memory path. It ingests the
 small public fixture under docs/showcase/artifacts into a temporary SQLite DB,
 then compares:
 
@@ -83,13 +83,13 @@ def _summarize_pack(pack: dict[str, Any], trust_by_ref: dict[str, str]) -> dict[
     }
 
 
-def run_benchmark(artifact: Path | None = None) -> dict[str, Any]:
+def run_proof(artifact: Path | None = None) -> dict[str, Any]:
     root = _repo_root()
     fixture = root / "docs" / "showcase" / "artifacts" / "trust-aware-context-pack.synthetic.jsonl"
     trust_by_ref = _load_trust_by_ref(fixture)
 
-    with tempfile.TemporaryDirectory(prefix="openclaw-mem-bench-") as td:
-        db = Path(td) / "plain-vanilla-test-memory.sqlite"
+    with tempfile.TemporaryDirectory(prefix="openclaw-mem-proof-") as td:
+        db = Path(td) / "trust-policy-proof-memory.sqlite"
         ingest = _run_json(
             [
                 sys.executable,
@@ -161,7 +161,7 @@ def run_benchmark(artifact: Path | None = None) -> dict[str, Any]:
         >= 1,
     }
     result = {
-        "kind": "openclaw-mem.benchmark.plain-vanilla-context-pack.v1",
+        "kind": "openclaw-mem.proof.trust-policy-synthetic.v1",
         "fixture": str(fixture.relative_to(root)),
         "query": QUERY,
         "comparison": {
@@ -192,13 +192,13 @@ def main() -> int:
     parser.add_argument("--artifact", type=Path, help="Optional path to write the JSON receipt")
     args = parser.parse_args()
 
-    result = run_benchmark(args.artifact)
+    result = run_proof(args.artifact)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         before = result["comparison"]["vanilla_pack"]
         after = result["comparison"]["trust_aware_pack"]
-        print("Plain-vanilla ContextPack benchmark")
+        print("Trust-policy synthetic proof")
         print(f"fixture: {result['fixture']}")
         print(f"passed: {result['passed']}")
         print(f"vanilla refs: {', '.join(before['selected_refs'])}")

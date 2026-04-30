@@ -40,7 +40,7 @@ A public proof should be synthetic, reproducible, and small enough to review.
 
 The current proof target is:
 
-- use a plain-vanilla synthetic memory fixture
+- use a small synthetic memory fixture
 - compare an ungated pack with a trust-aware pack
 - show selected refs, citation coverage, quarantined-row exclusion, bundle size, and trust-policy reasons
 - avoid reading any real OpenClaw memory, private workspace, or operator state

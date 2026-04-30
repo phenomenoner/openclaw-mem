@@ -7,6 +7,26 @@ repo_name: phenomenoner/openclaw-mem
 # GitHub Pages builds from MkDocs' docs_dir. We keep it clean and point it to ./docs.
 docs_dir: docs
 
+# Keep maintainer planning packets and internal specs out of the rendered public site.
+# They can remain in git for history, but first-time evaluators should not hit them
+# through site search or direct docs URLs.
+exclude_docs: |
+  launch/**
+  specs/**
+  2026-*.md
+  context-pack-auto-graph-*.md
+  context-packing-*.md
+  snippets/**
+  series/**
+  portfolio/**
+  *.txt
+  context-supply-chain-blueprint.md
+  context-bloat-mitigation-rollout.md
+  context-budget-sidecar-v0-receipt.md
+  context-engineering-lessons.md
+  rerank-poc-plan.md
+  releases-v1.6.0.md
+
 theme:
   name: material
   features:
@@ -36,7 +56,9 @@ nav:
   - Home: index.md
   - Traditional Chinese (zh-Hant): zh/index.md
   - Start here:
-      - Plain-vanilla benchmark: showcase/plain-vanilla-context-pack-benchmark.md
+      - Trust-policy synthetic proof: showcase/trust-policy-synthetic-proof.md
+      - Evaluator path: evaluator-path.md
+      - Core vs Advanced Labs: core-vs-advanced-labs.md
       - 60-second reality proof: reality-check.md
       - Quickstart: quickstart.md
       - Choose an install path: install-modes.md
@@ -45,68 +67,38 @@ nav:
   - OpenClaw 2026.4.15 comparison: openclaw-2026-4-15-comparison.md
   - About: about.md
   - Proactive Pack: proactive-pack.md
-  - Governed optimize assist: optimize-assist.md
   - Showcase:
-      - Plain-vanilla benchmark: showcase/plain-vanilla-context-pack-benchmark.md
+      - Trust-policy synthetic proof: showcase/trust-policy-synthetic-proof.md
       - Trust-aware pack proof: showcase/trust-aware-context-pack-proof.md
       - Trust-aware proof artifacts: showcase/artifacts/index.md
       - Inside-Out demo: showcase/inside-out-demo.md
       - Topology demo: showcase/topology-demo.md
-  - Launch:
-      - Relaunch information architecture (v0): launch/relaunch-information-architecture-v0.md
-      - Copy pack: launch/trust-aware-context-pack-copy-pack.md
-      - GitHub repo surface consistency: launch/github-repo-surface-consistency.md
-      - Proof-first relaunch checklist: launch/proof-first-relaunch-checklist.md
-      - Release-surface proof pack (PASS 3): launch/release-surface-proof-pack-v0.md
   - Releases: https://github.com/phenomenoner/openclaw-mem/releases
   - Reference:
       - Ecosystem fit: ecosystem-fit.md
       - Deployment: deployment.md
-      - Governed optimize assist: optimize-assist.md
-      - Proactive Pack: proactive-pack.md
       - Auto-capture (sidecar plugin): auto-capture.md
       - Mem Engine (slot backend): mem-engine.md
-      - Verbatim semantic lane: verbatim-semantic-lane.md
       - Engine admin ops: mem-engine-admin-ops.md
       - Architecture: architecture.md
       - Context pack: context-pack.md
       - Agent memory skill (SOP): agent-memory-skill.md
-      - Agent memory skill cards: agent-memory-skill-cards.md
       - Importance grading: importance-grading.md
       - Automation status: automation-status.md
-      - Roadmap: roadmap.md
       - Product-facing improvement roadmap: openclaw-user-improvement-roadmap.md
-      - Completeness roadmap: completeness-roadmap.md
-      - Dual-language memory strategy: dual-language-memory-strategy.md
-      - Upgrade checklist: upgrade-checklist.md
-      - Thought-links: thought-links.md
       - Privacy/export rules: privacy-export-rules.md
+  - Advanced Labs:
+      - Core vs Advanced Labs: core-vs-advanced-labs.md
+      - Governed optimize assist: optimize-assist.md
+      - Verbatim semantic lane: verbatim-semantic-lane.md
+      - Dual-language memory strategy: dual-language-memory-strategy.md
       - Obsidian: obsidian.md
       - Obsidian durable graph: obsidian_durable_graph.md
+      - Roadmap: roadmap.md
+      - Completeness roadmap: completeness-roadmap.md
+      - Upgrade checklist: upgrade-checklist.md
+      - Thought-links: thought-links.md
       - Release checklist (repo rule): release-checklist.md
-  - Specs:
-      - Agent memory skill (blueprint v0): specs/agent-memory-skill-v0.md
-      - Topology knowledge (L3 blueprint v0): specs/topology-knowledge-v0.md
-      - Docs memory (hybrid search v0): specs/docs-memory-hybrid-search-v0.md
-      - Context budget sidecar (v0): specs/context-budget-sidecar-v0.md
-      - Episodic events ledger (v0): specs/episodic-events-ledger-v0.md
-      - Episodic auto-capture (v0): specs/episodic-auto-capture-v0.md
-      - Verbatim semantic lane (v0): specs/verbatim-semantic-lane-v0.md
-      - Graphic memory (GraphRAG-lite PRD): specs/graphic-memory-graphrag-lite-prd.md
-      - Graphic memory auto-capture / auto-recall: specs/graphic-memory-auto-capture-auto-recall.md
-      - Graphic memory preflight trigger policy: specs/graphic-memory-preflight-trigger-policy.md
-      - Graphic memory query plane (v0): specs/graphic-memory-query-plane-v0.md
-      - Graphic memory compiled synthesis layer (v0): specs/graphic-memory-compiled-synthesis-v0.md
-      - Dream Lite apply + self-reflection sidecar (v0): specs/dream-lite-apply-self-reflection-sidecar-v0.md
-      - Dream Lite apply phase-1 working packet: specs/dream-lite-apply-phase1-working-packet-v0.md
-      - Dream Lite phase2-5 working packet: specs/dream-lite-phase2-5-worker-packet-v0.md
-      - Mem-engine versioning safety net: specs/mem-engine-versioning-safety-net-v0.md
-      - Topology auto-extract (v0): specs/topology-auto-extract-v0.md
-      - Self-optimizing memory loop (v0): specs/self-optimizing-memory-loop-v0.md
-      - Self-optimizing memory autonomy ramp (v0): specs/self-optimizing-memory-autonomy-ramp-v0.md
-      - Self-optimizing memory assist-mode contract (v1): specs/self-optimizing-memory-assist-mode-contract-v1.md
-      - OpenClaw context injection contract (v0): specs/openclaw-context-injection-contract-v0.md
-      - Auto-recall activation vs retention (v1): specs/auto-recall-activation-vs-retention-v1.md
   - Archive:
       - Archive home: archive/README.md
       - Decisions (historical): archive/decisions/README.md

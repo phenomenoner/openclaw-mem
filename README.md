@@ -6,11 +6,11 @@
 
 ## Start here
 
-1. **Run the local benchmark:** [Plain-vanilla ContextPack benchmark](docs/showcase/plain-vanilla-context-pack-benchmark.md)
-2. **Check shipped vs partial status:** [Reality check & status](docs/reality-check.md)
-3. **Run the CLI path:** [Quickstart](QUICKSTART.md)
+1. **Run the synthetic proof:** [Trust-policy synthetic proof](docs/showcase/trust-policy-synthetic-proof.md)
+2. **Pick an evaluation path:** [5 minutes / 30 minutes / one afternoon](docs/evaluator-path.md)
+3. **Check Core vs Advanced Labs:** [Core vs Advanced Labs](docs/core-vs-advanced-labs.md)
 4. **Choose sidecar vs engine:** [Install modes](docs/install-modes.md)
-5. **Check what is automatic:** [Automation status](docs/automation-status.md)
+5. **Check shipped vs partial status:** [Reality check & status](docs/reality-check.md)
 6. **Read in Traditional Chinese:** [Traditional Chinese edition](docs/zh/index.md)
 
 ## What is automatic today?
@@ -19,7 +19,8 @@
 | --- | --- | --- |
 | Sidecar observation capture | Automatic when the plugin is enabled | Captures denoised JSONL observations and backend/action annotations. |
 | Harvest, triage, and graph capture | Scheduled on configured hosts | Converts captured records into searchable stores and receipts. |
-| `pack`, graph routing, optimize assist, continuity | CLI / opt-in lanes | Available, but not assumed to run in every live agent turn. |
+| `pack` | CLI core | Produces bounded `ContextPack` output with citations and trace receipts. |
+| Graph routing, optimize assist, continuity, GBrain | Advanced Labs / opt-in lanes | Available for mature operators, but not part of the first evaluation path. |
 | Mem-engine Proactive Pack | Optional promotion | Bounded pre-reply recall orchestration after explicit engine adoption. |
 
 ## What you get
@@ -51,28 +52,19 @@ git clone https://github.com/phenomenoner/openclaw-mem.git
 cd openclaw-mem
 uv sync --locked
 
-DB=/tmp/openclaw-mem-proof.sqlite
-uv run --python 3.13 --frozen -- python -m openclaw_mem ingest \
-  --db "$DB" \
-  --json \
-  --file ./docs/showcase/artifacts/trust-aware-context-pack.synthetic.jsonl
-
-uv run --python 3.13 --frozen -- python -m openclaw_mem pack \
-  --db "$DB" \
-  --query "trust-aware context packing prompt pack receipts hostile durable memory provenance" \
-  --limit 5 \
-  --budget-tokens 500 \
-  --trace
+uv run --python 3.13 --frozen -- \
+  python benchmarks/trust_policy_synthetic_proof.py --json
 ```
 
 ### What this proof shows
 
-- the same query can change its result set when a trust policy is applied
-- quarantined content can be excluded with an explicit reason
-- every include/exclude decision stays inspectable through receipts and trace output
+- vanilla packing selects a quarantined row from synthetic memory
+- trust-aware packing excludes that row with an explicit reason
+- selected rows keep citation coverage and traceable receipts
 
 Full proof path:
-- [Plain-vanilla ContextPack benchmark](docs/showcase/plain-vanilla-context-pack-benchmark.md)
+- [Evaluator path](docs/evaluator-path.md)
+- [Trust-policy synthetic proof](docs/showcase/trust-policy-synthetic-proof.md)
 - [Trust-aware pack proof](docs/showcase/trust-aware-context-pack-proof.md)
 - [Command-aware compaction proof](docs/showcase/command-aware-compaction-proof.md)
 - [Metrics JSON](docs/showcase/artifacts/trust-aware-context-pack.metrics.json)
@@ -84,7 +76,7 @@ Full proof path:
 The product loop is simple and stable:
 
 1. **Store**: capture, ingest, and query observations with `store`/`ingest`/`search`.
-2. **Pack**: run `pack` to get a bounded `bundle_text` and `context_pack` (`schema: openclaw-mem.context-pack.v1`), with optional protected-tail continuity and graph-aware synthesis preference.
+2. **Pack**: run `pack` to get a bounded `bundle_text` and `context_pack` (`schema: openclaw-mem.context-pack.v1`), with citations, trust policy, and trace receipts.
 3. **Observe**: use `timeline`, `get`, and `artifact` outputs for explainability and rollback.
 
 When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
@@ -100,10 +92,12 @@ Advanced lanes currently include:
 - **Governed continuity side-car** for derived continuity inspection and public-safe summaries.
 - **Dream Lite / deeper optimize loops** for research-grade memory maintenance workflows.
 
-These lanes are not required for the 5-minute benchmark, the sidecar install path, or the basic `ContextPack` contract. Treat them as labs until your use case needs them.
+These lanes are not required for the 5-minute proof, the sidecar install path, or the basic `ContextPack` contract. Treat them as labs until your use case needs them.
 
 Read more:
 - [Product positioning](PRODUCT_POSITIONING.md)
+- [Core vs Advanced Labs](docs/core-vs-advanced-labs.md)
+- [Evaluator path](docs/evaluator-path.md)
 - [Architecture](docs/architecture.md)
 - [Context pack](docs/context-pack.md)
 - [Experimental GBrain sidecar](docs/experimental/gbrain-sidecar/README.md)
@@ -123,78 +117,16 @@ Read more:
 - [Why openclaw-mem still exists in a stronger OpenClaw world](docs/why-openclaw-mem-still-exists.md)
 - [openclaw-mem and OpenClaw 2026.4.15](docs/openclaw-2026-4-15-comparison.md)
 
-## Governed optimization updates
+## Deeper operations live below the fold
 
-`openclaw-mem` now ships a review-first workflow for one low-risk class of memory maintenance updates.
+`openclaw-mem` also has governed memory-hygiene and artifact-observation tools for mature operator stacks. They are useful after the core product is proven, but they are not required for the first evaluation path.
 
-Current shipped path:
-- `openclaw-mem optimize review` — read-only health signals
-- `openclaw-mem optimize evolution-review` — prepares low-risk maintenance candidates
-- `openclaw-mem optimize governor-review` — records explicit decisions
-- `openclaw-mem optimize assist-apply` — applies only approved low-risk observation updates with before/after and rollback receipts
+Start with:
 
-Each assist apply run now also emits a compact effect artifact so later autonomy phases can measure whether mutations helped, held steady, or regressed instead of treating writes as blind maintenance.
-
-The first bounded write class is intentionally narrow:
-- update `observations.detail_json.lifecycle.stale_candidate`
-- update `observations.detail_json.lifecycle.stale_reason_code`
-- update `observations.detail_json.importance.score`
-- update `observations.detail_json.importance.label`
-- add bounded `observations.detail_json.optimization.assist` metadata
-
-Example dry rehearsal:
-
-```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem optimize evolution-review --json > evolution.json
-uv run --python 3.13 --frozen -- python -m openclaw_mem optimize governor-review --from-file evolution.json --approve-stale --approve-importance --json > governor.json
-uv run --python 3.13 --frozen -- python -m openclaw_mem optimize assist-apply --from-file governor.json --dry-run --json
-```
-
-Example bounded write run:
-
-```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem optimize assist-apply --from-file governor.json --json
-```
-
-Scheduled worker form:
-
-```bash
-uv run --python 3.13 --frozen -- python tools/optimize_assist_runner.py --json
-```
-
-That runner keeps the full packet chain in one bounded scheduled surface and stays dry-run unless `--allow-apply` is set.
-
-Receipts are written under `~/.openclaw/memory/openclaw-mem/optimize-assist/` by default.
-If the packet is malformed, unapproved, duplicated, or exceeds caps, the run aborts before write.
-
-### Command-aware compaction, minimal operator path
-
-If you already use a compactor such as RTK, keep it in the Observe path first:
-
-```bash
-# 1) Produce raw + compact outputs with your own toolchain
-my-compactor git diff --stat > ./compact-git-diff.txt
-git diff --stat > ./raw-git-diff.txt
-
-# 2) Bind them into a sideband receipt
-uv run --python 3.13 --frozen -- python -m openclaw_mem artifact compact-receipt \
-  --command "git diff --stat" \
-  --tool my-compactor \
-  --compact-file ./compact-git-diff.txt \
-  --raw-file ./raw-git-diff.txt \
-  --json > ./compaction-receipt.json
-
-# 3) Recover bounded raw evidence later, from the receipt or raw handle
-uv run --python 3.13 --frozen -- python -m openclaw_mem artifact rehydrate \
-  --receipt-file ./compaction-receipt.json \
-  --max-chars 1200 \
-  --json
-```
-
-When a compaction receipt is later selected by `pack`, the response may include:
-- `compaction_sideband` for raw recovery metadata
-- `compaction_policy_hints` for advisory family-level guidance (`git_diff`, `test_failures`, `long_logs`, `generic`)
-- `trace.extensions.compaction_sideband` / `compaction_policy_hints` for auditable preference receipts
+- [Core vs Advanced Labs](docs/core-vs-advanced-labs.md)
+- [Evaluator path](docs/evaluator-path.md)
+- [Governed optimize assist](docs/optimize-assist.md)
+- [Command-aware compaction proof](docs/showcase/command-aware-compaction-proof.md)
 
 ## More links
 
@@ -204,7 +136,6 @@ When a compaction receipt is later selected by `pack`, the response may include:
 - **OpenClaw 2026.4.15 comparison:** [`docs/openclaw-2026-4-15-comparison.md`](docs/openclaw-2026-4-15-comparison.md)
 - **About the product:** [`docs/about.md`](docs/about.md)
 - **Proactive Pack:** [`docs/proactive-pack.md`](docs/proactive-pack.md)
-- **v2 blueprint:** [`docs/context-supply-chain-blueprint.md`](docs/context-supply-chain-blueprint.md)
 - **Choose an install path:** [`docs/install-modes.md`](docs/install-modes.md)
 - **Detailed quickstart:** [`QUICKSTART.md`](QUICKSTART.md)
 - **Docs site:** <https://phenomenoner.github.io/openclaw-mem/>
@@ -213,15 +144,8 @@ When a compaction receipt is later selected by `pack`, the response may include:
 - **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
 - **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
 - **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
-- **Pack policy contract:** [`docs/specs/context-pack-policy-v1.1.md`](docs/specs/context-pack-policy-v1.1.md)
 - **Optional Mem Engine:** [`docs/mem-engine.md`](docs/mem-engine.md)
 - **Release notes:** <https://github.com/phenomenoner/openclaw-mem/releases>
-
-### Advanced labs
-
-- **Experimental GBrain sidecar:** [`docs/experimental/gbrain-sidecar/README.md`](docs/experimental/gbrain-sidecar/README.md)
-- **Continuity side-car ops lane:** [`skills/self-model-sidecar.ops.md`](skills/self-model-sidecar.ops.md)
-- **GBrain sidecar ops lane:** [`skills/gbrain-sidecar.ops.md`](skills/gbrain-sidecar.ops.md)
 
 ## License
 
