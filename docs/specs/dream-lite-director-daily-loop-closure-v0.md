@@ -103,6 +103,31 @@ The message must also distinguish **run time** from **delivery time**. A daily r
 
 Operationally: ordinary no-op / rehearsal-only runs stay silent. If a notification is warranted, the assistant should synthesize from `daily-summary.json` + `director-opinion.md` into the three-part contract above and ask for a choice before product/authority mutation.
 
+Default delivery template:
+
+```text
+Dream Director daily review
+
+Run window: <run window or artifact timestamp>.
+
+Suggestions
+- <one-line suggestion or no-action observation>
+
+Recommended handling
+- Recommendation: <adopt | defer | reject | investigate>
+- Reason: <one sentence grounded in receipts>
+
+Choose one
+- A. <recommended operator choice>
+- B. <safe defer / no-op choice>
+- C. <reject/escalate choice, only when useful>
+
+Receipts
+- Raw JSON/Markdown artifacts are stored and available on request; do not paste them by default.
+```
+
+The runtime delivery helper must not label the report as “morning” unless delivery actually occurs in the morning; use neutral `Dream Director daily review` wording by default.
+
 ### Blade 5 — Future opinion author seam
 Add an explicit seam, but do not enable an LLM lane in deterministic cron by default:
 
