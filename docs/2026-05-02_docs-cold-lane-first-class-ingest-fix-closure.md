@@ -1,7 +1,7 @@
 # Docs cold lane first-class ingest hardening closure — 2026-05-02
 
 ## Changed truth
-`memory_docs_ingest` tool input is now sanitized before docs cold lane path resolution. Undefined, blank, or non-string `sourceRoots` / `sourceGlobs` entries are dropped; an override containing no valid roots returns a structured `source_roots_invalid` receipt instead of surfacing a raw Node `paths[0]` error.
+`memory_docs_ingest` tool input is now sanitized before docs cold lane path resolution. Undefined, blank, or non-string `sourceRoots` / `sourceGlobs` entries are dropped; absolute roots resolve directly with `path.resolve`; an override containing no valid roots returns a structured `source_roots_invalid` receipt instead of surfacing a raw Node `paths[0]` error.
 
 ## Patch
 - `extensions/openclaw-mem-engine/docsColdLane.js`
@@ -9,6 +9,7 @@
   - Added `normalizeDocsColdLaneToolInput` for first-class ingest root/glob sanitation.
 - `extensions/openclaw-mem-engine/index.ts`
   - Uses `normalizeDocsColdLaneToolInput` before resolving `memory_docs_ingest` override roots/globs.
+  - Resolves absolute override roots directly with `path.resolve` instead of runtime `api.resolvePath`.
   - Adds structured `source_roots_invalid` response with `droppedSourceRoots` diagnostic count.
 - `extensions/openclaw-mem-engine/docsColdLane.test.mjs`
   - Added regression coverage for invalid-only and mixed-valid first-class ingest input shapes.

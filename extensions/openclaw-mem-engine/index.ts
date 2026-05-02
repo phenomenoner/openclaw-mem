@@ -3355,6 +3355,13 @@ function resolveStateRelativePath(api: OpenClawPluginApi, input: string | undefi
     return path.resolve(stateDir, raw);
   }
 
+  // Absolute paths are already concrete. Avoid api.resolvePath here: some
+  // runtime tool-call paths bind it to a workspace-relative resolver and can
+  // surface a raw Node `paths[0]` error for otherwise valid absolute inputs.
+  if (path.isAbsolute(raw)) {
+    return path.resolve(raw);
+  }
+
   return api.resolvePath(raw);
 }
 
