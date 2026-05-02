@@ -241,3 +241,37 @@ Cron readback remains:
 ```text
 42 10 * * 6 /root/.openclaw/workspace/tools/cron-runner/jobs/self_curator_weekly.sh
 ```
+
+## 五氣朝元 closure sweep
+
+Closure sweep after `self-curator-body-v1` checked the active self-curator surfaces for stale metadata-only / sidecar-only / frontmatter-only wording.
+
+Amended active surfaces:
+
+- `README.md`: current advanced-lab summary now names Self Curator as an engine and says scheduled lane mutates `SKILL.md` body sections with rollback receipts.
+- `docs/core-vs-advanced-labs.md`: changed Self Curator row from review-only sidecar/no-mutation to checkpointed lifecycle review/apply with body-section mutation and gated memory/dream/authority surfaces.
+
+Left historical surfaces unchanged:
+
+- `docs/2026-05-02_self-curator-v0-receipt.md` remains accurate for v0 review-only sidecar history.
+- `docs/2026-05-02_self-curator-controller-receipt.md` explicitly labels the earlier `.curator-lifecycle.json` canary as historical before the body-mutating policy upgrade.
+- Unrelated `auto_low_risk` references belong to the optimize-assist controller family, not the self-curator controller exposed modes.
+
+Verifier:
+
+```text
+uv run -- python -m unittest tests.test_self_curator -q
+```
+
+Result:
+
+```text
+Ran 19 tests
+OK
+```
+
+Topology: unchanged after this sweep. Existing cron remains:
+
+```text
+42 10 * * 6 /root/.openclaw/workspace/tools/cron-runner/jobs/self_curator_weekly.sh
+```

@@ -102,7 +102,7 @@ Advanced lanes currently include:
 - **GBrain sidecar** for bounded read-only lookup and restricted helper-job experiments.
 - **Governed continuity side-car** for derived continuity inspection and public-safe summaries.
 - **Dream Lite / deeper optimize loops** for research-grade memory maintenance workflows.
-- **Self Curator sidecar** for review-only lifecycle packets over skills first, with memory/dream/authority expansion gated behind explicit review.
+- **Self Curator engine** for checkpointed skill lifecycle review/apply loops. The current scheduled lane can mutate `SKILL.md` body sections with rollback receipts; memory/dream/authority expansion remains gated behind explicit review.
 
 These lanes are not required for the 5-minute proof, the sidecar install path, or the basic `ContextPack` contract. Treat them as labs until your use case needs them.
 
@@ -139,7 +139,7 @@ Start with:
 - [Evaluator path](docs/evaluator-path.md)
 - [Governed optimize assist](docs/optimize-assist.md)
 - [Hermes Curator adoption review](docs/hermes-curator-adoption-review.md)
-- [Self Curator sidecar v0 contract](docs/specs/self-curator-sidecar-v0.md)
+- [Self Curator v0 review-only sidecar contract](docs/specs/self-curator-sidecar-v0.md)
 - [Command-aware compaction proof](docs/showcase/command-aware-compaction-proof.md)
 
 Manual Self Curator scout smoke:

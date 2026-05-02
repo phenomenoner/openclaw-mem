@@ -26,7 +26,7 @@ These lanes are intentionally not required for the first evaluation path.
 | Continuity / self-model side-car | Advanced Lab | Derived continuity inspection and public-safe summaries; not a memory source of truth. |
 | Dream Lite / dreaming director | Experimental Lab | Research-grade suggestion and rehearsal workflows; not part of the default memory path. |
 | Optimize assist / autonomy loops | Advanced Lab | Governed maintenance workflows for mature operators; not needed to prove the core wedge. |
-| Self Curator sidecar | Advanced Lab | Review-only lifecycle packets for skills/memory/dream surfaces; recommendations only, no canon mutation. |
+| Self Curator engine | Advanced Lab | Checkpointed lifecycle review/apply loops. Current scheduled lane may mutate `SKILL.md` body sections with rollback receipts; memory/dream/authority surfaces remain gated. |
 | Command-aware compaction | Advanced Lab | Observe-path artifact handling for long outputs; not required for the first proof. |
 
 ## Evaluation rule of thumb
