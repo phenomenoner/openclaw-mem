@@ -41,6 +41,7 @@ from openclaw_mem import context_pack_v1
 from openclaw_mem import gbrain_sidecar
 from openclaw_mem import pack_trace_v1
 from openclaw_mem import self_model_sidecar
+from openclaw_mem import self_curator
 from openclaw_mem import project_resolver
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
@@ -10369,6 +10370,39 @@ def _atomic_write_json(path_: Path, data: Dict[str, Any]) -> None:
     tmp_path.replace(path_)
 
 
+def cmd_self_curator_skill_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    roots = [Path(p) for p in (getattr(args, "skill_roots", None) or ["skills"])]
+    packet = self_curator.build_skill_review(
+        skill_roots=roots,
+        run_id=getattr(args, "run_id", None),
+        limit=getattr(args, "limit", None),
+    )
+    artifacts: Dict[str, str] = {}
+    if not bool(getattr(args, "no_write", False)):
+        artifacts = self_curator.write_review_artifacts(packet, Path(getattr(args, "out_root")))
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "kind": packet.get("kind"),
+        "mode": packet.get("mode"),
+        "scope": packet.get("scope"),
+        "summary": packet.get("summary"),
+        "writes_performed": packet.get("writes_performed"),
+        "artifacts": artifacts,
+        "packet": packet,
+    }
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        if artifacts:
+            print(f"review_json: {artifacts['review_json']}")
+            print(f"report_md: {artifacts['report_md']}")
+        print(
+            f"skills_scanned={packet['summary']['skills_scanned']} "
+            f"candidates={packet['summary']['candidate_count']} "
+            f"writes_performed={packet['writes_performed']}"
+        )
+
+
 def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Deterministic local triage.
 
@@ -19282,6 +19316,27 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--agent-id", default="main", help="Target agent ID for Gateway (default: main)")
     sp.set_defaults(func=cmd_semantic)
 
+    sp = sub.add_parser("self-curator", help="Review-only lifecycle curator sidecar")
+    scsub = sp.add_subparsers(dest="self_curator_cmd", required=True)
+    sc = scsub.add_parser("skill-review", help="Scan skill files and emit review-only lifecycle artifacts")
+    sc.add_argument(
+        "--skill-root",
+        action="append",
+        dest="skill_roots",
+        default=None,
+        help="Skill root to scan; may be repeated (default: ./skills)",
+    )
+    sc.add_argument(
+        "--out-root",
+        default=str(self_curator.DEFAULT_OUT_ROOT),
+        help="Output root for timestamped run artifacts (default: .state/self-curator/runs)",
+    )
+    sc.add_argument("--run-id", help="Stable run id for deterministic smoke tests")
+    sc.add_argument("--limit", type=int, help="Limit emitted candidates")
+    sc.add_argument("--no-write", action="store_true", help="Build packet only; do not write run artifacts")
+    sc.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    sc.set_defaults(func=cmd_self_curator_skill_review)
+
     sp = sub.add_parser("triage", help="Deterministic local scan (heartbeat/cron)"
     )
     add_common(sp)
@@ -19410,7 +19465,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd == "capsule" or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

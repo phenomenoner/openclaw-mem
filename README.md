@@ -30,7 +30,7 @@
 - **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, trust-policy receipts, and trace-backed debugging.
 - **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, sanitize runtime artifacts, and keep rollback simple.
 - **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
-- **Advanced labs are opt-in** — graph routing, GBrain, continuity, Dream Lite, and deeper optimization lanes stay out of the first evaluation path.
+- **Advanced labs are opt-in** — graph routing, GBrain, continuity, Dream Lite, Self Curator review packets, and deeper optimization lanes stay out of the first evaluation path.
 
 ## Why this exists
 
@@ -102,6 +102,7 @@ Advanced lanes currently include:
 - **GBrain sidecar** for bounded read-only lookup and restricted helper-job experiments.
 - **Governed continuity side-car** for derived continuity inspection and public-safe summaries.
 - **Dream Lite / deeper optimize loops** for research-grade memory maintenance workflows.
+- **Self Curator sidecar** for review-only lifecycle packets over skills first, with memory/dream/authority expansion gated behind explicit review.
 
 These lanes are not required for the 5-minute proof, the sidecar install path, or the basic `ContextPack` contract. Treat them as labs until your use case needs them.
 
@@ -137,7 +138,20 @@ Start with:
 - [Core vs Advanced Labs](docs/core-vs-advanced-labs.md)
 - [Evaluator path](docs/evaluator-path.md)
 - [Governed optimize assist](docs/optimize-assist.md)
+- [Hermes Curator adoption review](docs/hermes-curator-adoption-review.md)
+- [Self Curator sidecar v0 contract](docs/specs/self-curator-sidecar-v0.md)
 - [Command-aware compaction proof](docs/showcase/command-aware-compaction-proof.md)
+
+Manual Self Curator v0 smoke:
+
+```bash
+openclaw-mem self-curator skill-review \
+  --skill-root ~/.openclaw/workspace/skills \
+  --out-root .state/self-curator/runs \
+  --json
+```
+
+This emits review-only lifecycle artifacts and performs no writes to the scanned skills.
 
 ## More links
 
