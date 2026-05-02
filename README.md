@@ -175,7 +175,7 @@ python3 /root/.openclaw/workspace/openclaw-mem/tools/self_curator_controller.py 
   --cron-output
 ```
 
-Scheduled operation should use a separate cron-runner job, not heartbeat. Unattended apply is 事後報備制: the controller applies whitelisted low-risk changes first, emits `NEEDS_CK` with report/rollback paths when changes happen, and rollback is available from the apply receipt.
+Scheduled operation should use a separate cron-runner job, not heartbeat. Unattended apply is 事後報備制: the controller applies whitelisted low-risk changes first, emits `NEEDS_CK` with report/rollback paths when changes happen, and rollback is available from the apply receipt. The scheduled policy mutates `SKILL.md` directly by appending a bounded `## Curator lifecycle` section rather than writing detached metadata only.
 
 ## More links
 

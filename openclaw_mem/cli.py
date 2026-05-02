@@ -19372,7 +19372,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--agent-id", default="main", help="Target agent ID for Gateway (default: main)")
     sp.set_defaults(func=cmd_semantic)
 
-    sp = sub.add_parser("self-curator", help="Lifecycle curator sidecar (review + checkpointed apply)")
+    sp = sub.add_parser("self-curator", help="Lifecycle curator engine (review + checkpointed apply)")
     scsub = sp.add_subparsers(dest="self_curator_cmd", required=True)
     sc = scsub.add_parser("skill-review", help="Scan skill files and emit review-only lifecycle artifacts")
     sc.add_argument(
