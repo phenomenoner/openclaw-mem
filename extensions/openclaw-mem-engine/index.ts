@@ -41,7 +41,7 @@ import {
   todoStaleCutoffMs,
   isTodoStale,
 } from "./todoGuardrails.js";
-import { docsIngestWithCli, docsSearchWithCli } from "./docsColdLane.js";
+import { docsIngestWithCli, docsSearchWithCli, normalizeDocsColdLaneToolInput } from "./docsColdLane.js";
 import { runRouteAuto } from "./routeAuto.js";
 import { runTierFirstV1, selectTierQuotaV1 } from "./tierSelection.js";
 import { runWeiJiMemoryPreflight } from "./weiJiMemoryPreflight.js";
@@ -3337,9 +3337,12 @@ function resolveEmbeddingApiKey(api: OpenClawPluginApi, cfg: PluginConfig): stri
   return "";
 }
 
+
 function resolveStateRelativePath(api: OpenClawPluginApi, input: string | undefined, fallback: string): string {
   const stateDir = api.runtime.state.resolveStateDir();
-  const raw = (input ?? fallback).trim();
+  const rawInput = typeof input === "string" && input.trim() ? input : undefined;
+  const rawFallback = typeof fallback === "string" && fallback.trim() ? fallback : undefined;
+  const raw = (rawInput ?? rawFallback ?? stateDir).trim();
 
   // Treat ~/.openclaw as an alias for the resolved state dir.
   if (raw === "~/.openclaw" || raw.startsWith("~/.openclaw/") || raw.startsWith("~\\.openclaw\\")) {
@@ -4181,9 +4184,42 @@ const memoryPlugin = {
       embedOnIngest?: boolean;
       trigger: "startup" | "tool";
     }) => {
-      const overrideRootsProvided = Array.isArray(input.sourceRoots) && input.sourceRoots.length > 0;
+      const normalizedToolInput = normalizeDocsColdLaneToolInput(input);
+      const { overrideRootsProvided, requestedSourceRoots, requestedSourceGlobs } = normalizedToolInput;
+      if (normalizedToolInput.sourceRootsInvalid) {
+        return {
+          receipt: {
+            ok: false,
+            skipped: true,
+            skipReason: "source_roots_invalid",
+            sqlitePath: docsColdLaneResolved.sqlitePath,
+            sourceRoots: docsColdLaneResolved.sourceRoots,
+            sourceGlobs: docsColdLaneResolved.sourceGlobs,
+            filesMatched: 0,
+            missingRoots: [],
+            batches: 0,
+            files_ingested: 0,
+            chunks_total: 0,
+            chunks_inserted: 0,
+            chunks_updated: 0,
+            chunks_unchanged: 0,
+            chunks_deleted: 0,
+            embedded: 0,
+            droppedSourceRoots: normalizedToolInput.droppedSourceRoots,
+          },
+          error: "source_roots_invalid",
+          effective: {
+            sqlitePath: docsColdLaneResolved.sqlitePath,
+            sourceRoots: docsColdLaneResolved.sourceRoots,
+            sourceGlobs: docsColdLaneResolved.sourceGlobs,
+            maxChunkChars: docsColdLaneResolved.maxChunkChars,
+            embedOnIngest: docsColdLaneResolved.embedOnIngest,
+          },
+        };
+      }
+
       const roots = overrideRootsProvided
-        ? input.sourceRoots!.map((root) => resolveStateRelativePath(api, root, root))
+        ? requestedSourceRoots.map((root) => resolveStateRelativePath(api, root, root))
         : docsColdLaneResolved.sourceRoots;
 
       // Hardening: do not allow tool-driven ingestion outside configured allowlist roots.
@@ -4266,8 +4302,8 @@ const memoryPlugin = {
         }
       }
 
-      const sourceGlobs = Array.isArray(input.sourceGlobs) && input.sourceGlobs.length > 0
-        ? input.sourceGlobs
+      const sourceGlobs = requestedSourceGlobs.length > 0
+        ? requestedSourceGlobs
         : docsColdLaneResolved.sourceGlobs;
 
       const maxChunkChars =

@@ -97,11 +97,32 @@ function computeScopePushdownRepos(scope, strategy, scopeMap) {
   return repos;
 }
 
-function coerceArray(value, fallback = []) {
+export function coerceStringArray(value, fallback = []) {
   if (!Array.isArray(value)) return fallback;
   return value
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter(Boolean);
+}
+
+export function normalizeDocsColdLaneToolInput(input = {}) {
+  const sourceRootsRaw = input && Object.prototype.hasOwnProperty.call(input, "sourceRoots")
+    ? input.sourceRoots
+    : undefined;
+  const sourceGlobsRaw = input && Object.prototype.hasOwnProperty.call(input, "sourceGlobs")
+    ? input.sourceGlobs
+    : undefined;
+  const overrideRootsProvided = Array.isArray(sourceRootsRaw) && sourceRootsRaw.length > 0;
+  const requestedSourceRoots = coerceStringArray(sourceRootsRaw);
+  const requestedSourceGlobs = coerceStringArray(sourceGlobsRaw);
+
+  return {
+    overrideRootsProvided,
+    requestedSourceRoots,
+    requestedSourceGlobs,
+    sourceRootsInvalid: overrideRootsProvided && requestedSourceRoots.length === 0,
+    droppedSourceRoots: overrideRootsProvided ? sourceRootsRaw.length - requestedSourceRoots.length : 0,
+    droppedSourceGlobs: Array.isArray(sourceGlobsRaw) ? sourceGlobsRaw.length - requestedSourceGlobs.length : 0,
+  };
 }
 
 async function walkMarkdownFiles(rootAbs, limit) {
@@ -139,8 +160,8 @@ async function walkMarkdownFiles(rootAbs, limit) {
 }
 
 export async function collectDocsFiles({ sourceRoots, sourceGlobs, maxFiles = 5000 }) {
-  const roots = coerceArray(sourceRoots);
-  const globs = coerceArray(sourceGlobs, ["**/*.md"]);
+  const roots = coerceStringArray(sourceRoots);
+  const globs = coerceStringArray(sourceGlobs, ["**/*.md"]);
   const globRegexes = globs.map(globToRegExp);
 
   const files = [];
@@ -399,8 +420,8 @@ export async function docsIngestWithCli({
   maxChunkChars,
   embedOnIngest,
 }) {
-  const roots = coerceArray(sourceRoots);
-  const globs = coerceArray(sourceGlobs, ["**/*.md"]);
+  const roots = coerceStringArray(sourceRoots);
+  const globs = coerceStringArray(sourceGlobs, ["**/*.md"]);
 
   const collected = await collectDocsFiles({
     sourceRoots: roots,

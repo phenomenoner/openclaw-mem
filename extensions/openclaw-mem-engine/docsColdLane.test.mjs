@@ -5,11 +5,42 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  coerceStringArray,
   collectDocsFiles,
+  normalizeDocsColdLaneToolInput,
   docsIngestWithCli,
   docsSearchWithCli,
   __private__,
 } from './docsColdLane.js';
+
+
+test('coerceStringArray drops undefined and non-string path values', () => {
+  assert.deepEqual(coerceStringArray([undefined, '', '  /tmp/docs  ', 42, null, '**/*.md']), [
+    '/tmp/docs',
+    '**/*.md',
+  ]);
+  assert.deepEqual(coerceStringArray(undefined, ['**/*.md']), ['**/*.md']);
+});
+
+
+test('normalizeDocsColdLaneToolInput covers first-class ingest root/glob sanitation', () => {
+  const invalidOnly = normalizeDocsColdLaneToolInput({ sourceRoots: [undefined], sourceGlobs: [undefined] });
+  assert.equal(invalidOnly.overrideRootsProvided, true);
+  assert.equal(invalidOnly.sourceRootsInvalid, true);
+  assert.deepEqual(invalidOnly.requestedSourceRoots, []);
+  assert.equal(invalidOnly.droppedSourceRoots, 1);
+
+  const mixed = normalizeDocsColdLaneToolInput({
+    sourceRoots: [undefined, '  /tmp/docs  '],
+    sourceGlobs: [undefined, ' **/*.md ', 7],
+  });
+  assert.equal(mixed.overrideRootsProvided, true);
+  assert.equal(mixed.sourceRootsInvalid, false);
+  assert.deepEqual(mixed.requestedSourceRoots, ['/tmp/docs']);
+  assert.deepEqual(mixed.requestedSourceGlobs, ['**/*.md']);
+  assert.equal(mixed.droppedSourceRoots, 1);
+  assert.equal(mixed.droppedSourceGlobs, 2);
+});
 
 test('collectDocsFiles respects roots and globs', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'docs-cold-lane-'));
