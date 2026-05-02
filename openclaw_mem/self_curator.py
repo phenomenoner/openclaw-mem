@@ -1,14 +1,16 @@
-"""Review-only lifecycle curator sidecar.
+"""Self Curator lifecycle sidecar.
 
-The v0 sidecar is intentionally deterministic and zero-write with respect to the
-surfaces it reviews. It may write only its own run artifacts.
+The scanner is review-only. The apply lane may mutate whitelisted files only
+through explicit plan -> checkpoint -> apply -> verify -> rollback receipts.
 """
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -247,3 +249,412 @@ def write_review_artifacts(packet: dict[str, Any], out_root: Path) -> dict[str, 
     review_path.write_text(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     report_path.write_text(render_report(packet), encoding="utf-8")
     return {"run_dir": str(run_dir), "review_json": str(review_path), "report_md": str(report_path)}
+
+APPLY_PLAN_KIND = "openclaw.curator.apply-plan.v1"
+CHECKPOINT_KIND = "openclaw.curator.checkpoint.v1"
+APPLY_RECEIPT_KIND = "openclaw.curator.apply-receipt.v1"
+VERIFY_RECEIPT_KIND = "openclaw.curator.verify-receipt.v1"
+ROLLBACK_RECEIPT_KIND = "openclaw.curator.rollback-receipt.v1"
+_ALLOWED_MUTATION_ACTIONS = {"replace_text", "write_file", "move_file", "archive_file", "set_frontmatter_field"}
+
+
+def sha256_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    if not path.is_file():
+        raise ValueError("target_is_not_file")
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _safe_rel(ref: str) -> Path:
+    if not isinstance(ref, str) or not ref.strip():
+        raise ValueError("empty_target_ref")
+    p = Path(ref)
+    if p.is_absolute() or ".." in p.parts:
+        raise ValueError("unsafe_target_ref")
+    return p
+
+
+def _resolve_under(root: Path, ref: str) -> Path:
+    root = Path(root).expanduser().resolve()
+    rel = _safe_rel(ref)
+    out = (root / rel).resolve()
+    if out != root and root not in out.parents:
+        raise ValueError("target_outside_workspace")
+    return out
+
+
+def _unique_targets(plan: dict[str, Any]) -> list[str]:
+    refs: list[str] = []
+    for m in plan.get("mutations") or []:
+        for key in ("target_ref", "dest_ref"):
+            val = m.get(key)
+            if isinstance(val, str) and val and val not in refs:
+                refs.append(val)
+    return refs
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def validate_apply_plan(plan: dict[str, Any], *, workspace_root: Path) -> None:
+    if plan.get("kind") != APPLY_PLAN_KIND:
+        raise ValueError("invalid_apply_plan_kind")
+    mutations = plan.get("mutations")
+    if not isinstance(mutations, list):
+        raise ValueError("missing_mutations")
+    for m in mutations:
+        action = m.get("action")
+        if action not in _ALLOWED_MUTATION_ACTIONS:
+            raise ValueError(f"unsupported_mutation_action:{action}")
+        target = _resolve_under(workspace_root, str(m.get("target_ref") or ""))
+        if target.exists() and not target.is_file():
+            raise ValueError("target_is_not_file")
+        if action in {"move_file", "archive_file"}:
+            dest = _resolve_under(workspace_root, str(m.get("dest_ref") or ""))
+            if dest.exists() and not dest.is_file():
+                raise ValueError("dest_is_not_file")
+        if action == "replace_text":
+            patch = m.get("patch") if isinstance(m.get("patch"), dict) else None
+            if not patch or not isinstance(patch.get("old_text"), str) or not isinstance(patch.get("new_text"), str):
+                raise ValueError("invalid_replace_text_patch")
+        if action == "write_file" and not isinstance(m.get("content"), str):
+            raise ValueError("invalid_write_file_content")
+        if action == "set_frontmatter_field":
+            if not isinstance(m.get("field"), str) or not isinstance(m.get("value"), str):
+                raise ValueError("invalid_frontmatter_mutation")
+            if not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*$", str(m.get("field") or "")):
+                raise ValueError("invalid_frontmatter_field")
+
+
+def build_apply_plan(
+    *,
+    mutations: list[dict[str, Any]],
+    plan_id: str | None = None,
+    source_review: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    plan_id = validate_run_id(plan_id or f"plan-{utc_run_id(now)}")
+    plan = {
+        "kind": APPLY_PLAN_KIND,
+        "mode": "apply_plan",
+        "plan_id": plan_id,
+        "ts": _utc_iso(now),
+        "source_review": source_review,
+        "mutations": mutations,
+        "requires_checkpoint": True,
+    }
+    return plan
+
+
+def create_checkpoint(*, plan: dict[str, Any], workspace_root: Path, checkpoint_root: Path, checkpoint_id: str | None = None) -> dict[str, Any]:
+    validate_apply_plan(plan, workspace_root=workspace_root)
+    checkpoint_id = validate_run_id(checkpoint_id or f"checkpoint-{utc_run_id()}")
+    checkpoint_dir = Path(checkpoint_root).expanduser() / checkpoint_id
+    files_dir = checkpoint_dir / "files"
+    files: list[dict[str, Any]] = []
+    for ref in _unique_targets(plan):
+        target = _resolve_under(workspace_root, ref)
+        exists = target.exists()
+        snap_rel = Path(ref)
+        snap_path = files_dir / snap_rel
+        if exists and not target.is_file():
+            raise ValueError("target_is_not_file")
+        if exists:
+            snap_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target, snap_path)
+        files.append(
+            {
+                "target_ref": ref,
+                "exists_before": exists,
+                "before_sha256": sha256_file(target),
+                "snapshot_path": str(snap_path),
+            }
+        )
+    manifest = {
+        "kind": CHECKPOINT_KIND,
+        "checkpoint_id": checkpoint_id,
+        "ts": _utc_iso(),
+        "plan_id": plan.get("plan_id"),
+        "workspace_root": str(Path(workspace_root).expanduser().resolve()),
+        "files": files,
+    }
+    _write_json(checkpoint_dir / "checkpoint.json", manifest)
+    return manifest
+
+
+def _check_preconditions(mutation: dict[str, Any], target: Path) -> list[str]:
+    failures: list[str] = []
+    pre = mutation.get("preconditions") if isinstance(mutation.get("preconditions"), dict) else {}
+    if "sha256" in pre and sha256_file(target) != pre.get("sha256"):
+        failures.append("sha256_mismatch")
+    if "exists" in pre and bool(target.exists()) is not bool(pre.get("exists")):
+        failures.append("exists_mismatch")
+    if "must_contain" in pre:
+        text = target.read_text(encoding="utf-8") if target.exists() else ""
+        if str(pre.get("must_contain")) not in text:
+            failures.append("must_contain_missing")
+    return failures
+
+
+def _set_frontmatter_field(text: str, field: str, value: str) -> str:
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*$", field):
+        raise ValueError("invalid_frontmatter_field")
+    line = f"{field}: {value}"
+    if text.startswith("---\n"):
+        end = text.find("\n---", 4)
+        if end >= 0:
+            head = text[4:end].splitlines()
+            body = text[end:]
+            replaced = False
+            out_lines = []
+            for existing in head:
+                if existing.split(":", 1)[0].strip() == field and ":" in existing:
+                    out_lines.append(line)
+                    replaced = True
+                else:
+                    out_lines.append(existing)
+            if not replaced:
+                out_lines.append(line)
+            return "---\n" + "\n".join(out_lines) + body
+    return f"---\n{line}\n---\n\n" + text
+
+
+def _apply_one_mutation(mutation: dict[str, Any], *, workspace_root: Path) -> dict[str, Any]:
+    action = mutation.get("action")
+    target_ref = str(mutation.get("target_ref") or "")
+    target = _resolve_under(workspace_root, target_ref)
+    if target.exists() and not target.is_file():
+        raise ValueError("target_is_not_file")
+    before = target.read_text(encoding="utf-8") if target.exists() and target.is_file() else ""
+    before_sha = sha256_file(target)
+
+    failures = _check_preconditions(mutation, target)
+    if failures:
+        return {"mutation_id": mutation.get("mutation_id"), "target_ref": target_ref, "action": action, "applied": False, "failures": failures}
+
+    if action == "replace_text":
+        patch = mutation.get("patch") if isinstance(mutation.get("patch"), dict) else {}
+        old = str(patch.get("old_text") or "")
+        new = str(patch.get("new_text") or "")
+        if not old or before.count(old) != 1:
+            return {"mutation_id": mutation.get("mutation_id"), "target_ref": target_ref, "action": action, "applied": False, "failures": ["old_text_not_unique"]}
+        after = before.replace(old, new, 1)
+        target.write_text(after, encoding="utf-8")
+    elif action == "write_file":
+        content = str(mutation.get("content") or "")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    elif action in {"move_file", "archive_file"}:
+        dest_ref = str(mutation.get("dest_ref") or "")
+        dest = _resolve_under(workspace_root, dest_ref)
+        if not target.exists():
+            return {"mutation_id": mutation.get("mutation_id"), "target_ref": target_ref, "action": action, "applied": False, "failures": ["target_missing"]}
+        if dest.exists():
+            return {"mutation_id": mutation.get("mutation_id"), "target_ref": target_ref, "action": action, "applied": False, "failures": ["dest_exists"]}
+        if dest.parent.exists() and not dest.parent.is_dir():
+            return {"mutation_id": mutation.get("mutation_id"), "target_ref": target_ref, "action": action, "applied": False, "failures": ["dest_parent_not_dir"]}
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(target), str(dest))
+    elif action == "set_frontmatter_field":
+        field = str(mutation.get("field") or "")
+        value = str(mutation.get("value") or "")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_set_frontmatter_field(before, field, value), encoding="utf-8")
+    else:
+        raise ValueError(f"unsupported_mutation_action:{action}")
+
+    result = {
+        "mutation_id": mutation.get("mutation_id"),
+        "target_ref": target_ref,
+        "dest_ref": mutation.get("dest_ref"),
+        "action": action,
+        "applied": True,
+        "before_sha256": before_sha,
+        "after_sha256": sha256_file(target) if target.exists() else None,
+    }
+    if action in {"move_file", "archive_file"} and mutation.get("dest_ref"):
+        dest = _resolve_under(workspace_root, str(mutation.get("dest_ref")))
+        result["dest_after_sha256"] = sha256_file(dest) if dest.exists() else None
+    return result
+
+
+def _write_diff(*, workspace_root: Path, checkpoint: dict[str, Any], receipt_dir: Path) -> str:
+    lines: list[str] = []
+    for f in checkpoint.get("files") or []:
+        ref = str(f.get("target_ref") or "")
+        current = _resolve_under(workspace_root, ref)
+        snap = Path(str(f.get("snapshot_path") or ""))
+        before = snap.read_text(encoding="utf-8", errors="replace").splitlines(True) if snap.exists() else []
+        after = current.read_text(encoding="utf-8", errors="replace").splitlines(True) if current.exists() else []
+        lines.extend(difflib.unified_diff(before, after, fromfile=f"before/{ref}", tofile=f"after/{ref}"))
+    diff_path = receipt_dir / "apply.diff"
+    diff_path.write_text("".join(lines), encoding="utf-8")
+    return str(diff_path)
+
+
+def apply_plan(*, plan: dict[str, Any], workspace_root: Path, checkpoint_root: Path, receipt_root: Path, run_id: str | None = None) -> dict[str, Any]:
+    validate_apply_plan(plan, workspace_root=workspace_root)
+    run_id = validate_run_id(run_id or f"apply-{utc_run_id()}")
+    receipt_dir = Path(receipt_root).expanduser() / run_id
+    receipt_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoint = create_checkpoint(plan=plan, workspace_root=workspace_root, checkpoint_root=checkpoint_root, checkpoint_id=f"{run_id}-checkpoint")
+    mutations_applied: list[dict[str, Any]] = []
+    mutations_skipped: list[dict[str, Any]] = []
+    exception_info: dict[str, Any] | None = None
+    try:
+        for mutation in plan.get("mutations") or []:
+            result = _apply_one_mutation(mutation, workspace_root=workspace_root)
+            if result.get("applied"):
+                mutations_applied.append(result)
+            else:
+                mutations_skipped.append(result)
+                break
+    except Exception as exc:  # fail closed and restore any earlier writes
+        exception_info = {"type": exc.__class__.__name__, "message": str(exc)}
+        mutations_skipped.append({"action": "exception", "applied": False, "failures": ["exception"], "exception": exception_info})
+
+    # If any mutation failed, restore from checkpoint to keep apply atomic, including
+    # exceptions raised after a mutation performed a partial write but before it returned.
+    if mutations_skipped:
+        restore = _restore_checkpoint(checkpoint)
+        mutations_skipped.append({"action": "atomic_restore", "applied": True, "checkpoint_id": checkpoint.get("checkpoint_id"), "restored": restore})
+        mutations_applied = []
+
+    diff_path = _write_diff(workspace_root=workspace_root, checkpoint=checkpoint, receipt_dir=receipt_dir)
+    receipt = {
+        "kind": APPLY_RECEIPT_KIND,
+        "mode": "applied" if mutations_applied and not mutations_skipped else "failed_closed" if mutations_skipped else "applied",
+        "run_id": run_id,
+        "ts": _utc_iso(),
+        "plan_id": plan.get("plan_id"),
+        "checkpoint": checkpoint,
+        "checkpoint_id": checkpoint.get("checkpoint_id"),
+        "writes_performed": len(mutations_applied),
+        "mutations_applied": mutations_applied,
+        "mutations_skipped": mutations_skipped,
+        "exception": exception_info,
+        "diff_path": diff_path,
+        "verify": {
+            "preconditions_passed": not mutations_skipped,
+            "postconditions_passed": not mutations_skipped,
+            "rollback_rehearsal_available": True,
+        },
+        "rollback_command": f"openclaw-mem self-curator rollback --receipt {receipt_dir / 'apply-receipt.json'} --json",
+    }
+    receipt_path = receipt_dir / "apply-receipt.json"
+    _write_json(receipt_path, receipt)
+    receipt["receipt_path"] = str(receipt_path)
+    _write_json(receipt_path, receipt)
+    return receipt
+
+
+def _remove_path(path: Path) -> None:
+    if path.exists():
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
+def _restore_checkpoint(checkpoint: dict[str, Any]) -> list[dict[str, Any]]:
+    workspace_root = Path(str(checkpoint.get("workspace_root") or ".")).expanduser().resolve()
+    restored: list[dict[str, Any]] = []
+    # First remove paths that did not exist before (for write_file or move/archive destinations).
+    for f in reversed(checkpoint.get("files") or []):
+        ref = str(f.get("target_ref") or "")
+        target = _resolve_under(workspace_root, ref)
+        if not bool(f.get("exists_before")):
+            _remove_path(target)
+    # Then restore paths that existed before.
+    for f in reversed(checkpoint.get("files") or []):
+        ref = str(f.get("target_ref") or "")
+        target = _resolve_under(workspace_root, ref)
+        snap = Path(str(f.get("snapshot_path") or ""))
+        existed = bool(f.get("exists_before"))
+        before_sha = f.get("before_sha256")
+        if existed:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(snap, target)
+        current_sha = sha256_file(target) if target.exists() else None
+        ok = current_sha == before_sha if existed else not target.exists()
+        restored.append({"target_ref": ref, "restored": True, "after_sha256": current_sha, "expected_sha256": before_sha, "expected_exists": existed, "ok": ok})
+    return restored
+
+
+def rollback_apply_receipt(*, receipt: dict[str, Any], out_root: Path | None = None) -> dict[str, Any]:
+    checkpoint = receipt.get("checkpoint") if isinstance(receipt.get("checkpoint"), dict) else None
+    if not checkpoint:
+        raise ValueError("missing_checkpoint")
+    restored = _restore_checkpoint(checkpoint)
+    payload = {
+        "kind": ROLLBACK_RECEIPT_KIND,
+        "ts": _utc_iso(),
+        "source_apply_receipt": receipt.get("receipt_path"),
+        "checkpoint_id": checkpoint.get("checkpoint_id"),
+        "restored": restored,
+        "writes_performed": len(restored),
+        "ok": all(bool(r.get("ok")) for r in restored),
+    }
+    if out_root:
+        run_id = validate_run_id(f"rollback-{utc_run_id()}")
+        path = Path(out_root).expanduser() / run_id / "rollback-receipt.json"
+        payload["receipt_path"] = str(path)
+        _write_json(path, payload)
+    return payload
+
+
+def verify_apply_receipt(*, receipt: dict[str, Any]) -> dict[str, Any]:
+    checkpoint = receipt.get("checkpoint") if isinstance(receipt.get("checkpoint"), dict) else {}
+    workspace_root = Path(str(checkpoint.get("workspace_root") or ".")).expanduser().resolve()
+    file_checks = []
+    ok = True
+    applied_by_ref = {m.get("target_ref"): m for m in receipt.get("mutations_applied") or [] if isinstance(m, dict)}
+    applied_dest_by_ref = {m.get("dest_ref"): m for m in receipt.get("mutations_applied") or [] if isinstance(m, dict) and m.get("dest_ref")}
+    for f in checkpoint.get("files") or []:
+        ref = str(f.get("target_ref") or "")
+        target = _resolve_under(workspace_root, ref)
+        exists = target.exists()
+        current_sha = sha256_file(target) if exists else None
+        expected_sha = None
+        expected_exists = exists
+        if ref in applied_by_ref:
+            m = applied_by_ref[ref]
+            if m.get("action") in {"move_file", "archive_file"}:
+                expected_exists = False
+                expected_sha = None
+            else:
+                expected_exists = True
+                expected_sha = m.get("after_sha256")
+        elif ref in applied_dest_by_ref:
+            expected_exists = True
+            expected_sha = applied_dest_by_ref[ref].get("dest_after_sha256")
+        elif receipt.get("mode") == "failed_closed":
+            expected_exists = bool(f.get("exists_before"))
+            expected_sha = f.get("before_sha256")
+        check_ok = (exists is expected_exists) and (expected_sha is None or current_sha == expected_sha)
+        ok = ok and check_ok
+        file_checks.append({"target_ref": ref, "current_sha256": current_sha, "exists": exists, "expected_exists": expected_exists, "expected_sha256": expected_sha, "ok": check_ok})
+    payload = {
+        "kind": VERIFY_RECEIPT_KIND,
+        "ts": _utc_iso(),
+        "source_apply_receipt": receipt.get("receipt_path"),
+        "mode": receipt.get("mode"),
+        "writes_performed": receipt.get("writes_performed"),
+        "diff_exists": Path(str(receipt.get("diff_path") or "")).exists(),
+        "rollback_rehearsal_available": bool(receipt.get("rollback_command")) and bool(checkpoint),
+        "file_checks": file_checks,
+    }
+    payload["ok"] = bool(ok and payload["diff_exists"] and payload["rollback_rehearsal_available"])
+    return payload

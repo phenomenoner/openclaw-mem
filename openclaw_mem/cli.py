@@ -10403,6 +10403,49 @@ def cmd_self_curator_skill_review(conn: sqlite3.Connection, args: argparse.Names
         )
 
 
+def cmd_self_curator_plan(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    mutations = json.loads(Path(args.mutations_file).read_text(encoding="utf-8"))
+    if isinstance(mutations, dict) and "mutations" in mutations:
+        mutations = mutations["mutations"]
+    if not isinstance(mutations, list):
+        raise SystemExit("mutations file must contain a list or {'mutations': [...]} object")
+    plan = self_curator.build_apply_plan(
+        mutations=mutations,
+        plan_id=getattr(args, "plan_id", None),
+        source_review=getattr(args, "from_review", None),
+    )
+    self_curator.validate_apply_plan(plan, workspace_root=Path(getattr(args, "workspace_root")))
+    if getattr(args, "out", None):
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload = {"ok": True, "plan": plan, "out": getattr(args, "out", None)}
+    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) if bool(getattr(args, "json", False)) else (getattr(args, "out", None) or json.dumps(plan, ensure_ascii=False)))
+
+
+def cmd_self_curator_apply(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+    receipt = self_curator.apply_plan(
+        plan=plan,
+        workspace_root=Path(getattr(args, "workspace_root")),
+        checkpoint_root=Path(getattr(args, "checkpoint_root")),
+        receipt_root=Path(getattr(args, "receipt_root")),
+        run_id=getattr(args, "run_id", None),
+    )
+    print(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) if bool(getattr(args, "json", False)) else str(receipt.get("receipt_path")))
+
+
+def cmd_self_curator_verify(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    receipt = json.loads(Path(args.receipt).read_text(encoding="utf-8"))
+    payload = self_curator.verify_apply_receipt(receipt=receipt)
+    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) if bool(getattr(args, "json", False)) else json.dumps(payload, ensure_ascii=False))
+
+
+def cmd_self_curator_rollback(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    receipt = json.loads(Path(args.receipt).read_text(encoding="utf-8"))
+    payload = self_curator.rollback_apply_receipt(receipt=receipt, out_root=Path(getattr(args, "out_root")) if getattr(args, "out_root", None) else None)
+    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) if bool(getattr(args, "json", False)) else json.dumps(payload, ensure_ascii=False))
+
+
 def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Deterministic local triage.
 
@@ -19316,7 +19359,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--agent-id", default="main", help="Target agent ID for Gateway (default: main)")
     sp.set_defaults(func=cmd_semantic)
 
-    sp = sub.add_parser("self-curator", help="Review-only lifecycle curator sidecar")
+    sp = sub.add_parser("self-curator", help="Lifecycle curator sidecar (review + checkpointed apply)")
     scsub = sp.add_subparsers(dest="self_curator_cmd", required=True)
     sc = scsub.add_parser("skill-review", help="Scan skill files and emit review-only lifecycle artifacts")
     sc.add_argument(
@@ -19336,6 +19379,35 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--no-write", action="store_true", help="Build packet only; do not write run artifacts")
     sc.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
     sc.set_defaults(func=cmd_self_curator_skill_review)
+
+    sc = scsub.add_parser("plan", help="Build a checkpointed apply plan from explicit mutations")
+    sc.add_argument("--mutations-file", required=True, help="JSON list/object containing explicit mutations")
+    sc.add_argument("--out", required=True, help="Path to write apply plan JSON")
+    sc.add_argument("--plan-id", help="Stable plan id")
+    sc.add_argument("--from-review", help="Source review.json path")
+    sc.add_argument("--workspace-root", default=".", help="Workspace root for target validation (default: .)")
+    sc.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    sc.set_defaults(func=cmd_self_curator_plan)
+
+    sc = scsub.add_parser("apply", help="Apply a plan with checkpoint, diff, and rollback receipt")
+    sc.add_argument("--plan", required=True, help="Apply plan JSON")
+    sc.add_argument("--workspace-root", default=".", help="Workspace root for target validation (default: .)")
+    sc.add_argument("--checkpoint-root", default=".state/self-curator/checkpoints", help="Checkpoint root")
+    sc.add_argument("--receipt-root", default=".state/self-curator/apply-runs", help="Apply receipt root")
+    sc.add_argument("--run-id", help="Stable apply run id")
+    sc.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    sc.set_defaults(func=cmd_self_curator_apply)
+
+    sc = scsub.add_parser("verify", help="Verify an apply receipt has rollback/diff/readback evidence")
+    sc.add_argument("--receipt", required=True, help="apply-receipt.json path")
+    sc.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    sc.set_defaults(func=cmd_self_curator_verify)
+
+    sc = scsub.add_parser("rollback", help="Restore files from an apply receipt checkpoint")
+    sc.add_argument("--receipt", required=True, help="apply-receipt.json path")
+    sc.add_argument("--out-root", help="Optional rollback receipt output root")
+    sc.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    sc.set_defaults(func=cmd_self_curator_rollback)
 
     sp = sub.add_parser("triage", help="Deterministic local scan (heartbeat/cron)"
     )

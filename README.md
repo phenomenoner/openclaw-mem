@@ -142,7 +142,7 @@ Start with:
 - [Self Curator sidecar v0 contract](docs/specs/self-curator-sidecar-v0.md)
 - [Command-aware compaction proof](docs/showcase/command-aware-compaction-proof.md)
 
-Manual Self Curator v0 smoke:
+Manual Self Curator scout smoke:
 
 ```bash
 openclaw-mem self-curator skill-review \
@@ -151,7 +151,16 @@ openclaw-mem self-curator skill-review \
   --json
 ```
 
-This emits review-only lifecycle artifacts and performs no writes to the scanned skills.
+Checkpointed Self Curator apply flow:
+
+```bash
+openclaw-mem self-curator plan --mutations-file mutations.json --out plan.json --workspace-root . --json
+openclaw-mem self-curator apply --plan plan.json --workspace-root . --checkpoint-root .state/self-curator/checkpoints --receipt-root .state/self-curator/apply-runs --json
+openclaw-mem self-curator verify --receipt .state/self-curator/apply-runs/<run>/apply-receipt.json --json
+openclaw-mem self-curator rollback --receipt .state/self-curator/apply-runs/<run>/apply-receipt.json --json
+```
+
+The scout emits review-only lifecycle artifacts. The apply flow may mutate whitelisted relative workspace files through explicit plans, checkpoints, diffs, receipts, verification, and rollback.
 
 ## More links
 
