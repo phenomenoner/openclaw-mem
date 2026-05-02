@@ -41,14 +41,20 @@ apply
 
 ## Decision
 
-Adopt Hermes Curator as a **review-only sidecar pattern first**, not as a direct mutator.
+Adopt Hermes Curator as an **apply-capable curator pattern with mandatory checkpoints**, not as a permanently review-only system.
 
-The first implementation slice is a manual `self-curator skill-review` command that scans skills and emits:
+The first shipped implementation slice is still a manual `self-curator skill-review` command that scans skills and emits:
 
 - `review.json`
 - `REPORT.md`
 
-No cron is enabled. No canon file is mutated. No skill file is edited.
+That v0 slice is a scout/proposal surface. It does not represent the final authority model. The intended next step is an apply-capable lane with:
+
+```text
+plan → rollback checkpoint → apply whitelisted mutation → verify/readback → receipt → rollback command
+```
+
+No cron is enabled yet. Canon/authority files remain out of first apply scope, but skill/config hygiene may become directly mutable once the checkpointed apply contract is implemented and verified.
 
 ## Why not direct auto-archive
 
@@ -62,14 +68,15 @@ The local system has stronger authority surfaces than a generic skill library:
 - context packing policy
 - runtime/gateway topology
 
-A background curator that can directly mutate these would be too much authority in the wrong layer. The sidecar may recommend; the existing writer-of-record applies only after review.
+A background curator that can directly mutate these without checkpoints would be too much authority in the wrong layer. Direct mutation is acceptable only through explicit plan/checkpoint/apply/verify/rollback receipts, with whitelisted surfaces and fail-closed preconditions.
 
 ## Expansion path
 
 1. **Skill lifecycle review** — safest first surface; review-only packet and report.
-2. **Memory/context-pack lifecycle** — integrate half-life/downshift/consolidation signals into pack receipts and optimize-assist packets.
-3. **Dream/self lifecycle** — raw → candidate → adopted/archive, still checkpoint-gated.
-4. **Authority stale-rule review** — review-only stale-rule retirement suggestions; never auto-apply.
+2. **Checkpointed skill apply** — first direct mutation slice: deterministic skill metadata/frontmatter patches with before snapshots, diffs, verify, and rollback.
+3. **Memory/context-pack lifecycle** — integrate half-life/downshift/consolidation signals into pack receipts and optimize-assist packets.
+4. **Dream/self lifecycle** — raw → candidate → adopted/archive, checkpoint-gated before durable promotion.
+5. **Authority stale-rule review** — review-first; any apply requires a stricter checkpoint and explicit authority-surface gate.
 
 ## Closure criteria for v0
 

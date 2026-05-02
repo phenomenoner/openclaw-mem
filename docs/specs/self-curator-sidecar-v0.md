@@ -1,10 +1,12 @@
 # Self Curator Sidecar v0 — blade map and contract
 
-Status: **IMPLEMENTATION SLICE** (review-only, zero-write)
+Status: **IMPLEMENTATION SLICE** (review-only scout, zero-write)
+
+This v0 contract is intentionally a scout/proposal slice, not the final Self Curator posture. The apply-capable direction is captured in [`self-curator-apply-capable-v1.md`](self-curator-apply-capable-v1.md): direct mutation is allowed once it goes through plan → checkpoint → apply → verify → rollback-capable receipt.
 
 ## Goal
 
-Absorb the useful design pattern from Hermes Curator into `openclaw-mem` without giving a background model write authority over memory, skills, persona, ops canon, runtime config, or release surfaces.
+Absorb the useful design pattern from Hermes Curator into `openclaw-mem` by first establishing a safe review packet. This v0 does not yet give the curator write authority; v1 is expected to add checkpointed direct mutation for whitelisted surfaces.
 
 The first slice installs a deterministic **review-only self-curator sidecar** that scans skill files and emits lifecycle review artifacts:
 
@@ -13,7 +15,7 @@ The first slice installs a deterministic **review-only self-curator sidecar** th
 
 ## Non-goals
 
-- No automatic edits to `SOUL.md`, `AGENTS.md`, `MEMORY.md`, skills, runtime config, or OpenClaw memory rows.
+- No automatic edits to `SOUL.md`, `AGENTS.md`, `MEMORY.md`, skills, runtime config, or OpenClaw memory rows in v0.
 - No cron/heartbeat enablement in this slice.
 - No LLM judgment in the first implementation slice.
 - No hard delete and no archive action; all candidates are advisory.

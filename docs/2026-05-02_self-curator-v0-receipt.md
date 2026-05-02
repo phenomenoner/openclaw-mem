@@ -63,8 +63,15 @@ Independent review found one must-fix (`--run-id` traversal), resolved before th
 
 No active rule was found that contradicts the new behavior. Existing advanced-lab posture remains canonical: sidecars may recommend and emit receipts; writer-of-record/apply lanes remain separately governed.
 
+## Clarification after CK correction
+
+CK clarified that the intended product direction is not permanent review-only. Self Curator should be able to directly apply Hermes-curator-like file/config hygiene changes, provided every apply is preceded by a rollback checkpoint and followed by diff/readback/rollback receipts.
+
+Durable correction recorded in `docs/specs/self-curator-apply-capable-v1.md`.
+
 ## Follow-up
 
+- Implement checkpointed apply-capable v1: plan → checkpoint → apply → verify → rollback.
 - Usage/staleness signals are intentionally deferred until there are first-party usage receipts.
-- Cron enablement is intentionally deferred until manual report quality is reviewed.
+- Cron enablement is intentionally deferred until manual/apply safety is reviewed.
 - Memory/dream/authority lifecycle reviews remain future gated expansions, not v0 behavior.
