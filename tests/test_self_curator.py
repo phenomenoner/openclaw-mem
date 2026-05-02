@@ -310,6 +310,79 @@ class SelfCuratorTests(unittest.TestCase):
             self.assertEqual(old.read_text(encoding="utf-8"), old_before)
             self.assertEqual(dest.read_text(encoding="utf-8"), dest_before)
 
+    def test_controller_unattended_apply_writes_lifecycle_sidecar_and_reports(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td) / "ws"
+            skill = ws / "skills" / "demo" / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("---\nname: demo\ndescription: demo\n---\n\n" + "Body " * 80, encoding="utf-8")
+            receipt = self_curator.run_controller(
+                skill_roots=[ws / "skills"],
+                workspace_root=ws,
+                out_root=Path(td) / "runs",
+                mode="unattended_apply",
+                unattended=True,
+                run_id="controller-run",
+                max_mutations=2,
+            )
+            sidecar = ws / "skills" / "demo" / ".curator-lifecycle.json"
+            self.assertTrue(sidecar.exists())
+            self.assertEqual(receipt["decision"], "apply")
+            self.assertEqual(receipt["writes_performed"], 1)
+            self.assertTrue(receipt["verify_ok"])
+            self.assertTrue(Path(receipt["report_path"]).exists())
+            apply_receipt = json.loads(Path(receipt["apply_receipt_path"]).read_text(encoding="utf-8"))
+            rollback = self_curator.rollback_apply_receipt(receipt=apply_receipt)
+            self.assertTrue(rollback["ok"])
+            self.assertFalse(sidecar.exists())
+
+    def test_controller_skips_existing_lifecycle_sidecar(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td) / "ws"
+            skill = ws / "skills" / "demo" / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("---\nname: demo\ndescription: demo\n---\n\n" + "Body " * 80, encoding="utf-8")
+            first = self_curator.run_controller(
+                skill_roots=[ws / "skills"],
+                workspace_root=ws,
+                out_root=Path(td) / "runs",
+                mode="unattended_apply",
+                unattended=True,
+                run_id="controller-first",
+                max_mutations=2,
+            )
+            self.assertEqual(first["writes_performed"], 1)
+            second = self_curator.run_controller(
+                skill_roots=[ws / "skills"],
+                workspace_root=ws,
+                out_root=Path(td) / "runs",
+                mode="unattended_apply",
+                unattended=True,
+                run_id="controller-second",
+                max_mutations=2,
+            )
+            self.assertEqual(second["decision"], "proposal_only")
+            self.assertEqual(second["writes_performed"], 0)
+
+    def test_controller_dry_run_does_not_apply(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td) / "ws"
+            skill = ws / "skills" / "demo" / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("---\nname: demo\ndescription: demo\n---\n\n" + "Body " * 80, encoding="utf-8")
+            receipt = self_curator.run_controller(
+                skill_roots=[ws / "skills"],
+                workspace_root=ws,
+                out_root=Path(td) / "runs",
+                mode="dry_run",
+                unattended=True,
+                run_id="controller-dry",
+                max_mutations=2,
+            )
+            self.assertEqual(receipt["decision"], "proposal_only")
+            self.assertEqual(receipt["writes_performed"], 0)
+            self.assertFalse((ws / "skills" / "demo" / ".curator-lifecycle.json").exists())
+
     def test_apply_plan_rejects_unsafe_targets(self):
         plan = self_curator.build_apply_plan(
             mutations=[{"mutation_id": "bad", "target_ref": "../escape", "action": "write_file", "content": "x"}],

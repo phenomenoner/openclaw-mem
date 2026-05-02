@@ -10446,6 +10446,19 @@ def cmd_self_curator_rollback(conn: sqlite3.Connection, args: argparse.Namespace
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) if bool(getattr(args, "json", False)) else json.dumps(payload, ensure_ascii=False))
 
 
+def cmd_self_curator_controller(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = self_curator.run_controller(
+        skill_roots=[Path(p) for p in (getattr(args, "skill_roots", None) or ["skills"])],
+        workspace_root=Path(getattr(args, "workspace_root")),
+        out_root=Path(getattr(args, "out_root")),
+        mode=getattr(args, "mode"),
+        unattended=bool(getattr(args, "unattended", True)),
+        run_id=getattr(args, "run_id", None),
+        max_mutations=int(getattr(args, "max_mutations", 5)),
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) if bool(getattr(args, "json", False)) else str(payload.get("report_path")))
+
+
 def cmd_triage(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Deterministic local triage.
 
@@ -19408,6 +19421,17 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--out-root", help="Optional rollback receipt output root")
     sc.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
     sc.set_defaults(func=cmd_self_curator_rollback)
+
+    sc = scsub.add_parser("controller", help="Run autonomous self-curator review/plan/apply controller")
+    sc.add_argument("--skill-root", action="append", dest="skill_roots", default=None, help="Skill root to scan; may be repeated (default: ./skills)")
+    sc.add_argument("--workspace-root", default=".", help="Workspace root for target validation (default: .)")
+    sc.add_argument("--out-root", default=".state/self-curator/controller-runs", help="Controller run output root")
+    sc.add_argument("--mode", choices=["dry_run", "unattended_apply"], default="dry_run", help="Controller mode")
+    sc.add_argument("--unattended", action="store_true", default=True, help="Unattended/事後報備 posture (default true)")
+    sc.add_argument("--run-id", help="Stable controller run id")
+    sc.add_argument("--max-mutations", type=int, default=5, help="Max mutations planned/applied per run")
+    sc.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    sc.set_defaults(func=cmd_self_curator_controller)
 
     sp = sub.add_parser("triage", help="Deterministic local scan (heartbeat/cron)"
     )

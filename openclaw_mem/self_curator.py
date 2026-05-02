@@ -658,3 +658,178 @@ def verify_apply_receipt(*, receipt: dict[str, Any]) -> dict[str, Any]:
     }
     payload["ok"] = bool(ok and payload["diff_exists"] and payload["rollback_rehearsal_available"])
     return payload
+
+CONTROLLER_RECEIPT_KIND = "openclaw.curator.controller-run.v1"
+CONTROLLER_POLICY_KIND = "openclaw.curator.policy.v1"
+
+
+def _candidate_to_unattended_mutation(candidate: dict[str, Any], *, workspace_root: Path) -> dict[str, Any] | None:
+    """Build a deterministic unattended mutation for safe skill metadata hygiene.
+
+    v1 controller intentionally starts with a low-risk but real mutation: write a
+    lifecycle sidecar metadata file beside the reviewed skill. This matches the
+    curator lifecycle loop without rewriting skill prose from heuristics.
+    """
+
+    target_ref = str(candidate.get("target_ref") or "")
+    workspace_root = Path(workspace_root).expanduser().resolve()
+    if Path(target_ref).is_absolute():
+        try:
+            target_ref = str(Path(target_ref).resolve().relative_to(workspace_root))
+        except ValueError:
+            return None
+    if not target_ref.endswith("/SKILL.md"):
+        return None
+    skill_path = _resolve_under(workspace_root, target_ref)
+    if not skill_path.exists() or not skill_path.is_file():
+        return None
+    sidecar_ref = str(Path(target_ref).with_name(".curator-lifecycle.json"))
+    sidecar = _resolve_under(workspace_root, sidecar_ref)
+    if sidecar.exists():
+        return None
+    payload = {
+        "kind": "openclaw.curator.skill-lifecycle.v1",
+        "target_ref": target_ref,
+        "candidate_id": candidate.get("candidate_id"),
+        "lifecycle_action": candidate.get("lifecycle_action"),
+        "reason_code": candidate.get("reason_code"),
+        "risk_class": candidate.get("risk_class", "skill_surface"),
+        "updated_at": _utc_iso(),
+    }
+    return {
+        "mutation_id": _stable_id(sidecar_ref, "write_file", str(candidate.get("candidate_id") or "candidate")),
+        "target_ref": sidecar_ref,
+        "action": "write_file",
+        "risk_class": "skill_surface",
+        "preconditions": {"exists": sidecar.exists()},
+        "content": json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    }
+
+
+def build_controller_plan_from_review(*, review: dict[str, Any], workspace_root: Path, plan_id: str | None = None, max_mutations: int = 5) -> dict[str, Any]:
+    mutations: list[dict[str, Any]] = []
+    for candidate in review.get("candidates") or []:
+        if len(mutations) >= max_mutations:
+            break
+        if not isinstance(candidate, dict):
+            continue
+        mutation = _candidate_to_unattended_mutation(candidate, workspace_root=workspace_root)
+        if mutation:
+            mutations.append(mutation)
+    return build_apply_plan(
+        mutations=mutations,
+        plan_id=plan_id or f"controller-plan-{utc_run_id()}",
+        source_review=str(review.get("run_id") or "review"),
+    )
+
+
+def build_policy_for_plan(*, plan: dict[str, Any], mode: str, unattended: bool) -> dict[str, Any]:
+    allowed = True
+    reasons: list[str] = []
+    for m in plan.get("mutations") or []:
+        action = m.get("action")
+        target = str(m.get("target_ref") or "")
+        risk = m.get("risk_class")
+        if risk != "skill_surface":
+            allowed = False
+            reasons.append(f"unsupported_risk:{risk}")
+        if action != "write_file" or not target.endswith("/.curator-lifecycle.json"):
+            allowed = False
+            reasons.append(f"unsupported_unattended_mutation:{action}:{target}")
+    if not plan.get("mutations"):
+        allowed = False
+        reasons.append("no_mutations")
+    if mode == "dry_run":
+        allowed = False
+        reasons.append("dry_run_mode")
+    return {
+        "kind": CONTROLLER_POLICY_KIND,
+        "mode": mode,
+        "unattended": unattended,
+        "decision": "apply" if allowed else "proposal_only",
+        "reasons": reasons,
+        "mutation_count": len(plan.get("mutations") or []),
+    }
+
+
+def run_controller(
+    *,
+    skill_roots: Iterable[Path],
+    workspace_root: Path,
+    out_root: Path,
+    mode: str = "dry_run",
+    unattended: bool = True,
+    run_id: str | None = None,
+    max_mutations: int = 5,
+) -> dict[str, Any]:
+    run_id = validate_run_id(run_id or f"controller-{utc_run_id()}")
+    run_dir = Path(out_root).expanduser() / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    review = build_skill_review(skill_roots=skill_roots, run_id=f"{run_id}-review", limit=None)
+    _write_json(run_dir / "review.json", review)
+    plan = build_controller_plan_from_review(review=review, workspace_root=workspace_root, plan_id=f"{run_id}-plan", max_mutations=max_mutations)
+    _write_json(run_dir / "plan.json", plan)
+    policy = build_policy_for_plan(plan=plan, mode=mode, unattended=unattended)
+    _write_json(run_dir / "policy.json", policy)
+
+    apply_receipt: dict[str, Any] | None = None
+    verify_receipt: dict[str, Any] | None = None
+    rollback_receipt: dict[str, Any] | None = None
+    if policy.get("decision") == "apply" and plan.get("mutations"):
+        apply_receipt = apply_plan(
+            plan=plan,
+            workspace_root=workspace_root,
+            checkpoint_root=run_dir / "checkpoints",
+            receipt_root=run_dir,
+            run_id="apply",
+        )
+        verify_receipt = verify_apply_receipt(receipt=apply_receipt)
+        _write_json(run_dir / "verify.json", verify_receipt)
+        if not verify_receipt.get("ok"):
+            rollback_receipt = rollback_apply_receipt(receipt=apply_receipt, out_root=run_dir)
+            _write_json(run_dir / "rollback-receipt.json", rollback_receipt)
+    report_lines = [
+        "# Self Curator controller report",
+        "",
+        f"- run_id: `{run_id}`",
+        f"- mode: `{mode}`",
+        f"- unattended: {str(unattended).lower()}",
+        f"- decision: `{policy.get('decision')}`",
+        f"- reviewed candidates: {review.get('summary', {}).get('candidate_count', 0)}",
+        f"- planned mutations: {len(plan.get('mutations') or [])}",
+        f"- writes_performed: {apply_receipt.get('writes_performed') if apply_receipt else 0}",
+        f"- verify_ok: {verify_receipt.get('ok') if verify_receipt else None}",
+        "",
+        "## Artifacts",
+        "",
+        "- review: `review.json`",
+        "- plan: `plan.json`",
+        "- policy: `policy.json`",
+    ]
+    if apply_receipt:
+        report_lines.append("- apply receipt: `apply/apply-receipt.json`")
+        report_lines.append("- diff: `apply/apply.diff`")
+    if verify_receipt:
+        report_lines.append("- verify: `verify.json`")
+    if rollback_receipt:
+        report_lines.append("- rollback: `rollback-receipt.json`")
+    (run_dir / "REPORT.md").write_text("\n".join(report_lines) + "\n", encoding="utf-8")
+    receipt = {
+        "kind": CONTROLLER_RECEIPT_KIND,
+        "run_id": run_id,
+        "ts": _utc_iso(),
+        "mode": mode,
+        "unattended": unattended,
+        "run_dir": str(run_dir),
+        "review_path": str(run_dir / "review.json"),
+        "plan_path": str(run_dir / "plan.json"),
+        "policy_path": str(run_dir / "policy.json"),
+        "report_path": str(run_dir / "REPORT.md"),
+        "decision": policy.get("decision"),
+        "writes_performed": apply_receipt.get("writes_performed") if apply_receipt else 0,
+        "verify_ok": verify_receipt.get("ok") if verify_receipt else None,
+        "rollback_performed": rollback_receipt is not None,
+        "apply_receipt_path": apply_receipt.get("receipt_path") if apply_receipt else None,
+    }
+    _write_json(run_dir / "controller-receipt.json", receipt)
+    return receipt

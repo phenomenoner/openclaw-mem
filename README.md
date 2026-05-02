@@ -162,6 +162,21 @@ openclaw-mem self-curator rollback --receipt .state/self-curator/apply-runs/<run
 
 The scout emits review-only lifecycle artifacts. The apply flow may mutate whitelisted relative workspace files through explicit plans, checkpoints, diffs, receipts, verification, and rollback.
 
+Autonomy controller / cron posture:
+
+```bash
+python3 /root/.openclaw/workspace/openclaw-mem/tools/self_curator_controller.py \
+  --repo /root/.openclaw/workspace/openclaw-mem \
+  --workspace-root /root/.openclaw/workspace \
+  --skill-root /root/.openclaw/workspace/skills \
+  --out-root /root/.openclaw/workspace/.state/self-curator/controller-runs \
+  --mode unattended_apply \
+  --max-mutations 5 \
+  --cron-output
+```
+
+Scheduled operation should use a separate cron-runner job, not heartbeat. Unattended apply is 事後報備制: the controller applies whitelisted low-risk changes first, emits `NEEDS_CK` with report/rollback paths when changes happen, and rollback is available from the apply receipt.
+
 ## More links
 
 ### Core and adoption
