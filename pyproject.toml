@@ -32,4 +32,5 @@ dev = [
 
 [project.scripts]
 openclaw-mem = "openclaw_mem.cli:main"
+openclaw-mem-gateway = "openclaw_mem.gateway:main"
 openclaw-mem-pack-capsule = "openclaw_mem.capsule:standalone_main"
