@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.10] - 2026-05-06
+
+### Fixed
+
+- Made user-facing `search` fail open for FTS5 syntax-sensitive queries such as `openclaw-mem` by retrying with punctuation-normalized terms instead of raising `sqlite3.OperationalError` through the Memory Gateway as `502 cli_failed`.
+- Added regression coverage for hyphenated `/v1/search`-style query terms so agents can search product names without manual quoting.
+
+### Changed
+
+- Updated Codex install guidance to mention the fixed search behavior while still recommending `/v1/pack` first and quoting/normalizing punctuation-heavy exact searches when needed.
+
 ## [1.9.9] - 2026-05-06
 
 ### Added

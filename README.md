@@ -94,7 +94,7 @@ The product loop is simple and stable:
 
 When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
 
-For external AI harnesses, `openclaw-mem harness install` writes a managed persistent instruction card for Codex, Claude, Gemini, or a generic agent surface. For Codex specifically, `openclaw-mem codex install` adds a stronger Superpowers-style surface: global Codex card, generated CLI shim bundle, env/gateway checks, and `codex doctor` verification. The card points the harness at `OPENCLAW_MEM_GATEWAY_URL` / `OPENCLAW_MEM_GATEWAY_TOKEN`; raw tokens are never written into prompt files. Capability-scoped tokens let operators choose read-only, proposal/append write, admin, or owner-equivalent direct-store authority.
+For external AI harnesses, `openclaw-mem harness install` writes a managed persistent instruction card for Codex, Claude, Gemini, or a generic agent surface. For Codex specifically, `openclaw-mem codex install` adds a stronger Superpowers-style surface: global Codex card, generated CLI shim bundle, env/gateway checks, and `codex doctor` verification. The card points the harness at `OPENCLAW_MEM_GATEWAY_URL` / `OPENCLAW_MEM_GATEWAY_TOKEN`; raw tokens are never written into prompt files. Capability-scoped tokens let operators choose read-only, proposal/append write, admin, or owner-equivalent direct-store authority. Gateway-backed search is literal-friendly for common product names: v1.9.10 retries punctuation-heavy terms such as `openclaw-mem` with a normalized FTS fallback instead of surfacing `cli_failed`.
 
 Read more: [Harness-persistent memory install](docs/harness-persistent-memory.md).
 

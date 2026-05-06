@@ -5388,20 +5388,38 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         _emit({"error": "empty query"}, True)
         sys.exit(2)
 
-    rows = conn.execute(
-        """
-        SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
-               snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
-               snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
-               bm25(observations_fts) AS score
-        FROM observations_fts
-        JOIN observations o ON o.id = observations_fts.rowid
-        WHERE observations_fts MATCH ?
-        ORDER BY score ASC
-        LIMIT ?;
-        """,
-        (q, args.limit),
-    ).fetchall()
+    def run_fts(query: str):
+        return conn.execute(
+            """
+            SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
+                   snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
+                   snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
+                   bm25(observations_fts) AS score
+            FROM observations_fts
+            JOIN observations o ON o.id = observations_fts.rowid
+            WHERE observations_fts MATCH ?
+            ORDER BY score ASC
+            LIMIT ?;
+            """,
+            (query, args.limit),
+        ).fetchall()
+
+    try:
+        rows = run_fts(q)
+    except sqlite3.OperationalError:
+        # FTS5 treats punctuation such as hyphens as query syntax. User-facing
+        # search should be literal-ish and fail open rather than crashing the
+        # gateway with cli_failed. Retry with punctuation normalized to spaces;
+        # if that also fails, return no FTS rows and let fallbacks run.
+        sanitized = re.sub(r"[^\w\s]", " ", q, flags=re.UNICODE)
+        sanitized = " ".join(sanitized.split())
+        if sanitized and sanitized != q:
+            try:
+                rows = run_fts(sanitized)
+            except sqlite3.OperationalError:
+                rows = []
+        else:
+            rows = []
 
     # Fallback for CJK keyword queries when FTS5 tokenizer cannot split terms well.
     if not rows and _has_cjk(q):

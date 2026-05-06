@@ -1609,6 +1609,20 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(hits[0]["match"], ["graph_synthesis"])
         conn.close()
 
+    def test_search_normalizes_hyphenated_terms_instead_of_raising(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {"kind": "note", "summary": "openclaw-mem gateway search cli_failed diagnosis", "tool_name": "gateway.store.propose", "detail": {}})
+
+        args = type("Args", (), {"query": "openclaw-mem gateway search cli_failed", "limit": 10, "json": True})()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_search(conn, args)
+
+        hits = json.loads(buf.getvalue())
+        self.assertGreaterEqual(len(hits), 1)
+        self.assertIn("openclaw-mem", hits[0]["summary"])
+        conn.close()
+
     def test_cjk_search_fallback_when_fts_misses(self):
         conn = _connect(":memory:")
 
