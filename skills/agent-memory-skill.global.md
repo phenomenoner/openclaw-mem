@@ -51,6 +51,7 @@ Never store:
 - Recall (L1): `memory_recall(query)`
 - Store (L1): `memory_store(text, category, importance, scope)`
 - Docs search (L2): `memory_docs_search(query)`
+- Gateway (optional HTTP bridge): if the operator provides `OPENCLAW_MEM_GATEWAY_URL` plus a role token, prefer read-only `/v1/pack` or `/v1/search` for bounded external-harness context. Use write/admin gateway tokens only when explicitly authorized; never ask lightweight helpers to hold admin tokens.
 - Topology (L3): repo inspection + (if available) `openclaw-mem graph query ...`
   - prerequisite: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`)
 - Graph match (L3): `openclaw-mem graph match "…"` for idea → project candidate routing

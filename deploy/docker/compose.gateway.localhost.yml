@@ -1,0 +1,34 @@
+services:
+  openclaw-mem-gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/openclaw-mem-gateway.Dockerfile
+    image: openclaw-mem-gateway:local
+    restart: unless-stopped
+    environment:
+      # Put real tokens in an uncommitted .env file or secret manager.
+      OPENCLAW_MEM_GATEWAY_TOKENS: ${OPENCLAW_MEM_GATEWAY_TOKENS:?set role tokens}
+      OPENCLAW_MEM_DB: /data/openclaw-mem.sqlite
+      OPENCLAW_MEM_GATEWAY_MAX_BODY_BYTES: "131072"
+      OPENCLAW_MEM_GATEWAY_EXPORT_ROOT: /exports
+    ports:
+      # Host-local only. Remote access should use SSH tunnel or private mesh.
+      - "127.0.0.1:${OPENCLAW_MEM_GATEWAY_HOST_PORT:-18765}:8765"
+    volumes:
+      # Replace with the actual shared DB/state path for your installation.
+      - openclaw-mem-gateway-data:/data
+      - openclaw-mem-gateway-exports:/exports
+      - openclaw-mem-gateway-logs:/var/log/openclaw-mem
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    privileged: false
+
+volumes:
+  openclaw-mem-gateway-data: {}
+  openclaw-mem-gateway-exports: {}
+  openclaw-mem-gateway-logs: {}

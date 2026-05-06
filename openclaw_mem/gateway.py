@@ -9,6 +9,8 @@ the store/pack/observe implementation owner.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import os
 import subprocess
@@ -25,6 +27,10 @@ ROLE_RANK = {"read": 1, "write": 2, "admin": 3}
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 DEFAULT_MAX_BODY_BYTES = 128 * 1024
+DEFAULT_EXPORT_ROOT = os.path.expanduser("~/.openclaw/workspace/.state/openclaw-mem-gateway-exports")
+MIN_TOKEN_CHARS = 24
+DEFAULT_AUDIT_MAX_BYTES = 10 * 1024 * 1024
+DEFAULT_IDEMPOTENCY_TTL_SEC = 24 * 60 * 60
 
 
 class GatewayConfig:
@@ -38,6 +44,10 @@ class GatewayConfig:
         allow_direct_store: bool = False,
         max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
         cli_timeout_sec: float = 45.0,
+        export_root: Optional[str] = None,
+        audit_log: Optional[str] = None,
+        audit_max_bytes: int = DEFAULT_AUDIT_MAX_BYTES,
+        idempotency_ttl_sec: int = DEFAULT_IDEMPOTENCY_TTL_SEC,
     ) -> None:
         self.db = db
         self.workspace = workspace
@@ -46,6 +56,10 @@ class GatewayConfig:
         self.allow_direct_store = bool(allow_direct_store)
         self.max_body_bytes = int(max_body_bytes)
         self.cli_timeout_sec = float(cli_timeout_sec)
+        self.export_root = export_root or DEFAULT_EXPORT_ROOT
+        self.audit_log = audit_log
+        self.audit_max_bytes = int(audit_max_bytes)
+        self.idempotency_ttl_sec = int(idempotency_ttl_sec)
 
 
 def _truthy(value: Optional[str]) -> bool:
@@ -92,6 +106,9 @@ def config_from_env(args: argparse.Namespace) -> GatewayConfig:
             "refusing to start without auth: set OPENCLAW_MEM_GATEWAY_TOKEN "
             "or OPENCLAW_MEM_GATEWAY_TOKENS, or pass --allow-unauthenticated for local dev only"
         )
+    weak = [role for token, role in tokens.items() if len(token) < MIN_TOKEN_CHARS]
+    if weak and not allow_unauth:
+        raise SystemExit(f"refusing weak gateway token: minimum {MIN_TOKEN_CHARS} characters")
     return GatewayConfig(
         db=args.db or os.getenv("OPENCLAW_MEM_DB"),
         workspace=args.workspace or os.getenv("OPENCLAW_MEM_WORKSPACE"),
@@ -100,7 +117,20 @@ def config_from_env(args: argparse.Namespace) -> GatewayConfig:
         allow_direct_store=bool(args.allow_direct_store) or _truthy(os.getenv("OPENCLAW_MEM_GATEWAY_ALLOW_DIRECT_STORE")),
         max_body_bytes=int(args.max_body_bytes),
         cli_timeout_sec=float(args.cli_timeout_sec),
+        export_root=args.export_root or os.getenv("OPENCLAW_MEM_GATEWAY_EXPORT_ROOT") or DEFAULT_EXPORT_ROOT,
+        audit_log=args.audit_log or os.getenv("OPENCLAW_MEM_GATEWAY_AUDIT_LOG"),
+        audit_max_bytes=int(os.getenv("OPENCLAW_MEM_GATEWAY_AUDIT_MAX_BYTES", str(DEFAULT_AUDIT_MAX_BYTES))),
+        idempotency_ttl_sec=int(os.getenv("OPENCLAW_MEM_GATEWAY_IDEMPOTENCY_TTL_SEC", str(DEFAULT_IDEMPOTENCY_TTL_SEC))),
     )
+
+
+def _token_id(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+
+
+def _digest_payload(payload: Mapping[str, Any]) -> str:
+    data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: Mapping[str, Any]) -> None:
@@ -176,10 +206,11 @@ def _run_cli(config: GatewayConfig, argv: Iterable[str], *, stdin: Optional[str]
         "result": parsed,
     }
     if stderr:
-        # Keep stderr bounded and token-free; subprocess argv never includes tokens.
-        receipt["stderr_tail"] = stderr[-2000:]
+        # Never echo CLI stderr to remote clients; it can contain local paths or internals.
+        safe_tail = stderr[-2000:].replace("\n", "\\n")
+        sys.stderr.write(f"openclaw-mem-gateway cli stderr tail: {safe_tail}\n")
     if proc.returncode != 0:
-        raise RuntimeError(json.dumps(receipt, ensure_ascii=False))
+        raise RuntimeError(json.dumps({"ok": False, "exit_code": proc.returncode}, ensure_ascii=False))
     return receipt
 
 
@@ -193,18 +224,24 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:  # pragma: no cover - stdlib hook
         sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], self.log_date_time_string(), fmt % args))
 
-    def _role(self) -> Optional[str]:
+    def _role_and_token_id(self) -> Tuple[Optional[str], Optional[str]]:
         if self.config.allow_unauthenticated:
-            return "admin"
+            return "admin", "dev-unauthenticated"
         auth = self.headers.get("Authorization", "")
         prefix = "Bearer "
         if not auth.startswith(prefix):
-            return None
+            return None, None
         token = auth[len(prefix) :].strip()
-        return self.config.tokens.get(token)
+        matched_role: Optional[str] = None
+        for configured_token, configured_role in self.config.tokens.items():
+            if hmac.compare_digest(token, configured_token):
+                matched_role = configured_role
+        if matched_role is None:
+            return None, None
+        return matched_role, _token_id(token)
 
     def _require_role(self, required: str) -> Optional[str]:
-        role = self._role()
+        role, _token = self._role_and_token_id()
         if role is None:
             _json_response(self, HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "missing_or_invalid_bearer_token"})
             return None
@@ -214,6 +251,9 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         return role
 
     def _read_json_body(self) -> Dict[str, Any]:
+        content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            raise ValueError("Content-Type must be application/json")
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length > self.config.max_body_bytes:
             raise ValueError("request body too large")
@@ -225,6 +265,108 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         if not isinstance(parsed, dict):
             raise ValueError("JSON body must be an object")
         return parsed
+
+    def _write_audit(self, *, endpoint: str, action: str, body: Mapping[str, Any], ok: bool, result: str) -> None:
+        audit_log = self.config.audit_log
+        if not audit_log:
+            return
+        role, token_id = self._role_and_token_id()
+        row = {
+            "schema": "openclaw-mem.gateway.audit.v1",
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "endpoint": endpoint,
+            "action": action,
+            "role": role,
+            "token_id": token_id,
+            "payload_sha256": _digest_payload(body),
+            "ok": bool(ok),
+            "result": result,
+        }
+        path = Path(audit_log)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._append_jsonl(path, row)
+
+    def _append_jsonl(self, path: Path, row: Mapping[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and self.config.audit_max_bytes > 0 and path.stat().st_size > self.config.audit_max_bytes:
+            rotated = path.with_suffix(path.suffix + ".1")
+            try:
+                rotated.unlink()
+            except FileNotFoundError:
+                pass
+            path.rename(rotated)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+
+    def _resolve_export_to(self, raw: str) -> str:
+        root = Path(self.config.export_root).expanduser().resolve()
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        resolved = candidate.resolve()
+        if resolved != root and root not in resolved.parents:
+            raise ValueError("export path outside configured export root")
+        return str(resolved)
+
+    def _idempotency_store_path(self) -> Optional[Path]:
+        if not self.config.audit_log:
+            return None
+        return Path(self.config.audit_log).with_name("idempotency.jsonl")
+
+    def _idempotency_lookup(self, *, endpoint: str, body: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+        key = (self.headers.get("Idempotency-Key") or "").strip()
+        if not key:
+            return None
+        if len(key) > 200:
+            raise ValueError("Idempotency-Key too large")
+        path = self._idempotency_store_path()
+        if path is None or not path.exists():
+            return None
+        _role, token_id = self._role_and_token_id()
+        request_id = hashlib.sha256(f"{endpoint}\0{token_id}\0{key}".encode("utf-8")).hexdigest()
+        payload_hash = _digest_payload(body)
+        now = time.time()
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            try:
+                row_ts = float(row.get("created_unix", 0))
+            except Exception:
+                row_ts = 0.0
+            if self.config.idempotency_ttl_sec > 0 and row_ts and now - row_ts > self.config.idempotency_ttl_sec:
+                continue
+            if row.get("request_id") == request_id:
+                if row.get("payload_sha256") != payload_hash:
+                    raise ValueError("Idempotency-Key reused with different payload")
+                response = row.get("response")
+                if isinstance(response, dict):
+                    return response
+        return None
+
+    def _idempotency_record(self, *, endpoint: str, body: Mapping[str, Any], response: Mapping[str, Any]) -> None:
+        key = (self.headers.get("Idempotency-Key") or "").strip()
+        if not key:
+            return
+        path = self._idempotency_store_path()
+        if path is None:
+            return
+        _role, token_id = self._role_and_token_id()
+        request_id = hashlib.sha256(f"{endpoint}\0{token_id}\0{key}".encode("utf-8")).hexdigest()
+        row = {
+            "schema": "openclaw-mem.gateway.idempotency.v1",
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "created_unix": time.time(),
+            "request_id": request_id,
+            "endpoint": endpoint,
+            "token_id": token_id,
+            "payload_sha256": _digest_payload(body),
+            "response": response,
+        }
+        self._append_jsonl(path, row)
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib method name
         path = urlparse(self.path).path.rstrip("/") or "/"
@@ -244,8 +386,6 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
                 "workspace_configured": bool(self.config.workspace),
                 "direct_store_enabled": self.config.allow_direct_store,
             }
-            if self.config.db:
-                payload["db"] = self.config.db
             _json_response(self, HTTPStatus.OK, payload)
             return
         _json_response(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})
@@ -273,13 +413,8 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
             _json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
         except subprocess.TimeoutExpired:
             _json_response(self, HTTPStatus.GATEWAY_TIMEOUT, {"ok": False, "error": "cli_timeout"})
-        except RuntimeError as exc:
-            detail: Any = str(exc)
-            try:
-                detail = json.loads(str(exc))
-            except Exception:
-                pass
-            _json_response(self, HTTPStatus.BAD_GATEWAY, {"ok": False, "error": "cli_failed", "detail": detail})
+        except RuntimeError:
+            _json_response(self, HTTPStatus.BAD_GATEWAY, {"ok": False, "error": "cli_failed"})
         except Exception as exc:  # pragma: no cover - defensive boundary
             _json_response(self, HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": type(exc).__name__})
 
@@ -289,9 +424,10 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         body = self._read_json_body()
         query = _require_text(body, "query", max_chars=2000)
         limit = _coerce_int(body.get("limit"), default=10, maximum=100)
-        argv = ["search", query, "--limit", str(limit), "--json"]
+        argv = ["search", "--limit", str(limit), "--json"]
         if self.config.db:
             argv.extend(["--db", self.config.db])
+        argv.extend(["--", query])
         receipt = _run_cli(self.config, argv)
         _json_response(self, HTTPStatus.OK, {"ok": True, "receipt": receipt})
 
@@ -349,6 +485,10 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         if self._require_role("write") is None:
             return
         body = self._read_json_body()
+        cached = self._idempotency_lookup(endpoint="/v1/episodes/append", body=body)
+        if cached is not None:
+            _json_response(self, HTTPStatus.OK, cached)
+            return
         argv = [
             "episodes",
             "append",
@@ -371,12 +511,19 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         if self.config.db:
             argv.extend(["--db", self.config.db])
         receipt = _run_cli(self.config, argv)
-        _json_response(self, HTTPStatus.OK, {"ok": True, "receipt": receipt})
+        response = {"ok": True, "receipt": receipt}
+        self._idempotency_record(endpoint="/v1/episodes/append", body=body, response=response)
+        self._write_audit(endpoint="/v1/episodes/append", action="episodes.append", body=body, ok=True, result="ok")
+        _json_response(self, HTTPStatus.OK, response)
 
     def _handle_store_propose(self) -> None:
         if self._require_role("write") is None:
             return
         body = self._read_json_body()
+        cached = self._idempotency_lookup(endpoint="/v1/store/propose", body=body)
+        if cached is not None:
+            _json_response(self, HTTPStatus.OK, cached)
+            return
         scope = _require_text(body, "scope", max_chars=200)
         agent_id = _require_text(body, "agent_id", max_chars=200)
         text = _require_text(body, "text", max_chars=8000)
@@ -413,7 +560,10 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
                 os.unlink(temp_path)
             except FileNotFoundError:
                 pass
-        _json_response(self, HTTPStatus.OK, {"ok": True, "mode": "proposal", "receipt": receipt})
+        response = {"ok": True, "mode": "proposal", "receipt": receipt}
+        self._idempotency_record(endpoint="/v1/store/propose", body=body, response=response)
+        self._write_audit(endpoint="/v1/store/propose", action="store.propose", body=body, ok=True, result="ok")
+        _json_response(self, HTTPStatus.OK, response)
 
     def _handle_store(self) -> None:
         if self._require_role("admin") is None:
@@ -451,6 +601,7 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         if self.config.db:
             argv.extend(["--db", self.config.db])
         receipt = _run_cli(self.config, argv)
+        self._write_audit(endpoint="/v1/store", action="store.direct", body=body, ok=True, result="ok")
         _json_response(self, HTTPStatus.OK, {"ok": True, "mode": "direct_store", "receipt": receipt})
 
     def _handle_archive_export_canonical(self) -> None:
@@ -463,10 +614,11 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
             argv.append("--dry-run")
         to_path = _optional_text(body, "to", max_chars=2000)
         if to_path:
-            argv.extend(["--to", to_path])
+            argv.extend(["--to", self._resolve_export_to(to_path)])
         if self.config.db:
             argv.extend(["--db", self.config.db])
         receipt = _run_cli(self.config, argv)
+        self._write_audit(endpoint="/v1/archive/export-canonical", action="archive.export_canonical", body=body, ok=True, result="dry_run" if dry_run else "ok")
         _json_response(self, HTTPStatus.OK, {"ok": True, "dry_run": dry_run, "receipt": receipt})
 
 
@@ -485,6 +637,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--max-body-bytes", type=int, default=int(os.getenv("OPENCLAW_MEM_GATEWAY_MAX_BODY_BYTES", str(DEFAULT_MAX_BODY_BYTES))))
     parser.add_argument("--cli-timeout-sec", type=float, default=float(os.getenv("OPENCLAW_MEM_GATEWAY_CLI_TIMEOUT_SEC", "45")))
     parser.add_argument("--allow-direct-store", action="store_true", help="Enable admin-only /v1/store durable writes")
+    parser.add_argument("--export-root", default=None, help="Allowlisted root for admin canonical exports")
+    parser.add_argument("--audit-log", default=None, help="Append-only JSONL audit log for gateway write/admin actions")
     parser.add_argument("--allow-unauthenticated", action="store_true", help="INSECURE local dev only; disables bearer auth")
     args = parser.parse_args(argv)
 

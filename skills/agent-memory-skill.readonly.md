@@ -45,6 +45,7 @@ If asked to “remember” routine logs/OK checks:
 ## Tool mapping
 - Recall: `memory_recall(query)`
 - Docs: `memory_docs_search(query)`
+- Gateway (optional): if the operator provides `OPENCLAW_MEM_GATEWAY_URL` plus a **read-role** token, use the HTTP gateway for `/v1/status`, `/v1/search`, and `/v1/pack`; do not request write/admin tokens for read-only lanes.
 - Topology: repo inspection + (if available) `openclaw-mem graph query ...`
   - prerequisite: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`)
 - Graph match: `openclaw-mem graph match "…"` for bounded idea → project candidate routing; for unattended use, check `openclaw-mem graph health` first

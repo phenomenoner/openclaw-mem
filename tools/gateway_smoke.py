@@ -17,13 +17,13 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE_STATE = Path(os.getenv("OPENCLAW_WORKSPACE_STATE", "/root/.openclaw/workspace/.state"))
+WORKSPACE_STATE = Path(os.getenv("OPENCLAW_WORKSPACE_STATE", str(Path.home() / ".openclaw" / "workspace" / ".state")))
 OUT = WORKSPACE_STATE / "openclaw-mem-gateway-smoke"
 OUT.mkdir(parents=True, exist_ok=True)
 DB = OUT / "smoke.sqlite"
-READ_TOKEN = "smoke-read-token"
-WRITE_TOKEN = "smoke-write-token"
-ADMIN_TOKEN = "smoke-admin-token"
+READ_TOKEN = "smoke-read-token-20260505-abcdef"
+WRITE_TOKEN = "smoke-write-token-20260505-abcdef"
+ADMIN_TOKEN = "smoke-admin-token-20260505-abcdef"
 
 
 def free_port() -> int:
@@ -34,11 +34,13 @@ def free_port() -> int:
     return int(port)
 
 
-def request(base: str, method: str, path: str, *, token: str | None = None, body: dict | None = None) -> dict:
+def request(base: str, method: str, path: str, *, token: str | None = None, body: dict | None = None, idempotency_key: str | None = None) -> dict:
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
     req = urllib.request.Request(base + path, method=method, data=data, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
@@ -59,6 +61,8 @@ def main() -> int:
     env = os.environ.copy()
     env["OPENCLAW_MEM_GATEWAY_TOKENS"] = f"{READ_TOKEN}:read,{WRITE_TOKEN}:write,{ADMIN_TOKEN}:admin"
     env["OPENCLAW_MEM_DB"] = str(DB)
+    env["OPENCLAW_MEM_GATEWAY_AUDIT_LOG"] = str(OUT / "gateway_audit.jsonl")
+    env["OPENCLAW_MEM_GATEWAY_EXPORT_ROOT"] = str(OUT / "exports")
     proc = subprocess.Popen(
         [sys.executable, "-m", "openclaw_mem.gateway", "--host", "127.0.0.1", "--port", str(port), "--db", str(DB)],
         cwd=str(ROOT),
@@ -81,6 +85,13 @@ def main() -> int:
         checks["health"] = request(base, "GET", "/health")
         checks["status_missing_auth"] = request(base, "GET", "/v1/status")
         checks["status_read"] = request(base, "GET", "/v1/status", token=READ_TOKEN)
+        checks["search_flag_injection"] = request(
+            base,
+            "POST",
+            "/v1/search",
+            token=READ_TOKEN,
+            body={"query": "--help", "limit": 1},
+        )
         checks["append_read_forbidden"] = request(
             base,
             "POST",
@@ -115,20 +126,16 @@ def main() -> int:
             token=READ_TOKEN,
             body={"scope": "openclaw-mem", "session_id": "gateway-smoke", "limit": 10},
         )
-        checks["store_propose"] = request(
-            base,
-            "POST",
-            "/v1/store/propose",
-            token=WRITE_TOKEN,
-            body={
-                "scope": "openclaw-mem",
-                "agent_id": "smoke",
-                "category": "decision",
-                "importance": 0.7,
-                "text": "Gateway smoke memory proposal",
-                "provenance": {"smoke": True},
-            },
-        )
+        proposal_body = {
+            "scope": "openclaw-mem",
+            "agent_id": "smoke",
+            "category": "decision",
+            "importance": 0.7,
+            "text": "Gateway smoke memory proposal",
+            "provenance": {"smoke": True},
+        }
+        checks["store_propose"] = request(base, "POST", "/v1/store/propose", token=WRITE_TOKEN, body=proposal_body, idempotency_key="smoke-proposal-1")
+        checks["store_propose_idempotent"] = request(base, "POST", "/v1/store/propose", token=WRITE_TOKEN, body=proposal_body, idempotency_key="smoke-proposal-1")
         checks["search"] = request(
             base,
             "POST",
@@ -157,25 +164,50 @@ def main() -> int:
             token=ADMIN_TOKEN,
             body={"dry_run": True},
         )
+        checks["archive_path_traversal_blocked"] = request(
+            base,
+            "POST",
+            "/v1/archive/export-canonical",
+            token=ADMIN_TOKEN,
+            body={"dry_run": False, "to": "../../../tmp/pwn"},
+        )
+        checks["body_too_large"] = request(
+            base,
+            "POST",
+            "/v1/search",
+            token=READ_TOKEN,
+            body={"query": "x" * (128 * 1024), "limit": 1},
+        )
 
         expected = {
             "health": 200,
             "status_missing_auth": 401,
             "status_read": 200,
+            "search_flag_injection": 502,
             "append_read_forbidden": 403,
             "append_write": 200,
             "episodes_query": 200,
             "store_propose": 200,
+            "store_propose_idempotent": 200,
             "search": 200,
             "pack": 200,
             "direct_store_blocked": 403,
             "archive_dry_run": 200,
+            "archive_path_traversal_blocked": 400,
+            "body_too_large": 400,
         }
         failures = []
         for name, status in expected.items():
             got = checks[name]["status"]  # type: ignore[index]
             if got != status:
                 failures.append({"check": name, "expected": status, "got": got})
+        status_payload = checks["status_read"].get("payload", {})  # type: ignore[union-attr]
+        if "db" in status_payload or "workspace" in status_payload:
+            failures.append({"check": "status_no_sensitive_paths", "expected": "no db/workspace keys", "got": sorted(status_payload.keys())})
+        rendered = json.dumps(artifacts, ensure_ascii=False)
+        for token_name, token in {"read": READ_TOKEN, "write": WRITE_TOKEN, "admin": ADMIN_TOKEN}.items():
+            if token in rendered:
+                failures.append({"check": "token_redaction", "token": token_name})
         artifacts["failures"] = failures
         artifacts["ok"] = not failures
         (OUT / "gateway_smoke_receipt.json").write_text(json.dumps(artifacts, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

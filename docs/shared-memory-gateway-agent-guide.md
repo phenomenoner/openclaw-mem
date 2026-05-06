@@ -27,14 +27,16 @@ export OPENCLAW_MEM_GATEWAY_TOKENS='read-token:read,write-token:write,admin-toke
 uv run openclaw-mem-gateway --host 127.0.0.1 --port 8765
 ```
 
-If a parent Windows harness needs access to a WSL/Docker-hosted gateway, expose only the minimum local route you control, then give that harness:
+If a parent Windows harness needs access to a WSL/Docker-hosted gateway, expose only the minimum local route you control. Prefer the sidecar guide in `docs/remote-memory-gateway.md`, then give that harness:
 
 ```text
-OPENCLAW_MEM_GATEWAY_URL=http://127.0.0.1:8765
+OPENCLAW_MEM_GATEWAY_URL=http://127.0.0.1:18765
 OPENCLAW_MEM_GATEWAY_TOKEN=<role-token>
 ```
 
-Do **not** bind to `0.0.0.0` unless you understand the network exposure and have a strong token.
+Do **not** publish the service directly on a public interface. In Docker, binding `0.0.0.0` inside the container is acceptable only when the host port publish remains `127.0.0.1:18765:8765` or the service is otherwise private-mesh only.
+
+Tokens must be long random secrets (minimum 24 characters; 32+ random URL-safe bytes preferred). Rotate by updating runtime secrets/env and restarting the gateway sidecar.
 
 ## 2) Auth
 
@@ -125,7 +127,7 @@ Start with:
 
 ```bash
 export OPENCLAW_MEM_GATEWAY_ALLOW_DIRECT_STORE=1
-uv run openclaw-mem-gateway --host 127.0.0.1 --port 8765 --workspace /root/.openclaw/workspace
+uv run openclaw-mem-gateway --host 127.0.0.1 --port 8765 --workspace ~/.openclaw/workspace
 ```
 
 Then:

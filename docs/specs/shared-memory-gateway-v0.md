@@ -37,9 +37,13 @@ Portable endpoints:
 - Service refuses to start without a token unless an explicit insecure dev flag is set.
 - Auth uses `Authorization: Bearer <token>`.
 - Token roles: `read`, `write`, `admin`.
-- Request body size is capped.
+- Tokens must be long random secrets; weak tokens are rejected at startup and bearer comparison uses constant-time comparison.
+- Request body size is capped and JSON `Content-Type` is enforced.
 - Shell execution must use argv lists, never shell interpolation.
-- Error responses must not print token values.
+- Error responses must not print token values or CLI stderr details.
+- Status responses expose configuration booleans, not literal DB/workspace paths.
+- Admin export targets are contained under an allowlisted export root.
+- Append/proposal writes support `Idempotency-Key` for retry-safe clients, reject same-key/different-payload reuse, and apply a bounded replay TTL.
 
 ## Scope and write authority
 - Search and pack are read-only and may accept scope hints where the underlying CLI supports them.
@@ -55,7 +59,8 @@ Portable endpoints:
 5. Write token can append episode and create proposal.
 6. Direct store is blocked unless explicit allow flag is set.
 7. Archive export dry-run returns canonical manifest preview.
-8. Unit/smoke artifacts are written under `.state/openclaw-mem-gateway-smoke/`.
+8. Negative probes cover flag-like search strings, export path traversal, oversized bodies, direct-store default denial, and token redaction.
+9. Unit/smoke artifacts are written under `.state/openclaw-mem-gateway-smoke/`.
 
 ## Rollback
 - Remove `openclaw_mem/gateway.py`, script entry, docs, and tests.
