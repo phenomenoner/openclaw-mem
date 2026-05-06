@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openclaw-context-pack"
-version = "1.9.5"
+version = "1.9.8"
 description = "Local-first Store / Pack / Observe memory sidecar for cited, rollbackable OpenClaw context"
 requires-python = ">=3.10"
 readme = "README.md"

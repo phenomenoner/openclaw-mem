@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,7 +24,56 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
-ROLE_RANK = {"read": 1, "write": 2, "admin": 3}
+ROLE_RANK = {"read": 1, "write": 2, "admin": 3, "owner": 4}
+ROLE_CAPABILITIES = {
+    "read": frozenset({"status.read", "memory.search", "memory.pack", "episodes.query"}),
+    "write": frozenset({
+        "status.read",
+        "memory.search",
+        "memory.pack",
+        "episodes.query",
+        "episodes.append",
+        "store.propose",
+    }),
+    "admin": frozenset({
+        "status.read",
+        "memory.search",
+        "memory.pack",
+        "episodes.query",
+        "episodes.append",
+        "store.propose",
+        "archive.export",
+    }),
+    "owner": frozenset({
+        "status.read",
+        "memory.search",
+        "memory.pack",
+        "episodes.query",
+        "episodes.append",
+        "store.propose",
+        "archive.export",
+        "store.direct",
+    }),
+}
+CAPABILITY_ALIASES = {
+    "status": "status.read",
+    "search": "memory.search",
+    "pack": "memory.pack",
+    "episodes.read": "episodes.query",
+    "episodes.write": "episodes.append",
+    "append": "episodes.append",
+    "propose": "store.propose",
+    "store_propose": "store.propose",
+    "store.propose": "store.propose",
+    "direct_store": "store.direct",
+    "direct.store": "store.direct",
+    "store_direct": "store.direct",
+    "store.direct": "store.direct",
+    "export": "archive.export",
+    "archive": "archive.export",
+}
+KNOWN_CAPABILITIES = frozenset().union(*ROLE_CAPABILITIES.values())
+_GATEWAY_WRITE_LOCK = threading.RLock()
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 DEFAULT_MAX_BODY_BYTES = 128 * 1024
@@ -33,13 +83,22 @@ DEFAULT_AUDIT_MAX_BYTES = 10 * 1024 * 1024
 DEFAULT_IDEMPOTENCY_TTL_SEC = 24 * 60 * 60
 
 
+class GatewayTokenPolicy:
+    def __init__(self, role: str, capabilities: Iterable[str]) -> None:
+        self.capabilities = frozenset(capabilities)
+        self.role = _role_for_capabilities(role, self.capabilities)
+
+    def has(self, capability: str) -> bool:
+        return capability in self.capabilities
+
+
 class GatewayConfig:
     def __init__(
         self,
         *,
         db: Optional[str],
         workspace: Optional[str],
-        tokens: Mapping[str, str],
+        tokens: Mapping[str, str | GatewayTokenPolicy],
         allow_unauthenticated: bool = False,
         allow_direct_store: bool = False,
         max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
@@ -51,7 +110,7 @@ class GatewayConfig:
     ) -> None:
         self.db = db
         self.workspace = workspace
-        self.tokens = dict(tokens)
+        self.tokens = _normalize_token_policies(tokens)
         self.allow_unauthenticated = bool(allow_unauthenticated)
         self.allow_direct_store = bool(allow_direct_store)
         self.max_body_bytes = int(max_body_bytes)
@@ -66,15 +125,72 @@ def _truthy(value: Optional[str]) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _parse_tokens(raw_multi: Optional[str], raw_single: Optional[str]) -> Dict[str, str]:
+def _role_for_capabilities(requested_role: str, capabilities: Iterable[str]) -> str:
+    caps = frozenset(capabilities)
+    role = requested_role if requested_role in ROLE_RANK else "read"
+    if caps.issubset(ROLE_CAPABILITIES.get(role, frozenset())):
+        return role
+    containing = [candidate for candidate, candidate_caps in ROLE_CAPABILITIES.items() if caps.issubset(candidate_caps)]
+    if containing:
+        return min(containing, key=lambda candidate: ROLE_RANK[candidate])
+    return role
+
+
+def _normalize_capability(raw: str) -> Optional[str]:
+    cap = raw.strip().lower().replace("_", ".")
+    if not cap:
+        return None
+    cap = CAPABILITY_ALIASES.get(cap, cap)
+    if cap in ROLE_CAPABILITIES:
+        return cap
+    if cap in KNOWN_CAPABILITIES:
+        return cap
+    return None
+
+
+def _policy_from_spec(spec: str) -> Optional[GatewayTokenPolicy]:
+    parts = [part.strip().lower() for part in spec.replace("+", ",").split(",") if part.strip()]
+    if not parts:
+        parts = ["read"]
+    role = "read"
+    capabilities: set[str] = set()
+    for part in parts:
+        if part in ROLE_CAPABILITIES:
+            if ROLE_RANK[part] > ROLE_RANK[role]:
+                role = part
+            capabilities.update(ROLE_CAPABILITIES[part])
+            continue
+        cap = _normalize_capability(part)
+        if cap is None:
+            return None
+        capabilities.add(cap)
+    if not capabilities:
+        return None
+    return GatewayTokenPolicy(role=role, capabilities=capabilities)
+
+
+def _normalize_token_policies(tokens: Mapping[str, str | GatewayTokenPolicy]) -> Dict[str, GatewayTokenPolicy]:
+    out: Dict[str, GatewayTokenPolicy] = {}
+    for token, spec in tokens.items():
+        if isinstance(spec, GatewayTokenPolicy):
+            out[token] = spec
+            continue
+        policy = _policy_from_spec(str(spec or "read"))
+        if policy is not None:
+            out[token] = policy
+    return out
+
+
+def _parse_tokens(raw_multi: Optional[str], raw_single: Optional[str]) -> Dict[str, GatewayTokenPolicy]:
     """Parse token config without ever returning token text in receipts.
 
     Supported:
     - OPENCLAW_MEM_GATEWAY_TOKENS='tokenA:read,tokenB:write,tokenC:admin'
-    - OPENCLAW_MEM_GATEWAY_TOKEN='one-token' (admin role)
+    - OPENCLAW_MEM_GATEWAY_TOKENS='tokenD:read+episodes.append+store.propose'
+    - OPENCLAW_MEM_GATEWAY_TOKEN='one-token' (admin role, legacy)
     """
 
-    out: Dict[str, str] = {}
+    out: Dict[str, GatewayTokenPolicy] = {}
     for item in str(raw_multi or "").split(","):
         item = item.strip()
         if not item:
@@ -86,12 +202,12 @@ def _parse_tokens(raw_multi: Optional[str], raw_single: Optional[str]) -> Dict[s
         else:
             token, role = item, "read"
         token = token.strip()
-        role = role.strip().lower()
-        if token and role in ROLE_RANK:
-            out[token] = role
+        policy = _policy_from_spec(role)
+        if token and policy is not None:
+            out[token] = policy
     single = str(raw_single or "").strip()
     if single:
-        out[single] = "admin"
+        out[single] = GatewayTokenPolicy(role="admin", capabilities=ROLE_CAPABILITIES["admin"])
     return out
 
 
@@ -106,7 +222,7 @@ def config_from_env(args: argparse.Namespace) -> GatewayConfig:
             "refusing to start without auth: set OPENCLAW_MEM_GATEWAY_TOKEN "
             "or OPENCLAW_MEM_GATEWAY_TOKENS, or pass --allow-unauthenticated for local dev only"
         )
-    weak = [role for token, role in tokens.items() if len(token) < MIN_TOKEN_CHARS]
+    weak = [policy.role for token, policy in tokens.items() if len(token) < MIN_TOKEN_CHARS]
     if weak and not allow_unauth:
         raise SystemExit(f"refusing weak gateway token: minimum {MIN_TOKEN_CHARS} characters")
     return GatewayConfig(
@@ -183,7 +299,7 @@ def _run_cli(config: GatewayConfig, argv: Iterable[str], *, stdin: Optional[str]
     cmd = [sys.executable, "-m", "openclaw_mem", *list(argv)]
     env = os.environ.copy()
     if config.workspace:
-        env.setdefault("OPENCLAW_MEM_WORKSPACE", config.workspace)
+        env["OPENCLAW_MEM_WORKSPACE"] = config.workspace
     proc = subprocess.run(
         cmd,
         input=stdin,
@@ -224,21 +340,31 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:  # pragma: no cover - stdlib hook
         sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], self.log_date_time_string(), fmt % args))
 
-    def _role_and_token_id(self) -> Tuple[Optional[str], Optional[str]]:
+    def _policy_and_token_id(self) -> Tuple[Optional[GatewayTokenPolicy], Optional[str]]:
         if self.config.allow_unauthenticated:
-            return "admin", "dev-unauthenticated"
+            return GatewayTokenPolicy(role="owner", capabilities=ROLE_CAPABILITIES["owner"]), "dev-unauthenticated"
         auth = self.headers.get("Authorization", "")
         prefix = "Bearer "
         if not auth.startswith(prefix):
             return None, None
         token = auth[len(prefix) :].strip()
-        matched_role: Optional[str] = None
-        for configured_token, configured_role in self.config.tokens.items():
+        matched_policy: Optional[GatewayTokenPolicy] = None
+        for configured_token, configured_policy in self.config.tokens.items():
             if hmac.compare_digest(token, configured_token):
-                matched_role = configured_role
-        if matched_role is None:
+                matched_policy = configured_policy
+        if matched_policy is None:
             return None, None
-        return matched_role, _token_id(token)
+        return matched_policy, _token_id(token)
+
+    def _role_and_token_id(self) -> Tuple[Optional[str], Optional[str]]:
+        policy, token_id = self._policy_and_token_id()
+        return (policy.role if policy else None), token_id
+
+    def _capabilities_for_request(self) -> Tuple[Optional[frozenset[str]], Optional[str], Optional[str]]:
+        policy, token_id = self._policy_and_token_id()
+        if policy is None:
+            return None, None, None
+        return policy.capabilities, policy.role, token_id
 
     def _require_role(self, required: str) -> Optional[str]:
         role, _token = self._role_and_token_id()
@@ -250,11 +376,26 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
             return None
         return role
 
+    def _require_capability(self, required: str) -> Optional[str]:
+        capabilities, role, _token = self._capabilities_for_request()
+        if capabilities is None or role is None:
+            _json_response(self, HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "missing_or_invalid_bearer_token"})
+            return None
+        if required not in capabilities:
+            _json_response(self, HTTPStatus.FORBIDDEN, {"ok": False, "error": "insufficient_capability", "required": required})
+            return None
+        return role
+
     def _read_json_body(self) -> Dict[str, Any]:
         content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
         if content_type != "application/json":
             raise ValueError("Content-Type must be application/json")
-        length = int(self.headers.get("Content-Length", "0") or "0")
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except Exception as exc:
+            raise ValueError("invalid Content-Length") from exc
+        if length < 0:
+            raise ValueError("invalid Content-Length")
         if length > self.config.max_body_bytes:
             raise ValueError("request body too large")
         raw = self.rfile.read(length) if length else b"{}"
@@ -287,18 +428,19 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         self._append_jsonl(path, row)
 
     def _append_jsonl(self, path: Path, row: Mapping[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists() and self.config.audit_max_bytes > 0 and path.stat().st_size > self.config.audit_max_bytes:
-            rotated = path.with_suffix(path.suffix + ".1")
-            try:
-                rotated.unlink()
-            except FileNotFoundError:
-                pass
-            path.rename(rotated)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
-            fh.flush()
-            os.fsync(fh.fileno())
+        with _GATEWAY_WRITE_LOCK:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and self.config.audit_max_bytes > 0 and path.stat().st_size > self.config.audit_max_bytes:
+                rotated = path.with_suffix(path.suffix + ".1")
+                try:
+                    rotated.unlink()
+                except FileNotFoundError:
+                    pass
+                path.rename(rotated)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
 
     def _resolve_export_to(self, raw: str) -> str:
         root = Path(self.config.export_root).expanduser().resolve()
@@ -311,9 +453,9 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         return str(resolved)
 
     def _idempotency_store_path(self) -> Optional[Path]:
-        if not self.config.audit_log:
-            return None
-        return Path(self.config.audit_log).with_name("idempotency.jsonl")
+        if self.config.audit_log:
+            return Path(self.config.audit_log).with_name("idempotency.jsonl")
+        return Path(self.config.export_root).expanduser() / "idempotency.jsonl"
 
     def _idempotency_lookup(self, *, endpoint: str, body: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
         key = (self.headers.get("Idempotency-Key") or "").strip()
@@ -374,14 +516,16 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
             _json_response(self, HTTPStatus.OK, {"ok": True, "service": "openclaw-mem-gateway"})
             return
         if path == "/v1/status":
-            role = self._require_role("read")
+            role = self._require_capability("status.read")
             if role is None:
                 return
+            capabilities, _role, _token = self._capabilities_for_request()
             payload = {
                 "ok": True,
                 "service": "openclaw-mem-gateway",
                 "auth": "enabled" if not self.config.allow_unauthenticated else "disabled-dev",
                 "role": role,
+                "capabilities": sorted(capabilities or []),
                 "db_configured": bool(self.config.db),
                 "workspace_configured": bool(self.config.workspace),
                 "direct_store_enabled": self.config.allow_direct_store,
@@ -419,7 +563,7 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
             _json_response(self, HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": type(exc).__name__})
 
     def _handle_search(self) -> None:
-        if self._require_role("read") is None:
+        if self._require_capability("memory.search") is None:
             return
         body = self._read_json_body()
         query = _require_text(body, "query", max_chars=2000)
@@ -432,7 +576,7 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         _json_response(self, HTTPStatus.OK, {"ok": True, "receipt": receipt})
 
     def _handle_pack(self) -> None:
-        if self._require_role("read") is None:
+        if self._require_capability("memory.pack") is None:
             return
         body = self._read_json_body()
         query = _require_text(body, "query", max_chars=4000)
@@ -458,7 +602,7 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         _json_response(self, HTTPStatus.OK, {"ok": True, "receipt": receipt})
 
     def _handle_episodes_query(self) -> None:
-        if self._require_role("read") is None:
+        if self._require_capability("episodes.query") is None:
             return
         body = self._read_json_body()
         argv = ["episodes", "query", "--json", "--limit", str(_coerce_int(body.get("limit"), default=50, maximum=500))]
@@ -472,7 +616,10 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         session_id = _optional_text(body, "session_id", max_chars=500)
         if session_id:
             argv.extend(["--session-id", session_id])
-        for typ in body.get("types") or []:
+        types = body.get("types") or []
+        if not isinstance(types, list) or not all(isinstance(typ, str) for typ in types):
+            raise ValueError("types must be a list of strings")
+        for typ in types:
             argv.extend(["--type", str(typ)])
         if body.get("include_payload") is True:
             argv.append("--include-payload")
@@ -482,97 +629,100 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         _json_response(self, HTTPStatus.OK, {"ok": True, "receipt": receipt})
 
     def _handle_episodes_append(self) -> None:
-        if self._require_role("write") is None:
+        if self._require_capability("episodes.append") is None:
             return
         body = self._read_json_body()
-        cached = self._idempotency_lookup(endpoint="/v1/episodes/append", body=body)
-        if cached is not None:
-            _json_response(self, HTTPStatus.OK, cached)
-            return
-        argv = [
-            "episodes",
-            "append",
-            "--json",
-            "--scope",
-            _require_text(body, "scope", max_chars=200),
-            "--session-id",
-            _require_text(body, "session_id", max_chars=500),
-            "--agent-id",
-            _require_text(body, "agent_id", max_chars=200),
-            "--type",
-            _require_text(body, "type", max_chars=80),
-            "--summary",
-            _require_text(body, "summary", max_chars=2000),
-        ]
-        if "payload" in body:
-            argv.extend(["--payload-json", json.dumps(body.get("payload"), ensure_ascii=False)])
-        if "refs" in body:
-            argv.extend(["--refs-json", json.dumps(body.get("refs"), ensure_ascii=False)])
-        if self.config.db:
-            argv.extend(["--db", self.config.db])
-        receipt = _run_cli(self.config, argv)
-        response = {"ok": True, "receipt": receipt}
-        self._idempotency_record(endpoint="/v1/episodes/append", body=body, response=response)
-        self._write_audit(endpoint="/v1/episodes/append", action="episodes.append", body=body, ok=True, result="ok")
-        _json_response(self, HTTPStatus.OK, response)
-
-    def _handle_store_propose(self) -> None:
-        if self._require_role("write") is None:
-            return
-        body = self._read_json_body()
-        cached = self._idempotency_lookup(endpoint="/v1/store/propose", body=body)
-        if cached is not None:
-            _json_response(self, HTTPStatus.OK, cached)
-            return
-        scope = _require_text(body, "scope", max_chars=200)
-        agent_id = _require_text(body, "agent_id", max_chars=200)
-        text = _require_text(body, "text", max_chars=8000)
-        category = str(body.get("category") or "other").strip().lower()
-        if category not in {"fact", "preference", "decision", "entity", "task", "other"}:
-            raise ValueError("invalid category")
-        detail = {
-            "schema": "openclaw-mem.gateway.store-proposal.v0",
-            "scope": scope,
-            "agent_id": agent_id,
-            "category": category,
-            "importance": _coerce_float(body.get("importance"), default=0.5),
-            "text": text,
-            "provenance": body.get("provenance") if isinstance(body.get("provenance"), dict) else {},
-            "created_ms": int(time.time() * 1000),
-        }
-        row = {
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "kind": "memory.proposal",
-            "tool_name": "gateway.store.propose",
-            "summary": f"[{scope}] {text[:500]}",
-            "detail": detail,
-        }
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".jsonl", delete=False) as fh:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-            temp_path = fh.name
-        try:
-            argv = ["ingest", "--file", temp_path, "--json"]
+        with _GATEWAY_WRITE_LOCK:
+            cached = self._idempotency_lookup(endpoint="/v1/episodes/append", body=body)
+            if cached is not None:
+                _json_response(self, HTTPStatus.OK, cached)
+                return
+            argv = [
+                "episodes",
+                "append",
+                "--json",
+                "--scope",
+                _require_text(body, "scope", max_chars=200),
+                "--session-id",
+                _require_text(body, "session_id", max_chars=500),
+                "--agent-id",
+                _require_text(body, "agent_id", max_chars=200),
+                "--type",
+                _require_text(body, "type", max_chars=80),
+                "--summary",
+                _require_text(body, "summary", max_chars=2000),
+            ]
+            if "payload" in body:
+                argv.extend(["--payload-json", json.dumps(body.get("payload"), ensure_ascii=False)])
+            if "refs" in body:
+                argv.extend(["--refs-json", json.dumps(body.get("refs"), ensure_ascii=False)])
             if self.config.db:
                 argv.extend(["--db", self.config.db])
             receipt = _run_cli(self.config, argv)
-        finally:
+            response = {"ok": True, "receipt": receipt}
+            self._idempotency_record(endpoint="/v1/episodes/append", body=body, response=response)
+            self._write_audit(endpoint="/v1/episodes/append", action="episodes.append", body=body, ok=True, result="ok")
+        _json_response(self, HTTPStatus.OK, response)
+
+    def _handle_store_propose(self) -> None:
+        if self._require_capability("store.propose") is None:
+            return
+        body = self._read_json_body()
+        with _GATEWAY_WRITE_LOCK:
+            cached = self._idempotency_lookup(endpoint="/v1/store/propose", body=body)
+            if cached is not None:
+                _json_response(self, HTTPStatus.OK, cached)
+                return
+            scope = _require_text(body, "scope", max_chars=200)
+            agent_id = _require_text(body, "agent_id", max_chars=200)
+            text = _require_text(body, "text", max_chars=8000)
+            category = str(body.get("category") or "other").strip().lower()
+            if category not in {"fact", "preference", "decision", "entity", "task", "other"}:
+                raise ValueError("invalid category")
+            detail = {
+                "schema": "openclaw-mem.gateway.store-proposal.v0",
+                "scope": scope,
+                "agent_id": agent_id,
+                "category": category,
+                "importance": _coerce_float(body.get("importance"), default=0.5),
+                "text": text,
+                "provenance": body.get("provenance") if isinstance(body.get("provenance"), dict) else {},
+                "created_ms": int(time.time() * 1000),
+            }
+            row = {
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "kind": "memory.proposal",
+                "tool_name": "gateway.store.propose",
+                "summary": f"[{scope}] {text[:500]}",
+                "detail": detail,
+            }
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".jsonl", delete=False) as fh:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                temp_path = fh.name
             try:
-                os.unlink(temp_path)
-            except FileNotFoundError:
-                pass
-        response = {"ok": True, "mode": "proposal", "receipt": receipt}
-        self._idempotency_record(endpoint="/v1/store/propose", body=body, response=response)
-        self._write_audit(endpoint="/v1/store/propose", action="store.propose", body=body, ok=True, result="ok")
+                argv = ["ingest", "--file", temp_path, "--json"]
+                if self.config.db:
+                    argv.extend(["--db", self.config.db])
+                receipt = _run_cli(self.config, argv)
+            finally:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
+            response = {"ok": True, "mode": "proposal", "receipt": receipt}
+            self._idempotency_record(endpoint="/v1/store/propose", body=body, response=response)
+            self._write_audit(endpoint="/v1/store/propose", action="store.propose", body=body, ok=True, result="ok")
         _json_response(self, HTTPStatus.OK, response)
 
     def _handle_store(self) -> None:
-        if self._require_role("admin") is None:
+        role = self._require_capability("store.direct")
+        if role is None:
             return
         if not self.config.allow_direct_store:
             _json_response(
                 self,
                 HTTPStatus.FORBIDDEN,
-                {"ok": False, "error": "direct_store_disabled", "hint": "set OPENCLAW_MEM_GATEWAY_ALLOW_DIRECT_STORE=1"},
+                {"ok": False, "error": "direct_store_disabled", "hint": "set OPENCLAW_MEM_GATEWAY_ALLOW_DIRECT_STORE=1 and use an owner-capability token"},
             )
             return
         body = self._read_json_body()
@@ -605,7 +755,7 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         _json_response(self, HTTPStatus.OK, {"ok": True, "mode": "direct_store", "receipt": receipt})
 
     def _handle_archive_export_canonical(self) -> None:
-        if self._require_role("admin") is None:
+        if self._require_capability("archive.export") is None:
             return
         body = self._read_json_body()
         dry_run = body.get("dry_run", True) is not False

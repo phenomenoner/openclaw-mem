@@ -42,6 +42,7 @@ from openclaw_mem import gbrain_sidecar
 from openclaw_mem import pack_trace_v1
 from openclaw_mem import self_model_sidecar
 from openclaw_mem import self_curator
+from openclaw_mem import harness as harness_install
 from openclaw_mem import project_resolver
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
@@ -17964,6 +17965,36 @@ def cmd_routing_eval(conn: sqlite3.Connection, args: argparse.Namespace) -> None
     _emit(out, getattr(args, "json", False))
 
 
+def cmd_harness_detect(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _emit(harness_install.detect(getattr(args, "root", ".")), getattr(args, "json", False))
+
+
+def cmd_harness_install(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    dry_run = not bool(getattr(args, "yes", False))
+    out = harness_install.install_card(
+        root=getattr(args, "root", "."),
+        target=getattr(args, "target", "generic"),
+        mode=getattr(args, "mode", "read"),
+        scope=getattr(args, "scope", None),
+        gateway_url=getattr(args, "gateway_url", None),
+        output=getattr(args, "output", None),
+        dry_run=dry_run,
+        allow_non_local=bool(getattr(args, "allow_non_local_gateway_url", False)),
+    )
+    _emit(out, getattr(args, "json", False))
+
+
+def cmd_harness_verify(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _emit(
+        harness_install.verify_install(
+            root=getattr(args, "root", "."),
+            target=getattr(args, "target", "generic"),
+            output=getattr(args, "output", None),
+        ),
+        getattr(args, "json", False),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     epilog = (
         "Examples:\n"
@@ -18074,6 +18105,34 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("backend", help="Inspect active OpenClaw memory backend + fallback posture")
     add_common(sp)
     sp.set_defaults(func=cmd_backend)
+
+    sp = sub.add_parser("harness", help="Install/verify persistent memory cards for external AI harnesses")
+    add_common(sp)
+    hsub = sp.add_subparsers(dest="harness_cmd", required=True)
+
+    h = hsub.add_parser("detect", help="Detect supported harness instruction surfaces under a root")
+    add_common(h)
+    h.add_argument("--root", default=".", help="Root directory to inspect (default: current directory)")
+    h.set_defaults(func=cmd_harness_detect)
+
+    h = hsub.add_parser("install", help="Install/update a managed openclaw-mem harness instruction block")
+    add_common(h)
+    h.add_argument("--target", choices=sorted(harness_install.TARGET_FILES), default="generic", help="Harness target")
+    h.add_argument("--mode", choices=sorted(harness_install.MODES), default="read", help="Installed authority posture")
+    h.add_argument("--root", default=".", help="Root directory for target file (default: current directory)")
+    h.add_argument("--scope", default=None, help="Default memory scope to name in the card")
+    h.add_argument("--gateway-url", default=None, help="Gateway URL to mention; tokens are never written")
+    h.add_argument("--allow-non-local-gateway-url", action="store_true", help="Allow writing a non-loopback gateway URL into the managed card")
+    h.add_argument("--output", default=None, help="Override target file path")
+    h.add_argument("--yes", action="store_true", help="Write changes. Without --yes this is a dry-run receipt.")
+    h.set_defaults(func=cmd_harness_install)
+
+    h = hsub.add_parser("verify", help="Verify that the managed openclaw-mem block is installed")
+    add_common(h)
+    h.add_argument("--target", choices=sorted(harness_install.TARGET_FILES), default="generic", help="Harness target")
+    h.add_argument("--root", default=".", help="Root directory for target file (default: current directory)")
+    h.add_argument("--output", default=None, help="Override target file path")
+    h.set_defaults(func=cmd_harness_verify)
 
     sp = sub.add_parser("engine", help="openclaw-mem-engine operator utilities")
     add_common(sp)
@@ -19561,7 +19620,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "harness"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

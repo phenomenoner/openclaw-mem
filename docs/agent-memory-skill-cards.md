@@ -63,6 +63,7 @@ Never store:
 - Recall (L1): `memory_recall(query)`
 - Store (L1): `memory_store(text, category, importance, scope)`
 - Docs search (L2): `memory_docs_search(query)`
+- Gateway (optional HTTP bridge): if the operator provides `OPENCLAW_MEM_GATEWAY_URL` plus a role/capability token, prefer `/v1/pack` or `/v1/search` for bounded external-harness context. For persistent Codex/Claude/Gemini-style installs, follow `docs/harness-persistent-memory.md`: read tokens are default; write tokens may append scoped episodes or submit store proposals; direct durable store requires explicit owner/`store.direct` authority plus gateway direct-store enablement. Never ask lightweight helpers to hold admin/owner tokens.
 - Topology (L3): repo inspection + (if available) `openclaw-mem graph query ...`
   - prerequisite: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`)
 - Graph match (L3): `openclaw-mem graph match "…"` for idea → project candidate routing
@@ -171,6 +172,7 @@ If asked to “remember” routine logs/OK checks:
 ## Tool mapping
 - Recall: `memory_recall(query)`
 - Docs: `memory_docs_search(query)`
+- Gateway (optional): if the operator provides `OPENCLAW_MEM_GATEWAY_URL` plus a **read-role** token, use the HTTP gateway for `/v1/status`, `/v1/search`, and `/v1/pack`; do not request write/admin tokens for read-only lanes.
 - Topology: repo inspection + (if available) `openclaw-mem graph query ...`
   - prerequisite: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`)
 - Graph match: `openclaw-mem graph match "…"` for bounded idea → project candidate routing; for unattended use, check `openclaw-mem graph health` first

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.8] - 2026-05-06
+
+### Added
+
+- Added harness-persistent memory install support with `openclaw-mem harness detect`, `openclaw-mem harness install`, and `openclaw-mem harness verify` for Codex, Claude, Gemini, and generic agent instruction surfaces.
+- Added capability-scoped Memory Gateway tokens while preserving legacy `read`, `write`, and `admin` role token specs; `owner` is now the explicit direct-store authority role.
+- Added public documentation for the harness-persistent memory posture, capability matrix, safe write modes, and secret-handling rules.
+- Added a safe gateway Docker dry-run script and check script for localhost-only sidecar build/bring-up verification without destructive Docker cleanup.
+
+### Changed
+
+- Direct durable store now requires both explicit gateway direct-store enablement and a token with `store.direct` capability; the legacy single gateway token remains `admin`, not owner.
+- Gateway status now reports safe capability names for authenticated clients without exposing token literals or local filesystem paths.
+- Gateway idempotency and audit writes are serialized to avoid duplicate retry writes and audit rotation races.
+- Harness install cards are dry-run by default, marker-managed, idempotent, and reject gateway URLs that embed userinfo or non-local hosts unless explicitly allowed.
+- README, Memory Gateway docs, agent skill cards, generated snippets, and MkDocs navigation now describe the harness-persistent memory surface in product-facing language.
+
+### Testing
+
+- Added gateway token/capability regression tests and harness installer tests.
+- Ran targeted pytest coverage for gateway, harness, and generated skill assets.
+- Ran gateway smoke, generated skill asset freshness check, MkDocs strict build, and gateway Docker dry-run config check.
+
 ## [1.9.5] - 2026-04-30
 
 ### Changed

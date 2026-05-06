@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from openclaw_mem.gateway import GatewayConfig, MemoryGatewayHandler, config_from_env
+from openclaw_mem.gateway import GatewayConfig, MemoryGatewayHandler, config_from_env, _parse_tokens
 
 
 def test_gateway_rejects_short_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -39,11 +39,42 @@ def test_export_path_must_stay_under_export_root(tmp_path: Path) -> None:
 
 def test_status_payload_contract_has_no_sensitive_paths() -> None:
     # Contract-level guard for the read-token status surface; the handler builds
-    # status from booleans only and must not reintroduce literal local paths.
-    payload_keys = {"ok", "service", "auth", "role", "db_configured", "workspace_configured", "direct_store_enabled"}
+    # status from booleans/capability names only and must not reintroduce literal local paths.
+    payload_keys = {"ok", "service", "auth", "role", "capabilities", "db_configured", "workspace_configured", "direct_store_enabled"}
     assert "db" not in payload_keys
     assert "workspace" not in payload_keys
 
+
+def test_gateway_token_roles_expand_to_capabilities() -> None:
+    tokens = _parse_tokens(
+        "read-token-20260506-abcdefghijkl:read,write-token-20260506-abcdefghijkl:write,owner-token-20260506-abcdefghijkl:owner",
+        None,
+    )
+    assert tokens["read-token-20260506-abcdefghijkl"].role == "read"
+    assert "memory.pack" in tokens["read-token-20260506-abcdefghijkl"].capabilities
+    assert "store.propose" not in tokens["read-token-20260506-abcdefghijkl"].capabilities
+    assert "store.propose" in tokens["write-token-20260506-abcdefghijkl"].capabilities
+    assert "store.direct" not in tokens["write-token-20260506-abcdefghijkl"].capabilities
+    assert "store.direct" in tokens["owner-token-20260506-abcdefghijkl"].capabilities
+
+
+def test_gateway_token_capability_specs_are_supported() -> None:
+    tokens = _parse_tokens("custom-token-20260506-abcdefghijkl:read+episodes.append+direct_store", None)
+    policy = tokens["custom-token-20260506-abcdefghijkl"]
+    assert policy.role == "owner"
+    assert "status.read" in policy.capabilities
+    assert "memory.search" in policy.capabilities
+    assert "episodes.append" in policy.capabilities
+    assert "store.propose" not in policy.capabilities
+    assert "store.direct" in policy.capabilities
+
+
+def test_gateway_legacy_single_token_remains_admin_not_direct_store_owner() -> None:
+    tokens = _parse_tokens(None, "legacy-admin-token-20260506-abcdefghijkl")
+    policy = tokens["legacy-admin-token-20260506-abcdefghijkl"]
+    assert policy.role == "admin"
+    assert "archive.export" in policy.capabilities
+    assert "store.direct" not in policy.capabilities
 
 
 def test_export_path_blocks_escape_and_allows_relative(tmp_path: Path) -> None:

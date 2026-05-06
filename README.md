@@ -20,6 +20,7 @@
 | Sidecar observation capture | Automatic when the plugin is enabled | Captures denoised JSONL observations and backend/action annotations. |
 | Harvest, triage, and graph capture | Scheduled on configured hosts | Converts captured records into searchable stores and receipts. |
 | `pack` | CLI core | Produces bounded `ContextPack` output with citations and trace receipts. |
+| Harness-persistent memory | Gateway + CLI install card | Installs a persistent Codex / Claude / Gemini / generic agent memory posture backed by capability-scoped gateway tokens. |
 | Graph routing, optimize assist, continuity, GBrain | Advanced Labs / opt-in lanes | Available for mature operators, but not part of the first evaluation path. |
 | Mem-engine Proactive Pack | Optional promotion | Bounded pre-reply recall orchestration after explicit engine adoption. |
 
@@ -30,6 +31,7 @@
 - **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, trust-policy receipts, and trace-backed debugging.
 - **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, sanitize runtime artifacts, and keep rollback simple.
 - **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
+- **Harness-friendly** — external coding agents can get a persistent memory posture through the Memory Gateway without receiving raw SQLite or workspace-file authority.
 - **Advanced labs are opt-in** — graph routing, GBrain, continuity, Dream Lite, Self Curator review packets, and deeper optimization lanes stay out of the first evaluation path.
 
 ## Why this exists
@@ -91,6 +93,10 @@ The product loop is simple and stable:
 3. **Observe**: use `timeline`, `get`, and `artifact` outputs for explainability and rollback.
 
 When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
+
+For external AI harnesses, `openclaw-mem harness install` writes a managed persistent instruction card for Codex, Claude, Gemini, or a generic agent surface. The card points the harness at `OPENCLAW_MEM_GATEWAY_URL` / `OPENCLAW_MEM_GATEWAY_TOKEN`; raw tokens are never written into prompt files. Capability-scoped tokens let operators choose read-only, proposal/append write, admin, or owner-equivalent direct-store authority.
+
+Read more: [Harness-persistent memory install](docs/harness-persistent-memory.md).
 
 ## Advanced labs
 

@@ -84,6 +84,7 @@ nav:
       - Architecture: architecture.md
       - Context pack: context-pack.md
       - Agent memory skill (SOP): agent-memory-skill.md
+      - Harness-persistent memory: harness-persistent-memory.md
       - Importance grading: importance-grading.md
       - Automation status: automation-status.md
       - Product-facing improvement roadmap: openclaw-user-improvement-roadmap.md

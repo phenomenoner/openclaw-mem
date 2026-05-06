@@ -24,6 +24,7 @@ DB = OUT / "smoke.sqlite"
 READ_TOKEN = "smoke-read-token-20260505-abcdef"
 WRITE_TOKEN = "smoke-write-token-20260505-abcdef"
 ADMIN_TOKEN = "smoke-admin-token-20260505-abcdef"
+OWNER_TOKEN = "smoke-owner-token-20260505-abcdef"
 
 
 def free_port() -> int:
@@ -59,7 +60,7 @@ def main() -> int:
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     env = os.environ.copy()
-    env["OPENCLAW_MEM_GATEWAY_TOKENS"] = f"{READ_TOKEN}:read,{WRITE_TOKEN}:write,{ADMIN_TOKEN}:admin"
+    env["OPENCLAW_MEM_GATEWAY_TOKENS"] = f"{READ_TOKEN}:read,{WRITE_TOKEN}:write,{ADMIN_TOKEN}:admin,{OWNER_TOKEN}:owner"
     env["OPENCLAW_MEM_DB"] = str(DB)
     env["OPENCLAW_MEM_GATEWAY_AUDIT_LOG"] = str(OUT / "gateway_audit.jsonl")
     env["OPENCLAW_MEM_GATEWAY_EXPORT_ROOT"] = str(OUT / "exports")
@@ -154,8 +155,15 @@ def main() -> int:
             base,
             "POST",
             "/v1/store",
-            token=ADMIN_TOKEN,
+            token=OWNER_TOKEN,
             body={"text": "Should be blocked", "category": "fact", "importance": 0.5},
+        )
+        checks["direct_store_admin_capability_forbidden"] = request(
+            base,
+            "POST",
+            "/v1/store",
+            token=ADMIN_TOKEN,
+            body={"text": "Admin role without owner capability should be forbidden", "category": "fact", "importance": 0.5},
         )
         checks["archive_dry_run"] = request(
             base,
@@ -192,6 +200,7 @@ def main() -> int:
             "search": 200,
             "pack": 200,
             "direct_store_blocked": 403,
+            "direct_store_admin_capability_forbidden": 403,
             "archive_dry_run": 200,
             "archive_path_traversal_blocked": 400,
             "body_too_large": 400,
@@ -205,7 +214,7 @@ def main() -> int:
         if "db" in status_payload or "workspace" in status_payload:
             failures.append({"check": "status_no_sensitive_paths", "expected": "no db/workspace keys", "got": sorted(status_payload.keys())})
         rendered = json.dumps(artifacts, ensure_ascii=False)
-        for token_name, token in {"read": READ_TOKEN, "write": WRITE_TOKEN, "admin": ADMIN_TOKEN}.items():
+        for token_name, token in {"read": READ_TOKEN, "write": WRITE_TOKEN, "admin": ADMIN_TOKEN, "owner": OWNER_TOKEN}.items():
             if token in rendered:
                 failures.append({"check": "token_redaction", "token": token_name})
         artifacts["failures"] = failures

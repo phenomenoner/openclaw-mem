@@ -47,10 +47,13 @@ Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
-Roles:
+Roles/capabilities:
 - `read`: status/search/pack/query
 - `write`: read + append episode + store proposal
-- `admin`: write + archive export + optional direct durable store
+- `admin`: write + archive export
+- `owner`: admin + direct durable store capability
+
+Tokens may also be minted with explicit capabilities, for example `read+episodes.append+store.propose`. See `docs/harness-persistent-memory.md` for the full matrix.
 
 ## 3) Read memory
 
@@ -119,9 +122,9 @@ curl -sS "$OPENCLAW_MEM_GATEWAY_URL/v1/store/propose" \
   }'
 ```
 
-### Direct durable store — admin only, opt-in
+### Direct durable store — owner only, opt-in
 
-Direct store appends to daily memory markdown, so it is disabled by default.
+Direct store appends to daily memory markdown, so it is disabled by default and requires an `owner`/`store.direct` token.
 
 Start with:
 

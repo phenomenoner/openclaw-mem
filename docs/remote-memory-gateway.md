@@ -35,20 +35,29 @@ The container runs only the `openclaw-mem-gateway` process; it is not a full Ope
 
 ## Token model
 
-`OPENCLAW_MEM_GATEWAY_TOKENS` uses comma-separated `token:role` pairs:
+`OPENCLAW_MEM_GATEWAY_TOKENS` uses comma-separated `token:role-or-capability` pairs:
 
 ```text
-read-token:read,write-token:write,admin-token:admin
+read-token:read,write-token:write,admin-token:admin,owner-token:owner
+```
+
+Capability-shaped tokens are also supported:
+
+```text
+codex-token:read+episodes.append+store.propose,watchdog-token:read
 ```
 
 Rules:
 
 - use at least 24 characters of entropy per token; 32+ random URL-safe bytes is preferred;
 - default remote clients to `read`;
-- grant `write` only to selected harnesses that need scoped episodes/proposals;
-- keep `admin` host-local/operator-only;
+- grant `write` or explicit `episodes.append` / `store.propose` only to selected harnesses that need scoped episodes/proposals;
+- keep `admin` and especially `owner` host-local/operator-only;
+- `owner` is the only built-in role with `store.direct`; the legacy single-token env remains `admin`, not owner;
 - never bake tokens into Docker images or committed files;
 - rotate tokens by updating the runtime secret/env and restarting the sidecar.
+
+See [Harness-persistent memory install](harness-persistent-memory.md) for the capability matrix and harness install posture.
 
 Generate example tokens:
 
@@ -120,9 +129,9 @@ Safe remote write defaults:
 
 - `/v1/episodes/append` for scoped working-memory events;
 - `/v1/store/propose` for auditable memory proposals;
-- `/v1/store` remains disabled unless `OPENCLAW_MEM_GATEWAY_ALLOW_DIRECT_STORE=1` is explicitly set.
+- `/v1/store` requires both `OPENCLAW_MEM_GATEWAY_ALLOW_DIRECT_STORE=1` and a token with `store.direct` capability, normally `owner`.
 
-For retrying clients, send `Idempotency-Key` on append/propose requests. Reusing the same key with a different payload is rejected. Idempotency records are bounded by `OPENCLAW_MEM_GATEWAY_IDEMPOTENCY_TTL_SEC`.
+For retrying clients, send `Idempotency-Key` on append/propose requests. Reusing the same key with a different payload is rejected. Idempotency records are bounded by `OPENCLAW_MEM_GATEWAY_IDEMPOTENCY_TTL_SEC` and are stored beside the audit log when configured, otherwise under the configured gateway export/state root.
 
 Audit records are JSONL and written to the configured audit log with token IDs, payload digests, endpoint/action, and result — never raw token values. `OPENCLAW_MEM_GATEWAY_AUDIT_MAX_BYTES` controls simple log rotation.
 
