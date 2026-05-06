@@ -22,7 +22,7 @@ A harness install should add three surfaces:
 2. **Gateway client configuration** — URL and environment-variable names. Do not commit raw tokens to prompt/instruction files.
 3. **Verification command** — v0 verifies that the persistent instruction card is installed correctly. Live gateway capability checks remain covered by `tools/gateway_smoke.py` and are planned for a future `harness doctor` surface.
 
-The first-class install CLI:
+The generic first-class install CLI:
 
 ```bash
 openclaw-mem harness detect
@@ -32,6 +32,31 @@ openclaw-mem harness verify --target codex
 ```
 
 `install` is dry-run by default. Add `--yes` to write the managed block. The installer uses markers and preserves human-authored content outside the managed block.
+
+## Codex Superpowers-style install surface
+
+Codex needs more than a project-local `AGENTS.md` if you want cross-session behavior. Use the Codex-specific surface for a global card, generated shim artifacts, and a live doctor:
+
+```bash
+openclaw-mem codex install \
+  --mode write \
+  --scope openclaw-mem \
+  --agent-id codex-windows \
+  --gateway-url http://127.0.0.1:18765 \
+  --bundle-dir /workspace/openclaw-mem-gateway/install/codex-bundle
+
+openclaw-mem codex install ... --yes
+openclaw-mem codex doctor --gateway-url http://127.0.0.1:18765 --expected-role write --pack --json
+```
+
+This is intentionally described as **Superpowers-style**, not as an official Codex plugin API. The command installs/validates:
+
+- global Codex `AGENTS.md` (`CODEX_HOME` or `~/.codex` by default);
+- env/token presence without writing raw token values;
+- gateway `/health` service identity;
+- authenticated `/v1/status` role/capability readback;
+- optional read-only `/v1/pack` smoke;
+- generated PowerShell CLI shim and MCP candidate config artifact.
 
 ## Token authority model
 
@@ -142,7 +167,7 @@ If `OPENCLAW_MEM_GATEWAY_URL` and `OPENCLAW_MEM_GATEWAY_TOKEN` are present, use 
 ## Verifiers
 
 ```bash
-uv run pytest tests/test_gateway.py tests/test_harness.py tests/test_agent_memory_skill_assets.py
+uv run pytest tests/test_gateway.py tests/test_harness.py tests/test_codex_install.py tests/test_agent_memory_skill_assets.py
 uv run python scripts/generate_agent_memory_skill_assets.py --check
 uv run python tools/gateway_smoke.py
 bash scripts/gateway_docker_dryrun_check.sh

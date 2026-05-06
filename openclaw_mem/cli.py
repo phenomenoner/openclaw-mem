@@ -43,6 +43,7 @@ from openclaw_mem import pack_trace_v1
 from openclaw_mem import self_model_sidecar
 from openclaw_mem import self_curator
 from openclaw_mem import harness as harness_install
+from openclaw_mem import codex_install
 from openclaw_mem import project_resolver
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
@@ -17995,6 +17996,34 @@ def cmd_harness_verify(conn: sqlite3.Connection, args: argparse.Namespace) -> No
     )
 
 
+def cmd_codex_install(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    out = codex_install.install_codex(
+        codex_home=getattr(args, "codex_home", None),
+        output=getattr(args, "output", None),
+        mode=getattr(args, "mode", "write"),
+        scope=getattr(args, "scope", "openclaw-mem"),
+        agent_id=getattr(args, "agent_id", "codex-windows"),
+        gateway_url=getattr(args, "gateway_url", None),
+        dry_run=not bool(getattr(args, "yes", False)),
+        bundle_dir=getattr(args, "bundle_dir", None),
+        allow_non_local=bool(getattr(args, "allow_non_local_gateway_url", False)),
+    )
+    _emit(out, getattr(args, "json", False))
+
+
+def cmd_codex_doctor(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    out = codex_install.doctor_codex(
+        codex_home=getattr(args, "codex_home", None),
+        output=getattr(args, "output", None),
+        gateway_url=getattr(args, "gateway_url", None),
+        expected_role=getattr(args, "expected_role", "write"),
+        require_token=not bool(getattr(args, "no_require_token", False)),
+        run_pack=bool(getattr(args, "pack", False)),
+        timeout=float(getattr(args, "timeout", 5.0)),
+    )
+    _emit(out, getattr(args, "json", False))
+
+
 def build_parser() -> argparse.ArgumentParser:
     epilog = (
         "Examples:\n"
@@ -18133,6 +18162,34 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("--root", default=".", help="Root directory for target file (default: current directory)")
     h.add_argument("--output", default=None, help="Override target file path")
     h.set_defaults(func=cmd_harness_verify)
+
+    sp = sub.add_parser("codex", help="Codex-specific persistent memory install and doctor")
+    add_common(sp)
+    csub = sp.add_subparsers(dest="codex_cmd", required=True)
+
+    c = csub.add_parser("install", help="Install/update global Codex openclaw-mem posture plus optional shim bundle")
+    add_common(c)
+    c.add_argument("--codex-home", default=None, help="Codex global config dir (default: CODEX_HOME or ~/.codex)")
+    c.add_argument("--output", default=None, help="Override AGENTS.md output path")
+    c.add_argument("--mode", choices=sorted(codex_install.VALID_MODES), default="write")
+    c.add_argument("--scope", default="openclaw-mem")
+    c.add_argument("--agent-id", default="codex-windows")
+    c.add_argument("--gateway-url", default=None, help="Gateway URL to mention/check; tokens are never written")
+    c.add_argument("--allow-non-local-gateway-url", action="store_true", help="Allow writing a non-loopback gateway URL into the managed card")
+    c.add_argument("--bundle-dir", default=None, help="Optional dir for PowerShell shim / install bundle / MCP candidate artifacts")
+    c.add_argument("--yes", action="store_true", help="Write changes. Without --yes this is a dry-run receipt.")
+    c.set_defaults(func=cmd_codex_install)
+
+    c = csub.add_parser("doctor", help="Verify global Codex card, env token, gateway health/status, and optional pack smoke")
+    add_common(c)
+    c.add_argument("--codex-home", default=None, help="Codex global config dir (default: CODEX_HOME or ~/.codex)")
+    c.add_argument("--output", default=None, help="Override AGENTS.md path")
+    c.add_argument("--gateway-url", default=None, help="Gateway URL (default: env or production localhost mapping)")
+    c.add_argument("--expected-role", default="write", help="Expected token role; set empty string to skip role check")
+    c.add_argument("--no-require-token", action="store_true", help="Do not fail when OPENCLAW_MEM_GATEWAY_TOKEN is absent")
+    c.add_argument("--pack", action="store_true", help="Run a read-only /v1/pack smoke")
+    c.add_argument("--timeout", type=float, default=5.0)
+    c.set_defaults(func=cmd_codex_doctor)
 
     sp = sub.add_parser("engine", help="openclaw-mem-engine operator utilities")
     add_common(sp)
@@ -19620,7 +19677,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "harness"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

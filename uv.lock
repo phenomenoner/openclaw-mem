@@ -372,7 +372,7 @@ wheels = [
 
 [[package]]
 name = "openclaw-context-pack"
-version = "1.9.8"
+version = "1.9.9"
 source = { editable = "." }
 
 [package.optional-dependencies]

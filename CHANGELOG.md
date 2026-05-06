@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.9] - 2026-05-06
+
+### Added
+
+- Added `openclaw-mem codex install`, a Codex-specific Superpowers-style install surface that writes a global Codex managed instruction card, can generate a PowerShell gateway shim bundle, and emits an MCP candidate config artifact without writing raw tokens.
+- Added `openclaw-mem codex doctor`, which verifies the global Codex card, gateway `/health` service identity, authenticated `/v1/status` role/capability readback, and optional read-only `/v1/pack` smoke.
+- Added regression coverage for Codex dry-run install, global card/bundle generation, wrong-service doctor rejection, role mismatch rejection, and successful fake-gateway doctor.
+
+### Changed
+
+- Documented the difference between instruction-card posture and Superpowers-style install behavior for Codex: global Codex card plus env/gateway doctor is required for cross-session behavior; no official Codex plugin API is claimed.
+- Updated README and harness-persistent memory docs to route Codex installs through the stronger `codex install` / `codex doctor` surface.
+
+### Testing
+
+- Ran targeted pytest coverage for Codex install, gateway, harness, and generated skill assets.
+- Ran generated skill asset freshness check, MkDocs strict build, and whitespace diff check.
+
 ## [1.9.8] - 2026-05-06
 
 ### Added
