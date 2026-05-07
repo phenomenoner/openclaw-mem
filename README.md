@@ -20,7 +20,7 @@
 | Sidecar observation capture | Automatic when the plugin is enabled | Captures denoised JSONL observations and backend/action annotations. |
 | Harvest, triage, and graph capture | Scheduled on configured hosts | Converts captured records into searchable stores and receipts. |
 | `pack` | CLI core | Produces bounded `ContextPack` output with citations and trace receipts. |
-| Harness-persistent memory | Gateway + CLI install card | Installs a persistent Codex / Claude / Gemini / generic agent memory posture backed by capability-scoped gateway tokens. |
+| Harness-persistent memory | Gateway + CLI install card | Installs a persistent Codex / Claude / Gemini / generic agent memory posture backed by capability-scoped gateway tokens and parity-aware read diagnostics. |
 | Graph routing, optimize assist, continuity, GBrain | Advanced Labs / opt-in lanes | Available for mature operators, but not part of the first evaluation path. |
 | Mem-engine Proactive Pack | Optional promotion | Bounded pre-reply recall orchestration after explicit engine adoption. |
 
@@ -31,7 +31,7 @@
 - **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, trust-policy receipts, and trace-backed debugging.
 - **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, sanitize runtime artifacts, and keep rollback simple.
 - **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
-- **Harness-friendly** — external coding agents can get a persistent memory posture through the Memory Gateway without receiving raw SQLite or workspace-file authority.
+- **Harness-friendly** — external coding agents can get a persistent memory posture through the Memory Gateway without receiving raw SQLite or workspace-file authority. Parity-aware gateway reads can search/pack configured workspace Markdown memory and report when a no-result answer is only partial.
 - **Advanced labs are opt-in** — graph routing, GBrain, continuity, Dream Lite, Self Curator review packets, and deeper optimization lanes stay out of the first evaluation path.
 
 ## Why this exists
@@ -94,7 +94,7 @@ The product loop is simple and stable:
 
 When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
 
-For external AI harnesses, `openclaw-mem harness install` writes a managed persistent instruction card for Codex, Claude, Gemini, or a generic agent surface. For Codex specifically, `openclaw-mem codex install` adds a stronger Superpowers-style surface: global Codex card, generated CLI shim bundle, env/gateway checks, and `codex doctor` verification. The card points the harness at `OPENCLAW_MEM_GATEWAY_URL` / `OPENCLAW_MEM_GATEWAY_TOKEN`; raw tokens are never written into prompt files. Capability-scoped tokens let operators choose read-only, proposal/append write, admin, or owner-equivalent direct-store authority. Gateway-backed search is literal-friendly for common product names: v1.9.10 retries punctuation-heavy terms such as `openclaw-mem` with a normalized FTS fallback instead of surfacing `cli_failed`.
+For external AI harnesses, `openclaw-mem harness install` writes a managed persistent instruction card for Codex, Claude, Gemini, or a generic agent surface. For Codex specifically, `openclaw-mem codex install` adds a stronger Superpowers-style surface: global Codex card, generated CLI shim bundle, env/gateway checks, and `codex doctor` verification. The card points the harness at `OPENCLAW_MEM_GATEWAY_URL` / `OPENCLAW_MEM_GATEWAY_TOKEN`; raw tokens are never written into prompt files. Capability-scoped tokens let operators choose read-only, proposal/append write, admin, or owner-equivalent direct-store authority. Gateway-backed search is literal-friendly for common product names: v1.9.10 retries punctuation-heavy terms such as `openclaw-mem` with a normalized FTS fallback instead of surfacing `cli_failed`. Parity-aware gateways can also fall back from observation search/pack to configured workspace Markdown memory, and `/v1/status` reports whether the configured corpus is `healthy`, `partial`, or still `unknown`.
 
 Read more: [Harness-persistent memory install](docs/harness-persistent-memory.md).
 

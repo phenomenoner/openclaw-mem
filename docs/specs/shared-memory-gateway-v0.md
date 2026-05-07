@@ -19,9 +19,9 @@ Base path: `/v1`.
 
 Read endpoints:
 - `GET /health` — minimal liveness, no memory details.
-- `GET /v1/status` — authenticated compact gateway status.
-- `POST /v1/search` — authenticated FTS search over observations.
-- `POST /v1/pack` — authenticated ContextPack build.
+- `GET /v1/status` — authenticated compact gateway status, including public-safe corpus parity state when configured.
+- `POST /v1/search` — authenticated search over observations, with workspace/docs-memory fallback when enabled.
+- `POST /v1/pack` — authenticated ContextPack build, with docs-memory fallback when the observation pack is empty.
 - `POST /v1/episodes/query` — authenticated scoped episodic query.
 
 Write endpoints:
@@ -42,6 +42,8 @@ Portable endpoints:
 - Shell execution must use argv lists, never shell interpolation.
 - Error responses must not print token values or CLI stderr details.
 - Status responses expose configuration booleans, not literal DB/workspace paths.
+- Corpus status must not claim `healthy` until the configured corpus has been refreshed/indexed successfully; otherwise clients should treat no-result answers as partial.
+- API-visible workspace/docs memory excludes chunks tagged `[SECRET]`, `[PRIVATE]`, `[NOEXPORT]`, or `[NOMEM]`, and secret-like chunks.
 - Admin export targets are contained under an allowlisted export root.
 - Append/proposal writes support `Idempotency-Key` for retry-safe clients, reject same-key/different-payload reuse, and apply a bounded replay TTL.
 
@@ -59,7 +61,7 @@ Portable endpoints:
 5. Write token can append episode and create proposal.
 6. Direct store is blocked unless explicit allow flag is set.
 7. Archive export dry-run returns canonical manifest preview.
-8. Negative probes cover flag-like search strings, export path traversal, oversized bodies, direct-store default denial, and token redaction.
+8. Negative probes cover flag-like search strings, export path traversal, oversized bodies, direct-store default denial, corpus-status honesty, and token redaction.
 9. Unit/smoke artifacts are written under `.state/openclaw-mem-gateway-smoke/`.
 
 ## Rollback

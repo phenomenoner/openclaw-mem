@@ -72,7 +72,7 @@ Search first checks observations, then configured workspace/docs memory. Respons
 curl -sS "$OPENCLAW_MEM_GATEWAY_URL/v1/search" \
   -H "Authorization: Bearer $OPENCLAW_MEM_GATEWAY_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"query":"曦曦", "limit":5}'
+  -d '{"query":"alpha memory alias", "limit":5}'
 ```
 
 ### Build a ContextPack
@@ -83,7 +83,7 @@ curl -sS "$OPENCLAW_MEM_GATEWAY_URL/v1/search" \
 curl -sS "$OPENCLAW_MEM_GATEWAY_URL/v1/pack" \
   -H "Authorization: Bearer $OPENCLAW_MEM_GATEWAY_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"query":"曦曦", "limit":8, "budget_tokens":1200}'
+  -d '{"query":"alpha memory alias", "limit":8, "budget_tokens":1200}'
 ```
 
 ### Query scoped working memory / episodes

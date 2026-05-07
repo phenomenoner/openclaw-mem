@@ -95,6 +95,8 @@ curl -sS http://127.0.0.1:18765/v1/status \
 
 `/v1/status` intentionally reports booleans, not literal DB/workspace paths.
 
+For parity-aware deployments, status also includes a public-safe `corpus_status` block. Treat `parity_state=healthy` as the only state where a no-result response is authoritative for the configured corpus. If status reports `partial` or `unknown`, remote clients should say the result is partial rather than claiming the memory is absent.
+
 ## Remote access: SSH tunnel
 
 On the remote client:
@@ -113,6 +115,8 @@ curl -sS "$OPENCLAW_MEM_GATEWAY_URL/v1/pack" \
   -H 'Content-Type: application/json' \
   -d '{"query":"current openclaw-mem gateway deployment", "limit":8, "budget_tokens":1200}'
 ```
+
+Read endpoints search observations first and, when workspace memory indexing is enabled, can fall back to configured workspace Markdown memory. Chunks tagged `[SECRET]`, `[PRIVATE]`, `[NOEXPORT]`, or `[NOMEM]`, and secret-like chunks, are excluded from this API-visible corpus.
 
 ## Remote access: Tailscale/WireGuard
 
@@ -154,6 +158,7 @@ Expected counterfactual checks include:
 - export path traversal is blocked;
 - oversized payload is rejected;
 - status does not disclose literal DB/workspace paths;
+- status does not overstate corpus parity before a successful refresh;
 - token literals are absent from smoke receipts.
 
 ## Public HTTPS / WSS

@@ -211,7 +211,7 @@ third paragraph
         conn = _connect(":memory:")
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            (root / "safe.md").write_text("# Safe\n\n曦曦 is Lady H / 何曦.", encoding="utf-8")
+            (root / "safe.md").write_text("# Safe\n\n專案甲 is a project steward.", encoding="utf-8")
             (root / "private.md").write_text("# Private\n\n[NOEXPORT] do not expose this chunk", encoding="utf-8")
             (root / "secret.md").write_text("# Secret\n\napi_key=sk-proj-abcdefghijklmnop1234567890", encoding="utf-8")
 
@@ -239,19 +239,19 @@ third paragraph
             self.assertEqual(payload["chunks_skipped_secret_like"], 1)
             rows = conn.execute("SELECT text FROM docs_chunks").fetchall()
             self.assertEqual(len(rows), 1)
-            self.assertIn("曦曦", rows[0]["text"])
+            self.assertIn("專案甲", rows[0]["text"])
         conn.close()
 
     def test_docs_search_cjk_fallback_finds_literal_term(self):
         conn = _connect(":memory:")
-        self._insert_doc_chunk(conn, repo="workspace", rel_path="memory/2026-05-07.md", title="Memory", text="Lady H / 何曦 / 曦曦 = kawaii technical partner")
+        self._insert_doc_chunk(conn, repo="workspace", rel_path="memory/2026-05-07.md", title="Memory", text="project steward / 專案甲 = generic CJK fixture")
         conn.commit()
 
         search_args = type(
             "Args",
             (),
             {
-                "query": "曦曦",
+                "query": "專案甲",
                 "limit": 5,
                 "fts_k": 10,
                 "vec_k": 10,
@@ -270,7 +270,7 @@ third paragraph
         out = json.loads(buf.getvalue())
 
         self.assertGreaterEqual(len(out["results"]), 1)
-        self.assertIn("曦曦", out["results"][0]["text"])
+        self.assertIn("專案甲", out["results"][0]["text"])
         conn.close()
 
     def test_docs_search_scope_repos_filters_fts_results(self):

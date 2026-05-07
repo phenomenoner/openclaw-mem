@@ -132,7 +132,7 @@ def test_corpus_status_is_unknown_before_refresh_not_healthy(tmp_path: Path) -> 
     workspace = tmp_path / "workspace"
     (workspace / "memory").mkdir(parents=True)
     (workspace / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
-    (workspace / "memory" / "2026-05-07.md").write_text("曦曦", encoding="utf-8")
+    (workspace / "memory" / "2026-05-07.md").write_text("專案甲", encoding="utf-8")
     config = GatewayConfig(db=str(tmp_path / "memory.sqlite"), workspace=str(workspace), tokens={}, allow_unauthenticated=True)
 
     status = _corpus_status(config)
@@ -146,7 +146,7 @@ def test_refresh_workspace_memory_marks_partial_when_ingest_incomplete(monkeypat
     workspace = tmp_path / "workspace"
     (workspace / "memory").mkdir(parents=True)
     (workspace / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
-    (workspace / "memory" / "2026-05-07.md").write_text("曦曦", encoding="utf-8")
+    (workspace / "memory" / "2026-05-07.md").write_text("專案甲", encoding="utf-8")
     config = GatewayConfig(db=str(tmp_path / "memory.sqlite"), workspace=str(workspace), tokens={}, allow_unauthenticated=True)
 
     def fake_run_cli(_config: GatewayConfig, argv: list[str], *, stdin: str | None = None) -> dict:
@@ -165,7 +165,7 @@ def test_refresh_workspace_memory_marks_healthy_only_after_complete_ingest(monke
     workspace = tmp_path / "workspace"
     (workspace / "memory").mkdir(parents=True)
     (workspace / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
-    (workspace / "memory" / "2026-05-07.md").write_text("曦曦", encoding="utf-8")
+    (workspace / "memory" / "2026-05-07.md").write_text("專案甲", encoding="utf-8")
     config = GatewayConfig(db=str(tmp_path / "memory.sqlite"), workspace=str(workspace), tokens={}, allow_unauthenticated=True)
 
     def fake_run_cli(_config: GatewayConfig, argv: list[str], *, stdin: str | None = None) -> dict:
@@ -233,7 +233,7 @@ def test_search_handler_falls_back_to_docs_memory(monkeypatch: pytest.MonkeyPatc
     memory_dir = workspace / "memory"
     memory_dir.mkdir(parents=True)
     (workspace / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
-    (memory_dir / "2026-05-07.md").write_text("Lady H / 何曦 / 曦曦", encoding="utf-8")
+    (memory_dir / "2026-05-07.md").write_text("project steward / 專案甲", encoding="utf-8")
     config = GatewayConfig(
         db=str(tmp_path / "memory.sqlite"),
         workspace=str(workspace),
@@ -246,7 +246,7 @@ def test_search_handler_falls_back_to_docs_memory(monkeypatch: pytest.MonkeyPatc
     handler.server = server  # type: ignore[attr-defined]
     handler.headers = {"Host": "127.0.0.1:18765"}  # type: ignore[attr-defined]
     handler._require_capability = lambda capability: "read"  # type: ignore[attr-defined]
-    handler._read_json_body = lambda: {"query": "曦曦", "limit": 5}  # type: ignore[attr-defined]
+    handler._read_json_body = lambda: {"query": "專案甲", "limit": 5}  # type: ignore[attr-defined]
 
     calls: list[list[str]] = []
 
@@ -255,7 +255,7 @@ def test_search_handler_falls_back_to_docs_memory(monkeypatch: pytest.MonkeyPatc
         if argv[:2] == ["docs", "ingest"]:
             return {"ok": True, "exit_code": 0, "result": {"files_ingested": 2, "chunks_inserted": 2}}
         if argv[:2] == ["docs", "search"]:
-            return {"ok": True, "exit_code": 0, "result": {"results": [{"recordRef": "docs://workspace/memory/2026-05-07.md#intro", "text": "Lady H / 何曦 / 曦曦"}]}}
+            return {"ok": True, "exit_code": 0, "result": {"results": [{"recordRef": "docs://workspace/memory/2026-05-07.md#intro", "text": "project steward / 專案甲"}]}}
         return {"ok": True, "exit_code": 0, "result": []}
 
     captured: dict = {}
@@ -283,15 +283,15 @@ def test_docs_search_receipt_can_be_wrapped_as_pack() -> None:
         "exit_code": 0,
         "result": {
             "results": [
-                {"recordRef": "docs://workspace/memory/2026-05-07.md#intro", "text": "Lady H / 何曦 / 曦曦", "repo": "workspace", "path": "memory/2026-05-07.md", "chunk_id": "intro"}
+                {"recordRef": "docs://workspace/memory/2026-05-07.md#intro", "text": "project steward / 專案甲", "repo": "workspace", "path": "memory/2026-05-07.md", "chunk_id": "intro"}
             ]
         },
     }
 
-    receipt = gateway_mod._docs_pack_receipt_from_search("曦曦", docs_receipt, limit=5, budget_tokens=1000)
+    receipt = gateway_mod._docs_pack_receipt_from_search("專案甲", docs_receipt, limit=5, budget_tokens=1000)
 
     assert gateway_mod._pack_result_count(receipt) == 1
-    assert "曦曦" in receipt["result"]["bundle_text"]
+    assert "專案甲" in receipt["result"]["bundle_text"]
     assert receipt["result"]["source"] == "docs_memory_fallback"
 
 

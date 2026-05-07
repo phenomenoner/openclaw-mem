@@ -1,12 +1,12 @@
 # Memory API Parity Roadmap v0
 
-Date: 2026-05-08 Asia/Taipei / 2026-05-07 UTC
+Date: 2026-05-08
 Line: `openclaw-mem` canonical API parity
-Trigger: CK requested that authorized `openclaw-mem` API readers can find the same non-secret information Lyria can find locally.
+Trigger: operators need authorized `openclaw-mem` API readers to find the same non-secret configured memory that local agents can find, without learning internal storage surfaces.
 
 ## Product invariant
 
-Authorized `openclaw-mem` API readers MUST be able to retrieve all non-secret, non-excluded OpenClaw memory that the local Lyria/OpenClaw workspace can retrieve, without needing to understand internal memory surfaces.
+Authorized `openclaw-mem` API readers MUST be able to retrieve all non-secret, non-excluded configured OpenClaw memory that local agents can retrieve, without needing to understand internal memory surfaces.
 
 Plain-language contract:
 
@@ -18,7 +18,7 @@ Plain-language contract:
 - No direct credential/token disclosure.
 - No automatic permission expansion for remote harnesses.
 - No requirement that every private/local file becomes globally readable.
-- No live gateway restart in this implementation slice unless CK/operator performs it.
+- No live gateway restart in this implementation slice unless the operator performs it.
 
 ## Canonical corpus map
 
@@ -77,12 +77,12 @@ Authorization model for v0: token-bound, localhost/private-route only, role/capa
 
 Golden query fixture set:
 
-- `曦曦`
-- `Lady H`
-- `Lyria`
-- `CK timezone`
+- `alpha memory alias`
+- `project steward`
+- `operator timezone`
+- `handoff decision`
 - `non-stop`
-- `櫻花刀舞`
+- `automation trigger`
 - `Store Pack Observe`
 
 Verifier rule: if local corpus contains a golden fact and API `/v1/search` or `/v1/pack` misses it while `corpus_status.parity_state = "healthy"`, the parity smoke fails.
@@ -97,7 +97,7 @@ Corpus discovery verifier: compare the configured workspace Markdown source set 
 - corpus sources enabled;
 - corpus last refresh result;
 - indexed/missing/skipped/redacted counts;
-- parity health state: `healthy`, `partial`, `disabled`, or `unknown`.
+- parity health state: `healthy`, `partial`, or `unknown`.
 
 ### Phase 6 — External harness contract
 
@@ -121,16 +121,16 @@ Additional parity fixture smoke:
 ```bash
 tmp=$(mktemp -d)
 mkdir -p "$tmp/ws/memory"
-printf '# Memory\n\nCK timezone: Asia/Taipei\n' > "$tmp/ws/MEMORY.md"
-printf 'Lady H / 何曦 / 曦曦 = kawaii technical partner.\n' > "$tmp/ws/memory/2026-05-07.md"
+printf '# Memory\n\nOperator timezone: UTC.\n' > "$tmp/ws/MEMORY.md"
+printf 'alpha memory alias = project steward.\n' > "$tmp/ws/memory/2026-05-07.md"
 printf '[NOEXPORT] hidden fixture.\n' > "$tmp/ws/memory/2026-05-06.md"
 uv run openclaw-mem docs ingest --db "$tmp/mem.sqlite" --path "$tmp/ws/MEMORY.md" --path "$tmp/ws/memory" --no-embed --json
-uv run openclaw-mem docs search --db "$tmp/mem.sqlite" 曦曦 --json
+uv run openclaw-mem docs search --db "$tmp/mem.sqlite" "alpha memory alias" --json
 ```
 
 Expected acceptance:
 
-- `曦曦` resolves through the API-visible corpus with a source receipt.
+- `alpha memory alias` resolves through the API-visible corpus with a source receipt.
 - Gateway no-result diagnostics identify corpus/surface rather than implying global absence.
 - Status exposes corpus state without literal private paths.
 - No secrets or `[NOEXPORT]` chunks appear in API search results.
@@ -139,10 +139,10 @@ Expected acceptance:
 
 - Docs-only rollback: revert this spec file.
 - Code rollback: revert gateway/CLI/tests changes in this line; no DB migration should be destructive.
-- Live rollback: stop/restart the gateway with previous package/config only after CK/operator approval.
+- Live rollback: stop/restart the gateway with previous package/config only after operator approval.
 
 ## Topology/config impact
 
 Planned source behavior changes: yes, gateway read path may include a configured workspace-memory docs corpus.
 
-Live topology change in this slice: unchanged unless CK/operator restarts or redeploys gateway.
+Live topology change in this slice: unchanged unless the operator restarts or redeploys gateway.
