@@ -354,14 +354,40 @@ def _workspace_memory_paths(config: GatewayConfig) -> List[str]:
     return [str(p) for p in candidates if p.exists()]
 
 
+def _workspace_memory_file_count(paths: Iterable[str]) -> int:
+    count = 0
+    for raw in paths:
+        p = Path(raw).expanduser()
+        if p.is_file() and p.suffix.lower() == ".md":
+            count += 1
+        elif p.is_dir():
+            count += sum(1 for child in p.rglob("*.md") if child.is_file())
+    return count
+
+
 def _corpus_status(config: GatewayConfig) -> Dict[str, Any]:
     paths = _workspace_memory_paths(config)
+    source_files = _workspace_memory_file_count(paths)
+    if config.workspace and not config.auto_index_workspace_memory:
+        parity_state = "partial"
+    elif config.workspace and paths:
+        # Status is honest by default: configured sources exist, but a plain
+        # status read does not prove the current DB has indexed every source.
+        # Read endpoints attach a refreshed corpus_status after successful ingest.
+        parity_state = "unknown"
+    else:
+        parity_state = "unknown"
     return {
         "schema": "openclaw-mem.gateway.corpus-status.v1",
-        "parity_state": "partial" if (config.workspace and not config.auto_index_workspace_memory) else ("healthy" if paths else "unknown"),
+        "parity_state": parity_state,
         "workspace_memory_index_enabled": bool(config.auto_index_workspace_memory and config.workspace),
         "workspace_memory_sources_configured": len(paths),
+        "workspace_memory_files_configured": source_files,
         "source_path_fingerprints": [_path_fingerprint(p) for p in paths],
+        "indexed_files": None,
+        "missing_paths": None,
+        "skipped_private_chunks": None,
+        "skipped_secret_like_chunks": None,
         "redaction_policy": {
             "deny_tags": ["[SECRET]", "[PRIVATE]", "[NOEXPORT]", "[NOMEM]"],
             "secret_like_chunks": "skipped",
@@ -382,10 +408,21 @@ def _refresh_workspace_memory_corpus(config: GatewayConfig) -> Dict[str, Any]:
         argv.extend(["--path", path])
     receipt = _run_cli(config, argv)
     result = receipt.get("result") if isinstance(receipt, Mapping) else None
+    result_map = result if isinstance(result, Mapping) else {}
+    files_seen = int(result_map.get("files_seen") or 0)
+    files_ingested = int(result_map.get("files_ingested") or 0)
+    missing_paths = list(result_map.get("missing_paths") or []) if isinstance(result_map.get("missing_paths"), list) else []
+    refresh_ok = bool(receipt.get("ok"))
+    complete = refresh_ok and files_seen == files_ingested and not missing_paths and files_seen >= int(status.get("workspace_memory_files_configured") or 0)
     status.update({
         "refresh_attempted": True,
-        "refresh_ok": bool(receipt.get("ok")),
-        "last_refresh": result if isinstance(result, Mapping) else None,
+        "refresh_ok": refresh_ok,
+        "parity_state": "healthy" if complete else "partial",
+        "indexed_files": files_ingested,
+        "missing_paths": len(missing_paths),
+        "skipped_private_chunks": int(result_map.get("chunks_skipped_private") or 0),
+        "skipped_secret_like_chunks": int(result_map.get("chunks_skipped_secret_like") or 0),
+        "last_refresh": result_map or None,
     })
     return status
 
@@ -893,6 +930,19 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
             if docs_count > 0:
                 receipt = _docs_pack_receipt_from_search(query, docs_receipt, limit=limit, budget_tokens=budget_tokens)
                 result_count = _pack_result_count(receipt)
+            else:
+                for variant in _query_variants(query):
+                    variant_docs_argv = ["docs", "search", "--limit", str(limit), "--json"]
+                    if self.config.db:
+                        variant_docs_argv.extend(["--db", self.config.db])
+                    variant_docs_argv.append(variant)
+                    variant_docs_receipt = _run_cli(self.config, variant_docs_argv)
+                    variant_docs_count = _search_result_count(variant_docs_receipt)
+                    fallback_attempts.append({"route": "cli.docs.search", "query": variant, "result_count": variant_docs_count})
+                    if variant_docs_count > 0:
+                        receipt = _docs_pack_receipt_from_search(variant, variant_docs_receipt, limit=limit, budget_tokens=budget_tokens)
+                        result_count = _pack_result_count(receipt)
+                        break
         diagnostic = _not_found_diagnostic(
             endpoint="/v1/pack",
             query=query,

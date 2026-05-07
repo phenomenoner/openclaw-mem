@@ -13,6 +13,8 @@ from openclaw_mem.gateway import (
     _not_found_diagnostic,
     _parse_tokens,
     _query_variants,
+    _corpus_status,
+    _refresh_workspace_memory_corpus,
     _surface_identity,
 )
 
@@ -124,6 +126,59 @@ def test_not_found_diagnostic_explains_empty_surface(tmp_path: Path) -> None:
     assert diag["fallback_attempts"][0]["result_count"] == 3
     assert "yijing-loop-engine" in diag["query_variants"]
     assert "compare db_fingerprint" in diag["hint"]
+
+
+def test_corpus_status_is_unknown_before_refresh_not_healthy(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "memory").mkdir(parents=True)
+    (workspace / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
+    (workspace / "memory" / "2026-05-07.md").write_text("曦曦", encoding="utf-8")
+    config = GatewayConfig(db=str(tmp_path / "memory.sqlite"), workspace=str(workspace), tokens={}, allow_unauthenticated=True)
+
+    status = _corpus_status(config)
+
+    assert status["parity_state"] == "unknown"
+    assert status["workspace_memory_files_configured"] == 2
+    assert status["indexed_files"] is None
+
+
+def test_refresh_workspace_memory_marks_partial_when_ingest_incomplete(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "memory").mkdir(parents=True)
+    (workspace / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
+    (workspace / "memory" / "2026-05-07.md").write_text("曦曦", encoding="utf-8")
+    config = GatewayConfig(db=str(tmp_path / "memory.sqlite"), workspace=str(workspace), tokens={}, allow_unauthenticated=True)
+
+    def fake_run_cli(_config: GatewayConfig, argv: list[str], *, stdin: str | None = None) -> dict:
+        return {"ok": True, "exit_code": 0, "result": {"files_seen": 2, "files_ingested": 1, "missing_paths": [], "chunks_skipped_private": 0, "chunks_skipped_secret_like": 0}}
+
+    monkeypatch.setattr(gateway_mod, "_run_cli", fake_run_cli)
+
+    status = _refresh_workspace_memory_corpus(config)
+
+    assert status["refresh_ok"] is True
+    assert status["parity_state"] == "partial"
+    assert status["indexed_files"] == 1
+
+
+def test_refresh_workspace_memory_marks_healthy_only_after_complete_ingest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "memory").mkdir(parents=True)
+    (workspace / "MEMORY.md").write_text("# Memory\n", encoding="utf-8")
+    (workspace / "memory" / "2026-05-07.md").write_text("曦曦", encoding="utf-8")
+    config = GatewayConfig(db=str(tmp_path / "memory.sqlite"), workspace=str(workspace), tokens={}, allow_unauthenticated=True)
+
+    def fake_run_cli(_config: GatewayConfig, argv: list[str], *, stdin: str | None = None) -> dict:
+        return {"ok": True, "exit_code": 0, "result": {"files_seen": 2, "files_ingested": 2, "missing_paths": [], "chunks_skipped_private": 1, "chunks_skipped_secret_like": 0}}
+
+    monkeypatch.setattr(gateway_mod, "_run_cli", fake_run_cli)
+
+    status = _refresh_workspace_memory_corpus(config)
+
+    assert status["refresh_ok"] is True
+    assert status["parity_state"] == "healthy"
+    assert status["indexed_files"] == 2
+    assert status["skipped_private_chunks"] == 1
 
 
 def test_search_handler_falls_back_to_query_variant(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
