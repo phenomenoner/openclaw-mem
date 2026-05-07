@@ -19,6 +19,13 @@ Default posture:
 - refuses to start without auth
 - direct durable store is disabled
 - write agents can append scoped episodes and create store proposals
+- read agents can search/pack the configured shareable corpus, including workspace Markdown memory (`MEMORY.md`, `memory/*.md`, and default authority files) when `OPENCLAW_MEM_WORKSPACE` is configured
+
+Memory parity contract:
+
+> For authorized readers, the gateway is the canonical read bridge for shareable OpenClaw memory. A no-result answer is only authoritative when `/v1/status` reports `corpus_status.parity_state = "healthy"` for the requested scope.
+
+Default exclusions are secrets, chunks tagged `[SECRET]`, `[PRIVATE]`, `[NOEXPORT]`, or `[NOMEM]`, and corpus roots/scopes not configured for the caller. If workspace-memory indexing is intentionally disabled with `OPENCLAW_MEM_GATEWAY_DISABLE_WORKSPACE_MEMORY_INDEX=1`, clients must treat results as partial.
 
 For role-specific tokens:
 
@@ -59,20 +66,24 @@ Tokens may also be minted with explicit capabilities, for example `read+episodes
 
 ### Search observations
 
+Search first checks observations, then configured workspace/docs memory. Responses include `diagnostic.surface_identity` and `diagnostic.corpus_status`; clients should show "partial corpus" rather than "no memory" when `parity_state` is not `healthy`.
+
 ```bash
 curl -sS "$OPENCLAW_MEM_GATEWAY_URL/v1/search" \
   -H "Authorization: Bearer $OPENCLAW_MEM_GATEWAY_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"query":"gateway timeout", "limit":5}'
+  -d '{"query":"曦曦", "limit":5}'
 ```
 
 ### Build a ContextPack
+
+`/v1/pack` also falls back to workspace/docs memory when the observation pack is empty, so harnesses can get a cited bundle without knowing where the memory lived on disk.
 
 ```bash
 curl -sS "$OPENCLAW_MEM_GATEWAY_URL/v1/pack" \
   -H "Authorization: Bearer $OPENCLAW_MEM_GATEWAY_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"query":"openclaw-mem shared gateway scope policy", "limit":8, "budget_tokens":1200}'
+  -d '{"query":"曦曦", "limit":8, "budget_tokens":1200}'
 ```
 
 ### Query scoped working memory / episodes
