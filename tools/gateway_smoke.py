@@ -191,7 +191,7 @@ def main() -> int:
             "health": 200,
             "status_missing_auth": 401,
             "status_read": 200,
-            "search_flag_injection": 502,
+            "search_flag_injection": 200,
             "append_read_forbidden": 403,
             "append_write": 200,
             "episodes_query": 200,
@@ -213,6 +213,10 @@ def main() -> int:
         status_payload = checks["status_read"].get("payload", {})  # type: ignore[union-attr]
         if "db" in status_payload or "workspace" in status_payload:
             failures.append({"check": "status_no_sensitive_paths", "expected": "no db/workspace keys", "got": sorted(status_payload.keys())})
+        search_flag_payload = checks["search_flag_injection"].get("payload", {})  # type: ignore[union-attr]
+        rendered_flag_payload = json.dumps(search_flag_payload, ensure_ascii=False)
+        if "Usage:" in rendered_flag_payload or "usage:" in rendered_flag_payload:
+            failures.append({"check": "search_flag_injection_no_help_output", "expected": "no CLI help text", "got": "help-like output"})
         rendered = json.dumps(artifacts, ensure_ascii=False)
         for token_name, token in {"read": READ_TOKEN, "write": WRITE_TOKEN, "admin": ADMIN_TOKEN, "owner": OWNER_TOKEN}.items():
             if token in rendered:

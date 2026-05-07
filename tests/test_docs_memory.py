@@ -207,6 +207,72 @@ third paragraph
 
         conn.close()
 
+    def test_docs_ingest_skips_noexport_and_secret_like_chunks(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "safe.md").write_text("# Safe\n\n曦曦 is Lady H / 何曦.", encoding="utf-8")
+            (root / "private.md").write_text("# Private\n\n[NOEXPORT] do not expose this chunk", encoding="utf-8")
+            (root / "secret.md").write_text("# Secret\n\napi_key=sk-proj-abcdefghijklmnop1234567890", encoding="utf-8")
+
+            ingest_args = type(
+                "Args",
+                (),
+                {
+                    "path": [str(root)],
+                    "max_chars": 1400,
+                    "embed": False,
+                    "batch": 32,
+                    "model": "test-model",
+                    "base_url": None,
+                    "json": True,
+                },
+            )()
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_docs_ingest(conn, ingest_args)
+            payload = json.loads(buf.getvalue())
+
+            self.assertEqual(payload["chunks_inserted"], 1)
+            self.assertEqual(payload["chunks_skipped_private"], 1)
+            self.assertEqual(payload["chunks_skipped_secret_like"], 1)
+            rows = conn.execute("SELECT text FROM docs_chunks").fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertIn("曦曦", rows[0]["text"])
+        conn.close()
+
+    def test_docs_search_cjk_fallback_finds_literal_term(self):
+        conn = _connect(":memory:")
+        self._insert_doc_chunk(conn, repo="workspace", rel_path="memory/2026-05-07.md", title="Memory", text="Lady H / 何曦 / 曦曦 = kawaii technical partner")
+        conn.commit()
+
+        search_args = type(
+            "Args",
+            (),
+            {
+                "query": "曦曦",
+                "limit": 5,
+                "fts_k": 10,
+                "vec_k": 10,
+                "k": 60,
+                "scope_repos": None,
+                "trace": True,
+                "model": "text-embedding-3-small",
+                "base_url": "https://api.openai.com/v1",
+                "json": True,
+            },
+        )()
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_docs_search(conn, search_args)
+        out = json.loads(buf.getvalue())
+
+        self.assertGreaterEqual(len(out["results"]), 1)
+        self.assertIn("曦曦", out["results"][0]["text"])
+        conn.close()
+
     def test_docs_search_scope_repos_filters_fts_results(self):
         conn = _connect(":memory:")
         self._insert_doc_chunk(conn, repo="repo-a", rel_path="alpha.md", title="Alpha", text="target phrase for scoped docs test")

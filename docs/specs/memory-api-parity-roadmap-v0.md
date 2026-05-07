@@ -1,6 +1,6 @@
 # Memory API Parity Roadmap v0
 
-Date: 2026-05-08
+Date: 2026-05-08 Asia/Taipei / 2026-05-07 UTC
 Line: `openclaw-mem` canonical API parity
 Trigger: CK requested that authorized `openclaw-mem` API readers can find the same non-secret information Lyria can find locally.
 
@@ -10,7 +10,7 @@ Authorized `openclaw-mem` API readers MUST be able to retrieve all non-secret, n
 
 Plain-language contract:
 
-> `openclaw-mem API` is the canonical read bridge for shareable OpenClaw memory. A no-result response is only authoritative when the API reports the corpus as parity-healthy for the requested scope.
+> `openclaw-mem API` is the canonical read bridge for shareable OpenClaw memory. A no-result response is only authoritative when `/v1/status` reports `corpus_status.parity_state = "healthy"` for the requested scope.
 
 ## Non-goals
 
@@ -26,16 +26,27 @@ Default API-readable corpus, subject to redaction and scope controls:
 
 1. `MEMORY.md` — curated durable memory.
 2. `memory/YYYY-MM-DD.md` — daily append-only memory logs.
-3. selected bootstrap authority files when configured: `AGENTS.md`, `SOUL.md`, `USER.md`.
+3. selected bootstrap authority files by default for owner/workspace-local API surfaces: `AGENTS.md`, `SOUL.md`, `USER.md`. Remote/shared read tokens may receive a narrower configured corpus, but status must then report `partial`, not `healthy`.
 4. `openclaw-mem` observations, episodes, proposals, and existing docs chunks.
 5. Optional configured docs/project notes.
+
+Explicitly excluded from v0 parity unless separately configured: raw session transcripts, tool stdout/stderr artifacts, `.state/` scratch receipts, repo internals, and project notes outside the configured corpus roots. Reason: these are not stable memory surfaces, may contain secrets or incidental private content, and need their own redaction/retention policy before being part of the canonical API bridge.
+
+Conflict precedence when multiple sources disagree:
+
+1. workspace authority files (`AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`);
+2. daily memory logs (`memory/YYYY-MM-DD.md`), newest relevant entry wins unless an authority file overrides;
+3. curated observations/proposals;
+4. episodes and docs chunks.
 
 Default exclusions:
 
 - files/directories outside configured workspace/corpus roots;
 - paths or chunks marked `[SECRET]`, `[PRIVATE]`, `[NOEXPORT]`, `[NOMEM]`;
-- detected secret-like values unless redacted safely;
+- detected secret-like chunks are skipped in v0; future redaction may preserve non-secret surrounding text only after a dedicated verifier proves it safe;
 - scopes not authorized for the caller/token.
+
+Authorization model for v0: token-bound, localhost/private-route only, role/capability gated by the existing gateway token model. `read` tokens can search/pack the configured shareable corpus; private/scoped corpus expansion requires an explicit higher-scope configuration and must be visible in `/v1/status`.
 
 ## Phase roadmap
 
@@ -43,7 +54,7 @@ Default exclusions:
 
 - Document the API parity invariant.
 - Document no-result semantics: `result_count=0` means no match only inside the reported corpus/scope.
-- Gateway diagnostics/status must expose corpus completeness without leaking literal private paths.
+- Gateway diagnostics/status must expose corpus completeness without leaking literal private paths. Phase 5 owns the detailed status schema; Phase 0 owns the contract that no-result semantics depend on that status.
 
 ### Phase 1 — Canonical corpus map
 
@@ -74,7 +85,9 @@ Golden query fixture set:
 - `櫻花刀舞`
 - `Store Pack Observe`
 
-Verifier rule: if local corpus contains a golden fact and API `/v1/search` or `/v1/pack` misses it while corpus is parity-enabled, the parity smoke fails.
+Verifier rule: if local corpus contains a golden fact and API `/v1/search` or `/v1/pack` misses it while `corpus_status.parity_state = "healthy"`, the parity smoke fails.
+
+Corpus discovery verifier: compare the configured workspace Markdown source set (`MEMORY.md`, `memory/*.md`, default authority files) against indexed `docs_chunks` source paths. If any configured readable source is absent and not explicitly skipped/redacted, status must be `partial` or the smoke fails.
 
 ### Phase 5 — Honest gateway status
 
@@ -106,8 +119,13 @@ uv run python tools/gateway_smoke.py
 Additional parity fixture smoke:
 
 ```bash
-uv run openclaw-mem docs ingest --db <temp-db> --path <fixture-workspace>/MEMORY.md --path <fixture-workspace>/memory --no-embed --json
-uv run openclaw-mem docs search --db <temp-db> 曦曦 --json
+tmp=$(mktemp -d)
+mkdir -p "$tmp/ws/memory"
+printf '# Memory\n\nCK timezone: Asia/Taipei\n' > "$tmp/ws/MEMORY.md"
+printf 'Lady H / 何曦 / 曦曦 = kawaii technical partner.\n' > "$tmp/ws/memory/2026-05-07.md"
+printf '[NOEXPORT] hidden fixture.\n' > "$tmp/ws/memory/2026-05-06.md"
+uv run openclaw-mem docs ingest --db "$tmp/mem.sqlite" --path "$tmp/ws/MEMORY.md" --path "$tmp/ws/memory" --no-embed --json
+uv run openclaw-mem docs search --db "$tmp/mem.sqlite" 曦曦 --json
 ```
 
 Expected acceptance:

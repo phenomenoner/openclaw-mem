@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -107,6 +108,10 @@ class GatewayConfig:
         audit_log: Optional[str] = None,
         audit_max_bytes: int = DEFAULT_AUDIT_MAX_BYTES,
         idempotency_ttl_sec: int = DEFAULT_IDEMPOTENCY_TTL_SEC,
+        surface_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        default_scope: Optional[str] = None,
+        auto_index_workspace_memory: bool = True,
     ) -> None:
         self.db = db
         self.workspace = workspace
@@ -119,6 +124,10 @@ class GatewayConfig:
         self.audit_log = audit_log
         self.audit_max_bytes = int(audit_max_bytes)
         self.idempotency_ttl_sec = int(idempotency_ttl_sec)
+        self.surface_id = (surface_id or "").strip() or None
+        self.agent_id = (agent_id or "").strip() or None
+        self.default_scope = (default_scope or "").strip() or None
+        self.auto_index_workspace_memory = bool(auto_index_workspace_memory)
 
 
 def _truthy(value: Optional[str]) -> bool:
@@ -237,6 +246,10 @@ def config_from_env(args: argparse.Namespace) -> GatewayConfig:
         audit_log=args.audit_log or os.getenv("OPENCLAW_MEM_GATEWAY_AUDIT_LOG"),
         audit_max_bytes=int(os.getenv("OPENCLAW_MEM_GATEWAY_AUDIT_MAX_BYTES", str(DEFAULT_AUDIT_MAX_BYTES))),
         idempotency_ttl_sec=int(os.getenv("OPENCLAW_MEM_GATEWAY_IDEMPOTENCY_TTL_SEC", str(DEFAULT_IDEMPOTENCY_TTL_SEC))),
+        surface_id=getattr(args, "surface_id", None) or os.getenv("OPENCLAW_MEM_GATEWAY_SURFACE_ID"),
+        agent_id=getattr(args, "agent_id", None) or os.getenv("OPENCLAW_MEM_AGENT_ID"),
+        default_scope=getattr(args, "default_scope", None) or os.getenv("OPENCLAW_MEM_DEFAULT_SCOPE"),
+        auto_index_workspace_memory=not _truthy(os.getenv("OPENCLAW_MEM_GATEWAY_DISABLE_WORKSPACE_MEMORY_INDEX")),
     )
 
 
@@ -247,6 +260,210 @@ def _token_id(token: str) -> str:
 def _digest_payload(payload: Mapping[str, Any]) -> str:
     data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(data).hexdigest()
+
+
+def _path_fingerprint(value: Optional[str]) -> Optional[str]:
+    """Return a stable public-safe identifier for a local path without exposing it."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        canonical = str(Path(raw).expanduser().resolve())
+    except Exception:
+        canonical = raw
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def _surface_identity(config: GatewayConfig, *, gateway_url_hint: Optional[str] = None) -> Dict[str, Any]:
+    identity: Dict[str, Any] = {
+        "schema": "openclaw-mem.gateway.surface-identity.v1",
+        "service": "openclaw-mem-gateway",
+        "surface_id": config.surface_id,
+        "agent_id": config.agent_id,
+        "default_scope": config.default_scope,
+        "db_configured": bool(config.db),
+        "db_fingerprint": _path_fingerprint(config.db),
+        "workspace_configured": bool(config.workspace),
+        "workspace_fingerprint": _path_fingerprint(config.workspace),
+        "direct_store_enabled": config.allow_direct_store,
+        "source_lanes": ["store", "episodes", "pack", "search", "docs_memory", "workspace_markdown"],
+        "auto_index_workspace_memory": config.auto_index_workspace_memory,
+    }
+    if gateway_url_hint:
+        identity["gateway_url_hint"] = gateway_url_hint
+    return {k: v for k, v in identity.items() if v is not None}
+
+
+def _query_variants(query: str) -> List[str]:
+    raw = str(query or "").strip()
+    variants: List[str] = []
+    if not raw:
+        return variants
+
+    def add(value: str) -> None:
+        cleaned = " ".join(str(value or "").strip().split())
+        if cleaned and cleaned != raw and cleaned not in variants:
+            variants.append(cleaned)
+
+    punctuation_normalized = re.sub(r"[^\w\s]", " ", raw, flags=re.UNICODE)
+    add(punctuation_normalized)
+    # Common misspelling observed in cross-agent handoff: yijin-loop-engine -> yijing-loop-engine.
+    if re.search(r"yijin", raw, flags=re.IGNORECASE):
+        add(re.sub(r"yijin", "yijing", raw, flags=re.IGNORECASE))
+    return variants[:5]
+
+
+def _search_result_count(receipt: Mapping[str, Any]) -> int:
+    result = receipt.get("result")
+    if isinstance(result, list):
+        return len(result)
+    if isinstance(result, Mapping):
+        docs_results = result.get("results")
+        if isinstance(docs_results, list):
+            return len(docs_results)
+    return 0
+
+
+def _pack_result_count(receipt: Mapping[str, Any]) -> int:
+    result = receipt.get("result")
+    if not isinstance(result, Mapping):
+        return 0
+    context_pack = result.get("context_pack")
+    if isinstance(context_pack, Mapping):
+        items = context_pack.get("items")
+        if isinstance(items, list):
+            return len(items)
+    citations = result.get("citations")
+    if isinstance(citations, list):
+        return len(citations)
+    return 0
+
+
+def _workspace_memory_paths(config: GatewayConfig) -> List[str]:
+    workspace = str(config.workspace or "").strip()
+    if not workspace:
+        return []
+    root = Path(workspace).expanduser()
+    candidates = [
+        root / "MEMORY.md",
+        root / "memory",
+        root / "AGENTS.md",
+        root / "SOUL.md",
+        root / "USER.md",
+    ]
+    return [str(p) for p in candidates if p.exists()]
+
+
+def _corpus_status(config: GatewayConfig) -> Dict[str, Any]:
+    paths = _workspace_memory_paths(config)
+    return {
+        "schema": "openclaw-mem.gateway.corpus-status.v1",
+        "parity_state": "partial" if (config.workspace and not config.auto_index_workspace_memory) else ("healthy" if paths else "unknown"),
+        "workspace_memory_index_enabled": bool(config.auto_index_workspace_memory and config.workspace),
+        "workspace_memory_sources_configured": len(paths),
+        "source_path_fingerprints": [_path_fingerprint(p) for p in paths],
+        "redaction_policy": {
+            "deny_tags": ["[SECRET]", "[PRIVATE]", "[NOEXPORT]", "[NOMEM]"],
+            "secret_like_chunks": "skipped",
+        },
+    }
+
+
+def _refresh_workspace_memory_corpus(config: GatewayConfig) -> Dict[str, Any]:
+    paths = _workspace_memory_paths(config)
+    status: Dict[str, Any] = _corpus_status(config)
+    status.update({"refresh_attempted": False, "refresh_ok": None})
+    if not config.auto_index_workspace_memory or not paths:
+        return status
+    argv = ["docs", "ingest", "--no-embed", "--json"]
+    if config.db:
+        argv.extend(["--db", config.db])
+    for path in paths:
+        argv.extend(["--path", path])
+    receipt = _run_cli(config, argv)
+    result = receipt.get("result") if isinstance(receipt, Mapping) else None
+    status.update({
+        "refresh_attempted": True,
+        "refresh_ok": bool(receipt.get("ok")),
+        "last_refresh": result if isinstance(result, Mapping) else None,
+    })
+    return status
+
+
+def _docs_pack_receipt_from_search(query: str, docs_receipt: Mapping[str, Any], *, limit: int, budget_tokens: int) -> Dict[str, Any]:
+    result = docs_receipt.get("result")
+    docs_results = result.get("results") if isinstance(result, Mapping) else []
+    if not isinstance(docs_results, list):
+        docs_results = []
+    items: List[Dict[str, Any]] = []
+    citations: List[Dict[str, Any]] = []
+    used = 0
+    for row in docs_results[: max(1, int(limit))]:
+        if not isinstance(row, Mapping):
+            continue
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        estimated = max(1, len(text) // 4)
+        if used + estimated > max(1, int(budget_tokens)) and items:
+            break
+        used += estimated
+        record_ref = str(row.get("recordRef") or f"docs://{row.get('repo')}/{row.get('path')}#{row.get('chunk_id')}")
+        item = {
+            "recordRef": record_ref,
+            "layer": "L1",
+            "type": "docs_memory",
+            "summary": text,
+            "text": text,
+            "kind": row.get("doc_kind"),
+            "repo": row.get("repo"),
+            "path": row.get("path"),
+            "heading_path": row.get("heading_path"),
+        }
+        items.append(item)
+        citations.append({"recordRef": record_ref, "url": None})
+    bundle_text = "\n".join(f"- [{item['recordRef']}] {item['text']}" for item in items)
+    return {
+        "ok": True,
+        "exit_code": 0,
+        "result": {
+            "bundle_text": bundle_text,
+            "items": items,
+            "citations": citations,
+            "context_pack": {
+                "schema": "openclaw-mem.context-pack.v1",
+                "meta": {"query": query, "budgetTokens": int(budget_tokens), "maxItems": int(limit), "source": "docs_memory_fallback"},
+                "bundle_text": bundle_text,
+                "items": items,
+            },
+            "source": "docs_memory_fallback",
+        },
+    }
+
+
+def _not_found_diagnostic(
+    *,
+    endpoint: str,
+    query: str,
+    result_count: int,
+    config: GatewayConfig,
+    gateway_url_hint: Optional[str] = None,
+    searched_routes: Optional[List[str]] = None,
+    fallback_attempts: Optional[List[Mapping[str, Any]]] = None,
+) -> Dict[str, Any]:
+    return {
+        "schema": "openclaw-mem.gateway.query-diagnostic.v1",
+        "endpoint": endpoint,
+        "query": query,
+        "normalized_query": " ".join(str(query or "").strip().split()),
+        "result_count": int(result_count),
+        "empty": int(result_count) == 0,
+        "query_variants": _query_variants(query),
+        "searched_routes": searched_routes or [],
+        "fallback_attempts": list(fallback_attempts or []),
+        "surface_identity": _surface_identity(config, gateway_url_hint=gateway_url_hint),
+        "hint": "Empty results mean this specific surface had no match; compare db_fingerprint/surface_id/scope across agents before concluding shared memory is missing." if int(result_count) == 0 else None,
+    }
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: Mapping[str, Any]) -> None:
@@ -359,6 +576,12 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
     def _role_and_token_id(self) -> Tuple[Optional[str], Optional[str]]:
         policy, token_id = self._policy_and_token_id()
         return (policy.role if policy else None), token_id
+
+    def _gateway_url_hint(self) -> Optional[str]:
+        host = str(self.headers.get("Host") or "").strip()
+        if not host:
+            return None
+        return f"http://{host}"
 
     def _capabilities_for_request(self) -> Tuple[Optional[frozenset[str]], Optional[str], Optional[str]]:
         policy, token_id = self._policy_and_token_id()
@@ -529,6 +752,8 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
                 "db_configured": bool(self.config.db),
                 "workspace_configured": bool(self.config.workspace),
                 "direct_store_enabled": self.config.allow_direct_store,
+                "surface_identity": _surface_identity(self.config, gateway_url_hint=self._gateway_url_hint()),
+                "corpus_status": _corpus_status(self.config),
             }
             _json_response(self, HTTPStatus.OK, payload)
             return
@@ -568,27 +793,81 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         body = self._read_json_body()
         query = _require_text(body, "query", max_chars=2000)
         limit = _coerce_int(body.get("limit"), default=10, maximum=100)
-        argv = ["search", "--limit", str(limit), "--json"]
-        if self.config.db:
-            argv.extend(["--db", self.config.db])
-        argv.extend(["--", query])
-        receipt = _run_cli(self.config, argv)
-        _json_response(self, HTTPStatus.OK, {"ok": True, "receipt": receipt})
+        corpus_status = _refresh_workspace_memory_corpus(self.config)
+
+        def run_search(search_query: str) -> Dict[str, Any]:
+            argv = ["search", "--limit", str(limit), "--json"]
+            if self.config.db:
+                argv.extend(["--db", self.config.db])
+            argv.extend(["--", search_query])
+            return _run_cli(self.config, argv)
+
+        def run_docs_search(search_query: str) -> Dict[str, Any]:
+            argv = ["docs", "search", "--limit", str(limit), "--json"]
+            if self.config.db:
+                argv.extend(["--db", self.config.db])
+            argv.append(search_query)
+            return _run_cli(self.config, argv)
+
+        receipt = run_search(query)
+        result_count = _search_result_count(receipt)
+        fallback_attempts: List[Mapping[str, Any]] = []
+        searched_routes = ["cli.search"]
+        if result_count == 0:
+            for variant in _query_variants(query):
+                variant_receipt = run_search(variant)
+                variant_count = _search_result_count(variant_receipt)
+                fallback_attempts.append({"route": "cli.search", "query": variant, "result_count": variant_count})
+                if variant_count > 0:
+                    receipt = variant_receipt
+                    result_count = variant_count
+                    break
+        if result_count == 0:
+            searched_routes.append("cli.docs.search")
+            docs_receipt = run_docs_search(query)
+            docs_count = _search_result_count(docs_receipt)
+            fallback_attempts.append({"route": "cli.docs.search", "query": query, "result_count": docs_count})
+            if docs_count > 0:
+                receipt = docs_receipt
+                result_count = docs_count
+            else:
+                for variant in _query_variants(query):
+                    variant_docs_receipt = run_docs_search(variant)
+                    variant_docs_count = _search_result_count(variant_docs_receipt)
+                    fallback_attempts.append({"route": "cli.docs.search", "query": variant, "result_count": variant_docs_count})
+                    if variant_docs_count > 0:
+                        receipt = variant_docs_receipt
+                        result_count = variant_docs_count
+                        break
+        diagnostic = _not_found_diagnostic(
+            endpoint="/v1/search",
+            query=query,
+            result_count=result_count,
+            config=self.config,
+            gateway_url_hint=self._gateway_url_hint(),
+            searched_routes=searched_routes,
+            fallback_attempts=fallback_attempts,
+        )
+        diagnostic["corpus_status"] = corpus_status
+        _json_response(self, HTTPStatus.OK, {"ok": True, "receipt": receipt, "diagnostic": diagnostic})
 
     def _handle_pack(self) -> None:
         if self._require_capability("memory.pack") is None:
             return
         body = self._read_json_body()
         query = _require_text(body, "query", max_chars=4000)
+        corpus_status = _refresh_workspace_memory_corpus(self.config)
+        limit = _coerce_int(body.get("limit"), default=12, maximum=50)
+        budget_tokens = _coerce_int(body.get("budget_tokens"), default=1200, maximum=20000)
         argv = [
             "pack",
             "--json",
             "--query",
             query,
             "--limit",
-            str(_coerce_int(body.get("limit"), default=12, maximum=50)),
+            str(limit),
             "--budget-tokens",
-            str(_coerce_int(body.get("budget_tokens"), default=1200, maximum=20000)),
+            str(budget_tokens),
         ]
         query_en = _optional_text(body, "query_en", max_chars=4000)
         if query_en:
@@ -599,7 +878,32 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
         if self.config.db:
             argv.extend(["--db", self.config.db])
         receipt = _run_cli(self.config, argv)
-        _json_response(self, HTTPStatus.OK, {"ok": True, "receipt": receipt})
+        searched_routes = ["cli.pack"]
+        fallback_attempts: List[Mapping[str, Any]] = []
+        result_count = _pack_result_count(receipt)
+        if result_count == 0:
+            docs_argv = ["docs", "search", "--limit", str(limit), "--json"]
+            if self.config.db:
+                docs_argv.extend(["--db", self.config.db])
+            docs_argv.append(query)
+            docs_receipt = _run_cli(self.config, docs_argv)
+            docs_count = _search_result_count(docs_receipt)
+            searched_routes.append("cli.docs.search")
+            fallback_attempts.append({"route": "cli.docs.search", "query": query, "result_count": docs_count})
+            if docs_count > 0:
+                receipt = _docs_pack_receipt_from_search(query, docs_receipt, limit=limit, budget_tokens=budget_tokens)
+                result_count = _pack_result_count(receipt)
+        diagnostic = _not_found_diagnostic(
+            endpoint="/v1/pack",
+            query=query,
+            result_count=result_count,
+            config=self.config,
+            gateway_url_hint=self._gateway_url_hint(),
+            searched_routes=searched_routes,
+            fallback_attempts=fallback_attempts,
+        )
+        diagnostic["corpus_status"] = corpus_status
+        _json_response(self, HTTPStatus.OK, {"ok": True, "receipt": receipt, "diagnostic": diagnostic})
 
     def _handle_episodes_query(self) -> None:
         if self._require_capability("episodes.query") is None:
@@ -789,6 +1093,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--allow-direct-store", action="store_true", help="Enable admin-only /v1/store durable writes")
     parser.add_argument("--export-root", default=None, help="Allowlisted root for admin canonical exports")
     parser.add_argument("--audit-log", default=None, help="Append-only JSONL audit log for gateway write/admin actions")
+    parser.add_argument("--surface-id", default=None, help="Public-safe label for this memory surface, returned in diagnostics")
+    parser.add_argument("--agent-id", default=None, help="Public-safe agent id label for diagnostics")
+    parser.add_argument("--default-scope", default=None, help="Default memory scope label for diagnostics")
     parser.add_argument("--allow-unauthenticated", action="store_true", help="INSECURE local dev only; disables bearer auth")
     args = parser.parse_args(argv)
 

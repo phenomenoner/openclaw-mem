@@ -33,7 +33,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Dict, Any, List, Optional, Set, Tuple
+from typing import Iterable, Dict, Any, List, Mapping, Optional, Set, Tuple
 
 from openclaw_mem import __version__
 from openclaw_mem import defaults
@@ -5394,7 +5394,8 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
                    snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
                    snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
-                   bm25(observations_fts) AS score
+                   bm25(observations_fts) AS score,
+                   o.detail_json AS detail_json
             FROM observations_fts
             JOIN observations o ON o.id = observations_fts.rowid
             WHERE observations_fts MATCH ?
@@ -5425,6 +5426,7 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if not rows and _has_cjk(q):
         rows = _search_cjk_fallback(conn, q, args.limit)
 
+    rows = _filter_superseded_rows(rows)
     out = _search_prefer_synthesis_rows(conn, rows=rows, limit=max(1, int(args.limit)))
     _emit(out, args.json)
 
@@ -5552,6 +5554,20 @@ def _docs_embedding_input(*, title: str, heading_path: str, text: str) -> str:
     return "\n".join(parts)
 
 
+DOCS_MEMORY_DENY_TAGS = ("[SECRET]", "[PRIVATE]", "[NOEXPORT]", "[NOMEM]")
+
+
+def _docs_chunk_exclusion_reason(text: str) -> Optional[str]:
+    compact = str(text or "")
+    upper = compact.upper()
+    for tag in DOCS_MEMORY_DENY_TAGS:
+        if tag in upper:
+            return "deny_tag"
+    if _looks_like_secret(compact):
+        return "secret_like"
+    return None
+
+
 def cmd_docs_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     files, missing = _docs_collect_markdown_files(list(getattr(args, "path", []) or []))
     max_chars = max(200, int(getattr(args, "max_chars", 1400) or 1400))
@@ -5566,6 +5582,8 @@ def cmd_docs_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "chunks_updated": 0,
         "chunks_unchanged": 0,
         "chunks_deleted": 0,
+        "chunks_skipped_private": 0,
+        "chunks_skipped_secret_like": 0,
         "embedded": 0,
     }
 
@@ -5592,6 +5610,14 @@ def cmd_docs_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
         seen_chunk_ids: set[str] = set()
         for chunk in chunks:
+            exclusion_reason = _docs_chunk_exclusion_reason("\n".join([chunk.heading_path, chunk.title, chunk.text]))
+            if exclusion_reason:
+                if exclusion_reason == "secret_like":
+                    stats["chunks_skipped_secret_like"] = int(stats["chunks_skipped_secret_like"]) + 1
+                else:
+                    stats["chunks_skipped_private"] = int(stats["chunks_skipped_private"]) + 1
+                continue
+
             seen_chunk_ids.add(chunk.chunk_id)
             chunk_hash = chunk_content_hash(
                 heading_path=chunk.heading_path,
@@ -5783,6 +5809,38 @@ def _docs_fts_rows(
     return [dict(r) for r in rows]
 
 
+def _docs_cjk_rows(
+    conn: sqlite3.Connection,
+    query: str,
+    top_k: int,
+    *,
+    scope_repos: Optional[Iterable[str]] = None,
+) -> List[Dict[str, Any]]:
+    terms = _cjk_terms(query)
+    if not terms:
+        return []
+    repo_filter = _docs_scope_repos(scope_repos)
+    like_vals = [f"%{t}%" for t in terms]
+    score_expr = " + ".join(["CASE WHEN c.text LIKE ? THEN 1 ELSE 0 END" for _ in like_vals])
+    where_expr = " OR ".join(["c.text LIKE ?" for _ in like_vals])
+    repo_sql = ""
+    repo_params: List[Any] = []
+    if repo_filter:
+        placeholders = ",".join(["?"] * len(repo_filter))
+        repo_sql = f" AND c.repo IN ({placeholders})"
+        repo_params = list(repo_filter)
+    sql = f"""
+            SELECT c.id, c.doc_id, c.chunk_id, c.repo, c.path, c.doc_kind, c.heading_path, c.title, c.text,
+                   -1.0 * ({score_expr}) AS score
+            FROM docs_chunks c
+            WHERE ({where_expr}){repo_sql}
+            ORDER BY score ASC, c.id ASC
+            LIMIT ?
+            """
+    rows = conn.execute(sql, (*like_vals, *like_vals, *repo_params, int(top_k))).fetchall()
+    return [dict(r) for r in rows]
+
+
 def _docs_vec_candidates_exist(
     conn: sqlite3.Connection,
     *,
@@ -5875,6 +5933,8 @@ def cmd_docs_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     scope_repos = _docs_scope_repos(getattr(args, "scope_repos", None))
 
     fts_rows = _docs_fts_rows(conn, query, fts_k, scope_repos=scope_repos)
+    if not fts_rows and _has_cjk(query):
+        fts_rows = _docs_cjk_rows(conn, query, fts_k, scope_repos=scope_repos)
     fts_ids = [int(r["id"]) for r in fts_rows]
 
     vec_rows: List[Dict[str, Any]] = []
@@ -7463,6 +7523,75 @@ def _pack_parse_detail_json(raw: Any) -> Dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+def _supersede_ref_to_id(raw: Any) -> Optional[int]:
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return raw if raw > 0 else None
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    m = re.fullmatch(r"(?:obs:)?(\d+)", text, flags=re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        value = int(m.group(1))
+    except Exception:
+        return None
+    return value if value > 0 else None
+
+
+def _superseded_observation_ids(detail_map: Mapping[int, Mapping[str, Any]]) -> set[int]:
+    superseded: set[int] = set()
+    for detail in detail_map.values():
+        if not isinstance(detail, Mapping):
+            continue
+        provenance = detail.get("provenance")
+        if not isinstance(provenance, Mapping):
+            continue
+        raw_refs = provenance.get("supersedes")
+        if raw_refs is None:
+            continue
+        if isinstance(raw_refs, (str, int)) and not isinstance(raw_refs, bool):
+            values = [raw_refs]
+        elif isinstance(raw_refs, list):
+            values = raw_refs
+        else:
+            continue
+        for raw in values:
+            rid = _supersede_ref_to_id(raw)
+            if rid is not None:
+                superseded.add(rid)
+    return superseded
+
+
+def _filter_superseded_rows(rows: List[Any]) -> List[Any]:
+    if not rows:
+        return rows
+    detail_map: Dict[int, Dict[str, Any]] = {}
+    for row in rows:
+        try:
+            rid = int(row["id"])
+        except Exception:
+            continue
+        try:
+            raw_detail = row["detail_json"]
+        except Exception:
+            raw_detail = None
+        detail_map[rid] = _pack_parse_detail_json(raw_detail)
+    superseded = _superseded_observation_ids(detail_map)
+    if not superseded:
+        return rows
+    return [row for row in rows if int(row["id"]) not in superseded]
+
+
+def _filter_superseded_ids(ordered_ids: List[int], detail_map: Mapping[int, Mapping[str, Any]]) -> List[int]:
+    superseded = _superseded_observation_ids(detail_map)
+    if not superseded:
+        return ordered_ids
+    return [rid for rid in ordered_ids if int(rid) not in superseded]
 
 
 def _normalize_importance_label(raw: Any) -> Optional[str]:
@@ -9183,6 +9312,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         q_detail = f"SELECT id, detail_json FROM observations WHERE id IN ({','.join(['?']*len(ordered_ids))})"
         detail_rows = conn.execute(q_detail, ordered_ids).fetchall()
         detail_map = {int(r["id"]): _pack_parse_detail_json(r["detail_json"]) for r in detail_rows}
+
+    ordered_ids = _filter_superseded_ids(ordered_ids, detail_map)
 
     trust_policy = _pack_trust_apply_policy(
         ordered_ids=ordered_ids,
