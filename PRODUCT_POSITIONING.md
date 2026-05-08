@@ -1,10 +1,10 @@
 # Product positioning
 
-`openclaw-mem` is a local-first context supply chain for OpenClaw operators who need memory they can inspect, cite, and roll back.
+`openclaw-mem` is a local-first memory governance layer and context supply chain for teams running AI agents that need memory they can inspect, cite, constrain, and roll back. OpenClaw is the first-class deployment target.
 
-It is not a generic vector database, a hosted memory SaaS, or a second hidden brain. The product promise is narrower and sharper:
+It is not trying to be a generic memory SDK, hosted memory API, vector database, or opaque second brain. Its job is narrower: govern what becomes context.
 
-> Store operational memory records locally, pack only the useful context with citations and receipts, and observe why each memory affected the agent.
+> Store operational records locally. Pack only bounded, cited context. Observe why each memory was included, excluded, or quarantined.
 
 ## Core product
 
@@ -30,6 +30,7 @@ The first user is an advanced OpenClaw operator or agent-infra builder who has a
 | Alternative | What `openclaw-mem` adds |
 | --- | --- |
 | Native memory slots | sidecar-first audit, traceable packs, governed promotion, one-line rollback posture |
+| Memory SDKs / engines | governance over storage: trust policy, pack receipts, citation coverage, and rollback posture |
 | Vector databases | operational records, trust policy, citations, and pack receipts instead of embeddings alone |
 | Hosted memory APIs | local artifacts, inspectable SQLite/JSONL, no required SaaS hop |
 | Plain logs | search, timeline, get, and `ContextPack` assembly for agent recall |

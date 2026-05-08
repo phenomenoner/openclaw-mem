@@ -1,8 +1,8 @@
 # openclaw-mem
 
-**Memory your agent can’t lie about — Store / Pack / Observe for local, cited, rollbackable context.**
+**Local-first context supply chain for AI agents — Store / Pack / Observe with citations, trust-policy receipts, and rollback.**
 
-`openclaw-mem` turns agent work into a durable local memory trail, then builds bounded `ContextPack` bundles with citations, trust-policy receipts, and traceable include/exclude reasons. Start with a plain SQLite sidecar beside OpenClaw. Promote to the optional mem engine only after the local proof earns the extra surface.
+`openclaw-mem` turns agent activity into a durable local memory trail and assembles bounded `ContextPack` bundles whose include/exclude reasons are inspectable. Use it first as a plain SQLite sidecar; promote to deeper OpenClaw integration only after the local proof earns the extra surface.
 
 ## Start here
 
@@ -17,15 +17,16 @@
 
 | Surface | Status | Meaning |
 | --- | --- | --- |
-| Sidecar observation capture | Automatic when the plugin is enabled | Captures denoised JSONL observations and backend/action annotations. |
+| Sidecar observation capture | Automatic when the plugin is enabled | Captures JSONL observations with backend/action annotations. |
 | Harvest, triage, and graph capture | Scheduled on configured hosts | Converts captured records into searchable stores and receipts. |
 | `pack` | CLI core | Produces bounded `ContextPack` output with citations and trace receipts. |
-| Harness-persistent memory | Gateway + CLI install card | Installs a persistent Codex / Claude / Gemini / generic agent memory posture backed by capability-scoped gateway tokens and parity-aware read diagnostics. |
+| Harness-persistent memory | Opt-in via Gateway + CLI install card | Installs a persistent Codex / Claude / Gemini / generic agent memory posture backed by capability-scoped gateway tokens and parity-aware read diagnostics. |
 | Graph routing, optimize assist, continuity, GBrain | Advanced Labs / opt-in lanes | Available for mature operators, but not part of the first evaluation path. |
 | Mem-engine Proactive Pack | Optional promotion | Bounded pre-reply recall orchestration after explicit engine adoption. |
 
-## What you get
+## Why it is different
 
+- **Governance before recall theater** — trust policy, citations, trace receipts, and rollback posture make memory inclusion inspectable instead of mystical.
 - **Local-first by default** — JSONL + SQLite, no external database required.
 - **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
 - **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, trust-policy receipts, and trace-backed debugging.
@@ -94,9 +95,9 @@ The product loop is simple and stable:
 
 When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
 
-For external AI harnesses, `openclaw-mem harness install` writes a managed persistent instruction card for Codex, Claude, Gemini, or a generic agent surface. For Codex specifically, `openclaw-mem codex install` adds a stronger Superpowers-style surface: global Codex card, generated CLI shim bundle, env/gateway checks, and `codex doctor` verification. The card points the harness at `OPENCLAW_MEM_GATEWAY_URL` / `OPENCLAW_MEM_GATEWAY_TOKEN`; raw tokens are never written into prompt files. Capability-scoped tokens let operators choose read-only, proposal/append write, admin, or owner-equivalent direct-store authority. Gateway-backed search is literal-friendly for common product names: v1.9.10 retries punctuation-heavy terms such as `openclaw-mem` with a normalized FTS fallback instead of surfacing `cli_failed`. v1.9.11 adds read-only workspace Markdown read-through for `/v1/search`, so read-mostly gateways can still answer from configured Markdown memory when the SQLite/docs index is stale or cannot refresh. `/v1/status` reports whether the configured corpus is `healthy`, `partial`, or still `unknown`.
+For external AI harnesses, `openclaw-mem harness install` writes a managed persistent instruction card for Codex, Claude, Gemini, or a generic agent surface. The card points the harness at `OPENCLAW_MEM_GATEWAY_URL` / `OPENCLAW_MEM_GATEWAY_TOKEN`; raw tokens are never written into prompt files. Capability-scoped tokens let operators choose read-only, proposal/append write, admin, or owner-equivalent direct-store authority. For Codex specifically, `openclaw-mem codex install` adds a stronger Superpowers-style surface with generated CLI shims, env/gateway checks, and `codex doctor` verification.
 
-Read more: [Harness-persistent memory install](docs/harness-persistent-memory.md).
+Read more: [Harness-persistent memory install](docs/harness-persistent-memory.md) and the release notes for version-specific gateway behavior.
 
 ## Advanced labs
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "openclaw-context-pack"
 version = "1.9.11"
-description = "Local-first Store / Pack / Observe memory sidecar for cited, rollbackable OpenClaw context"
+description = "Local-first AI agent memory governance: Store / Pack / Observe with citations, receipts, and rollback"
 requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }

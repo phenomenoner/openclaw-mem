@@ -1,11 +1,13 @@
 # About openclaw-mem
 
-`openclaw-mem` is a **local-first context supply chain for OpenClaw**.
+`openclaw-mem` is a **local-first memory governance layer and context supply chain for AI agents** — OpenClaw-native, but not OpenClaw-only.
 
 It gives operators a durable record of what the agent actually did and a practical recall surface they can inspect.
 It also gives them a bounded packing surface they can inject, test, and roll back.
 
 ## What problem it solves
+
+The hard part is not storing more memory. It is deciding what memory is allowed to become context, then proving why.
 
 Most agent memory stories sound good until you need all of these in production:
 
@@ -19,13 +21,13 @@ Most agent memory stories sound good until you need all of these in production:
 
 ## What it does today
 
+- **Store**: JSONL/SQLite capture and ingest for local operational memory
+- **Pack**: bounded `ContextPack` output with citations, trust policy, and receipts
+- **Observe**: `timeline`, `get`, traces, and artifacts for debugging and rollback
 - local recall with `search → timeline → get`
-- compact memory packs with `pack`
-- trace receipts that show what was included or excluded
-- trust-policy controls for pack selection
 - sidecar capture on top of an existing OpenClaw install
-- optional promotion to `openclaw-mem-engine` later for hybrid recall and stronger policy controls
-- optional governed continuity side-car for derived self/continuity inspection, adjudication, public-safe summaries, and explicit control-plane receipts
+- optional promotion to `openclaw-mem-engine` later when hybrid recall and stronger policy controls justify the extra surface
+- optional advanced continuity side-car for derived self/continuity inspection, adjudication, public-safe summaries, and explicit control-plane receipts
 
 ## How the product is split
 
@@ -56,7 +58,7 @@ When the optional mem-engine role is active, this same Pack posture extends into
 
 This is the controlled next step when sidecar mode already proved useful.
 
-- can become the active OpenClaw memory backend
+- supports promotion toward active OpenClaw memory-backend ownership when that extra surface is justified
 - adds hybrid recall and tighter policy controls
 - exposes **Proactive Pack** for bounded pre-reply recall during prompt build
 - keeps rollback explicit and configuration-driven
@@ -71,7 +73,7 @@ Operators also need to see what the system kept, what it cut, and where large ra
 - artifact handles keep raw payloads off-prompt but retrievable
 - local files stay diffable and backup-friendly
 
-### Governed continuity side-car (optional)
+### Governed continuity side-car (optional / advanced)
 
 For operators who need a safer continuity surface, `openclaw-mem` also exposes a derived `continuity` lane.
 
@@ -102,6 +104,8 @@ The local-first posture keeps the base layer simple:
 ## What it is not
 
 - not a hosted SaaS memory product
+- not a general-purpose memory SDK for every agent framework
+- not a generic memory engine competing on retrieval scores alone
 - not a requirement to capture everything forever
 - not a promise that embeddings alone solve retrieval quality
 - not a requirement to replace OpenClaw native memory on day one
