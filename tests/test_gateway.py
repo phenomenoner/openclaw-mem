@@ -338,3 +338,115 @@ def test_export_path_blocks_escape_and_allows_relative(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="outside configured export root"):
         handler._resolve_export_to("../../escape")  # type: ignore[attr-defined]
+
+
+def test_refresh_workspace_memory_marks_partial_when_cli_refresh_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "memory").mkdir(parents=True)
+    (workspace / "USER.md").write_text("# USER\n", encoding="utf-8")
+    config = GatewayConfig(db=str(tmp_path / "memory.sqlite"), workspace=str(workspace), tokens={}, allow_unauthenticated=True)
+
+    def fake_run_cli(_config: GatewayConfig, argv: list[str], *, stdin: str | None = None) -> dict:
+        raise RuntimeError("cli_failed")
+
+    monkeypatch.setattr(gateway_mod, "_run_cli", fake_run_cli)
+
+    status = _refresh_workspace_memory_corpus(config)
+
+    assert status["refresh_attempted"] is True
+    assert status["refresh_ok"] is False
+    assert status["parity_state"] == "partial"
+    assert status["refresh_error"] == "cli_failed"
+
+
+def test_workspace_markdown_readthrough_finds_user_profile_and_skips_denied_chunks(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    memory = workspace / "memory"
+    memory.mkdir(parents=True)
+    (workspace / "USER.md").write_text("# USER.md\n\nName: CK Wang\nPronouns: he/him\n", encoding="utf-8")
+    (memory / "private.md").write_text("[private]\nCK Wang hidden secret phrase\n", encoding="utf-8")
+    config = GatewayConfig(db=None, workspace=str(workspace), tokens={}, allow_unauthenticated=True)
+
+    receipt = gateway_mod._workspace_markdown_search_receipt(config, "CK Wang USER.md pronouns he/him", limit=5)
+
+    rows = receipt["result"]
+    assert rows
+    assert rows[0]["id"] == "workspace:USER.md:0"
+    assert rows[0]["tool_name"] == "workspace_markdown_readthrough"
+    assert "Pronouns: he/him" in rows[0]["summary"]
+    assert all("hidden secret phrase" not in row["summary"] for row in rows)
+
+
+def test_workspace_markdown_readthrough_uses_token_matching_not_substrings(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "USER.md").write_text("# USER.md\n\nthere theater theme only\n", encoding="utf-8")
+    config = GatewayConfig(db=None, workspace=str(workspace), tokens={}, allow_unauthenticated=True)
+
+    receipt = gateway_mod._workspace_markdown_search_receipt(config, "he", limit=5)
+
+    assert receipt["result"] == []
+
+
+def test_workspace_markdown_readthrough_skips_symlink_escape(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    memory = workspace / "memory"
+    memory.mkdir(parents=True)
+    outside = tmp_path / "outside.md"
+    outside.write_text("CK Wang outside symlink content\n", encoding="utf-8")
+    (memory / "safe.md").write_text("CK Wang safe workspace content\n", encoding="utf-8")
+    symlink = memory / "escape.md"
+    try:
+        symlink.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink unavailable")
+    config = GatewayConfig(db=None, workspace=str(workspace), tokens={}, allow_unauthenticated=True)
+
+    receipt = gateway_mod._workspace_markdown_search_receipt(config, "CK Wang content", limit=10)
+
+    ids = [row["id"] for row in receipt["result"]]
+    summaries = "\n".join(row["summary"] for row in receipt["result"])
+    assert any("safe.md" in row_id for row_id in ids)
+    assert "outside symlink" not in summaries
+
+
+def test_search_handler_falls_back_to_workspace_markdown_when_index_routes_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "USER.md").write_text("# USER.md\n\nName: CK Wang\nPronouns: he/him\n", encoding="utf-8")
+    config = GatewayConfig(
+        db=str(tmp_path / "memory.sqlite"),
+        workspace=str(workspace),
+        tokens={},
+        allow_unauthenticated=True,
+        surface_id="test-surface",
+    )
+    handler = object.__new__(MemoryGatewayHandler)
+    server = type("Server", (), {"gateway_config": config})()
+    handler.server = server  # type: ignore[attr-defined]
+    handler.headers = {"Host": "127.0.0.1:18765"}  # type: ignore[attr-defined]
+    handler._require_capability = lambda capability: "read"  # type: ignore[attr-defined]
+    handler._read_json_body = lambda: {"query": "CK Wang USER.md pronouns he/him", "limit": 5}  # type: ignore[attr-defined]
+
+    def fake_run_cli(_config: GatewayConfig, argv: list[str], *, stdin: str | None = None) -> dict:
+        if argv[:2] == ["docs", "ingest"]:
+            raise RuntimeError("readonly")
+        return {"ok": True, "exit_code": 0, "result": {"results": []} if argv[:2] == ["docs", "search"] else []}
+
+    captured: dict = {}
+
+    def fake_json_response(_handler: object, status: int, payload: dict) -> None:
+        captured["status"] = status
+        captured["payload"] = payload
+
+    monkeypatch.setattr(gateway_mod, "_run_cli", fake_run_cli)
+    monkeypatch.setattr(gateway_mod, "_json_response", fake_json_response)
+
+    handler._handle_search()  # type: ignore[attr-defined]
+
+    assert captured["status"] == 200
+    payload = captured["payload"]
+    assert payload["diagnostic"]["result_count"] >= 1
+    assert "workspace_markdown_readthrough" in payload["diagnostic"]["searched_routes"]
+    assert payload["receipt"]["result"][0]["id"] == "workspace:USER.md:0"
+    assert payload["diagnostic"]["corpus_status"]["parity_state"] == "partial"

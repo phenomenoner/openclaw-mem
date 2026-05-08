@@ -395,6 +395,128 @@ def _corpus_status(config: GatewayConfig) -> Dict[str, Any]:
     }
 
 
+
+_DENY_MARKERS = ("[SECRET]", "[PRIVATE]", "[NOEXPORT]", "[NOMEM]")
+
+
+def _contains_deny_marker(text: str) -> bool:
+    upper = text.upper()
+    return any(marker in upper for marker in _DENY_MARKERS)
+
+
+def _workspace_markdown_files(config: GatewayConfig) -> List[Path]:
+    files: List[Path] = []
+    for raw in _workspace_memory_paths(config):
+        path = Path(raw).expanduser()
+        try:
+            root = path.resolve()
+            if path.is_file() and path.suffix.lower() == ".md":
+                files.append(root)
+            elif path.is_dir():
+                for child in sorted(path.rglob("*.md")):
+                    try:
+                        resolved = child.resolve()
+                    except OSError:
+                        continue
+                    if not child.is_file():
+                        continue
+                    if resolved != root and root not in resolved.parents:
+                        continue
+                    files.append(resolved)
+        except OSError:
+            continue
+    return files
+
+
+def _markdown_chunks(text: str, *, max_chars: int = 1600) -> List[str]:
+    chunks: List[str] = []
+    current: List[str] = []
+    current_len = 0
+    for part in re.split(r"\n\s*\n", text):
+        piece = part.strip()
+        if not piece:
+            continue
+        if _contains_deny_marker(piece):
+            continue
+        if current and current_len + len(piece) + 2 > max_chars:
+            chunks.append("\n\n".join(current).strip())
+            current = []
+            current_len = 0
+        if len(piece) > max_chars:
+            for idx in range(0, len(piece), max_chars):
+                sub = piece[idx : idx + max_chars].strip()
+                if sub and not _contains_deny_marker(sub):
+                    chunks.append(sub)
+            continue
+        current.append(piece)
+        current_len += len(piece) + 2
+    if current:
+        chunks.append("\n\n".join(current).strip())
+    return chunks
+
+
+def _query_terms(query: str) -> List[str]:
+    normalized = re.sub(r"[^\w]+", " ", query.lower(), flags=re.UNICODE)
+    terms: List[str] = []
+    for term in normalized.split():
+        if len(term) < 2:
+            continue
+        if term not in terms:
+            terms.append(term)
+    return terms
+
+
+def _workspace_markdown_search_receipt(config: GatewayConfig, query: str, *, limit: int) -> Dict[str, Any]:
+    terms = _query_terms(query)
+    if not terms:
+        return {"ok": True, "exit_code": 0, "result": []}
+    rows: List[Dict[str, Any]] = []
+    workspace = Path(str(config.workspace or "")).expanduser() if config.workspace else None
+    for file_path in _workspace_markdown_files(config):
+        try:
+            text = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for chunk_index, chunk in enumerate(_markdown_chunks(text)):
+            haystack_terms = set(_query_terms(chunk))
+            matched = [term for term in terms if term in haystack_terms]
+            if not matched:
+                continue
+            # Deterministic lightweight ranking: token coverage + exact phrase bonus + shorter chunk tie-break.
+            coverage = len(matched) / max(1, len(terms))
+            phrase_bonus = 0.25 if query.lower().strip() in chunk.lower() else 0.0
+            score = coverage + phrase_bonus - min(len(chunk), 5000) / 1_000_000
+            rel_path = str(file_path)
+            if workspace:
+                try:
+                    rel_path = str(file_path.resolve().relative_to(workspace.resolve()))
+                except Exception:
+                    rel_path = str(file_path)
+            summary = " ".join(chunk.split())[:700]
+            if _contains_deny_marker(summary):
+                continue
+            rows.append({
+                "id": f"workspace:{rel_path}:{chunk_index}",
+                "kind": "workspace_markdown",
+                "ts": None,
+                "tool_name": "workspace_markdown_readthrough",
+                "summary": summary,
+                "summary_en": None,
+                "lang": None,
+                "score": score,
+                "snippet": summary,
+                "snippet_en": "",
+                "detail_json": json.dumps({
+                    "schema": "openclaw-mem.gateway.workspace-markdown-readthrough.v1",
+                    "path": rel_path,
+                    "chunk_index": chunk_index,
+                    "matched_terms": matched,
+                    "source": "workspace_markdown",
+                }, ensure_ascii=False, sort_keys=True),
+            })
+    rows.sort(key=lambda row: (-float(row.get("score") or 0), str(row.get("id") or "")))
+    return {"ok": True, "exit_code": 0, "result": rows[:limit]}
+
 def _refresh_workspace_memory_corpus(config: GatewayConfig) -> Dict[str, Any]:
     paths = _workspace_memory_paths(config)
     status: Dict[str, Any] = _corpus_status(config)
@@ -406,7 +528,16 @@ def _refresh_workspace_memory_corpus(config: GatewayConfig) -> Dict[str, Any]:
         argv.extend(["--db", config.db])
     for path in paths:
         argv.extend(["--path", path])
-    receipt = _run_cli(config, argv)
+    try:
+        receipt = _run_cli(config, argv)
+    except RuntimeError:
+        status.update({
+            "refresh_attempted": True,
+            "refresh_ok": False,
+            "parity_state": "partial",
+            "refresh_error": "cli_failed",
+        })
+        return status
     result = receipt.get("result") if isinstance(receipt, Mapping) else None
     result_map = result if isinstance(result, Mapping) else {}
     files_seen = int(result_map.get("files_seen") or 0)
@@ -549,11 +680,28 @@ def _optional_text(body: Mapping[str, Any], key: str, *, max_chars: int = 12000)
     return value
 
 
+def _read_only_cli_argv(argv: List[str]) -> bool:
+    if not argv:
+        return False
+    first = argv[0]
+    if first in {"search", "pack", "vsearch", "hybrid"}:
+        return True
+    if first == "docs" and len(argv) > 1 and argv[1] == "search":
+        return True
+    if first == "episodes" and len(argv) > 1 and argv[1] == "query":
+        return True
+    return False
+
+
 def _run_cli(config: GatewayConfig, argv: Iterable[str], *, stdin: Optional[str] = None) -> Dict[str, Any]:
-    cmd = [sys.executable, "-m", "openclaw_mem", *list(argv)]
+    argv_list = list(argv)
+    cmd = [sys.executable, "-m", "openclaw_mem", *argv_list]
     env = os.environ.copy()
     if config.workspace:
         env["OPENCLAW_MEM_WORKSPACE"] = config.workspace
+    if _read_only_cli_argv(argv_list):
+        env["OPENCLAW_MEM_SKIP_INIT_DB"] = "1"
+        env["OPENCLAW_MEM_READONLY_DB"] = "1"
     proc = subprocess.run(
         cmd,
         input=stdin,
@@ -846,14 +994,25 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
             argv.append(search_query)
             return _run_cli(self.config, argv)
 
-        receipt = run_search(query)
-        result_count = _search_result_count(receipt)
         fallback_attempts: List[Mapping[str, Any]] = []
         searched_routes = ["cli.search"]
+        try:
+            receipt = run_search(query)
+            result_count = _search_result_count(receipt)
+        except RuntimeError:
+            receipt = {"ok": False, "exit_code": 1, "result": []}
+            result_count = 0
+            fallback_attempts.append({"route": "cli.search", "query": query, "result_count": 0, "error": "cli_failed"})
         if result_count == 0:
             for variant in _query_variants(query):
-                variant_receipt = run_search(variant)
-                variant_count = _search_result_count(variant_receipt)
+                try:
+                    variant_receipt = run_search(variant)
+                    variant_count = _search_result_count(variant_receipt)
+                except RuntimeError:
+                    variant_receipt = {"ok": False, "exit_code": 1, "result": []}
+                    variant_count = 0
+                    fallback_attempts.append({"route": "cli.search", "query": variant, "result_count": 0, "error": "cli_failed"})
+                    continue
                 fallback_attempts.append({"route": "cli.search", "query": variant, "result_count": variant_count})
                 if variant_count > 0:
                     receipt = variant_receipt
@@ -861,20 +1020,47 @@ class MemoryGatewayHandler(BaseHTTPRequestHandler):
                     break
         if result_count == 0:
             searched_routes.append("cli.docs.search")
-            docs_receipt = run_docs_search(query)
-            docs_count = _search_result_count(docs_receipt)
-            fallback_attempts.append({"route": "cli.docs.search", "query": query, "result_count": docs_count})
+            try:
+                docs_receipt = run_docs_search(query)
+                docs_count = _search_result_count(docs_receipt)
+            except RuntimeError:
+                docs_receipt = {"ok": False, "exit_code": 1, "result": []}
+                docs_count = 0
+                fallback_attempts.append({"route": "cli.docs.search", "query": query, "result_count": 0, "error": "cli_failed"})
+            else:
+                fallback_attempts.append({"route": "cli.docs.search", "query": query, "result_count": docs_count})
             if docs_count > 0:
                 receipt = docs_receipt
                 result_count = docs_count
             else:
                 for variant in _query_variants(query):
-                    variant_docs_receipt = run_docs_search(variant)
-                    variant_docs_count = _search_result_count(variant_docs_receipt)
+                    try:
+                        variant_docs_receipt = run_docs_search(variant)
+                        variant_docs_count = _search_result_count(variant_docs_receipt)
+                    except RuntimeError:
+                        fallback_attempts.append({"route": "cli.docs.search", "query": variant, "result_count": 0, "error": "cli_failed"})
+                        continue
                     fallback_attempts.append({"route": "cli.docs.search", "query": variant, "result_count": variant_docs_count})
                     if variant_docs_count > 0:
                         receipt = variant_docs_receipt
                         result_count = variant_docs_count
+                        break
+        if result_count == 0:
+            searched_routes.append("workspace_markdown_readthrough")
+            md_receipt = _workspace_markdown_search_receipt(self.config, query, limit=limit)
+            md_count = _search_result_count(md_receipt)
+            fallback_attempts.append({"route": "workspace_markdown_readthrough", "query": query, "result_count": md_count})
+            if md_count > 0:
+                receipt = md_receipt
+                result_count = md_count
+            else:
+                for variant in _query_variants(query):
+                    variant_md_receipt = _workspace_markdown_search_receipt(self.config, variant, limit=limit)
+                    variant_md_count = _search_result_count(variant_md_receipt)
+                    fallback_attempts.append({"route": "workspace_markdown_readthrough", "query": variant, "result_count": variant_md_count})
+                    if variant_md_count > 0:
+                        receipt = variant_md_receipt
+                        result_count = variant_md_count
                         break
         diagnostic = _not_found_diagnostic(
             endpoint="/v1/search",

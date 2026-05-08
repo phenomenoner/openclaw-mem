@@ -1,0 +1,12 @@
+*.pyc
+.git
+.pytest_cache/
+.state/
+.venv
+__pycache__/
+build/
+dist/
+extensions/openclaw-mem-engine/node_modules/
+logs/
+node_modules/
+site/

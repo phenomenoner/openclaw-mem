@@ -1,6 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { buildToolResultSummary } from "./toolResultSummary.js";
 
@@ -67,6 +68,25 @@ type EpisodicEventLine = {
   payload?: unknown;
   refs?: unknown;
 };
+
+function expandUserPath(raw: string): string {
+  if (raw === "~") return os.homedir();
+  if (raw.startsWith("~/") || raw.startsWith("~\\")) {
+    return path.join(os.homedir(), raw.slice(2));
+  }
+  return path.resolve(raw);
+}
+
+function resolveOpenClawStateDir(api: OpenClawPluginApi): string {
+  const runtimeState = (api as { runtime?: { state?: { resolveStateDir?: () => string } } }).runtime?.state;
+  if (typeof runtimeState?.resolveStateDir === "function") {
+    const resolved = runtimeState.resolveStateDir();
+    if (typeof resolved === "string" && resolved.trim()) return path.resolve(resolved);
+  }
+
+  const override = process.env.OPENCLAW_STATE_DIR?.trim();
+  return override ? expandUserPath(override) : path.join(os.homedir(), ".openclaw");
+}
 
 function shouldCapture(toolName: string | undefined, cfg: PluginConfig): boolean {
   if (!cfg.enabled) return false;
@@ -387,7 +407,7 @@ const plugin = {
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
 
-    const stateDir = api.runtime.state.resolveStateDir();
+    const stateDir = resolveOpenClawStateDir(api);
 
     const resolveOutputPath = (input: string | undefined): string => {
       const raw = (input ?? DEFAULT_OUTPUT).trim();

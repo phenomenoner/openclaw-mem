@@ -8,7 +8,39 @@ import unittest
 from unittest.mock import patch
 from contextlib import redirect_stdout
 
-from openclaw_mem.cli import _connect, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, _pack_graph_resolve_scope, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export, cmd_graph_synth, cmd_graph_lint, cmd_vsearch
+from openclaw_mem.cli import _connect, _enable_wal_best_effort, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, _pack_graph_resolve_scope, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export, cmd_graph_synth, cmd_graph_lint, cmd_vsearch
+
+
+
+
+class TestSqliteConnectionPosture(unittest.TestCase):
+    def test_wal_setup_is_best_effort_for_readonly_database(self):
+        class FakeConn:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql):
+                self.calls.append(sql)
+                if sql == "PRAGMA journal_mode=WAL;":
+                    raise sqlite3.OperationalError("attempt to write a readonly database")
+                return None
+
+        conn = FakeConn()
+        _enable_wal_best_effort(conn)
+        self.assertEqual(
+            conn.calls,
+            ["PRAGMA journal_mode=WAL;", "PRAGMA busy_timeout=5000;"],
+        )
+
+    def test_wal_setup_still_raises_unexpected_operational_errors(self):
+        class FakeConn:
+            def execute(self, sql):
+                if sql == "PRAGMA journal_mode=WAL;":
+                    raise sqlite3.OperationalError("database disk image is malformed")
+                return None
+
+        with self.assertRaises(sqlite3.OperationalError):
+            _enable_wal_best_effort(FakeConn())
 
 
 class TestParserContracts(unittest.TestCase):
@@ -1607,6 +1639,51 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(hits[0]["graph_consumption"]["coveredRawRefs"], ["obs:1", "obs:2"])
         self.assertEqual(hits[0]["graph_consumption"]["coveredRanks"], [1, 2])
         self.assertEqual(hits[0]["match"], ["graph_synthesis"])
+        conn.close()
+
+    def test_search_suppresses_superseded_proposal_rows(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {
+            "kind": "memory.proposal",
+            "summary": "yijin-loop-engine alias dirty v3 contains question mark mojibake ???",
+            "tool_name": "gateway.store.propose",
+            "detail": {"provenance": {"seed_id": "dirty-v3"}},
+        })
+        _insert_observation(conn, {
+            "kind": "memory.proposal",
+            "summary": "yijin-loop-engine alias clean canonical memory v4",
+            "tool_name": "gateway.store.propose",
+            "detail": {"provenance": {"seed_id": "clean-v4", "supersedes": ["obs:1"]}},
+        })
+
+        args = type("Args", (), {"query": "yijin-loop-engine", "limit": 10, "json": True})()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_search(conn, args)
+
+        hits = json.loads(buf.getvalue())
+        self.assertEqual([h["id"] for h in hits], [2])
+        self.assertIn("clean canonical memory v4", hits[0]["summary"])
+        self.assertNotIn("???", hits[0]["summary"])
+        conn.close()
+
+    def test_search_supersede_filter_ignores_malformed_provenance(self):
+        conn = _connect(":memory:")
+        _insert_observation(conn, {
+            "kind": "memory.proposal",
+            "summary": "yijin-loop-engine unrelated row remains",
+            "tool_name": "gateway.store.propose",
+            "detail": {"provenance": {"supersedes": [{"bad": "shape"}]}},
+        })
+
+        args = type("Args", (), {"query": "yijin-loop-engine", "limit": 10, "json": True})()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_search(conn, args)
+
+        hits = json.loads(buf.getvalue())
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["id"], 1)
         conn.close()
 
     def test_search_normalizes_hyphenated_terms_instead_of_raising(self):
@@ -3939,6 +4016,61 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(out[0].get("rerank_provider"), "jina")
         self.assertNotIn("rank_stage", out[0])
         self.assertIn("rerank failed", err.getvalue())
+        conn.close()
+
+    def test_pack_suppresses_superseded_proposal_rows(self):
+        conn = _connect(":memory:")
+
+        pack_state = {
+            "ordered_ids": [1, 2],
+            "fts_ids": {1, 2},
+            "vec_ids": set(),
+            "vec_en_ids": set(),
+            "rrf_scores": {1: 0.9, 2: 0.8},
+            "obs_map": {
+                1: {
+                    "summary": "yijin-loop-engine alias dirty v3 contains question mark mojibake ???",
+                    "summary_en": None,
+                    "kind": "memory.proposal",
+                    "lang": "en",
+                    "tool_name": "gateway.store.propose",
+                },
+                2: {
+                    "summary": "yijin-loop-engine alias clean canonical memory v4",
+                    "summary_en": None,
+                    "kind": "memory.proposal",
+                    "lang": "en",
+                    "tool_name": "gateway.store.propose",
+                },
+            },
+            "candidate_limit": 12,
+        }
+        _insert_observation(conn, {
+            "kind": "memory.proposal",
+            "summary": pack_state["obs_map"][1]["summary"],
+            "tool_name": "gateway.store.propose",
+            "detail": {"provenance": {"seed_id": "dirty-v3"}},
+        })
+        _insert_observation(conn, {
+            "kind": "memory.proposal",
+            "summary": pack_state["obs_map"][2]["summary"],
+            "tool_name": "gateway.store.propose",
+            "detail": {"provenance": {"seed_id": "clean-v4", "supersedes": ["obs:1"]}},
+        })
+
+        args = build_parser().parse_args(["pack", "--query", "yijin-loop-engine", "--json", "--limit", "5"] )
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._hybrid_retrieve", return_value=pack_state):
+            with redirect_stdout(buf):
+                args.func(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertEqual([item["recordRef"] for item in out["items"]], ["obs:2"])
+        self.assertIn("canonical memory v4", out["bundle_text"])
+        self.assertNotIn("???", out["bundle_text"])
         conn.close()
 
     def test_pack_rejects_blank_query(self):

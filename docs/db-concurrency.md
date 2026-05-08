@@ -16,6 +16,8 @@ conn.execute("PRAGMA busy_timeout=5000;")
 
 **Implemented in the main sidecar connection path (`openclaw_mem/cli.py`) and graph refresh write path** ✅
 
+`journal_mode=WAL` is best-effort in the main CLI connection path. Writable stores still use WAL, but read-only/read-mostly gateway lanes tolerate SQLite refusing the journal-mode switch (for example, `attempt to write a readonly database`) so read endpoints can still run `SELECT` queries instead of failing before search/pack logic starts. For read-only gateway routes, the CLI may skip schema initialization and open SQLite with a `mode=ro&immutable=1` URI; if the indexed DB/docs route is empty or degraded, the gateway can fall back to read-only workspace Markdown scanning. Unexpected SQLite operational errors outside those read-only paths still propagate.
+
 ### 2. Short-Lived Connections
 Open → operate → close immediately. Avoid holding connections across operations.
 

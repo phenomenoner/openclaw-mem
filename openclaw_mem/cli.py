@@ -864,6 +864,32 @@ def _read_openclaw_config() -> Dict[str, Any]:
     return _CONFIG_CACHE
 
 
+def _enable_wal_best_effort(conn: sqlite3.Connection) -> None:
+    """Enable SQLite WAL when possible without breaking read-only lanes.
+
+    WAL is preferred for the normal writable store because it improves reader /
+    writer concurrency. Some sidecar deployments intentionally run read-mostly
+    endpoints against a database file or volume that cannot switch journal mode
+    at request time. In that case, read commands must not fail before they can
+    perform a SELECT, so journal-mode setup is best-effort while busy_timeout is
+    still attempted independently.
+    """
+
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+    except sqlite3.OperationalError as exc:
+        msg = str(exc).lower()
+        tolerated = (
+            "readonly" in msg
+            or "read-only" in msg
+            or "attempt to write a readonly database" in msg
+            or "permission denied" in msg
+        )
+        if not tolerated:
+            raise
+    conn.execute("PRAGMA busy_timeout=5000;")
+
+
 def _connect(db_path: str) -> sqlite3.Connection:
     # Allow in-memory DB and relative paths without a directory component.
     # (Useful for unit tests and quick experiments.)
@@ -872,14 +898,22 @@ def _connect(db_path: str) -> sqlite3.Connection:
         os.makedirs(dir_, exist_ok=True)
 
     # Concurrency hardening for the live sidecar DB:
-    # - WAL for concurrent readers/writers
+    # - WAL for concurrent readers/writers when the DB can switch journal mode
     # - non-zero connect timeout / busy_timeout so parallel cron/tool lanes
     #   wait briefly instead of failing immediately under transient contention
-    conn = sqlite3.connect(db_path, timeout=10.0)
+    # WAL setup is intentionally best-effort so read endpoints can still query
+    # read-only/read-mostly sidecar databases.
+    skip_init = str(os.environ.get("OPENCLAW_MEM_SKIP_INIT_DB") or "").strip().lower() in {"1", "true", "yes", "on"}
+    readonly_db = str(os.environ.get("OPENCLAW_MEM_READONLY_DB") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if readonly_db and db_path not in (":memory:", ""):
+        uri_path = Path(db_path).expanduser().resolve().as_posix()
+        conn = sqlite3.connect(f"file:{uri_path}?mode=ro&immutable=1", timeout=10.0, uri=True)
+    else:
+        conn = sqlite3.connect(db_path, timeout=10.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA busy_timeout=5000;")
-    _init_db(conn)
+    _enable_wal_best_effort(conn)
+    if not skip_init:
+        _init_db(conn)
     return conn
 
 

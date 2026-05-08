@@ -23,6 +23,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import type * as LanceDB from "@lancedb/lancedb";
@@ -3308,9 +3309,28 @@ function resolveEnvVars(value: string): string {
   });
 }
 
+function expandUserPath(raw: string): string {
+  if (raw === "~") return os.homedir();
+  if (raw.startsWith("~/") || raw.startsWith("~\\")) {
+    return path.join(os.homedir(), raw.slice(2));
+  }
+  return path.resolve(raw);
+}
+
+function resolveOpenClawStateDir(api: OpenClawPluginApi): string {
+  const runtimeState = (api as { runtime?: { state?: { resolveStateDir?: () => string } } }).runtime?.state;
+  if (typeof runtimeState?.resolveStateDir === "function") {
+    const resolved = runtimeState.resolveStateDir();
+    if (typeof resolved === "string" && resolved.trim()) return path.resolve(resolved);
+  }
+
+  const override = process.env.OPENCLAW_STATE_DIR?.trim();
+  return override ? expandUserPath(override) : path.join(os.homedir(), ".openclaw");
+}
+
 function readBundledMemoryLanceDbApiKey(api: OpenClawPluginApi): string {
   try {
-    const stateDir = api.runtime.state.resolveStateDir();
+    const stateDir = resolveOpenClawStateDir(api);
     const cfgPath = path.join(stateDir, "openclaw.json");
     if (!fs.existsSync(cfgPath)) return "";
     const raw = fs.readFileSync(cfgPath, "utf8");
@@ -3339,7 +3359,7 @@ function resolveEmbeddingApiKey(api: OpenClawPluginApi, cfg: PluginConfig): stri
 
 
 function resolveStateRelativePath(api: OpenClawPluginApi, input: string | undefined, fallback: string): string {
-  const stateDir = api.runtime.state.resolveStateDir();
+  const stateDir = resolveOpenClawStateDir(api);
   const rawInput = typeof input === "string" && input.trim() ? input : undefined;
   const rawFallback = typeof fallback === "string" && fallback.trim() ? fallback : undefined;
   const raw = (rawInput ?? rawFallback ?? stateDir).trim();

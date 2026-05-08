@@ -116,7 +116,11 @@ curl -sS "$OPENCLAW_MEM_GATEWAY_URL/v1/pack" \
   -d '{"query":"current openclaw-mem gateway deployment", "limit":8, "budget_tokens":1200}'
 ```
 
-Read endpoints search observations first and, when workspace memory indexing is enabled, can fall back to configured workspace Markdown memory. Chunks tagged `[SECRET]`, `[PRIVATE]`, `[NOEXPORT]`, or `[NOMEM]`, and secret-like chunks, are excluded from this API-visible corpus.
+Read endpoints search observations first. When workspace memory indexing is enabled but the DB/docs index is empty, stale, or cannot be refreshed from a read-only deployment, `/v1/search` can fall back to a read-only scan of the configured workspace Markdown memory (`MEMORY.md`, `memory/*.md`, `AGENTS.md`, `SOUL.md`, `USER.md`). The fallback is intentionally lexical and deterministic; it is a source-of-truth safety net, not a replacement for the indexed/vector search path.
+
+The Markdown read-through fallback does not write to SQLite. It skips chunks tagged with `[SECRET]`, `[PRIVATE]`, `[NOEXPORT]`, or `[NOMEM]` case-insensitively, and it refuses symlinked Markdown files that resolve outside the configured source roots. Remote clients can detect this path through `diagnostic.searched_routes` / `fallback_attempts` containing `workspace_markdown_readthrough`.
+
+For read-mostly sidecars, the CLI connection path treats SQLite WAL enablement as best-effort and can open read endpoints with a read-only SQLite URI. The gateway should not fail a read request merely because the mounted database or volume refuses a journal-mode switch at request time. Writable deployments still prefer WAL for concurrency; read-only failures during actual schema migration or writes remain real errors.
 
 ## Remote access: Tailscale/WireGuard
 

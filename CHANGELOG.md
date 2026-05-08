@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.11] - 2026-05-08
+
+### Added
+
+- Added a read-only workspace Markdown read-through fallback for `/v1/search` so read-mostly Memory Gateway deployments can still answer from configured Markdown memory when the SQLite/docs index is empty, stale, or cannot refresh. Diagnostics report the `workspace_markdown_readthrough` route when used.
+
+### Fixed
+
+- Made read-only gateway search degrade cleanly when workspace/docs refresh cannot write to SQLite, avoiding `502 cli_failed` for read requests.
+- Added read-only SQLite connection posture for read routes (`mode=ro&immutable=1`) and skip-init support so read endpoints do not attempt schema writes.
+
+### Security
+
+- Markdown read-through skips `[SECRET]`, `[PRIVATE]`, `[NOEXPORT]`, and `[NOMEM]` chunks case-insensitively and refuses symlinked Markdown files that resolve outside configured source roots.
+
+### Testing
+
+- Added gateway regression coverage for read-through fallback, denied chunk skipping, token-exact matching, symlink escape rejection, and partial corpus status after refresh failure.
+- Ran full test suite: `632 passed, 71 subtests passed`.
+
 ## [1.9.10] - 2026-05-06
 
 ### Fixed
