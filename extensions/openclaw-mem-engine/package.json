@@ -1,6 +1,6 @@
 {
   "name": "openclaw-mem-engine",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "type": "module",
   "description": "Optional OpenClaw memory-slot backend with hybrid recall, docs cold-lane search, and bounded autoRecall/autoCapture controls.",
   "license": "MIT",
@@ -17,7 +17,7 @@
     ]
   },
   "dependencies": {
-    "@lancedb/lancedb": "^0.26.2",
+    "@lancedb/lancedb": "^0.27.2",
     "@sinclair/typebox": "^0.34.48"
   }
 }

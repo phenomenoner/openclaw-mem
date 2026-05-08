@@ -44,6 +44,22 @@ After publishing to ClawHub package marketplace:
 openclaw plugins install @phenomenoner/openclaw-mem-engine
 ```
 
+## LanceDB upgrade smoke
+
+Before bumping `@lancedb/lancedb`, run the isolated gate from the repo root:
+
+```bash
+node extensions/openclaw-mem-engine/scripts/lancedb-upgrade-smoke.mjs \
+  --current 0.26.2 \
+  --candidate 0.27.2
+```
+
+The gate installs both LanceDB versions into a throwaway run directory under
+`.state/openclaw-mem/lancedb-upgrade-smoke/`, creates fresh isolated databases,
+checks cross-version read/write compatibility, and opens a copy of the local
+LanceDB store when `~/.openclaw/memory/lancedb` exists. It must not open or
+mutate the live memory DB directly.
+
 ## Minimal config
 
 ```jsonc
