@@ -17,7 +17,7 @@ Most agent memory stories sound good until you need all of these in production:
 - **bounded context assembly** that fits inside a prompt instead of flooding it
 - **safe rollback** when a memory backend or embedding path gets weird
 
-`openclaw-mem` exists to make memory and context assembly more operational, not more mystical.
+`openclaw-mem` exists to make memory and context assembly operational, not opaque.
 
 ## What it does today
 

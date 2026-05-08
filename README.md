@@ -2,7 +2,7 @@
 
 **Local-first context supply chain for AI agents — Store / Pack / Observe with citations, trust-policy receipts, and rollback.**
 
-`openclaw-mem` turns agent activity into a durable local memory trail and assembles bounded `ContextPack` bundles whose include/exclude reasons are inspectable. Use it first as a plain SQLite sidecar; promote to deeper OpenClaw integration only after the local proof earns the extra surface.
+`openclaw-mem` captures agent activity as durable local records, then assembles bounded `ContextPack` bundles with inspectable include/exclude reasons and citation coverage. Use it first as a plain SQLite sidecar; promote to deeper OpenClaw integration only after the local proof earns the extra surface.
 
 ## Start here
 
@@ -26,7 +26,7 @@
 
 ## Why it is different
 
-- **Governance before recall theater** — trust policy, citations, trace receipts, and rollback posture make memory inclusion inspectable instead of mystical.
+- **Governance before recall theater** — trust policy, citations, trace receipts, and rollback posture make memory inclusion inspectable instead of opaque.
 - **Local-first by default** — JSONL + SQLite, no external database required.
 - **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
 - **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, trust-policy receipts, and trace-backed debugging.
