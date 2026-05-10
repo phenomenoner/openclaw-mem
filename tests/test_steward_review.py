@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
+from openclaw_mem.cli import _load_steward_candidates
 from openclaw_mem.steward_review import public_safety_markers, review_candidate, review_candidates
 
 
@@ -68,6 +72,24 @@ class TestStewardReview(unittest.TestCase):
         markers = public_safety_markers("Local evidence lives under /home/operator and private-channel:abc")
         self.assertIn("/home/", markers)
         self.assertIn("private-channel:", markers)
+
+    def test_load_steward_candidates_accepts_context_pack_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "pack.json"
+            path.write_text(json.dumps({"items": [{"id": "obs:1", "text": "Decision: keep", "importance": 0.9}]}), encoding="utf-8")
+            self.assertEqual(_load_steward_candidates(str(path))[0]["id"], "obs:1")
+
+    def test_load_steward_candidates_accepts_jsonl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidates.jsonl"
+            path.write_text(
+                '{"id":"obs:1","text":"No change","importance":0.1}\n'
+                '{"id":"obs:2","text":"Decision: keep","importance":0.9}\n',
+                encoding="utf-8",
+            )
+            loaded = _load_steward_candidates(str(path))
+            self.assertEqual(loaded[0]["id"], "obs:1")
+            self.assertEqual(loaded[1]["id"], "obs:2")
 
     def test_batch_counts_actions(self):
         batch = review_candidates(

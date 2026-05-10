@@ -42,6 +42,7 @@ from openclaw_mem import gbrain_sidecar
 from openclaw_mem import pack_trace_v1
 from openclaw_mem import self_model_sidecar
 from openclaw_mem import self_curator
+from openclaw_mem import steward_review
 from openclaw_mem import harness as harness_install
 from openclaw_mem import codex_install
 from openclaw_mem import project_resolver
@@ -10588,6 +10589,64 @@ def cmd_self_curator_skill_review(conn: sqlite3.Connection, args: argparse.Names
         )
 
 
+def _load_steward_candidates(path: str) -> list[Dict[str, Any]]:
+    raw = Path(path).read_text(encoding="utf-8")
+    stripped = raw.strip()
+    if not stripped:
+        return []
+    if stripped.startswith("[") or stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            data = None
+        if data is not None:
+            if isinstance(data, dict):
+                if isinstance(data.get("candidates"), list):
+                    data = data["candidates"]
+                elif isinstance(data.get("items"), list):
+                    data = data["items"]
+                else:
+                    data = [data]
+            if not isinstance(data, list):
+                raise SystemExit("steward review input must be a JSON object/list or JSONL file")
+            if not all(isinstance(item, dict) for item in data):
+                raise SystemExit("steward review JSON list must contain objects")
+            return data
+    candidates: list[Dict[str, Any]] = []
+    for line_no, line in enumerate(raw.splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        item = json.loads(line)
+        if not isinstance(item, dict):
+            raise SystemExit(f"steward review JSONL line {line_no} must be an object")
+        candidates.append(item)
+    return candidates
+
+
+def cmd_steward_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    candidates = _load_steward_candidates(args.file)
+    payload = {
+        "ok": True,
+        "input": str(args.file),
+        "writes_performed": False,
+        "review": steward_review.review_candidates(candidates),
+    }
+    if getattr(args, "out", None):
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        review = payload["review"]
+        print(
+            f"steward_review count={review['count']} "
+            f"actions={json.dumps(review['action_counts'], ensure_ascii=False, sort_keys=True)} "
+            f"writes_performed=false"
+        )
+
+
 def cmd_self_curator_plan(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     mutations = json.loads(Path(args.mutations_file).read_text(encoding="utf-8"))
     if isinstance(mutations, dict) and "mutations" in mutations:
@@ -19671,6 +19730,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--agent-id", default="main", help="Target agent ID for Gateway (default: main)")
     sp.set_defaults(func=cmd_semantic)
 
+    sp = sub.add_parser("steward", help="Review-only memory/context lifecycle steward")
+    stsub = sp.add_subparsers(dest="steward_cmd", required=True)
+    st = stsub.add_parser("review", help="Review JSON/JSONL candidate records without mutating storage")
+    st.add_argument("--file", required=True, help="JSON object/list or JSONL candidate file")
+    st.add_argument("--out", help="Optional path to write the review receipt JSON")
+    st.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    st.set_defaults(func=cmd_steward_review)
+
     sp = sub.add_parser("self-curator", help="Lifecycle curator engine (review + checkpointed apply)")
     scsub = sp.add_subparsers(dest="self_curator_cmd", required=True)
     sc = scsub.add_parser("skill-review", help="Scan skill files and emit review-only lifecycle artifacts")
@@ -19860,7 +19927,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "steward", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.
