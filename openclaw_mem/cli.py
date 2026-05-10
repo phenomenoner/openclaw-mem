@@ -37,7 +37,9 @@ from typing import Iterable, Dict, Any, List, Mapping, Optional, Set, Tuple
 
 from openclaw_mem import __version__
 from openclaw_mem import defaults
+from openclaw_mem import active_line_context
 from openclaw_mem import context_pack_v1
+from openclaw_mem import ingestion_review
 from openclaw_mem import gbrain_sidecar
 from openclaw_mem import pack_trace_v1
 from openclaw_mem import self_model_sidecar
@@ -10647,6 +10649,53 @@ def cmd_steward_review(conn: sqlite3.Connection, args: argparse.Namespace) -> No
         )
 
 
+def cmd_ingest_review_source(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    text = Path(args.file).read_text(encoding="utf-8")
+    payload = {
+        "ok": True,
+        "input": str(args.file),
+        "review": ingestion_review.review_source(
+            text,
+            source_kind=getattr(args, "source_kind", "text"),
+            source_ref=getattr(args, "source_ref", None),
+        ),
+    }
+    if getattr(args, "out", None):
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        summary = payload["review"]["summary"]
+        print(
+            f"ingest_review candidates={summary['candidate_count']} "
+            f"entities={summary['entity_hint_count']} follow_ups={summary['follow_up_count']} "
+            f"risk_terms={summary['risk_term_count']} writes_performed=false"
+        )
+
+
+def cmd_active_line_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    receipt = active_line_context.load_receipt(args.file)
+    payload = {
+        "ok": True,
+        "input": str(args.file),
+        "context": active_line_context.build_active_line_context(
+            receipt,
+            source_ref=getattr(args, "source_ref", None) or str(args.file),
+        ),
+    }
+    if getattr(args, "out", None):
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        active = payload["context"]["active_line"]
+        print(f"active_line goal_id={active['goal_id']} status={active['status']} writes_performed=false")
+
+
 def cmd_self_curator_plan(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     mutations = json.loads(Path(args.mutations_file).read_text(encoding="utf-8"))
     if isinstance(mutations, dict) and "mutations" in mutations:
@@ -19738,6 +19787,25 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
     st.set_defaults(func=cmd_steward_review)
 
+    sp = sub.add_parser("ingest-review", help="Review source text into candidate records without writing memory")
+    irsub = sp.add_subparsers(dest="ingest_review_cmd", required=True)
+    ir = irsub.add_parser("source", help="Review one text/markdown source file")
+    ir.add_argument("--file", required=True, help="Source text/markdown file")
+    ir.add_argument("--source-kind", default="text", help="Source kind label (article, transcript, repo-note, text)")
+    ir.add_argument("--source-ref", help="Optional source reference label/URL")
+    ir.add_argument("--out", help="Optional path to write the review receipt JSON")
+    ir.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    ir.set_defaults(func=cmd_ingest_review_source)
+
+    sp = sub.add_parser("active-line", help="Build packable context from controller/goal receipts")
+    alsub = sp.add_subparsers(dest="active_line_cmd", required=True)
+    al = alsub.add_parser("pack", help="Convert one active-line receipt JSON into a ContextPack fragment")
+    al.add_argument("--file", required=True, help="Controller/goal receipt JSON")
+    al.add_argument("--source-ref", help="Optional public-safe source reference")
+    al.add_argument("--out", help="Optional path to write the context fragment JSON")
+    al.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    al.set_defaults(func=cmd_active_line_pack)
+
     sp = sub.add_parser("self-curator", help="Lifecycle curator engine (review + checkpointed apply)")
     scsub = sp.add_subparsers(dest="self_curator_cmd", required=True)
     sc = scsub.add_parser("skill-review", help="Scan skill files and emit review-only lifecycle artifacts")
@@ -19927,7 +19995,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "steward", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "steward", "ingest-review", "active-line", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

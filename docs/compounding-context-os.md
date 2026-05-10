@@ -70,16 +70,23 @@ Store/Pack/Observe remain auditable and rollbackable.
 5. **Receipts beat vibes** — every automation loop should leave machine-readable
    evidence plus a human-readable summary when operators need debugging context.
 
+## Shipped public-safe slices
+
+- `openclaw-mem steward review --file <json-or-jsonl>` reviews candidate records
+  without mutating storage.
+- `openclaw-mem ingest-review source --file <text-or-markdown>` turns a source
+  into candidate records, entity hints, follow-up actions, and risk markers.
+- `openclaw-mem active-line pack --file <receipt.json>` converts an active-line
+  or goal receipt into a small ContextPack-compatible fragment.
+
 ## Suggested next slices
 
-1. Add a CLI surface for steward review over JSONL candidates and pack traces.
-2. Connect steward receipts to `pack --trace` so included records can refresh
+1. Connect steward receipts to `pack --trace` so included records can refresh
    lifecycle metadata through a governed apply path.
-3. Add a generic ingestion review that turns articles, transcripts, PDFs, and
-   repository notes into candidate records, entity hints, and follow-up actions.
-4. Expose active-line controller receipts as Pack inputs so agents can see the
-   current objective, gate, stop-loss, and closure criteria without loading a
-   whole operations log.
+2. Add richer synthetic ingestion fixtures for articles, transcripts, PDFs, and
+   repository notes.
+3. Let Pack accept active-line context fragments directly as protected L0 inputs
+   without loading a whole operations log.
 
 ## Non-goals
 
