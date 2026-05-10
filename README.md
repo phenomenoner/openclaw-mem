@@ -115,6 +115,7 @@ These lanes are not required for the 5-minute proof, the sidecar install path, o
 
 Read more:
 - [Product positioning](PRODUCT_POSITIONING.md)
+- [Compounding Context OS roadmap](docs/compounding-context-os.md)
 - [Core vs Advanced Labs](docs/core-vs-advanced-labs.md)
 - [Evaluator path](docs/evaluator-path.md)
 - [Architecture](docs/architecture.md)
