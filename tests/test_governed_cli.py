@@ -37,3 +37,35 @@ def test_governed_release_check_cli(tmp_path: Path):
     payload = run_cli("governed", "release-check", "--repo-root", str(root), "--expected-version", "9.9.9", "--json")
     assert payload["ok"] is True
     assert payload["writes_performed"] is False
+
+
+def test_governed_advisory_dossier_cli_writes_markdown(tmp_path: Path):
+    mutations = tmp_path / "mutations.json"
+    mutations.write_text(json.dumps({"mutations": [{"action": "write_file", "path": "protected.txt", "content": "x", "risk_class": "L4"}]}), encoding="utf-8")
+    plan = tmp_path / "plan.json"
+    run_cli("mutation", "plan", "--mutations-file", str(mutations), "--out", str(plan), "--json")
+    report = tmp_path / "dossier.md"
+    payload = run_cli(
+        "governed",
+        "advisory-dossier",
+        "--plan-file",
+        str(plan),
+        "--allowed-root",
+        str(tmp_path / "sandbox"),
+        "--ck-approved",
+        "--why-now",
+        "Need CK decision",
+        "--markdown-out",
+        str(report),
+        "--json",
+    )
+    assert payload["risk_class"] == "L4"
+    assert payload["approval"]["status"] == "approval_required"
+    assert payload["apply_review"]["ok"] is False
+    assert "l3_l4_not_auto_applyable" in payload["apply_review"]["reasons"]
+    assert payload["writes_performed"] is False
+    assert str(report) in payload["artifact_outputs"]
+    assert report.exists()
+    text = report.read_text(encoding="utf-8")
+    assert "# L3/L4 Advisory Dossier" in text
+    assert "Message delivery is not approval: True" in text

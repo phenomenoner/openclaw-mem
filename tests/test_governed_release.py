@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from openclaw_mem.governed_release import release_check, review_apply_plan
+from openclaw_mem.governed_release import build_advisory_dossier, release_check, render_advisory_dossier_markdown, review_apply_plan
 from openclaw_mem.mutation_framework import build_plan
 
 
@@ -45,6 +45,32 @@ class TestGovernedRelease(unittest.TestCase):
             review = review_apply_plan(plan, allowed_root=Path(tmp) / "sandbox")
         self.assertFalse(review["ok"])
         self.assertIn("invalid_plan_schema", review["reasons"])
+
+
+    def test_advisory_dossier_keeps_l3_execution_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = build_plan(mutations=[{"action": "replace_text", "path": "runtime/config.json", "old": "off", "new": "on", "risk_class": "L3", "requires_approval": True}])
+            dossier = build_advisory_dossier(plan, allowed_root=Path(tmp) / "sandbox", human_approved=True, why_now="Need operator decision")
+        self.assertEqual(dossier["schema_version"], "openclaw-mem.governed.advisory-dossier.v0")
+        self.assertEqual(dossier["risk_class"], "L3")
+        self.assertEqual(dossier["approval"]["status"], "approval_required")
+        self.assertFalse(dossier["apply_review"]["ok"])
+        self.assertIn("l3_l4_not_auto_applyable", dossier["apply_review"]["reasons"])
+        self.assertFalse(dossier["writes_performed"])
+
+    def test_advisory_dossier_l4_ck_flag_is_not_execution_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = build_plan(mutations=[{"action": "write_file", "path": "release/tag.txt", "content": "ship", "risk_class": "L4"}])
+            dossier = build_advisory_dossier(plan, allowed_root=Path(tmp) / "sandbox", ck_approved=True, recommendation="Ask CK before execution")
+        self.assertEqual(dossier["risk_class"], "L4")
+        self.assertEqual(dossier["approval"]["status"], "approval_required")
+        self.assertTrue(dossier["approval"]["message_delivery_is_not_approval"])
+        self.assertFalse(dossier["apply_review"]["ok"])
+        self.assertIn("l3_l4_not_auto_applyable", dossier["apply_review"]["reasons"])
+        report = render_advisory_dossier_markdown(dossier)
+        self.assertIn("# L3/L4 Advisory Dossier", report)
+        self.assertIn("Risk class: L4", report)
+        self.assertIn("Message delivery is not approval: True", report)
 
     def test_release_check_passes_consistent_release(self):
         with tempfile.TemporaryDirectory() as tmp:
