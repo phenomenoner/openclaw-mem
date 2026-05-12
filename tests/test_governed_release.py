@@ -81,6 +81,10 @@ class TestGovernedRelease(unittest.TestCase):
             root = Path(tmp)
             (root / "openclaw_mem").mkdir()
             (root / "docs").mkdir()
+            (root / "extensions" / "openclaw-mem-engine").mkdir(parents=True)
+            (root / "extensions" / "openclaw-mem-engine" / "openclaw.plugin.json").write_text('{"version":"0.0.9"}\n', encoding="utf-8")
+            (root / "extensions" / "openclaw-mem-engine" / "package.json").write_text('{"version":"0.0.9"}\n', encoding="utf-8")
+            (root / "extensions" / "openclaw-mem-engine" / "package-lock.json").write_text('{"version":"0.0.9"}\n', encoding="utf-8")
             (root / "pyproject.toml").write_text('version = "9.9.9"\n', encoding="utf-8")
             (root / "openclaw_mem" / "__init__.py").write_text('__version__ = "9.9.9"\n', encoding="utf-8")
             (root / "uv.lock").write_text('[[package]]\nname = "openclaw-context-pack"\nversion = "9.9.9"\n', encoding="utf-8")
@@ -90,6 +94,7 @@ class TestGovernedRelease(unittest.TestCase):
             check = release_check(repo_root=root, expected_version="9.9.9")
         self.assertTrue(check["ok"])
         self.assertTrue(check["checks"]["version_consistent"])
+        self.assertTrue(check["checks"]["engine_version_consistent"])
         self.assertTrue(check["checks"]["public_safety_clean"])
 
     def test_release_check_fails_version_and_public_safety(self):
@@ -97,6 +102,10 @@ class TestGovernedRelease(unittest.TestCase):
             root = Path(tmp)
             (root / "openclaw_mem").mkdir()
             (root / "docs").mkdir()
+            (root / "extensions" / "openclaw-mem-engine").mkdir(parents=True)
+            (root / "extensions" / "openclaw-mem-engine" / "openclaw.plugin.json").write_text('{"version":"0.0.9"}\n', encoding="utf-8")
+            (root / "extensions" / "openclaw-mem-engine" / "package.json").write_text('{"version":"0.0.9"}\n', encoding="utf-8")
+            (root / "extensions" / "openclaw-mem-engine" / "package-lock.json").write_text('{"version":"0.0.8"}\n', encoding="utf-8")
             (root / "pyproject.toml").write_text('version = "9.9.9"\n', encoding="utf-8")
             (root / "openclaw_mem" / "__init__.py").write_text('__version__ = "9.9.8"\n', encoding="utf-8")
             (root / "uv.lock").write_text('[[package]]\nname = "some-dependency"\nversion = "9.9.9"\n[[package]]\nname = "openclaw-context-pack"\nversion = "9.9.8"\n', encoding="utf-8")
@@ -105,6 +114,7 @@ class TestGovernedRelease(unittest.TestCase):
             check = release_check(repo_root=root, expected_version="9.9.9")
         self.assertFalse(check["ok"])
         self.assertIn("init_version_mismatch", check["errors"])
+        self.assertIn("engine_version_mismatch", check["errors"])
         self.assertIn("public_safety_markers_found", check["errors"])
 
 

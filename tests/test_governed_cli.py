@@ -28,6 +28,10 @@ def test_governed_release_check_cli(tmp_path: Path):
     root = tmp_path
     (root / "openclaw_mem").mkdir()
     (root / "docs").mkdir()
+    (root / "extensions" / "openclaw-mem-engine").mkdir(parents=True)
+    (root / "extensions" / "openclaw-mem-engine" / "openclaw.plugin.json").write_text('{"version":"0.0.9"}\n', encoding="utf-8")
+    (root / "extensions" / "openclaw-mem-engine" / "package.json").write_text('{"version":"0.0.9"}\n', encoding="utf-8")
+    (root / "extensions" / "openclaw-mem-engine" / "package-lock.json").write_text('{"version":"0.0.9"}\n', encoding="utf-8")
     (root / "pyproject.toml").write_text('version = "9.9.9"\n', encoding="utf-8")
     (root / "openclaw_mem" / "__init__.py").write_text('__version__ = "9.9.9"\n', encoding="utf-8")
     (root / "uv.lock").write_text('[[package]]\nname = "openclaw-context-pack"\nversion = "9.9.9"\n', encoding="utf-8")

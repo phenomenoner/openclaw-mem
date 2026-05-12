@@ -7,6 +7,7 @@ higher-risk automation can be considered.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -262,6 +263,15 @@ def _version_from_init(text: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _version_from_json_manifest(text: str) -> str | None:
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    version = parsed.get("version") if isinstance(parsed, dict) else None
+    return version if isinstance(version, str) and version else None
+
+
 def _lockfile_project_version_present(lock_text: str, expected: str) -> bool:
     pattern = (
         r'(?ms)^\[\[package\]\]\s*\n'
@@ -283,6 +293,9 @@ def release_check(
     init = _read(root / "openclaw_mem" / "__init__.py")
     lock = _read(root / "uv.lock")
     changelog = _read(root / "CHANGELOG.md")
+    engine_plugin_version = _version_from_json_manifest(_read(root / "extensions" / "openclaw-mem-engine" / "openclaw.plugin.json"))
+    engine_package_version = _version_from_json_manifest(_read(root / "extensions" / "openclaw-mem-engine" / "package.json"))
+    engine_package_lock_version = _version_from_json_manifest(_read(root / "extensions" / "openclaw-mem-engine" / "package-lock.json"))
     version = _version_from_pyproject(pyproject)
     init_version = _version_from_init(init)
     expected = expected_version or version
@@ -294,6 +307,10 @@ def release_check(
         errors.append("init_version_mismatch")
     if expected and version != expected:
         errors.append("expected_version_mismatch")
+    engine_versions = [v for v in [engine_plugin_version, engine_package_version, engine_package_lock_version] if v]
+    engine_version_consistent = len(set(engine_versions)) <= 1 and len(engine_versions) == 3
+    if not engine_version_consistent:
+        errors.append("engine_version_mismatch")
     lock_has_project_version = bool(expected and _lockfile_project_version_present(lock, expected))
     if expected and not lock_has_project_version:
         errors.append("uv_lock_version_missing")
@@ -318,9 +335,16 @@ def release_check(
         "topology_changed": False,
         "repo_root": str(root),
         "expected_version": expected,
-        "versions": {"pyproject": version, "init": init_version},
+        "versions": {
+            "pyproject": version,
+            "init": init_version,
+            "engine_plugin": engine_plugin_version,
+            "engine_package": engine_package_version,
+            "engine_package_lock": engine_package_lock_version,
+        },
         "checks": {
             "version_consistent": bool(version and init_version == version),
+            "engine_version_consistent": engine_version_consistent,
             "lockfile_mentions_version": lock_has_project_version,
             "changelog_entry_present": bool(expected and f"## [{expected}]" in changelog),
             "receipt_present": bool(receipts),

@@ -163,3 +163,46 @@ test("runRouteAuto marks timeout receipts explicitly", async () => {
   assert.equal(result.receipt.signal, "SIGTERM");
   assert.equal(result.receipt.killed, true);
 });
+
+test("runRouteAuto does not retain full parsed payload on result", async () => {
+  const largeRefs = Array.from({ length: 100 }, (_, idx) => `obs:${idx}`);
+  const payload = {
+    selection: {
+      selected_lane: "graph_match",
+      reason: "graph_ready_with_candidates",
+      graph_consumption: {
+        preferredCardRefs: largeRefs,
+        coveredRawRefs: largeRefs,
+      },
+    },
+    inputs: {
+      graph_match: {
+        result: {
+          candidates: [
+            {
+              title: "openclaw-mem",
+              why_relevant: "matched graph evidence",
+              large_unused_blob: "x".repeat(400_000),
+            },
+          ],
+        },
+      },
+    },
+  };
+
+  const result = await runRouteAuto({
+    query: "graph semantic memory",
+    scope: "global",
+    config: { enabled: true, timeoutMs: 400, maxBufferBytes: 128 * 1024, maxChars: 320 },
+    runner: async ({ maxBufferBytes }) => {
+      assert.equal(maxBufferBytes, 128 * 1024);
+      return { ok: true, exitCode: 0, stdout: JSON.stringify(payload), stderr: "", errorCode: null, errorMessage: null };
+    },
+  });
+
+  assert.equal(Object.hasOwn(result, "payload"), false);
+  assert.equal(result.receipt.preferredCardRefs.length, 64);
+  assert.equal(result.receipt.coveredRawRefs.length, 64);
+  assert.equal(result.receipt.maxBufferBytes, 128 * 1024);
+  assert.ok(result.text.length <= 320);
+});

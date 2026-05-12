@@ -111,6 +111,7 @@ Example host config:
             "routeAuto": {
               "enabled": true,
               "timeoutMs": 1800,
+              "maxBufferBytes": 524288,
               "maxChars": 420,
               "maxGraphCandidates": 2,
               "maxTranscriptSessions": 2
@@ -124,11 +125,22 @@ Example host config:
 ```
 
 Behavior:
-- shells out to `openclaw-mem route auto "<prompt>"`
+- shells out to `openclaw-mem route auto "<prompt>"` with bounded output buffering (`maxBufferBytes`, default 512 KiB)
+- returns only compact hook text and a bounded receipt to the gateway hook; the parsed route payload is not retained on the result
 - if graph-semantic is ready and returns candidates, injects a compact graph-routing hint block
 - when route-auto reports `preferredCardRefs` / `coveredRawRefs`, the hint prefers the fresh synthesis card while preserving the covered-raw receipt
 - otherwise fails open to a compact transcript-recall hint block
 - runtime failures/timeouts remain fail-open (the turn continues without the route block)
+
+## autoCapture RSS/context bounds
+
+`autoCapture` is intentionally strict: it stores only a small number of preference/decision/TODO candidates per turn. To avoid large-session RSS spikes, input scanning is bounded before candidate splitting and embedding:
+
+- `maxScannedUserMessages` default `24`, hard cap `64`
+- `maxTextBlocksPerMessage` default `4`, hard cap `8`
+- `maxTotalInputChars` default `48000`, hard cap `120000`
+
+These caps do not reduce normal recent-turn capture quality; they prevent rescanning an entire long transcript when at most a few memory rows can be written.
 
 Rollback:
 - set `plugins.entries.openclaw-mem-engine.config.autoRecall.routeAuto.enabled = false`

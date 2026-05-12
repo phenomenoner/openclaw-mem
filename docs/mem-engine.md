@@ -105,14 +105,16 @@ Related boundary: the shipped **verbatim semantic lane** remains a **sidecar ret
 - Default: **on** (but gated by heuristics)
 - Behavior:
   - optional `autoRecall.routeAuto` hook calls `openclaw-mem route auto --compact` before normal recall and injects a compact synthesis-aware routing hint block
+  - route-auto child output is bounded (`maxBufferBytes`, default 512 KiB, hard cap 2 MiB) and only compact text/receipt are retained by the hook
   - dual registration is deduped by run/session key so sequential `before_prompt_build` then legacy `before_agent_start` does not double-inject
+  - prompt-hook dedupe keeps a hard-capped recent-run map to avoid quiet-period stale growth
   - when route-auto carries `preferredCardRefs` / `coveredRawRefs`, the hook prefers the fresh synthesis card but keeps the covered-raw receipt visible
   - route hook is recommendation-only and fail-open (timeout/runtime failure does not block the turn)
   - skip trivial prompts (greetings/ack/emojis/HEARTBEAT/slash commands)
     - robust to trailing emoji/punctuation (e.g. `ok👍`, `done!!`, `thanks...`)
     - punctuation-only prompts also skip (e.g. `？`, `…`)
   - recall tiers: `must_remember` → `nice_to_have` → (optional) `unknown` fallback
-  - cap: <=6 memories
+  - cap: <=5 memories
   - escapes memory text to reduce prompt-injection risk
   - emits bounded lifecycle receipt (`openclaw-mem-engine.recall.receipt.v1`) with skip reason / tier counts / top IDs
   - in `receipts.verbosity=high`, injects a compact autoRecall wrapper comment (IDs only; no memory text in receipt)
@@ -131,11 +133,12 @@ Boundary rule:
 - Hook: `agent_end`
 - Default: **on** (but strict allowlist)
 - Behavior:
-  - capture only a small number of items (1–4 per turn)
+  - capture only a small number of items (1–3 per turn; default 2)
   - default categories: `preference`, `decision`
+  - scans only a bounded recent user-message tail before candidate extraction (`maxScannedUserMessages`, `maxTextBlocksPerMessage`, `maxTotalInputChars`)
   - skip tool outputs; prefer user text; skip secrets-like strings
   - dedupe near-identical items
-  - emits bounded lifecycle receipt (`openclaw-mem-engine.autoCapture.receipt.v1`) with extracted/filtered/stored counts
+  - emits bounded lifecycle receipt (`openclaw-mem-engine.autoCapture.receipt.v1`) with extracted/filtered/stored counts plus scan-bound counters
 
 ### Rollback
 One line:
