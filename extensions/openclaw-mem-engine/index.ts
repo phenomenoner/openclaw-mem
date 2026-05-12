@@ -77,6 +77,7 @@ type RouteAutoConfigInput = {
   commandArgs?: string[];
   dbPath?: string;
   timeoutMs?: number;
+  maxBufferBytes?: number;
   maxChars?: number;
   maxGraphCandidates?: number;
   maxTranscriptSessions?: number;
@@ -98,6 +99,9 @@ type AutoCaptureConfigInput = {
   enabled?: boolean;
   maxItemsPerTurn?: number;
   maxCharsPerItem?: number;
+  maxScannedUserMessages?: number;
+  maxTextBlocksPerMessage?: number;
+  maxTotalInputChars?: number;
   capturePreference?: boolean;
   captureDecision?: boolean;
   captureTodo?: boolean;
@@ -244,6 +248,12 @@ const AUTO_CAPTURE_MAX_CHARS_PER_ITEM = 320;
 const AUTO_CAPTURE_MAX_TODO_PER_TURN = 3;
 const AUTO_CAPTURE_MAX_TODO_DEDUPE_WINDOW_HOURS = 24 * 7;
 const AUTO_CAPTURE_MAX_TODO_STALE_TTL_DAYS = 90;
+const AUTO_CAPTURE_MAX_SCANNED_USER_MESSAGES = 64;
+const AUTO_CAPTURE_MAX_TEXT_BLOCKS_PER_MESSAGE = 8;
+const AUTO_CAPTURE_MAX_TOTAL_INPUT_CHARS = 120_000;
+const ROUTE_AUTO_DEFAULT_MAX_BUFFER_BYTES = 512 * 1024;
+const ROUTE_AUTO_MAX_BUFFER_BYTES = 2 * 1024 * 1024;
+const PROMPT_MUTATION_HOOK_DEDUPE_MAX_ENTRIES = 1024;
 const DOCS_COLD_LANE_MAX_ITEMS = 5;
 const DOCS_COLD_LANE_MAX_SNIPPET_CHARS = 600;
 const DOCS_COLD_LANE_MAX_CHUNK_CHARS = 4000;
@@ -257,6 +267,7 @@ type RouteAutoConfig = {
   commandArgs: string[];
   dbPath?: string;
   timeoutMs: number;
+  maxBufferBytes: number;
   maxChars: number;
   maxGraphCandidates: number;
   maxTranscriptSessions: number;
@@ -282,6 +293,9 @@ type AutoCaptureConfig = {
   enabled: boolean;
   maxItemsPerTurn: number;
   maxCharsPerItem: number;
+  maxScannedUserMessages: number;
+  maxTextBlocksPerMessage: number;
+  maxTotalInputChars: number;
   capturePreference: boolean;
   captureDecision: boolean;
   captureTodo: boolean;
@@ -352,6 +366,7 @@ const DEFAULT_ROUTE_AUTO_CONFIG: RouteAutoConfig = {
   commandArgs: [],
   dbPath: undefined,
   timeoutMs: 1800,
+  maxBufferBytes: ROUTE_AUTO_DEFAULT_MAX_BUFFER_BYTES,
   maxChars: 420,
   maxGraphCandidates: 2,
   maxTranscriptSessions: 2,
@@ -377,6 +392,9 @@ const DEFAULT_AUTO_CAPTURE_CONFIG: AutoCaptureConfig = {
   enabled: true,
   maxItemsPerTurn: 2,
   maxCharsPerItem: 240,
+  maxScannedUserMessages: 24,
+  maxTextBlocksPerMessage: 4,
+  maxTotalInputChars: 48_000,
   capturePreference: true,
   captureDecision: true,
   captureTodo: false,
@@ -709,6 +727,11 @@ function resolveAutoRecallConfig(input: PluginConfig["autoRecall"]): AutoRecallC
       max: 15_000,
       integer: true,
     }),
+    maxBufferBytes: normalizeNumberInRange(rawRouteAuto.maxBufferBytes, defaults.routeAuto.maxBufferBytes, {
+      min: 64 * 1024,
+      max: ROUTE_AUTO_MAX_BUFFER_BYTES,
+      integer: true,
+    }),
     maxChars: normalizeNumberInRange(rawRouteAuto.maxChars, defaults.routeAuto.maxChars, {
       min: 120,
       max: 2400,
@@ -776,6 +799,21 @@ function resolveAutoCaptureConfig(input: PluginConfig["autoCapture"]): AutoCaptu
     maxCharsPerItem: normalizeNumberInRange(raw.maxCharsPerItem, defaults.maxCharsPerItem, {
       min: 60,
       max: AUTO_CAPTURE_MAX_CHARS_PER_ITEM,
+      integer: true,
+    }),
+    maxScannedUserMessages: normalizeNumberInRange(raw.maxScannedUserMessages, defaults.maxScannedUserMessages, {
+      min: 1,
+      max: AUTO_CAPTURE_MAX_SCANNED_USER_MESSAGES,
+      integer: true,
+    }),
+    maxTextBlocksPerMessage: normalizeNumberInRange(raw.maxTextBlocksPerMessage, defaults.maxTextBlocksPerMessage, {
+      min: 1,
+      max: AUTO_CAPTURE_MAX_TEXT_BLOCKS_PER_MESSAGE,
+      integer: true,
+    }),
+    maxTotalInputChars: normalizeNumberInRange(raw.maxTotalInputChars, defaults.maxTotalInputChars, {
+      min: 1_000,
+      max: AUTO_CAPTURE_MAX_TOTAL_INPUT_CHARS,
       integer: true,
     }),
     capturePreference: normalizeBoolean(raw.capturePreference, defaults.capturePreference),
@@ -1736,32 +1774,116 @@ function isNearDuplicateText(a: string, b: string, threshold: number): boolean {
   return tokenJaccardSimilarity(aNorm, bNorm) >= threshold;
 }
 
-function extractUserTextMessages(messages: unknown[]): string[] {
-  const out: string[] = [];
+type AutoCaptureExtractionStats = {
+  scannedUserMessages: number;
+  scannedTextBlocks: number;
+  scannedTextChars: number;
+  skippedOlderUserMessages: number;
+  truncatedInputChars: number;
+};
 
+const EMPTY_AUTO_CAPTURE_EXTRACTION_STATS: AutoCaptureExtractionStats = {
+  scannedUserMessages: 0,
+  scannedTextBlocks: 0,
+  scannedTextChars: 0,
+  skippedOlderUserMessages: 0,
+  truncatedInputChars: 0,
+};
+
+function normalizePositiveInteger(raw: number | undefined, fallback: number): number {
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.max(1, Math.floor(raw as number));
+}
+
+function clampTextForAutoCaptureInput(text: string, remainingChars: number): { text: string; truncatedChars: number } {
+  if (remainingChars <= 0) return { text: "", truncatedChars: text.length };
+  if (text.length <= remainingChars) return { text, truncatedChars: 0 };
+  return { text: text.slice(0, remainingChars), truncatedChars: text.length - remainingChars };
+}
+
+function extractUserTextMessages(
+  messages: unknown[],
+  options: { maxMessages?: number; maxTextBlocksPerMessage?: number; maxTotalInputChars?: number } = {},
+): { texts: string[]; stats: AutoCaptureExtractionStats } {
+  const out: string[] = [];
+  const stats: AutoCaptureExtractionStats = { ...EMPTY_AUTO_CAPTURE_EXTRACTION_STATS };
+  const maxMessages = normalizePositiveInteger(options.maxMessages, AUTO_CAPTURE_MAX_SCANNED_USER_MESSAGES);
+  const maxTextBlocksPerMessage = normalizePositiveInteger(
+    options.maxTextBlocksPerMessage,
+    AUTO_CAPTURE_MAX_TEXT_BLOCKS_PER_MESSAGE,
+  );
+  const maxTotalInputChars = normalizePositiveInteger(options.maxTotalInputChars, AUTO_CAPTURE_MAX_TOTAL_INPUT_CHARS);
+
+  const userMessages: unknown[] = [];
   for (const message of messages) {
     if (!message || typeof message !== "object") continue;
     const msg = message as Record<string, unknown>;
-    if (msg.role !== "user") continue;
+    if (msg.role === "user") userMessages.push(message);
+  }
+
+  stats.skippedOlderUserMessages = Math.max(0, userMessages.length - maxMessages);
+
+  for (const message of userMessages.slice(-maxMessages)) {
+    if (stats.scannedTextChars >= maxTotalInputChars) {
+      if (message && typeof message === "object") {
+        const content = (message as Record<string, unknown>).content;
+        if (typeof content === "string") stats.truncatedInputChars += content.length;
+        else if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block && typeof block === "object" && (block as Record<string, unknown>).type === "text") {
+              const text = (block as Record<string, unknown>).text;
+              if (typeof text === "string") stats.truncatedInputChars += text.length;
+            }
+          }
+        }
+      }
+      continue;
+    }
+    if (!message || typeof message !== "object") continue;
+    const msg = message as Record<string, unknown>;
+    stats.scannedUserMessages += 1;
 
     const content = msg.content;
     if (typeof content === "string") {
-      out.push(content);
+      const remaining = maxTotalInputChars - stats.scannedTextChars;
+      const clamped = clampTextForAutoCaptureInput(content, remaining);
+      if (clamped.text) {
+        out.push(clamped.text);
+        stats.scannedTextBlocks += 1;
+        stats.scannedTextChars += clamped.text.length;
+      }
+      stats.truncatedInputChars += clamped.truncatedChars;
       continue;
     }
 
     if (!Array.isArray(content)) continue;
+    let textBlocks = 0;
     for (const block of content) {
+      if (stats.scannedTextChars >= maxTotalInputChars || textBlocks >= maxTextBlocksPerMessage) {
+        if (block && typeof block === "object" && (block as Record<string, unknown>).type === "text") {
+          const skippedText = (block as Record<string, unknown>).text;
+          if (typeof skippedText === "string") stats.truncatedInputChars += skippedText.length;
+        }
+        continue;
+      }
       if (!block || typeof block !== "object") continue;
       const typed = block as Record<string, unknown>;
       if (typed.type !== "text") continue;
       if (typeof typed.text === "string") {
-        out.push(typed.text);
+        const remaining = maxTotalInputChars - stats.scannedTextChars;
+        const clamped = clampTextForAutoCaptureInput(typed.text, remaining);
+        if (clamped.text) {
+          out.push(clamped.text);
+          stats.scannedTextBlocks += 1;
+          stats.scannedTextChars += clamped.text.length;
+          textBlocks += 1;
+        }
+        stats.truncatedInputChars += clamped.truncatedChars;
       }
     }
   }
 
-  return out;
+  return { texts: out, stats };
 }
 
 function stripAutoInjectedArtifacts(rawText: string): string {
@@ -2063,6 +2185,13 @@ type AutoCaptureLifecycleReceipt = {
     duplicate: number;
     todo_rate_limit: number;
     todo_dedupe_window: number;
+    older_user_messages: number;
+    input_chars_truncated: number;
+  };
+  scanned: {
+    userMessages: number;
+    textBlocks: number;
+    textChars: number;
   };
   storedCount: number;
 };
@@ -2288,6 +2417,13 @@ function buildAutoCaptureLifecycleReceipt(input: {
     duplicate: number;
     todo_rate_limit: number;
     todo_dedupe_window: number;
+    older_user_messages?: number;
+    input_chars_truncated?: number;
+  };
+  scanned?: {
+    userMessages: number;
+    textBlocks: number;
+    textChars: number;
   };
   storedCount: number;
 }): AutoCaptureLifecycleReceipt {
@@ -2301,9 +2437,29 @@ function buildAutoCaptureLifecycleReceipt(input: {
       duplicate: Math.max(0, Math.floor(input.filteredOut.duplicate)),
       todo_rate_limit: Math.max(0, Math.floor(input.filteredOut.todo_rate_limit)),
       todo_dedupe_window: Math.max(0, Math.floor(input.filteredOut.todo_dedupe_window)),
+      older_user_messages: Math.max(0, Math.floor(input.filteredOut.older_user_messages ?? 0)),
+      input_chars_truncated: Math.max(0, Math.floor(input.filteredOut.input_chars_truncated ?? 0)),
+    },
+    scanned: {
+      userMessages: Math.max(0, Math.floor(input.scanned?.userMessages ?? 0)),
+      textBlocks: Math.max(0, Math.floor(input.scanned?.textBlocks ?? 0)),
+      textChars: Math.max(0, Math.floor(input.scanned?.textChars ?? 0)),
     },
     storedCount: Math.max(0, Math.floor(input.storedCount)),
   };
+}
+
+
+function capPromptMutationHookRuns(map: Map<string, number>, maxEntries = PROMPT_MUTATION_HOOK_DEDUPE_MAX_ENTRIES): number {
+  const cappedMax = Math.max(1, Math.floor(maxEntries));
+  let dropped = 0;
+  while (map.size > cappedMax) {
+    const oldestKey = map.keys().next().value as string | undefined;
+    if (oldestKey == null) break;
+    map.delete(oldestKey);
+    dropped += 1;
+  }
+  return dropped;
 }
 
 function renderAutoRecallReceiptComment(receipt: RecallLifecycleReceipt, cfg: ReceiptsConfig): string {
@@ -3498,7 +3654,7 @@ const memoryEngineConfigSchema = {
         const routeAutoObj = obj.routeAuto as Record<string, unknown>;
         assertAllowedKeys(
           routeAutoObj,
-          ["enabled", "command", "commandArgs", "dbPath", "timeoutMs", "maxChars", "maxGraphCandidates", "maxTranscriptSessions"],
+          ["enabled", "command", "commandArgs", "dbPath", "timeoutMs", "maxBufferBytes", "maxChars", "maxGraphCandidates", "maxTranscriptSessions"],
           "autoRecall.routeAuto config",
         );
 
@@ -3510,6 +3666,7 @@ const memoryEngineConfigSchema = {
             : undefined,
           dbPath: typeof routeAutoObj.dbPath === "string" ? routeAutoObj.dbPath : undefined,
           timeoutMs: typeof routeAutoObj.timeoutMs === "number" ? routeAutoObj.timeoutMs : undefined,
+          maxBufferBytes: typeof routeAutoObj.maxBufferBytes === "number" ? routeAutoObj.maxBufferBytes : undefined,
           maxChars: typeof routeAutoObj.maxChars === "number" ? routeAutoObj.maxChars : undefined,
           maxGraphCandidates:
             typeof routeAutoObj.maxGraphCandidates === "number" ? routeAutoObj.maxGraphCandidates : undefined,
@@ -3549,6 +3706,9 @@ const memoryEngineConfigSchema = {
           "enabled",
           "maxItemsPerTurn",
           "maxCharsPerItem",
+          "maxScannedUserMessages",
+          "maxTextBlocksPerMessage",
+          "maxTotalInputChars",
           "capturePreference",
           "captureDecision",
           "captureTodo",
@@ -3564,6 +3724,9 @@ const memoryEngineConfigSchema = {
         enabled: typeof obj.enabled === "boolean" ? obj.enabled : undefined,
         maxItemsPerTurn: typeof obj.maxItemsPerTurn === "number" ? obj.maxItemsPerTurn : undefined,
         maxCharsPerItem: typeof obj.maxCharsPerItem === "number" ? obj.maxCharsPerItem : undefined,
+        maxScannedUserMessages: typeof obj.maxScannedUserMessages === "number" ? obj.maxScannedUserMessages : undefined,
+        maxTextBlocksPerMessage: typeof obj.maxTextBlocksPerMessage === "number" ? obj.maxTextBlocksPerMessage : undefined,
+        maxTotalInputChars: typeof obj.maxTotalInputChars === "number" ? obj.maxTotalInputChars : undefined,
         capturePreference: typeof obj.capturePreference === "boolean" ? obj.capturePreference : undefined,
         captureDecision: typeof obj.captureDecision === "boolean" ? obj.captureDecision : undefined,
         captureTodo: typeof obj.captureTodo === "boolean" ? obj.captureTodo : undefined,
@@ -4192,7 +4355,7 @@ const memoryPlugin = {
     const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model, embeddingClampCfg) : null;
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, routeAuto=${routeAutoResolved.enabled ? `on|timeout=${routeAutoResolved.timeoutMs}|chars=${routeAutoResolved.maxChars}|graph=${routeAutoResolved.maxGraphCandidates}|episodes=${routeAutoResolved.maxTranscriptSessions}|db=${routeAutoResolved.dbPath}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, weijiMemoryPreflight=${weijiMemoryPreflightResolved.enabled ? `${weijiMemoryPreflightResolved.failOnQueued || weijiMemoryPreflightResolved.failOnRejected ? "enforced" : "advisory"}|${weijiMemoryPreflightResolved.failMode}|cmd=${weijiMemoryPreflightResolved.command}` : "off"}, gbrainMirror=${gbrainMirrorResolved.enabled ? `${gbrainMirrorResolved.importOnStore ? "write-through" : "file-only"}|timeout=${gbrainMirrorResolved.timeoutMs}|root=${gbrainMirrorResolved.mirrorRoot}|cmd=${gbrainMirrorResolved.command}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, routeAuto=${routeAutoResolved.enabled ? `on|timeout=${routeAutoResolved.timeoutMs}|buffer=${routeAutoResolved.maxBufferBytes}|chars=${routeAutoResolved.maxChars}|graph=${routeAutoResolved.maxGraphCandidates}|episodes=${routeAutoResolved.maxTranscriptSessions}|db=${routeAutoResolved.dbPath}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, weijiMemoryPreflight=${weijiMemoryPreflightResolved.enabled ? `${weijiMemoryPreflightResolved.failOnQueued || weijiMemoryPreflightResolved.failOnRejected ? "enforced" : "advisory"}|${weijiMemoryPreflightResolved.failMode}|cmd=${weijiMemoryPreflightResolved.command}` : "off"}, gbrainMirror=${gbrainMirrorResolved.enabled ? `${gbrainMirrorResolved.importOnStore ? "write-through" : "file-only"}|timeout=${gbrainMirrorResolved.timeoutMs}|root=${gbrainMirrorResolved.mirrorRoot}|cmd=${gbrainMirrorResolved.command}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
     );
 
     const resolveAdminFilters = (input: {
@@ -5953,6 +6116,7 @@ const memoryPlugin = {
         }
 
         promptMutationHookRuns.set(runKey, now);
+        capPromptMutationHookRuns(promptMutationHookRuns, PROMPT_MUTATION_HOOK_DEDUPE_MAX_ENTRIES);
         return false;
       };
 
@@ -6459,7 +6623,12 @@ const memoryPlugin = {
           if (allowedCategories.size === 0) return;
 
           try {
-            const userTexts = extractUserTextMessages(event.messages)
+            const extracted = extractUserTextMessages(event.messages, {
+              maxMessages: autoCaptureCfg.maxScannedUserMessages,
+              maxTextBlocksPerMessage: autoCaptureCfg.maxTextBlocksPerMessage,
+              maxTotalInputChars: autoCaptureCfg.maxTotalInputChars,
+            });
+            const userTexts = extracted.texts
               .map(stripAutoInjectedArtifacts)
               .filter((text) => Boolean(String(text ?? "").trim()));
             if (userTexts.length === 0) return;
@@ -6470,6 +6639,8 @@ const memoryPlugin = {
               duplicate: 0,
               todo_rate_limit: 0,
               todo_dedupe_window: 0,
+              older_user_messages: extracted.stats.skippedOlderUserMessages,
+              input_chars_truncated: extracted.stats.truncatedInputChars,
             };
 
             let candidateExtractionCount = 0;
@@ -6662,6 +6833,11 @@ const memoryPlugin = {
                 cfg: receiptsCfg,
                 candidateExtractionCount,
                 filteredOut,
+                scanned: {
+                  userMessages: extracted.stats.scannedUserMessages,
+                  textBlocks: extracted.stats.scannedTextBlocks,
+                  textChars: extracted.stats.scannedTextChars,
+                },
                 storedCount: toStore.length,
               });
               api.logger.info(`openclaw-mem-engine:autoCapture.receipt ${JSON.stringify(receipt)}`);
@@ -6687,6 +6863,8 @@ export const __debugReceipts = {
   isTodoStale,
   buildRecallLifecycleReceipt,
   buildAutoCaptureLifecycleReceipt,
+  extractUserTextMessages,
+  capPromptMutationHookRuns,
   applyPrependContextBudget,
 };
 

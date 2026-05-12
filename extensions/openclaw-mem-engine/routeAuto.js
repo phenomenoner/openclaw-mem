@@ -7,6 +7,8 @@ const DEFAULT_COMMAND = "openclaw-mem";
 const DEFAULT_TIMEOUT_MS = 1800;
 const MAX_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_CHARS = 420;
+const DEFAULT_MAX_BUFFER_BYTES = 512 * 1024;
+const MAX_BUFFER_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MAX_GRAPH_CANDIDATES = 2;
 const DEFAULT_MAX_TRANSCRIPT_SESSIONS = 2;
 
@@ -71,11 +73,17 @@ function compactSessionId(raw) {
   return text.length > 18 ? `${text.slice(0, 18)}…` : text;
 }
 
-async function defaultRunner({ command, args, timeoutMs }) {
+function clampBufferBytes(raw) {
+  const parsed = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_MAX_BUFFER_BYTES;
+  return Math.max(64 * 1024, Math.min(MAX_BUFFER_BYTES, Math.floor(parsed)));
+}
+
+async function defaultRunner({ command, args, timeoutMs, maxBufferBytes }) {
   try {
     const { stdout, stderr } = await execFile(command, args, {
       timeout: timeoutMs,
-      maxBuffer: 2 * 1024 * 1024,
+      maxBuffer: clampBufferBytes(maxBufferBytes),
     });
     return {
       ok: true,
@@ -106,6 +114,7 @@ function receiptBase(config) {
   const timeoutMs = clampTimeout(config?.timeoutMs);
   const dbPath = typeof config?.dbPath === "string" && config.dbPath.trim() ? config.dbPath.trim() : null;
   const maxChars = clampChars(config?.maxChars, DEFAULT_MAX_CHARS);
+  const maxBufferBytes = clampBufferBytes(config?.maxBufferBytes);
   const maxGraphCandidates = clampCount(config?.maxGraphCandidates, DEFAULT_MAX_GRAPH_CANDIDATES, 5);
   const maxTranscriptSessions = clampCount(config?.maxTranscriptSessions, DEFAULT_MAX_TRANSCRIPT_SESSIONS, 5);
 
@@ -115,6 +124,7 @@ function receiptBase(config) {
     timeoutMs,
     dbPath,
     maxChars,
+    maxBufferBytes,
     maxGraphCandidates,
     maxTranscriptSessions,
   };
@@ -209,7 +219,6 @@ export async function runRouteAuto({ query, scope, config, runner = defaultRunne
   if (!enabled) {
     return {
       text: "",
-      payload: null,
       receipt: {
         enabled: false,
         attempted: false,
@@ -225,7 +234,6 @@ export async function runRouteAuto({ query, scope, config, runner = defaultRunne
   if (!trimmedQuery) {
     return {
       text: "",
-      payload: null,
       receipt: {
         enabled: true,
         attempted: false,
@@ -243,6 +251,7 @@ export async function runRouteAuto({ query, scope, config, runner = defaultRunne
     command: base.command,
     args: buildArgs({ query: trimmedQuery, scope, base }),
     timeoutMs: base.timeoutMs,
+    maxBufferBytes: base.maxBufferBytes,
   });
 
   const payload = parseJsonLoose(result.stdout) ?? parseJsonLoose(result.stderr);
@@ -259,7 +268,6 @@ export async function runRouteAuto({ query, scope, config, runner = defaultRunne
 
   return {
     text,
-    payload,
     receipt: {
       enabled: true,
       attempted: true,
@@ -280,6 +288,7 @@ export async function runRouteAuto({ query, scope, config, runner = defaultRunne
       killed: Boolean(result.killed),
       latencyMs: Date.now() - started,
       timeoutMs: base.timeoutMs,
+      maxBufferBytes: base.maxBufferBytes,
       command: base.command,
     },
   };

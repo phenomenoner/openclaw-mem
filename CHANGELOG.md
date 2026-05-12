@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.16] - 2026-05-12
+
+### Fixed
+
+- Bounded `openclaw-mem-engine` autoCapture input scanning before candidate extraction to avoid RSS spikes on long transcripts while preserving recent-turn capture behavior.
+- Bounded route-auto child output buffering and stopped returning the full parsed route payload from the prompt hook result.
+- Added a hard cap to prompt-hook dedupe tracking so stale quiet-period entries cannot grow without bound.
+
+### Docs
+
+- Documented RSS/context-safety knobs for route-auto and autoCapture, and corrected public cap descriptions for autoRecall and autoCapture.
+
+### Testing
+
+- Added regression coverage for RSS-bound source/schema invariants and route-auto no-payload retention.
+
 ## [1.9.15] - 2026-05-12
 
 ### Added
