@@ -41,6 +41,7 @@ from openclaw_mem import active_line_context
 from openclaw_mem import context_pack_v1
 from openclaw_mem import ingestion_review
 from openclaw_mem import gbrain_sidecar
+from openclaw_mem import governed_release
 from openclaw_mem import goal_primitive
 from openclaw_mem import mem_system_status
 from openclaw_mem import mutation_framework
@@ -10874,6 +10875,38 @@ def cmd_mutation_rollback(conn: sqlite3.Connection, args: argparse.Namespace) ->
         print(f"mutation_rollback ok={str(payload['ok']).lower()} restored={len(payload['restored'])} writes_performed={str(payload['writes_performed']).lower()}")
 
 
+def cmd_governed_apply_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    plan = mutation_framework.load_json(args.plan_file)
+    payload = governed_release.review_apply_plan(
+        plan,
+        allowed_root=getattr(args, "allowed_root"),
+        l2_enabled=bool(getattr(args, "l2_enabled", False)),
+        human_approved=bool(getattr(args, "human_approved", False)),
+        ck_approved=bool(getattr(args, "ck_approved", False)),
+    )
+    if getattr(args, "out", None):
+        mutation_framework.write_json(args.out, payload)
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"governed_apply_review decision={payload['decision']} ok={str(payload['ok']).lower()} writes_performed=false")
+
+
+def cmd_governed_release_check(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = governed_release.release_check(
+        repo_root=getattr(args, "repo_root"),
+        expected_version=getattr(args, "expected_version", None),
+        require_receipt=not bool(getattr(args, "no_require_receipt", False)),
+        docs_glob=getattr(args, "docs_glob", "docs/self-improvement*.md"),
+    )
+    if getattr(args, "out", None):
+        mutation_framework.write_json(args.out, payload)
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"governed_release_check ok={str(payload['ok']).lower()} version={payload['expected_version']} writes_performed=false")
+
+
 def cmd_self_curator_plan(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     mutations = json.loads(Path(args.mutations_file).read_text(encoding="utf-8"))
     if isinstance(mutations, dict) and "mutations" in mutations:
@@ -20099,6 +20132,27 @@ def build_parser() -> argparse.ArgumentParser:
     mr.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
     mr.set_defaults(func=cmd_mutation_rollback)
 
+    sp = sub.add_parser("governed", help="Governed apply/release hardening checks (review-only)")
+    govsub = sp.add_subparsers(dest="governed_cmd", required=True)
+    ga = govsub.add_parser("apply-review", help="Review a mutation plan against approval boundaries without applying it")
+    ga.add_argument("--plan-file", required=True, help="Mutation plan JSON file")
+    ga.add_argument("--allowed-root", default=".state/mutation-framework/sandbox", help="Allowed local fixture root")
+    ga.add_argument("--l2-enabled", action="store_true", help="Allow L2 local apply in this review")
+    ga.add_argument("--human-approved", action="store_true", help="Record human approval for L3 review (still not auto-applyable)")
+    ga.add_argument("--ck-approved", action="store_true", help="Record CK approval for L4 review (still not auto-applyable)")
+    ga.add_argument("--out", help="Optional apply review receipt path")
+    ga.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    ga.set_defaults(func=cmd_governed_apply_review)
+
+    gr = govsub.add_parser("release-check", help="Check version/changelog/lockfile/docs safety before release")
+    gr.add_argument("--repo-root", default=".", help="Repository root")
+    gr.add_argument("--expected-version", help="Expected release version")
+    gr.add_argument("--docs-glob", default="docs/self-improvement*.md", help="Glob of public docs to safety-scan")
+    gr.add_argument("--no-require-receipt", action="store_true", help="Do not require a self-improvement receipt document")
+    gr.add_argument("--out", help="Optional release check receipt path")
+    gr.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    gr.set_defaults(func=cmd_governed_release_check)
+
     sp = sub.add_parser("self-curator", help="Lifecycle curator engine (review + checkpointed apply)")
     scsub = sp.add_subparsers(dest="self_curator_cmd", required=True)
     sc = scsub.add_parser("skill-review", help="Scan skill files and emit review-only lifecycle artifacts")
@@ -20288,7 +20342,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.
