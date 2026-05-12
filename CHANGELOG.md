@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.14] - 2026-05-12
+
+### Added
+
+- Added `openclaw-mem mutation plan|validate|stage|apply|rollback`, a local staged mutation framework for synthetic L0-L2 fixture apply with rollback receipts.
+- Added public Slice 6 documentation and receipt for the staged mutation framework.
+
+### Safety
+
+- Slice 6 apply is confined to `--allowed-root`, blocks absolute/traversal paths, and rejects protected/L3/L4/manual-approval mutations.
+- Failed multi-step applies restore already-applied changes and return `failed_closed`.
+
+### Testing
+
+- Added unit and CLI integration coverage for plan/stage/apply/rollback, L3/L4/protected blocking, path escape blocking, and rollback-on-failure.
+
 ## [1.9.13] - 2026-05-12
 
 ### Added
