@@ -10907,6 +10907,38 @@ def cmd_governed_release_check(conn: sqlite3.Connection, args: argparse.Namespac
         print(f"governed_release_check ok={str(payload['ok']).lower()} version={payload['expected_version']} writes_performed=false")
 
 
+def cmd_governed_advisory_dossier(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    plan = mutation_framework.load_json(args.plan_file)
+    payload = governed_release.build_advisory_dossier(
+        plan,
+        allowed_root=getattr(args, "allowed_root"),
+        title=getattr(args, "title", None),
+        why_now=getattr(args, "why_now", None),
+        recommendation=getattr(args, "recommendation", None),
+        do_nothing_cost=getattr(args, "do_nothing_cost", None),
+        operator_target=getattr(args, "operator_target", None),
+        l2_enabled=bool(getattr(args, "l2_enabled", False)),
+        human_approved=bool(getattr(args, "human_approved", False)),
+        ck_approved=bool(getattr(args, "ck_approved", False)),
+    )
+    artifact_outputs = []
+    if getattr(args, "markdown_out", None):
+        report_path = Path(args.markdown_out)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(governed_release.render_advisory_dossier_markdown(payload), encoding="utf-8")
+        artifact_outputs.append(str(report_path))
+    if getattr(args, "out", None):
+        artifact_outputs.append(str(args.out))
+        payload["artifact_outputs"] = artifact_outputs
+        mutation_framework.write_json(args.out, payload)
+    else:
+        payload["artifact_outputs"] = artifact_outputs
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"governed_advisory_dossier verdict={payload['verdict']} risk={payload['risk_class']} writes_performed={str(payload['writes_performed']).lower()}")
+
+
 def cmd_self_curator_plan(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     mutations = json.loads(Path(args.mutations_file).read_text(encoding="utf-8"))
     if isinstance(mutations, dict) and "mutations" in mutations:
@@ -20152,6 +20184,22 @@ def build_parser() -> argparse.ArgumentParser:
     gr.add_argument("--out", help="Optional release check receipt path")
     gr.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
     gr.set_defaults(func=cmd_governed_release_check)
+
+    gd = govsub.add_parser("advisory-dossier", help="Build an L3/L4 operator approval dossier without applying it")
+    gd.add_argument("--plan-file", required=True, help="Mutation plan JSON file")
+    gd.add_argument("--allowed-root", default=".state/mutation-framework/sandbox", help="Allowed local fixture root")
+    gd.add_argument("--title", help="Human-facing dossier title")
+    gd.add_argument("--why-now", help="Why this should be considered now")
+    gd.add_argument("--recommendation", help="Recommended operator action")
+    gd.add_argument("--do-nothing-cost", help="Cost/risk of taking no action")
+    gd.add_argument("--operator-target", help="Operator/person whose approval is needed")
+    gd.add_argument("--l2-enabled", action="store_true", help="Pass through L2 config gate for review context")
+    gd.add_argument("--human-approved", action="store_true", help="Record human approval flag for review context; does not execute")
+    gd.add_argument("--ck-approved", action="store_true", help="Record CK approval flag for review context; does not execute")
+    gd.add_argument("--out", help="Optional JSON dossier receipt path")
+    gd.add_argument("--markdown-out", help="Optional Markdown dossier report path")
+    gd.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    gd.set_defaults(func=cmd_governed_advisory_dossier)
 
     sp = sub.add_parser("self-curator", help="Lifecycle curator engine (review + checkpointed apply)")
     scsub = sp.add_subparsers(dest="self_curator_cmd", required=True)
