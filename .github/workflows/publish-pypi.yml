@@ -1,0 +1,46 @@
+name: publish-pypi
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to publish (tag or commit). Defaults to the current workflow ref.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish openclaw-context-pack to PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+          enable-cache: true
+
+      - name: Verify lockfile and tests
+        run: |
+          uv lock --check
+          uv sync --locked
+          uv run -- python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Check distributions
+        run: uvx twine check dist/*
+
+      - name: Publish to PyPI via trusted publishing
+        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple/ dist/*
