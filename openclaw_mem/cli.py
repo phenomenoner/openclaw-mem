@@ -41,9 +41,11 @@ from openclaw_mem import active_line_context
 from openclaw_mem import context_pack_v1
 from openclaw_mem import ingestion_review
 from openclaw_mem import gbrain_sidecar
+from openclaw_mem import goal_primitive
 from openclaw_mem import pack_trace_v1
 from openclaw_mem import self_model_sidecar
 from openclaw_mem import self_curator
+from openclaw_mem import self_improvement_surface
 from openclaw_mem import steward_review
 from openclaw_mem import harness as harness_install
 from openclaw_mem import codex_install
@@ -10696,6 +10698,42 @@ def cmd_active_line_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> 
         print(f"active_line goal_id={active['goal_id']} status={active['status']} writes_performed=false")
 
 
+def cmd_surface_validate(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    inventory = None
+    receipt = None
+    if getattr(args, "inventory", None):
+        inventory = self_improvement_surface.load_json_object(args.inventory)
+    if getattr(args, "receipt", None):
+        receipt = self_improvement_surface.load_json_object(args.receipt)
+    if inventory is None and receipt is None:
+        raise SystemExit("surface validate requires --inventory and/or --receipt")
+    payload = self_improvement_surface.validate_bundle(inventory=inventory, receipt=receipt)
+    if getattr(args, "out", None):
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"surface_validate ok={str(payload['ok']).lower()} writes_performed=false")
+
+
+def cmd_goal_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    receipt = goal_primitive.load_goal_receipt(args.file)
+    payload = goal_primitive.build_goal_status(
+        receipt,
+        source_ref=getattr(args, "source_ref", None),
+    )
+    if getattr(args, "out", None):
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(goal_primitive.render_goal_status(payload))
+
+
 def cmd_self_curator_plan(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     mutations = json.loads(Path(args.mutations_file).read_text(encoding="utf-8"))
     if isinstance(mutations, dict) and "mutations" in mutations:
@@ -19806,6 +19844,24 @@ def build_parser() -> argparse.ArgumentParser:
     al.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
     al.set_defaults(func=cmd_active_line_pack)
 
+    sp = sub.add_parser("surface", help="Validate self-improvement surface inventory and receipts")
+    surfsub = sp.add_subparsers(dest="surface_cmd", required=True)
+    sv = surfsub.add_parser("validate", help="Validate self-improvement surface inventory and receipts")
+    sv.add_argument("--inventory", help="Surface inventory JSON file")
+    sv.add_argument("--receipt", help="Receipt JSON file to validate against the inventory")
+    sv.add_argument("--out", help="Optional path to write the validation receipt JSON")
+    sv.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    sv.set_defaults(func=cmd_surface_validate)
+
+    sp = sub.add_parser("goal", help="Read-only goal primitive utilities")
+    goalsub = sp.add_subparsers(dest="goal_cmd", required=True)
+    gs = goalsub.add_parser("status", help="Normalize and validate one goal/controller receipt")
+    gs.add_argument("--file", required=True, help="Goal/controller receipt JSON")
+    gs.add_argument("--source-ref", help="Optional public-safe source reference")
+    gs.add_argument("--out", help="Optional path to write the status receipt JSON")
+    gs.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    gs.set_defaults(func=cmd_goal_status)
+
     sp = sub.add_parser("self-curator", help="Lifecycle curator engine (review + checkpointed apply)")
     scsub = sp.add_subparsers(dest="self_curator_cmd", required=True)
     sc = scsub.add_parser("skill-review", help="Scan skill files and emit review-only lifecycle artifacts")
@@ -19995,7 +20051,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "steward", "ingest-review", "active-line", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "steward", "ingest-review", "active-line", "surface", "goal", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.
