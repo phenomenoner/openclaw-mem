@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.15] - 2026-05-12
+
+### Added
+
+- Added `openclaw-mem governed apply-review`, a review-only approval-boundary receipt for mutation plans.
+- Added `openclaw-mem governed release-check`, a release hardening receipt for version, lockfile, changelog, receipt, and public-doc safety gates.
+- Added public Slice 7 documentation and receipt for governed apply/release hardening.
+
+### Safety
+
+- L2 local apply review requires an explicit config gate; L3/L4 remain blocked from auto-apply even when approval flags are recorded.
+- Release-check does not publish, tag, push, merge, or mutate runtime topology.
+
+### Testing
+
+- Added unit and CLI coverage for L2 gating, L3/L4 blocks, version mismatch, public safety markers, and release-check success.
+
 ## [1.9.14] - 2026-05-12
 
 ### Added
