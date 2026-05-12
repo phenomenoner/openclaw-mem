@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.12] - 2026-05-12
+
+### Added
+
+- Added the read-only self-improvement surface validator via `openclaw-mem surface validate` for inventory/receipt contract checks with protected-surface and write-authority guardrails.
+- Added the read-only goal primitive status command via `openclaw-mem goal status` for normalizing controller/goal receipts without enabling auto-continuation.
+- Added public Advanced Labs documentation and an operator skill card for the self-improvement goal pilot.
+
+### Testing
+
+- Added regression coverage for surface inventory validation, protected/L3/L4 authority checks, goal status normalization, and invalid goal status handling.
+- Verified targeted tests, CLI smoke, MkDocs strict build, Claude public-facing review, and local editable install smoke for this slice.
+
 ## [1.9.11] - 2026-05-08
 
 ### Added
