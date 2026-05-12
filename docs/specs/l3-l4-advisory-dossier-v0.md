@@ -35,6 +35,8 @@ Turn high-risk governed apply candidates into operator-facing advisory dossiers 
 - Optional JSON/Markdown dossier files are reported under `artifact_outputs`, not treated as target writes.
 - `apply_review.writes_performed=false` always.
 - L3/L4 always remain execution-blocked in this slice.
+- Top-level `ok` follows nested `apply_review.ok`; L3/L4 dossiers are generated but not gate-ok.
+- `dossier_generated=true` distinguishes successful report generation from approval.
 - Approval status is `approval_required`, never `approved`.
 - Topology/config impact: unchanged.
 

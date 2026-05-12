@@ -52,6 +52,8 @@ class TestGovernedRelease(unittest.TestCase):
             plan = build_plan(mutations=[{"action": "replace_text", "path": "runtime/config.json", "old": "off", "new": "on", "risk_class": "L3", "requires_approval": True}])
             dossier = build_advisory_dossier(plan, allowed_root=Path(tmp) / "sandbox", human_approved=True, why_now="Need operator decision")
         self.assertEqual(dossier["schema_version"], "openclaw-mem.governed.advisory-dossier.v0")
+        self.assertFalse(dossier["ok"])
+        self.assertTrue(dossier["dossier_generated"])
         self.assertEqual(dossier["risk_class"], "L3")
         self.assertEqual(dossier["approval"]["status"], "approval_required")
         self.assertFalse(dossier["apply_review"]["ok"])
@@ -62,6 +64,8 @@ class TestGovernedRelease(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             plan = build_plan(mutations=[{"action": "write_file", "path": "release/tag.txt", "content": "ship", "risk_class": "L4"}])
             dossier = build_advisory_dossier(plan, allowed_root=Path(tmp) / "sandbox", ck_approved=True, recommendation="Ask CK before execution")
+        self.assertFalse(dossier["ok"])
+        self.assertTrue(dossier["dossier_generated"])
         self.assertEqual(dossier["risk_class"], "L4")
         self.assertEqual(dossier["approval"]["status"], "approval_required")
         self.assertTrue(dossier["approval"]["message_delivery_is_not_approval"])

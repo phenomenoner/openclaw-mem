@@ -28,6 +28,8 @@ openclaw-mem governed advisory-dossier \
 
 The JSON receipt includes:
 
+- `ok` following the nested apply-review gate result
+- `dossier_generated` to distinguish successful report generation from approval
 - `risk_class`
 - `affected_surfaces`
 - `proposed_changes`

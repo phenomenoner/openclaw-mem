@@ -151,7 +151,8 @@ def build_advisory_dossier(
     approval_status = "approval_required" if highest in {"L3", "L4"} else "not_high_risk"
     return {
         "schema_version": ADVISORY_DOSSIER_SCHEMA,
-        "ok": True,
+        "ok": bool(apply_review.get("ok")),
+        "dossier_generated": True,
         "writes_performed": False,
         "topology_changed": False,
         "title": title or f"Governed advisory dossier for {highest} mutation plan",

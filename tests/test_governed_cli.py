@@ -59,6 +59,8 @@ def test_governed_advisory_dossier_cli_writes_markdown(tmp_path: Path):
         str(report),
         "--json",
     )
+    assert payload["ok"] is False
+    assert payload["dossier_generated"] is True
     assert payload["risk_class"] == "L4"
     assert payload["approval"]["status"] == "approval_required"
     assert payload["apply_review"]["ok"] is False
