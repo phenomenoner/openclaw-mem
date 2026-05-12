@@ -42,10 +42,12 @@ from openclaw_mem import context_pack_v1
 from openclaw_mem import ingestion_review
 from openclaw_mem import gbrain_sidecar
 from openclaw_mem import goal_primitive
+from openclaw_mem import mem_system_status
 from openclaw_mem import pack_trace_v1
 from openclaw_mem import self_model_sidecar
 from openclaw_mem import self_curator
 from openclaw_mem import self_improvement_surface
+from openclaw_mem import skill_capture
 from openclaw_mem import steward_review
 from openclaw_mem import harness as harness_install
 from openclaw_mem import codex_install
@@ -10734,6 +10736,79 @@ def cmd_goal_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         print(goal_primitive.render_goal_status(payload))
 
 
+def cmd_goal_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    receipt = active_line_context.load_receipt(args.file)
+    payload = {
+        "ok": True,
+        "input": str(args.file),
+        "context": active_line_context.build_active_line_context(
+            receipt,
+            source_ref=getattr(args, "source_ref", None),
+        ),
+        "relationship": "goal pack is the goal-primitive alias for active-line pack",
+    }
+    if getattr(args, "out", None):
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        active = payload["context"]["active_line"]
+        print(f"goal_pack goal_id={active['goal_id']} status={active['status']} writes_performed=false")
+
+
+def cmd_skill_capture_propose(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    text = getattr(args, "text", None)
+    if getattr(args, "text_file", None):
+        text_path = Path(args.text_file)
+        if text_path.stat().st_size > skill_capture.MAX_TEXT_CHARS * 10:
+            raise SystemExit(f"text file exceeds pre-read cap: {skill_capture.MAX_TEXT_CHARS * 10} bytes")
+        text = text_path.read_text(encoding="utf-8")
+    proposal = skill_capture.build_proposal(
+        text=text or "",
+        source_ref=getattr(args, "source_ref", None),
+        target_skill=getattr(args, "target_skill", None),
+        rationale=getattr(args, "rationale", None),
+        run_id=getattr(args, "run_id", None),
+    )
+    stored_path = None
+    if getattr(args, "out", None) or getattr(args, "out_dir", None):
+        if not proposal.get("ok"):
+            raise SystemExit("refusing to write invalid skill capture proposal")
+        stored_path = skill_capture.write_proposal(proposal, out=getattr(args, "out", None), out_dir=getattr(args, "out_dir", None))
+        proposal = dict(proposal)
+        proposal["artifact_path"] = str(stored_path)
+        proposal["writes_performed"] = True
+        proposal["write_scope"] = "staged_proposal_artifact"
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(proposal, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(
+            f"skill_capture candidate_id={proposal.get('candidate_id')} ok={str(proposal.get('ok')).lower()} "
+            f"writes_performed={str(proposal.get('writes_performed')).lower()}"
+        )
+
+
+def cmd_skill_curator_review(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    return cmd_self_curator_skill_review(conn, args)
+
+
+def cmd_mem_system_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    payload = mem_system_status.build_status(
+        workspace_root=getattr(args, "workspace_root", "."),
+        state_root=getattr(args, "state_root", None),
+    )
+    if getattr(args, "out", None):
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(mem_system_status.render_status(payload))
+
+
 def cmd_self_curator_plan(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     mutations = json.loads(Path(args.mutations_file).read_text(encoding="utf-8"))
     if isinstance(mutations, dict) and "mutations" in mutations:
@@ -19861,6 +19936,53 @@ def build_parser() -> argparse.ArgumentParser:
     gs.add_argument("--out", help="Optional path to write the status receipt JSON")
     gs.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
     gs.set_defaults(func=cmd_goal_status)
+    gp = goalsub.add_parser("pack", help="Build a ContextPack fragment from one goal/controller receipt")
+    gp.add_argument("--file", required=True, help="Goal/controller receipt JSON")
+    gp.add_argument("--source-ref", help="Optional public-safe source reference")
+    gp.add_argument("--out", help="Optional path to write the pack fragment JSON")
+    gp.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    gp.set_defaults(func=cmd_goal_pack)
+
+    sp = sub.add_parser("skill-capture", help="Stage skill-learning proposals without mutating live skills")
+    sksub = sp.add_subparsers(dest="skill_capture_cmd", required=True)
+    sk = sksub.add_parser("propose", help="Create one L1 staged skill-learning proposal")
+    sk_text = sk.add_mutually_exclusive_group(required=True)
+    sk_text.add_argument("--text", help="Learning candidate text")
+    sk_text.add_argument("--text-file", help="Read learning candidate text from a file")
+    sk.add_argument("--source-ref", help="Optional public-safe source reference")
+    sk.add_argument("--target-skill", help="Optional target skill name (not a path)")
+    sk.add_argument("--rationale", help="Why this candidate may deserve curator review")
+    sk.add_argument("--run-id", help="Optional caller run/session id")
+    sk.add_argument("--out", help="Write the staged proposal artifact to this JSON path")
+    sk.add_argument("--out-dir", help="Write the staged proposal artifact into this directory")
+    sk.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    sk.set_defaults(func=cmd_skill_capture_propose)
+
+    sp = sub.add_parser("skill-curator", help="Read-only skill lifecycle curator review surface")
+    ksub = sp.add_subparsers(dest="skill_curator_cmd", required=True)
+    kr = ksub.add_parser("review", help="Alias for self-curator skill-review; emits review-only artifacts")
+    kr.add_argument(
+        "--skill-root",
+        action="append",
+        dest="skill_roots",
+        default=[],
+        help="Skill root containing */SKILL.md (repeatable)",
+    )
+    kr.add_argument("--out-root", default=".state/skill-curator/runs", help="Output root for timestamped run artifacts")
+    kr.add_argument("--run-id", help="Optional safe run id")
+    kr.add_argument("--limit", type=int, help="Optional candidate limit")
+    kr.add_argument("--no-write", action="store_true", help="Print review payload without writing review artifacts")
+    kr.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Print review JSON")
+    kr.set_defaults(func=cmd_skill_curator_review)
+
+    sp = sub.add_parser("mem-system", help="Read-only Store/Pack/Observe/Review/Curate status")
+    msub = sp.add_subparsers(dest="mem_system_cmd", required=True)
+    ms = msub.add_parser("status", help="Show OpenClaw Mem system surface inventory")
+    ms.add_argument("--workspace-root", default=".", help="Repository/workspace root to inspect")
+    ms.add_argument("--state-root", help="OpenClaw state root to inspect (default: ~/.openclaw)")
+    ms.add_argument("--out", help="Optional path to write the status JSON")
+    ms.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+    ms.set_defaults(func=cmd_mem_system_status)
 
     sp = sub.add_parser("self-curator", help="Lifecycle curator engine (review + checkpointed apply)")
     scsub = sp.add_subparsers(dest="self_curator_cmd", required=True)
@@ -20051,7 +20173,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "steward", "ingest-review", "active-line", "surface", "goal", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

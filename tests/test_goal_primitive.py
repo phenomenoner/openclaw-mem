@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from openclaw_mem.active_line_context import build_active_line_context
 from openclaw_mem.goal_primitive import build_goal_status, load_goal_receipt, render_goal_status
 
 
@@ -55,6 +56,23 @@ class TestGoalPrimitive(unittest.TestCase):
             bad.write_text("[]", encoding="utf-8")
             with self.assertRaises(ValueError):
                 load_goal_receipt(bad)
+
+    def test_goal_receipt_can_feed_context_pack_fragment(self):
+        receipt = {
+            "goal": {
+                "goal_id": "survival-pack",
+                "objective": "Survive compaction",
+                "status": "active",
+                "next_gate": "pack current gate",
+                "continuation_owner": "operator",
+                "completion_verifier": "context fragment readback",
+            }
+        }
+        fragment = build_active_line_context(receipt, source_ref="test://goal")
+        self.assertFalse(fragment["writes_performed"])
+        self.assertEqual(fragment["active_line"]["goal_id"], "survival-pack")
+        self.assertTrue(fragment["active_line"]["has_verifier"])
+        self.assertIn("active-line:survival-pack", fragment["context_pack_fragment"]["bundle_text"])
 
 
 if __name__ == "__main__":

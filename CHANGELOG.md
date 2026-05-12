@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.13] - 2026-05-12
+
+### Added
+
+- Added `openclaw-mem goal pack` as the goal-survival pack seam for building ContextPack-compatible fragments from goal/controller receipts.
+- Added `openclaw-mem skill-capture propose` for L1 staged skill-learning proposal artifacts without live skill mutation.
+- Added `openclaw-mem skill-curator review` as a product-facing non-mutating report-only alias for skill lifecycle review.
+- Added `openclaw-mem mem-system status` for read-only Store / Pack / Observe / Review / Curate surface inventory.
+- Added public documentation and operator skill guidance for self-improvement slices 2-5.
+
+### Testing
+
+- Added regression coverage for goal pack survival, skill-capture proposals, mem-system status, and CLI smoke for the new command surfaces.
+- Verified targeted tests, CLI smoke, MkDocs strict build, public-facing second-brain review, and local editable install smoke for this batch.
+
 ## [1.9.12] - 2026-05-12
 
 ### Added
