@@ -4,6 +4,9 @@
 
 What it does:
 - becomes the active OpenClaw memory backend when selected in `plugins.slots.memory`
+- registers with OpenClaw's core memory runtime on hosts that expose
+  `registerMemoryCapability` / `registerMemoryRuntime`, so doctor/status/core
+  memory-search probes can recognize the engine as the active backend
 - provides hybrid recall controls (FTS + vector) with scope-aware policies
 - exposes bounded autoRecall / autoCapture controls and lifecycle receipts
 - frames live-turn bounded recall as **Proactive Pack**: pre-reply orchestration, not a separate hidden memory layer
@@ -92,6 +95,31 @@ mutate the live memory DB directly.
 - fallback: `before_agent_start`
 
 The plugin dedupes by run/session key so a newer OpenClaw that invokes both paths does not inject the same recall block twice.
+
+## Core memory runtime compatibility
+
+On current OpenClaw hosts, `openclaw-mem-engine` registers a thin core memory runtime adapter:
+
+- `search` delegates to the existing hybrid LanceDB recall path
+- `readFile` returns bounded synthetic previews for `openclaw-mem-engine/<id>.md`
+- `status` and probe methods expose backend readiness to doctor/status surfaces
+
+This is additive to the existing tools and prompt hooks; it does not create a second write path.
+
+Verification after install/restart:
+
+```bash
+openclaw doctor
+openclaw status
+```
+
+Expected capable-host log line:
+
+```text
+openclaw-mem-engine: registered core memory runtime capability
+```
+
+Older hosts that lack the capability hook continue to run the plugin through tools and hooks and log that core runtime registration was skipped.
 
 ## Route-auto prompt hook (optional)
 

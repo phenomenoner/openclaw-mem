@@ -2,6 +2,39 @@
 
 This page documents the operator-facing admin surfaces added for `openclaw-mem-engine`.
 
+## Core memory runtime capability
+
+`openclaw-mem-engine` registers with OpenClaw's core memory runtime capability when the
+host exposes `registerMemoryCapability` or the legacy `registerMemoryRuntime` hook. This
+lets core doctor/status and memory-search health checks see the engine as the active
+memory plugin instead of treating it as only a sidecar tool/hook plugin.
+
+The runtime adapter is intentionally thin:
+
+- `search` routes through the existing LanceDB-backed hybrid recall path and returns
+  bounded synthetic memory citations.
+- `readFile` supports synthetic `openclaw-mem-engine/<id>.md` previews with direct ID
+  lookup and line slicing for core UI/debug consumers.
+- `status`, `probeEmbeddingAvailability`, and `probeVectorAvailability` expose the same
+  backend facts operators already see in plugin logs.
+
+Older OpenClaw hosts remain compatible. If the host lacks the core capability hook, the
+plugin logs `core memory runtime registration skipped` and continues to provide its
+existing tools, docs cold lane, auto-capture, and prompt-hook behavior.
+
+Verification after enabling or upgrading:
+
+```bash
+openclaw doctor
+openclaw status
+```
+
+Expected capable-host log line:
+
+```text
+openclaw-mem-engine: registered core memory runtime capability
+```
+
 ## What is supported
 
 Comparable admin capabilities are now available for the engine backend:

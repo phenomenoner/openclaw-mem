@@ -25,6 +25,12 @@ This repo runs CI in **locked** mode:
    uv sync --locked
    uv sync --locked --extra docs
    ```
+5) If the release changes `openclaw-mem-engine` runtime wiring, capture local host receipts:
+   ```bash
+   openclaw doctor
+   openclaw status
+   ```
+   Capable hosts should log `openclaw-mem-engine: registered core memory runtime capability` and should not report `No active memory plugin is registered for the current config` when mem-engine owns `plugins.slots.memory`.
 
 ## Tag + release
 - Create annotated tag and push:

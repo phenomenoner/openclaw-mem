@@ -3,7 +3,7 @@
   "name": "OpenClaw Mem Engine",
   "description": "Optional memory slot backend with hybrid recall and Proactive Pack runtime recall",
   "kind": "memory",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "uiHints": {
     "embedding.apiKey": {
       "label": "OpenAI API Key",

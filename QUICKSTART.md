@@ -213,6 +213,27 @@ openclaw plugins install -l ./extensions/openclaw-mem-engine
 openclaw gateway restart
 ```
 
+On OpenClaw hosts that expose the core memory runtime capability, `openclaw-mem-engine`
+also registers as the active core memory runtime. That makes doctor/status and core
+memory-search probes recognize the engine while the existing `memory_store`,
+`memory_recall`, docs cold-lane, auto-capture, and prompt-hook behavior remain intact.
+
+Compatibility note: older OpenClaw hosts that do not expose
+`registerMemoryCapability`/`registerMemoryRuntime` continue to run the plugin through
+its tools and hooks. In that case the engine logs that core runtime registration was
+skipped; this is a host capability limit, not data loss.
+
+Useful verification after restart:
+
+```bash
+openclaw doctor
+openclaw status
+```
+
+Expect plugin logs to include `openclaw-mem-engine: registered core memory runtime capability`
+on capable hosts. If the core `memory` CLI surface is disabled by `plugins.allow`, use
+doctor/status plus the plugin's direct tools as the verification path.
+
 ---
 
 ## Step 7: Autograde toggle (optional)

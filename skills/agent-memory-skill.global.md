@@ -62,6 +62,7 @@ Never store:
   - regression probes: `openclaw-mem routing eval --probes <public-safe-probes.json> --workspace-root <workspace> --json`
   - mem-engine auto-hook: enable `autoRecall.routeAuto` when you want **Proactive Pack** live turns to consult that router during prompt build and inject the same synthesis-aware hint
     - current OpenClaw prefers `before_prompt_build`; `openclaw-mem-engine` keeps `before_agent_start` as a backward-compatible fallback
+    - on hosts exposing OpenClaw's core memory runtime capability, mem-engine also registers a thin runtime adapter so doctor/status/core memory-search probes recognize the active backend; this is additive to the tools/hooks and does not create a second write path
 
 ## Graphic Memory compiled synthesis note
 - Fresh synthesis cards are **derived graph artifacts**, not L1 durable-memory facts by default.

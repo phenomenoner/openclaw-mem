@@ -2040,6 +2040,94 @@ type RecallResult = {
   score: number;
 };
 
+type MemoryRuntimeDebug = {
+  backend: "builtin";
+  configuredMode?: string;
+  effectiveMode?: string;
+  fallback?: string;
+};
+
+type MemoryRuntimeSearchOptions = {
+  maxResults?: number;
+  minScore?: number;
+  sessionKey?: string;
+  onDebug?: (debug: MemoryRuntimeDebug) => void;
+};
+
+type MemoryRuntimeManager = {
+  search(query: string, opts?: MemoryRuntimeSearchOptions): Promise<Array<{
+    path: string;
+    startLine: number;
+    endLine: number;
+    score: number;
+    vectorScore?: number;
+    textScore?: number;
+    snippet: string;
+    source: "memory";
+    citation: string;
+  }>>;
+  readFile(params: { relPath: string; from?: number; lines?: number }): Promise<{
+    text: string;
+    path: string;
+    truncated: boolean;
+    from?: number;
+    lines?: number;
+    nextFrom?: number;
+  }>;
+  probeEmbeddingAvailability(): Promise<{ ok: boolean; error?: string }>;
+  probeVectorAvailability(): Promise<boolean>;
+  status(): {
+    backend: "builtin";
+    provider: string;
+    model?: string;
+    dbPath?: string;
+    custom?: Record<string, unknown>;
+  };
+};
+
+type MemoryRuntimeHost = {
+  registerMemoryCapability?: (capability: {
+    runtime: {
+      getMemorySearchManager: (params: { cfg: unknown; agentId: string; purpose?: "default" | "status" }) => Promise<{ manager: MemoryRuntimeManager | null; error?: string }>;
+      resolveMemoryBackendConfig: (params: { cfg: unknown; agentId: string }) => { backend: "builtin" };
+      closeAllMemorySearchManagers?: () => Promise<void>;
+    };
+  }) => void;
+  registerMemoryRuntime?: (runtime: {
+    getMemorySearchManager: (params: { cfg: unknown; agentId: string; purpose?: "default" | "status" }) => Promise<{ manager: MemoryRuntimeManager | null; error?: string }>;
+    resolveMemoryBackendConfig: (params: { cfg: unknown; agentId: string }) => { backend: "builtin" };
+    closeAllMemorySearchManagers?: () => Promise<void>;
+  }) => void;
+};
+
+function sanitizeRuntimeMemoryIdForPath(id: unknown): string {
+  const raw = String(id ?? "unknown").trim() || "unknown";
+  return raw.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160) || "unknown";
+}
+
+function sliceRuntimeMemoryText(text: string, from?: number, lines?: number): {
+  text: string;
+  from?: number;
+  lines?: number;
+  truncated: boolean;
+  nextFrom?: number;
+} {
+  const allLines = String(text ?? "").split(/\r?\n/);
+  const start = Number.isFinite(from) ? Math.max(1, Math.floor(Number(from))) : 1;
+  const count = Number.isFinite(lines) ? Math.max(0, Math.floor(Number(lines))) : allLines.length;
+  const startIndex = Math.min(allLines.length, Math.max(0, start - 1));
+  const endIndex = Math.min(allLines.length, startIndex + count);
+  const selected = allLines.slice(startIndex, endIndex);
+  const truncated = startIndex > 0 || endIndex < allLines.length;
+  return {
+    text: selected.join("\n"),
+    from: start,
+    lines: count,
+    truncated,
+    nextFrom: endIndex < allLines.length ? endIndex + 1 : undefined,
+  };
+}
+
 type RecallReceiptRankedHit = {
   id: string;
   score: number;
@@ -3226,6 +3314,22 @@ class MemoryDB {
       .filter((row) => row.id && row.id !== "__schema__");
   }
 
+  async getScalarById(id: string): Promise<MemoryScalarRow | null> {
+    await this.ensureInitialized();
+    const safe = String(id ?? "").replace(/'/g, "''");
+    if (!safe || safe === "__schema__") return null;
+    const rows = await this.table!
+      .query()
+      .select([...MEMORY_SCALAR_COLUMNS])
+      .where(`id = '${safe}'`)
+      .limit(1)
+      .toArray();
+    const row = rows
+      .map((item) => toMemoryScalarRow(item))
+      .find((item) => item.id && item.id !== "__schema__");
+    return row ?? null;
+  }
+
   async listRecentTodosByScope(scope: string, minCreatedAt: number, limit = 64): Promise<MemoryScalarRow[]> {
     await this.ensureInitialized();
 
@@ -4357,6 +4461,127 @@ const memoryPlugin = {
     api.logger.info(
       `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, routeAuto=${routeAutoResolved.enabled ? `on|timeout=${routeAutoResolved.timeoutMs}|buffer=${routeAutoResolved.maxBufferBytes}|chars=${routeAutoResolved.maxChars}|graph=${routeAutoResolved.maxGraphCandidates}|episodes=${routeAutoResolved.maxTranscriptSessions}|db=${routeAutoResolved.dbPath}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, weijiMemoryPreflight=${weijiMemoryPreflightResolved.enabled ? `${weijiMemoryPreflightResolved.failOnQueued || weijiMemoryPreflightResolved.failOnRejected ? "enforced" : "advisory"}|${weijiMemoryPreflightResolved.failMode}|cmd=${weijiMemoryPreflightResolved.command}` : "off"}, gbrainMirror=${gbrainMirrorResolved.enabled ? `${gbrainMirrorResolved.importOnStore ? "write-through" : "file-only"}|timeout=${gbrainMirrorResolved.timeoutMs}|root=${gbrainMirrorResolved.mirrorRoot}|cmd=${gbrainMirrorResolved.command}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
     );
+
+    const memoryRuntimeManager: MemoryRuntimeManager = {
+      async search(query: string, opts?: MemoryRuntimeSearchOptions) {
+        const limit = clampLimit(opts?.maxResults);
+        const searchLimit = Math.max(limit, Math.min(MAX_RECALL_LIMIT, limit * 4));
+        const scopeInfo = resolveScope({ text: query, policy: scopePolicyCfg });
+        opts?.onDebug?.({
+          backend: "builtin",
+          configuredMode: "openclaw-mem-engine",
+          effectiveMode: embeddings ? "hybrid" : "fts-only",
+          fallback: embeddings ? undefined : "embedding-unavailable",
+        });
+
+        const ftsPromise = db.fullTextSearch(query, searchLimit, scopeInfo.scope).catch((err) => {
+          api.logger.warn(`openclaw-mem-engine:runtime fts search failed: ${String(err)}`);
+          return [] as RecallResult[];
+        });
+        const vecPromise = embeddings
+          ? embeddings.embed(query)
+              .then((vector) => db.vectorSearch(vector, searchLimit, scopeInfo.scope))
+              .catch((err) => {
+                api.logger.warn(`openclaw-mem-engine:runtime vector search failed: ${String(err)}`);
+                return [] as RecallResult[];
+              })
+          : Promise.resolve([] as RecallResult[]);
+
+        const [ftsResults, vecResults] = await Promise.all([ftsPromise, vecPromise]);
+        const fused = fuseRecall({ fts: ftsResults, vector: vecResults, limit }).order;
+        const minScore = Number.isFinite(opts?.minScore) ? Number(opts?.minScore) : 0;
+
+        return fused
+          .filter((item) => item.score >= minScore)
+          .map((item) => ({
+            path: `openclaw-mem-engine/${sanitizeRuntimeMemoryIdForPath(item.row.id)}.md`,
+            startLine: 1,
+            endLine: 1,
+            score: item.score,
+            vectorScore: vecResults.find((hit) => hit.row.id === item.row.id)?.score,
+            textScore: ftsResults.find((hit) => hit.row.id === item.row.id)?.score,
+            snippet: item.row.text,
+            source: "memory" as const,
+            citation: `openclaw-mem-engine:${String(item.row.id ?? "unknown")}`,
+          }));
+      },
+      async readFile(params: { relPath: string; from?: number; lines?: number }) {
+        const relPath = String(params.relPath ?? "").trim();
+        const id = relPath.replace(/^openclaw-mem-engine\//, "").replace(/\.md$/, "");
+        const row = await db.getScalarById(id);
+        const sliced = sliceRuntimeMemoryText(row?.text ?? "", params.from, params.lines);
+        return {
+          text: sliced.text,
+          path: relPath,
+          truncated: sliced.truncated,
+          from: sliced.from,
+          lines: sliced.lines,
+          nextFrom: sliced.nextFrom,
+        };
+      },
+      async probeEmbeddingAvailability() {
+        if (!embeddings) return { ok: false, error: "embedding api key unavailable" };
+        try {
+          await embeddings.embed("openclaw-mem-engine probe");
+          return { ok: true };
+        } catch (err) {
+          return { ok: false, error: String(err) };
+        }
+      },
+      async probeVectorAvailability() {
+        try {
+          await db.listScalars();
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      status() {
+        return {
+          backend: "builtin" as const,
+          provider: "openclaw-mem-engine",
+          model,
+          dbPath: resolvedDbPath,
+          custom: {
+            pluginId: "openclaw-mem-engine",
+            tableName,
+            embeddings: Boolean(embeddings),
+            scopePolicy: scopePolicyCfg.enabled ? scopePolicyCfg.defaultScope : "off",
+            docsColdLane: docsColdLaneResolved.enabled,
+            workingSet: workingSetCfg.enabled,
+            readOnly: readOnlyEnabled,
+          },
+        };
+      },
+    };
+
+    const memoryRuntime = {
+      async getMemorySearchManager() {
+        return { manager: memoryRuntimeManager };
+      },
+      resolveMemoryBackendConfig() {
+        return { backend: "builtin" as const };
+      },
+      async closeAllMemorySearchManagers() {
+        // Intentional no-op: this manager is a plugin-scoped singleton; LanceDB
+        // connection lifecycle remains owned by the existing MemoryDB wrapper.
+      },
+    };
+
+    try {
+      const runtimeHost = api as unknown as MemoryRuntimeHost;
+      if (typeof runtimeHost.registerMemoryCapability === "function") {
+        runtimeHost.registerMemoryCapability({ runtime: memoryRuntime });
+        api.logger.info("openclaw-mem-engine: registered core memory runtime capability");
+      } else if (typeof runtimeHost.registerMemoryRuntime === "function") {
+        runtimeHost.registerMemoryRuntime(memoryRuntime);
+        api.logger.info("openclaw-mem-engine: registered legacy core memory runtime");
+      } else {
+        api.logger.info("openclaw-mem-engine: core memory runtime registration skipped (host lacks capability hook)");
+      }
+    } catch (err) {
+      api.logger.warn(`openclaw-mem-engine: core memory runtime registration failed: ${String(err)}`);
+    }
 
     const resolveAdminFilters = (input: {
       scope?: unknown;

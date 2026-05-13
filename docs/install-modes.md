@@ -112,6 +112,7 @@ Disable the plugin, stop harvest jobs, remove the symlink if you added one. Your
 ### What you get
 
 - hybrid recall path
+- core memory runtime registration on capable OpenClaw hosts, so doctor/status can recognize mem-engine as the active backend
 - operator-tunable receipts and policies
 - more explicit control over recall/capture behavior
 - optional **Proactive Pack** lane for bounded pre-reply recall during live turns
@@ -133,7 +134,7 @@ Read:
 
 ### Rollback
 
-Switch `plugins.slots.memory` back to the prior backend and restart OpenClaw.
+Switch `plugins.slots.memory` back to the prior backend (`memory-core` or `memory-lancedb`), restart OpenClaw, and run `openclaw doctor` / `openclaw status` as the readback gate. The mem-engine data store is not deleted by the slot switch.
 
 ---
 

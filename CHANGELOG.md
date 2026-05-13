@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.17] - 2026-05-13
+
+### Added
+
+- Wired `openclaw-mem-engine` into OpenClaw's core memory runtime capability so core doctor/status surfaces can recognize the engine as the active memory plugin while preserving existing tool and prompt-hook behavior.
+
+### Fixed
+
+- Added guarded runtime registration that reports a skipped host-capability path instead of logging false success on older OpenClaw hosts.
+- Added bounded synthetic memory-read support for core memory previews with direct ID lookup and line slicing.
+
+### Docs
+
+- Documented the core runtime capability, older-host fallback behavior, and public verification expectations for engine promotion.
+
 ## [1.9.16] - 2026-05-12
 
 ### Fixed

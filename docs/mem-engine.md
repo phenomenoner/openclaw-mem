@@ -11,6 +11,7 @@
 `openclaw-mem-engine` becomes an optional **slot owner** (replaces `memory-lancedb` when enabled) so we can:
 
 - do **hybrid recall** (FTS + vector) with **scopes & metadata filters**,
+- register with OpenClaw's **core memory runtime** so doctor/status/core memory-search probes recognize it as the active backend,
 - make recall behavior **auditable + tunable** (receipts, knobs, policies),
 - add **safe M1 automation**: conservative `autoRecall` + strict `autoCapture` (configurable),
 - expose **Proactive Pack** as the public-facing name for bounded pre-reply recall orchestration,
@@ -69,6 +70,14 @@ Owned by `openclaw-mem-engine`:
   - fallback: `openclaw ltm list|stats|export|import`
 
 - uses LanceDB as the online store for fast retrieval & hybrid search.
+- registers a thin core runtime adapter on capable OpenClaw hosts:
+  - `search` delegates to the existing hybrid recall path
+  - `readFile` returns bounded synthetic previews for core UI/debug consumers
+  - `status` and probe methods expose backend readiness to doctor/status checks
+
+Compatibility note: older hosts that lack `registerMemoryCapability` or legacy
+`registerMemoryRuntime` still run mem-engine through its tools and hooks; they just
+cannot expose it through the newer core runtime slot until the host is upgraded.
 
 Key stance: **sidecar governs; engine serves**.
 
