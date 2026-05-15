@@ -83,6 +83,7 @@ nav:
       - Engine admin ops: mem-engine-admin-ops.md
       - Architecture: architecture.md
       - Context pack: context-pack.md
+      - Symbolic Canvas: symbolic-canvas.md
       - Agent memory skill (SOP): agent-memory-skill.md
       - Harness-persistent memory: harness-persistent-memory.md
       - Importance grading: importance-grading.md

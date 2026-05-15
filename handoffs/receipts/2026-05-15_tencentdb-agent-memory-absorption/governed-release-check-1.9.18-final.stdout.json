@@ -1,0 +1,27 @@
+{
+  "checked_at": "2026-05-15T14:54:03.147308+00:00",
+  "checks": {
+    "changelog_entry_present": true,
+    "engine_version_consistent": true,
+    "lockfile_mentions_version": true,
+    "public_safety_clean": true,
+    "receipt_present": true,
+    "version_consistent": true
+  },
+  "errors": [],
+  "expected_version": "1.9.18",
+  "ok": true,
+  "public_safety_markers": {},
+  "repo_root": "/root/.openclaw/workspace/openclaw-mem",
+  "schema_version": "openclaw-mem.governed.release-check.v0",
+  "topology_changed": false,
+  "versions": {
+    "engine_package": "0.0.7",
+    "engine_package_lock": "0.0.7",
+    "engine_plugin": "0.0.7",
+    "init": "1.9.18",
+    "pyproject": "1.9.18"
+  },
+  "warnings": [],
+  "writes_performed": false
+}

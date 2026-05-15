@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.18] - 2026-05-15
+
+### Added
+
+- Added `openclaw-mem symbolic-canvas build`, a deterministic file-only helper that turns task traces into compact Mermaid canvases with stable `node_id` drill-down refs and warning receipts.
+- Added the symbolic-canvas operator skill card for evidence-linked task maps without memory mutation, Gateway patching, or backend topology changes.
+
+### Docs
+
+- Added public Symbolic Canvas documentation and a TencentDB-Agent-Memory adoption review describing which ideas were absorbed, rejected, and why.
+- Linked Symbolic Canvas into README and MkDocs navigation.
+
+### Testing
+
+- Added unit and CLI coverage for deterministic output, missing-ref warnings, duplicate source-id fail-closed behavior, unknown-edge warnings, stdin input, and malformed-trace bounded errors.
+
 ## [1.9.17] - 2026-05-13
 
 ### Added

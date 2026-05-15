@@ -51,6 +51,7 @@ from openclaw_mem import self_curator
 from openclaw_mem import self_improvement_surface
 from openclaw_mem import skill_capture
 from openclaw_mem import steward_review
+from openclaw_mem import symbolic_canvas
 from openclaw_mem import harness as harness_install
 from openclaw_mem import codex_install
 from openclaw_mem import project_resolver
@@ -18476,6 +18477,29 @@ def cmd_episodes_gc(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 
 
+def cmd_symbolic_canvas_build(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    try:
+        if getattr(args, "from_file", None):
+            trace = symbolic_canvas.load_trace_file(getattr(args, "from_file"))
+        else:
+            trace = json.load(sys.stdin)
+        result = symbolic_canvas.build_symbolic_canvas(trace, base_dir=getattr(args, "base_dir", None))
+        written = symbolic_canvas.write_canvas_outputs(
+            result,
+            out=getattr(args, "out", None),
+            mermaid_out=getattr(args, "mermaid_out", None),
+        )
+        if written:
+            result = dict(result)
+            result["written"] = written
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        _emit({"kind": symbolic_canvas.SCHEMA, "ok": False, "error": str(e)}, True)
+        sys.exit(2)
+    _emit(result, getattr(args, "json", False))
+
+
+
 def cmd_routing_resolve(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _ = conn
     resolution = project_resolver.resolve_project(
@@ -18760,6 +18784,18 @@ def build_parser() -> argparse.ArgumentParser:
     sn.add_argument("--snapshots-dir", dest="snapshots_dir", default=DEFAULT_ENGINE_SNAPSHOTS_DIR, help=f"Snapshots root (default: {DEFAULT_ENGINE_SNAPSHOTS_DIR})")
     sn.add_argument("--yes", action="store_true", help="Required: delete snapshot")
     sn.set_defaults(func=cmd_engine_snapshot_delete)
+
+    sp = sub.add_parser("symbolic-canvas", help="Build a compact Mermaid task canvas with node_id drill-down refs")
+    add_common(sp)
+    scsub = sp.add_subparsers(dest="symbolic_canvas_cmd", required=True)
+
+    sc = scsub.add_parser("build", help="Build a symbolic task canvas from a JSON trace (no runtime writes)")
+    add_common(sc)
+    sc.add_argument("--from-file", dest="from_file", default=None, help="Trace JSON input path (default: stdin)")
+    sc.add_argument("--base-dir", dest="base_dir", default=None, help="Base directory for relative evidence refs")
+    sc.add_argument("--out", default=None, help="Optional JSON receipt output path")
+    sc.add_argument("--mermaid-out", dest="mermaid_out", default=None, help="Optional Mermaid .mmd output path")
+    sc.set_defaults(func=cmd_symbolic_canvas_build)
 
     sp = sub.add_parser("routing", help="Evaluate and resolve canonical project/repo routing guardrails")
     add_common(sp)
@@ -20390,7 +20426,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "harness", "codex"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "harness", "codex", "symbolic-canvas"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

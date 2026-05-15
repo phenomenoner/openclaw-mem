@@ -30,6 +30,7 @@
 - **Local-first by default** — JSONL + SQLite, no external database required.
 - **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
 - **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, trust-policy receipts, and trace-backed debugging.
+- **Symbolic canvas helper** — `symbolic-canvas` can turn task traces into compact Mermaid + `node_id` drill-down artifacts without live capture, Gateway patching, or memory mutation.
 - **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, sanitize runtime artifacts, and keep rollback simple.
 - **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
 - **Harness-friendly** — external coding agents can get a persistent memory posture through the Memory Gateway without receiving raw SQLite or workspace-file authority. Parity-aware gateway reads can search/pack configured workspace Markdown memory and report when a no-result answer is only partial.
@@ -120,6 +121,8 @@ Read more:
 - [Evaluator path](docs/evaluator-path.md)
 - [Architecture](docs/architecture.md)
 - [Context pack](docs/context-pack.md)
+- [Symbolic Canvas](docs/symbolic-canvas.md)
+- [Symbolic canvas ops skill card](skills/symbolic-canvas.ops.md)
 - [Experimental GBrain sidecar](docs/experimental/gbrain-sidecar/README.md)
 - [Optional Mem Engine](docs/mem-engine.md)
 

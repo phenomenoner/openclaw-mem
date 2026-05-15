@@ -1,0 +1,13 @@
+graph LR
+    upstream_scan["Scan TencentDB-Agent-Memory\\n[done]\\nrefs:1"]
+    value_selection["Select symbolic canvas absorption slice\\n[done]\\nrefs:1"]
+    implementation["Implement symbolic-canvas helper\\n[done]\\nrefs:2"]
+    verification["Run focused tests and CLI smoke\\n[done]\\nrefs:1"]
+    upstream_scan -- "filter" --> value_selection
+    value_selection -- "build" --> implementation
+    implementation -- "prove" --> verification
+    classDef done fill:#f8fafc,stroke:#94a3b8,color:#0f172a
+    class upstream_scan done
+    class value_selection done
+    class implementation done
+    class verification done

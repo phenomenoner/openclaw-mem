@@ -1,0 +1,83 @@
+{
+  "kind": "openclaw-mem.symbolic-canvas.v0",
+  "ok": true,
+  "task_id": "tencentdb-agent-memory-absorption",
+  "topology": "unchanged",
+  "store_pack_observe": {
+    "store": "raw evidence remains in refs/artifacts; canvas does not become canonical memory",
+    "pack": "Mermaid canvas and node index are compact candidates for bounded context injection",
+    "observe": "node_id + refs provide drill-down receipts for debugging and rollback"
+  },
+  "mermaid": "graph LR\n    upstream_scan[\"Scan TencentDB-Agent-Memory\\\\n[done]\\\\nrefs:1\"]\n    value_selection[\"Select symbolic canvas absorption slice\\\\n[done]\\\\nrefs:1\"]\n    implementation[\"Implement symbolic-canvas helper\\\\n[done]\\\\nrefs:2\"]\n    verification[\"Run focused tests and CLI smoke\\\\n[done]\\\\nrefs:1\"]\n    upstream_scan -- \"filter\" --> value_selection\n    value_selection -- \"build\" --> implementation\n    implementation -- \"prove\" --> verification\n    classDef done fill:#f8fafc,stroke:#94a3b8,color:#0f172a\n    class upstream_scan done\n    class value_selection done\n    class implementation done\n    class verification done\n",
+  "nodes": [
+    {
+      "node_id": "upstream_scan",
+      "source_id": "upstream_scan",
+      "label": "Scan TencentDB-Agent-Memory",
+      "state": "done",
+      "summary": null,
+      "refs": [
+        "/root/.openclaw/workspace/openclaw-mem/handoffs/receipts/2026-05-15_tencentdb-agent-memory-absorption/refs/upstream-review.md"
+      ],
+      "missing_refs": []
+    },
+    {
+      "node_id": "value_selection",
+      "source_id": "value_selection",
+      "label": "Select symbolic canvas absorption slice",
+      "state": "done",
+      "summary": null,
+      "refs": [
+        "/root/.openclaw/workspace/openclaw-mem/docs/specs/tencentdb-agent-memory-absorption-blade-map-v0.md"
+      ],
+      "missing_refs": []
+    },
+    {
+      "node_id": "implementation",
+      "source_id": "implementation",
+      "label": "Implement symbolic-canvas helper",
+      "state": "done",
+      "summary": null,
+      "refs": [
+        "/root/.openclaw/workspace/openclaw-mem/openclaw_mem/symbolic_canvas.py",
+        "/root/.openclaw/workspace/openclaw-mem/tests/test_symbolic_canvas.py"
+      ],
+      "missing_refs": []
+    },
+    {
+      "node_id": "verification",
+      "source_id": "verification",
+      "label": "Run focused tests and CLI smoke",
+      "state": "done",
+      "summary": null,
+      "refs": [
+        "/root/.openclaw/workspace/openclaw-mem/docs/symbolic-canvas.md"
+      ],
+      "missing_refs": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "upstream_scan",
+      "to": "value_selection",
+      "label": "filter"
+    },
+    {
+      "from": "value_selection",
+      "to": "implementation",
+      "label": "build"
+    },
+    {
+      "from": "implementation",
+      "to": "verification",
+      "label": "prove"
+    }
+  ],
+  "warnings": [],
+  "stats": {
+    "nodes": 4,
+    "edges": 3,
+    "refs": 5,
+    "missing_refs": 0
+  }
+}

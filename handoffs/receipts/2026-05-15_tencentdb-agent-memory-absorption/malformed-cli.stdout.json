@@ -1,0 +1,5 @@
+{
+  "kind": "openclaw-mem.symbolic-canvas.v0",
+  "ok": false,
+  "error": "trace must contain a list field: nodes, steps, or events"
+}
