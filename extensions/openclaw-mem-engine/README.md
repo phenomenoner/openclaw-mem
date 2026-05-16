@@ -279,8 +279,12 @@ See the repo docs for:
 ## Symbolic canvas auto-build hook (optional)
 
 `symbolicCanvas.autoBuild` is an observe-only `agent_end` hook that writes bounded
-Mermaid/JSON task-canvas receipts. It does **not** write canonical memory, call
-`memory_store`, or inject prompt context.
+Mermaid/JSON task-canvas receipts. It defaults to `triggerMode=qualified`, so
+system/tool payloads (including long skill text) do not qualify a run by
+themselves; receipts are emitted for handoff, checkpoint, closure, verifier, or
+similar task-boundary turns. Set `triggerMode=always` only when every successful
+eligible `agent_end` should emit a receipt. It does **not** write canonical
+memory, call `memory_store`, or inject prompt context.
 
 ```jsonc
 {

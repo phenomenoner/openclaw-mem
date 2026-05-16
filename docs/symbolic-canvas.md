@@ -79,10 +79,12 @@ The command is file-only. It does not open the memory DB and does not require Op
 }
 ```
 
-The hook is deliberately observe-only:
+The hook is deliberately observe-only and narrow by default:
 
 - runs only when explicitly enabled
 - listens at `agent_end` and derives a bounded user/assistant message trace
+- defaults to `triggerMode=qualified`, which ignores system/tool payloads and emits receipts only for handoff, checkpoint, closure, verifier, or similar task-boundary turns
+- supports `triggerMode=always` only as an explicit opt-in for every successful eligible `agent_end`
 - writes JSON + Mermaid receipts under the configured state-relative `outputDir`
 - performs no model calls, no prompt injection, and no canonical memory mutation
 - skips failed agent runs and runs with fewer than `minMessages` eligible messages
