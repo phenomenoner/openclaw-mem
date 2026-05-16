@@ -1,0 +1,22 @@
+{
+  "disabled": {
+    "ok": true,
+    "skipped": true,
+    "skipReason": "disabled",
+    "elapsedMs": 0
+  },
+  "failed": {
+    "ok": true,
+    "skipped": true,
+    "skipReason": "agent_not_successful",
+    "elapsedMs": 0
+  },
+  "tooFew": {
+    "ok": true,
+    "skipped": true,
+    "skipReason": "too_few_messages",
+    "nodeCount": 2,
+    "minMessages": 3,
+    "elapsedMs": 0
+  }
+}

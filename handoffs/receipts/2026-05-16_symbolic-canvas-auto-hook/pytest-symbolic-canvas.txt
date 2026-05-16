@@ -1,0 +1,3 @@
+$ uv run --project /tmp/openclaw-mem-symbolic-clean --python 3.13 --frozen python -m pytest tests/test_symbolic_canvas.py -q
+.......                                                                  [100%]
+7 passed in 0.49s

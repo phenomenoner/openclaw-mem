@@ -1,0 +1,22 @@
+extensions/openclaw-mem-engine/index.ts(24,8): error TS1192: Module '"node:fs"' has no default export.
+extensions/openclaw-mem-engine/index.ts(25,8): error TS1192: Module '"node:fs/promises"' has no default export.
+extensions/openclaw-mem-engine/index.ts(26,8): error TS1192: Module '"node:os"' has no default export.
+extensions/openclaw-mem-engine/index.ts(27,8): error TS1259: Module '"node:path"' can only be default-imported using the 'allowSyntheticDefaultImports' flag
+extensions/openclaw-mem-engine/index.ts(31,40): error TS2307: Cannot find module 'openclaw/plugin-sdk/core' or its corresponding type declarations.
+extensions/openclaw-mem-engine/index.ts(4177,60): error TS2339: Property 'enabled' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4177,109): error TS2339: Property 'enabled' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4178,60): error TS2339: Property 'command' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4178,108): error TS2339: Property 'command' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4179,71): error TS2339: Property 'commandArgs' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4180,48): error TS2339: Property 'commandArgs' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4182,59): error TS2339: Property 'dbPath' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4182,106): error TS2339: Property 'dbPath' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4183,62): error TS2339: Property 'timeoutMs' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4183,112): error TS2339: Property 'timeoutMs' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4184,54): error TS2339: Property 'failMode' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4184,104): error TS2339: Property 'failMode' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4185,48): error TS2339: Property 'failMode' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4187,65): error TS2339: Property 'failOnQueued' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4187,119): error TS2339: Property 'failOnQueued' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4188,67): error TS2339: Property 'failOnRejected' does not exist on type 'object'.
+extensions/openclaw-mem-engine/index.ts(4188,123): error TS2339: Property 'failOnRejected' does not exist on type 'object'.

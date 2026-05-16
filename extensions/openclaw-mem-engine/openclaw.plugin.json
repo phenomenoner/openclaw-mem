@@ -3,7 +3,7 @@
   "name": "OpenClaw Mem Engine",
   "description": "Optional memory slot backend with hybrid recall and Proactive Pack runtime recall",
   "kind": "memory",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "uiHints": {
     "embedding.apiKey": {
       "label": "OpenAI API Key",
@@ -25,7 +25,7 @@
     "embedding.headChars": {
       "label": "Embedding Head Chars",
       "placeholder": "500",
-      "help": "If clamping, keep the first headChars and the last tail (head + \u2026 + tail). Default 500.",
+      "help": "If clamping, keep the first headChars and the last tail (head + … + tail). Default 500.",
       "advanced": true
     },
     "embedding.maxBytes": {
@@ -340,6 +340,21 @@
     "autoRecall.routeAuto.maxTranscriptSessions": {
       "label": "Route Auto Transcript Sessions",
       "help": "Maximum transcript session groups summarized into the route hint block.",
+      "advanced": true
+    },
+    "symbolicCanvas.autoBuild.enabled": {
+      "label": "Symbolic Canvas Auto Build",
+      "help": "On agent-end, build bounded Mermaid/JSON task-canvas receipts. No memory mutation or prompt injection.",
+      "advanced": true
+    },
+    "symbolicCanvas.autoBuild.outputDir": {
+      "label": "Symbolic Canvas Output Dir",
+      "help": "State-relative directory for generated symbolic-canvas receipts.",
+      "advanced": true
+    },
+    "symbolicCanvas.autoBuild.minMessages": {
+      "label": "Symbolic Canvas Min Messages",
+      "help": "Minimum eligible user/assistant messages required before auto-build runs.",
       "advanced": true
     }
   },
@@ -974,6 +989,70 @@
             }
           }
         ]
+      },
+      "symbolicCanvas": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "autoBuild": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "command": {
+                "type": "string",
+                "default": "openclaw-mem"
+              },
+              "commandArgs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "outputDir": {
+                "type": "string",
+                "default": "memory/symbolic-canvas-auto"
+              },
+              "baseDir": {
+                "type": "string"
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 200,
+                "maximum": 15000,
+                "default": 2500
+              },
+              "maxBufferBytes": {
+                "type": "integer",
+                "minimum": 65536,
+                "maximum": 2097152,
+                "default": 524288
+              },
+              "maxNodes": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 24,
+                "default": 8
+              },
+              "maxLabelChars": {
+                "type": "integer",
+                "minimum": 40,
+                "maximum": 300,
+                "default": 120
+              },
+              "minMessages": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64,
+                "default": 4
+              }
+            }
+          }
+        }
       }
     }
   }

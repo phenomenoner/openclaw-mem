@@ -53,6 +53,54 @@ openclaw-mem symbolic-canvas build \
 
 The command is file-only. It does not open the memory DB and does not require OpenClaw Gateway changes.
 
+
+## Opt-in auto-build hook
+
+`openclaw-mem-engine` can optionally build symbolic-canvas receipts on `agent_end` via:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem-engine": {
+        "config": {
+          "symbolicCanvas": {
+            "autoBuild": {
+              "enabled": true,
+              "outputDir": "memory/symbolic-canvas-auto",
+              "minMessages": 4
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+The hook is deliberately observe-only:
+
+- runs only when explicitly enabled
+- listens at `agent_end` and derives a bounded user/assistant message trace
+- writes JSON + Mermaid receipts under the configured state-relative `outputDir`
+- performs no model calls, no prompt injection, and no canonical memory mutation
+- skips failed agent runs and runs with fewer than `minMessages` eligible messages
+
+For local development without a globally installed `openclaw-mem`, set `command` and `commandArgs`, for example:
+
+```json
+{
+  "command": "uv",
+  "commandArgs": [
+    "run", "--project", "/path/to/openclaw-mem",
+    "--python", "3.13", "--frozen",
+    "python", "-m", "openclaw_mem"
+  ]
+}
+```
+
+Rollback is config-only: set `symbolicCanvas.autoBuild.enabled=false`. Generated receipts are non-canonical artifacts and may be deleted independently.
+
 ## Non-goals
 
 - Not a replacement for `ContextPack`.

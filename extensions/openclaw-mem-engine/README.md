@@ -275,3 +275,46 @@ See the repo docs for:
 - `docs/experimental/gbrain-sidecar/README.md`
 - `docs/ecosystem-fit.md`
 - `docs/mem-engine-admin-ops.md`
+
+## Symbolic canvas auto-build hook (optional)
+
+`symbolicCanvas.autoBuild` is an observe-only `agent_end` hook that writes bounded
+Mermaid/JSON task-canvas receipts. It does **not** write canonical memory, call
+`memory_store`, or inject prompt context.
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "openclaw-mem-engine": {
+        "config": {
+          "symbolicCanvas": {
+            "autoBuild": {
+              "enabled": true,
+              "outputDir": "memory/symbolic-canvas-auto",
+              "minMessages": 4
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Local source checkouts can point the hook at the Python module instead of a
+global `openclaw-mem` binary:
+
+```jsonc
+{
+  "command": "uv",
+  "commandArgs": [
+    "run", "--project", "/path/to/openclaw-mem",
+    "--python", "3.13", "--frozen",
+    "python", "-m", "openclaw_mem"
+  ]
+}
+```
+
+Rollback is config-only: set `symbolicCanvas.autoBuild.enabled=false`.
+Generated receipts under `outputDir` are non-canonical observe artifacts.

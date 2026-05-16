@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.19] - 2026-05-16
+
+- Add opt-in `openclaw-mem-engine` `symbolicCanvas.autoBuild` agent-end hook for bounded JSON/Mermaid observe receipts.
+- Keep symbolic canvas auto-build observe-only: no prompt injection, no `memory_store`, no canonical memory mutation.
+- Document public CLI + hook usage and update symbolic-canvas operator skill.
+
 ## [1.9.18] - 2026-05-15
 
 ### Added

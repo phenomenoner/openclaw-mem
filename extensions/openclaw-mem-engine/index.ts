@@ -47,6 +47,7 @@ import { runRouteAuto } from "./routeAuto.js";
 import { runTierFirstV1, selectTierQuotaV1 } from "./tierSelection.js";
 import { runWeiJiMemoryPreflight } from "./weiJiMemoryPreflight.js";
 import { mirrorMemoryToGbrain } from "./gbrainMirror.js";
+import { runSymbolicCanvasAutoBuild } from "./symbolicCanvasAuto.js";
 
 // ============================================================================
 // Config
@@ -191,6 +192,23 @@ type GBrainMirrorConfigInput = {
   importOnStore?: boolean;
 };
 
+type SymbolicCanvasAutoBuildConfigInput = {
+  enabled?: boolean;
+  command?: string;
+  commandArgs?: string[];
+  outputDir?: string;
+  baseDir?: string;
+  timeoutMs?: number;
+  maxBufferBytes?: number;
+  maxNodes?: number;
+  maxLabelChars?: number;
+  minMessages?: number;
+};
+
+type SymbolicCanvasConfigInput = {
+  autoBuild?: boolean | SymbolicCanvasAutoBuildConfigInput;
+};
+
 type DocsColdLaneConfig = {
   enabled: boolean;
   sqlitePath: string;
@@ -230,6 +248,7 @@ type PluginConfig = {
   docsColdLane?: boolean | DocsColdLaneConfigInput;
   weijiMemoryPreflight?: boolean | WeiJiMemoryPreflightConfigInput;
   gbrainMirror?: boolean | GBrainMirrorConfigInput;
+  symbolicCanvas?: boolean | SymbolicCanvasConfigInput;
   // only canonical durable-memory write lane
   // Hard write-path guard. When enabled, mem-engine remains the only canonical
   // durable-memory write lane for the active slot: explicit write tools are rejected,
@@ -260,6 +279,7 @@ const DOCS_COLD_LANE_MAX_CHUNK_CHARS = 4000;
 const DOCS_COLD_LANE_MAX_SEARCH_K = 100;
 const WORKING_SET_MAX_CHARS = 2800;
 const WORKING_SET_MAX_ITEMS_PER_SECTION = 5;
+const SYMBOLIC_CANVAS_AUTO_DEFAULT_MAX_BUFFER_BYTES = 512 * 1024;
 
 type RouteAutoConfig = {
   enabled: boolean;
@@ -358,6 +378,23 @@ type GBrainMirrorConfig = {
   importOnStore: boolean;
 };
 
+type SymbolicCanvasAutoBuildConfig = {
+  enabled: boolean;
+  command: string;
+  commandArgs: string[];
+  outputDir: string;
+  baseDir?: string;
+  timeoutMs: number;
+  maxBufferBytes: number;
+  maxNodes: number;
+  maxLabelChars: number;
+  minMessages: number;
+};
+
+type SymbolicCanvasConfig = {
+  autoBuild: SymbolicCanvasAutoBuildConfig;
+};
+
 type AutoCaptureCategory = "preference" | "decision" | "todo";
 
 const DEFAULT_ROUTE_AUTO_CONFIG: RouteAutoConfig = {
@@ -439,6 +476,21 @@ const DEFAULT_RECEIPTS_CONFIG: ReceiptsConfig = {
   enabled: true,
   verbosity: "low",
   maxItems: 3,
+};
+
+const DEFAULT_SYMBOLIC_CANVAS_CONFIG: SymbolicCanvasConfig = {
+  autoBuild: {
+    enabled: false,
+    command: "openclaw-mem",
+    commandArgs: [],
+    outputDir: "memory/symbolic-canvas-auto",
+    baseDir: undefined,
+    timeoutMs: 2500,
+    maxBufferBytes: SYMBOLIC_CANVAS_AUTO_DEFAULT_MAX_BUFFER_BYTES,
+    maxNodes: 8,
+    maxLabelChars: 120,
+    minMessages: 4,
+  },
 };
 
 const DEFAULT_DOCS_COLD_LANE_CONFIG: DocsColdLaneConfig = {
@@ -1196,6 +1248,62 @@ function resolveGBrainMirrorConfig(input: PluginConfig["gbrainMirror"]): GBrainM
       integer: true,
     }),
     importOnStore: normalizeBoolean(raw.importOnStore, defaults.importOnStore),
+  };
+}
+
+function resolveSymbolicCanvasConfig(input: PluginConfig["symbolicCanvas"]): SymbolicCanvasConfig {
+  const defaults = DEFAULT_SYMBOLIC_CANVAS_CONFIG;
+  const cloneDefaults = (): SymbolicCanvasConfig => ({
+    autoBuild: {
+      ...defaults.autoBuild,
+      commandArgs: [...defaults.autoBuild.commandArgs],
+    },
+  });
+
+  if (input === false || input == null) {
+    return cloneDefaults();
+  }
+
+  if (input === true) {
+    return { autoBuild: { ...cloneDefaults().autoBuild, enabled: true } };
+  }
+
+  if (typeof input !== "object" || Array.isArray(input)) {
+    return cloneDefaults();
+  }
+
+  const raw = input as SymbolicCanvasConfigInput;
+  const rawAutoBuild = raw.autoBuild;
+  if (rawAutoBuild === false || rawAutoBuild == null) {
+    return cloneDefaults();
+  }
+
+  const defaultsAuto = defaults.autoBuild;
+  if (rawAutoBuild === true) {
+    return { autoBuild: { ...defaultsAuto, commandArgs: [...defaultsAuto.commandArgs], enabled: true } };
+  }
+
+  if (typeof rawAutoBuild !== "object" || Array.isArray(rawAutoBuild)) {
+    return cloneDefaults();
+  }
+
+  const commandArgs = Array.isArray(rawAutoBuild.commandArgs)
+    ? rawAutoBuild.commandArgs.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean).slice(0, 64)
+    : defaultsAuto.commandArgs;
+
+  return {
+    autoBuild: {
+      enabled: normalizeBoolean(rawAutoBuild.enabled, defaultsAuto.enabled),
+      command: typeof rawAutoBuild.command === "string" && rawAutoBuild.command.trim() ? rawAutoBuild.command.trim() : defaultsAuto.command,
+      commandArgs,
+      outputDir: typeof rawAutoBuild.outputDir === "string" && rawAutoBuild.outputDir.trim() ? rawAutoBuild.outputDir.trim() : defaultsAuto.outputDir,
+      baseDir: typeof rawAutoBuild.baseDir === "string" && rawAutoBuild.baseDir.trim() ? rawAutoBuild.baseDir.trim() : defaultsAuto.baseDir,
+      timeoutMs: normalizeNumberInRange(rawAutoBuild.timeoutMs, defaultsAuto.timeoutMs, { min: 200, max: 15_000, integer: true }),
+      maxBufferBytes: normalizeNumberInRange(rawAutoBuild.maxBufferBytes, defaultsAuto.maxBufferBytes, { min: 64 * 1024, max: 2 * 1024 * 1024, integer: true }),
+      maxNodes: normalizeNumberInRange(rawAutoBuild.maxNodes, defaultsAuto.maxNodes, { min: 2, max: 24, integer: true }),
+      maxLabelChars: normalizeNumberInRange(rawAutoBuild.maxLabelChars, defaultsAuto.maxLabelChars, { min: 40, max: 300, integer: true }),
+      minMessages: normalizeNumberInRange(rawAutoBuild.minMessages, defaultsAuto.minMessages, { min: 1, max: 64, integer: true }),
+    },
   };
 }
 
@@ -3685,6 +3793,7 @@ const memoryEngineConfigSchema = {
         "docsColdLane",
         "weijiMemoryPreflight",
         "gbrainMirror",
+        "symbolicCanvas",
         "readOnly",
       ],
       "openclaw-mem-engine config",
@@ -3795,6 +3904,47 @@ const memoryEngineConfigSchema = {
         quotas,
         routeAuto,
       };
+    };
+
+    const parseSymbolicCanvas = (raw: unknown): PluginConfig["symbolicCanvas"] => {
+      if (raw == null) return undefined;
+      if (typeof raw === "boolean") return raw;
+      if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("symbolicCanvas must be a boolean or object");
+      }
+      const obj = raw as Record<string, unknown>;
+      assertAllowedKeys(obj, ["autoBuild"], "symbolicCanvas config");
+
+      let autoBuild: SymbolicCanvasConfigInput["autoBuild"] | undefined;
+      if (obj.autoBuild != null) {
+        if (typeof obj.autoBuild === "boolean") {
+          autoBuild = obj.autoBuild;
+        } else if (typeof obj.autoBuild === "object" && !Array.isArray(obj.autoBuild)) {
+          const autoObj = obj.autoBuild as Record<string, unknown>;
+          assertAllowedKeys(
+            autoObj,
+            ["enabled", "command", "commandArgs", "outputDir", "baseDir", "timeoutMs", "maxBufferBytes", "maxNodes", "maxLabelChars", "minMessages"],
+            "symbolicCanvas.autoBuild config",
+          );
+          autoBuild = {
+            enabled: typeof autoObj.enabled === "boolean" ? autoObj.enabled : undefined,
+            command: typeof autoObj.command === "string" ? autoObj.command : undefined,
+            commandArgs: Array.isArray(autoObj.commandArgs)
+              ? autoObj.commandArgs.filter((item): item is string => typeof item === "string")
+              : undefined,
+            outputDir: typeof autoObj.outputDir === "string" ? autoObj.outputDir : undefined,
+            baseDir: typeof autoObj.baseDir === "string" ? autoObj.baseDir : undefined,
+            timeoutMs: typeof autoObj.timeoutMs === "number" ? autoObj.timeoutMs : undefined,
+            maxBufferBytes: typeof autoObj.maxBufferBytes === "number" ? autoObj.maxBufferBytes : undefined,
+            maxNodes: typeof autoObj.maxNodes === "number" ? autoObj.maxNodes : undefined,
+            maxLabelChars: typeof autoObj.maxLabelChars === "number" ? autoObj.maxLabelChars : undefined,
+            minMessages: typeof autoObj.minMessages === "number" ? autoObj.minMessages : undefined,
+          };
+        } else {
+          throw new Error("symbolicCanvas.autoBuild must be a boolean or object");
+        }
+      }
+      return { autoBuild };
     };
 
     const parseAutoCapture = (raw: unknown): PluginConfig["autoCapture"] => {
@@ -4018,6 +4168,7 @@ const memoryEngineConfigSchema = {
       workingSet: parseWorkingSet(cfg.workingSet),
       receipts: parseReceipts(cfg.receipts),
       docsColdLane: parseDocsColdLane(cfg.docsColdLane),
+      symbolicCanvas: parseSymbolicCanvas(cfg.symbolicCanvas),
       weijiMemoryPreflight:
         cfg.weijiMemoryPreflight === false || cfg.weijiMemoryPreflight === true
           ? cfg.weijiMemoryPreflight
@@ -4102,6 +4253,21 @@ const memoryEngineConfigSchema = {
     tableName: {
       label: "Table Name",
       placeholder: "memories",
+      advanced: true,
+    },
+    "symbolicCanvas.autoBuild.enabled": {
+      label: "Symbolic Canvas Auto Build",
+      help: "On agent-end, build bounded Mermaid/JSON task-canvas receipts. No memory mutation or prompt injection.",
+      advanced: true,
+    },
+    "symbolicCanvas.autoBuild.outputDir": {
+      label: "Symbolic Canvas Output Dir",
+      help: "State-relative directory for generated symbolic-canvas receipts.",
+      advanced: true,
+    },
+    "symbolicCanvas.autoBuild.minMessages": {
+      label: "Symbolic Canvas Min Messages",
+      help: "Minimum eligible user/assistant messages required before auto-build runs.",
       advanced: true,
     },
     readOnly: {
@@ -4423,6 +4589,7 @@ const memoryPlugin = {
     const docsColdLaneCfg = resolveDocsColdLaneConfig(cfg.docsColdLane);
     const weijiMemoryPreflightCfg = resolveWeiJiMemoryPreflightConfig(cfg.weijiMemoryPreflight);
     const gbrainMirrorCfg = resolveGBrainMirrorConfig(cfg.gbrainMirror);
+    const symbolicCanvasCfg = resolveSymbolicCanvasConfig(cfg.symbolicCanvas);
 
     const model = cfg.embedding?.model ?? DEFAULT_MODEL;
     const vectorDim = vectorDimsForModel(model);
@@ -6829,6 +6996,23 @@ const memoryPlugin = {
       }
 
       api.on("before_agent_start", promptMutationHook);
+    }
+
+    if (symbolicCanvasCfg.autoBuild.enabled) {
+      api.on("agent_end", async (event, ctx) => {
+        try {
+          const receipt = await runSymbolicCanvasAutoBuild({
+            event,
+            ctx,
+            config: symbolicCanvasCfg.autoBuild,
+            stateDir: resolveOpenClawStateDir(api),
+          });
+          api.logger.info(`openclaw-mem-engine:symbolicCanvas.autoBuild ${JSON.stringify(receipt)}`);
+        } catch (err) {
+          api.logger.warn(`openclaw-mem-engine: symbolicCanvas autoBuild failed: ${String(err)}`);
+        }
+      });
+      api.logger.info("openclaw-mem-engine: registered symbolicCanvas autoBuild hook");
     }
 
     if (autoCaptureCfg.enabled && readOnlyEnabled) {

@@ -39,6 +39,30 @@ Input trace shape:
 
 `steps` or `events` may be used instead of `nodes`.
 
+
+## Optional auto-build hook
+
+For OpenClaw installations using `openclaw-mem-engine`, symbolic-canvas can be enabled as an observe-only `agent_end` auto-build hook:
+
+```json
+"symbolicCanvas": {
+  "autoBuild": {
+    "enabled": true,
+    "outputDir": "memory/symbolic-canvas-auto",
+    "minMessages": 4
+  }
+}
+```
+
+Use this when you want automatic Mermaid/JSON receipts for longer task turns or handoffs. It is not live memory mutation: the hook does not write `MEMORY.md`, call `memory_store`, or inject context into the next prompt. Keep `minMessages` and `maxNodes` bounded; use generated receipts as Observe/Pack candidates only.
+
+Counterfactuals for the hook:
+
+- disabled config must produce a skipped receipt / no generated canvas
+- failed agent runs must skip
+- too-few eligible messages must skip
+- successful eligible runs must write both `canvas.json` and `canvas.mmd`
+
 ## Store / Pack / Observe boundary
 
 - **Store:** raw evidence remains in files, observations, artifacts, or other canonical stores.
