@@ -292,7 +292,8 @@ Mermaid/JSON task-canvas receipts. It does **not** write canonical memory, call
             "autoBuild": {
               "enabled": true,
               "outputDir": "memory/symbolic-canvas-auto",
-              "minMessages": 4
+              "minMessages": 4,
+              "triggerMode": "qualified"
             }
           }
         }

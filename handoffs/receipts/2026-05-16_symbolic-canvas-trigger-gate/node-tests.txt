@@ -1,0 +1,58 @@
+TAP version 13
+# Subtest: symbolic canvas auto config is disabled by default and bounded
+ok 1 - symbolic canvas auto config is disabled by default and bounded
+  ---
+  duration_ms: 1.827824
+  type: 'test'
+  ...
+# Subtest: qualified trigger ignores routine/skill-heavy turns and accepts handoff turns
+ok 2 - qualified trigger ignores routine/skill-heavy turns and accepts handoff turns
+  ---
+  duration_ms: 1.287318
+  type: 'test'
+  ...
+# Subtest: always trigger mode preserves broad agent_end behavior when explicitly requested
+ok 3 - always trigger mode preserves broad agent_end behavior when explicitly requested
+  ---
+  duration_ms: 0.233703
+  type: 'test'
+  ...
+# Subtest: buildTraceFromAgentEvent creates bounded sequential message graph
+ok 4 - buildTraceFromAgentEvent creates bounded sequential message graph
+  ---
+  duration_ms: 0.669309
+  type: 'test'
+  ...
+# Subtest: runSymbolicCanvasAutoBuild skips when disabled, unqualified, or below min messages
+ok 5 - runSymbolicCanvasAutoBuild skips when disabled, unqualified, or below min messages
+  ---
+  duration_ms: 0.685109
+  type: 'test'
+  ...
+# Subtest: runSymbolicCanvasAutoBuild writes json and mermaid via runner
+ok 6 - runSymbolicCanvasAutoBuild writes json and mermaid via runner
+  ---
+  duration_ms: 1.961426
+  type: 'test'
+  ...
+# Subtest: plugin schema exposes symbolicCanvas autoBuild disabled-by-default config
+ok 7 - plugin schema exposes symbolicCanvas autoBuild disabled-by-default config
+  ---
+  duration_ms: 1.885325
+  type: 'test'
+  ...
+# Subtest: inline config parser rejects invalid symbolicCanvas shapes
+ok 8 - inline config parser rejects invalid symbolicCanvas shapes
+  ---
+  duration_ms: 0.282003
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 75.747411

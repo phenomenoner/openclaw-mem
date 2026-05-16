@@ -203,6 +203,8 @@ type SymbolicCanvasAutoBuildConfigInput = {
   maxNodes?: number;
   maxLabelChars?: number;
   minMessages?: number;
+  triggerMode?: string;
+  triggerPatterns?: string[];
 };
 
 type SymbolicCanvasConfigInput = {
@@ -389,6 +391,8 @@ type SymbolicCanvasAutoBuildConfig = {
   maxNodes: number;
   maxLabelChars: number;
   minMessages: number;
+  triggerMode: string;
+  triggerPatterns: string[];
 };
 
 type SymbolicCanvasConfig = {
@@ -490,6 +494,27 @@ const DEFAULT_SYMBOLIC_CANVAS_CONFIG: SymbolicCanvasConfig = {
     maxNodes: 8,
     maxLabelChars: 120,
     minMessages: 4,
+    triggerMode: "qualified",
+    triggerPatterns: [
+      "handoff",
+      "closeout",
+      "closure",
+      "checkpoint",
+      "receipt",
+      "verifier",
+      "subagent",
+      "inter-session message",
+      "queued announce",
+      "工程規格",
+      "刀舞",
+      "non-stop",
+      "交接",
+      "收尾",
+      "驗證",
+      "完成",
+      "實作",
+      "測試",
+    ],
   },
 };
 
@@ -1303,6 +1328,12 @@ function resolveSymbolicCanvasConfig(input: PluginConfig["symbolicCanvas"]): Sym
       maxNodes: normalizeNumberInRange(rawAutoBuild.maxNodes, defaultsAuto.maxNodes, { min: 2, max: 24, integer: true }),
       maxLabelChars: normalizeNumberInRange(rawAutoBuild.maxLabelChars, defaultsAuto.maxLabelChars, { min: 40, max: 300, integer: true }),
       minMessages: normalizeNumberInRange(rawAutoBuild.minMessages, defaultsAuto.minMessages, { min: 1, max: 64, integer: true }),
+      triggerMode: typeof rawAutoBuild.triggerMode === "string" && ["qualified", "always"].includes(rawAutoBuild.triggerMode)
+        ? rawAutoBuild.triggerMode
+        : defaultsAuto.triggerMode,
+      triggerPatterns: Array.isArray(rawAutoBuild.triggerPatterns)
+        ? rawAutoBuild.triggerPatterns.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean).slice(0, 64)
+        : defaultsAuto.triggerPatterns,
     },
   };
 }
@@ -3923,7 +3954,7 @@ const memoryEngineConfigSchema = {
           const autoObj = obj.autoBuild as Record<string, unknown>;
           assertAllowedKeys(
             autoObj,
-            ["enabled", "command", "commandArgs", "outputDir", "baseDir", "timeoutMs", "maxBufferBytes", "maxNodes", "maxLabelChars", "minMessages"],
+            ["enabled", "command", "commandArgs", "outputDir", "baseDir", "timeoutMs", "maxBufferBytes", "maxNodes", "maxLabelChars", "minMessages", "triggerMode", "triggerPatterns"],
             "symbolicCanvas.autoBuild config",
           );
           autoBuild = {
@@ -3939,6 +3970,10 @@ const memoryEngineConfigSchema = {
             maxNodes: typeof autoObj.maxNodes === "number" ? autoObj.maxNodes : undefined,
             maxLabelChars: typeof autoObj.maxLabelChars === "number" ? autoObj.maxLabelChars : undefined,
             minMessages: typeof autoObj.minMessages === "number" ? autoObj.minMessages : undefined,
+            triggerMode: typeof autoObj.triggerMode === "string" ? autoObj.triggerMode : undefined,
+            triggerPatterns: Array.isArray(autoObj.triggerPatterns)
+              ? autoObj.triggerPatterns.filter((item): item is string => typeof item === "string")
+              : undefined,
           };
         } else {
           throw new Error("symbolicCanvas.autoBuild must be a boolean or object");
@@ -4268,6 +4303,11 @@ const memoryEngineConfigSchema = {
     "symbolicCanvas.autoBuild.minMessages": {
       label: "Symbolic Canvas Min Messages",
       help: "Minimum eligible user/assistant messages required before auto-build runs.",
+      advanced: true,
+    },
+    "symbolicCanvas.autoBuild.triggerMode": {
+      label: "Symbolic Canvas Trigger Mode",
+      help: "qualified runs only on handoff/closure/checkpoint-style turns; always runs on every successful eligible agent_end.",
       advanced: true,
     },
     readOnly: {

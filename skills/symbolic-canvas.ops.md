@@ -49,10 +49,13 @@ For OpenClaw installations using `openclaw-mem-engine`, symbolic-canvas can be e
   "autoBuild": {
     "enabled": true,
     "outputDir": "memory/symbolic-canvas-auto",
-    "minMessages": 4
+    "minMessages": 4,
+    "triggerMode": "qualified"
   }
 }
 ```
+
+Default `triggerMode=qualified` avoids receipts for routine turns, heartbeat, and long skill/tool payloads; set `triggerMode=always` only when every eligible `agent_end` should emit a receipt.
 
 Use this when you want automatic Mermaid/JSON receipts for longer task turns or handoffs. It is not live memory mutation: the hook does not write `MEMORY.md`, call `memory_store`, or inject context into the next prompt. Keep `minMessages` and `maxNodes` bounded; use generated receipts as Observe/Pack candidates only.
 

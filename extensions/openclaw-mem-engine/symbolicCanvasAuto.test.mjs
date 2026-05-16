@@ -8,6 +8,7 @@ import {
   buildTraceFromAgentEvent,
   resolveSymbolicCanvasAutoConfig,
   runSymbolicCanvasAutoBuild,
+  shouldRunSymbolicCanvasAutoBuild,
 } from "./symbolicCanvasAuto.js";
 
 test("symbolic canvas auto config is disabled by default and bounded", () => {
@@ -16,6 +17,42 @@ test("symbolic canvas auto config is disabled by default and bounded", () => {
   assert.equal(cfg.maxNodes, 24);
   assert.equal(cfg.timeoutMs, 15000);
   assert.equal(cfg.maxLabelChars, 40);
+  assert.equal(cfg.triggerMode, "qualified");
+});
+
+test("qualified trigger ignores routine/skill-heavy turns and accepts handoff turns", () => {
+  const routine = {
+    success: true,
+    messages: [
+      { role: "system", content: "very long skill text should not qualify" },
+      { role: "tool", content: "SKILL.md contents ..." },
+      { role: "user", content: "之前我們在曦那邊碰到一個問題" },
+      { role: "assistant", content: "我查一下" },
+    ],
+  };
+  assert.deepEqual(shouldRunSymbolicCanvasAutoBuild(routine, {}, { enabled: true }), {
+    ok: false,
+    reason: "not_qualified",
+  });
+
+  const handoff = {
+    success: true,
+    messages: [
+      { role: "user", content: "請做 checkpoint handoff receipt" },
+      { role: "assistant", content: "closure verifier complete" },
+    ],
+  };
+  const result = shouldRunSymbolicCanvasAutoBuild(handoff, {}, { enabled: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.reason, "qualified_pattern");
+});
+
+test("always trigger mode preserves broad agent_end behavior when explicitly requested", () => {
+  const event = { success: true, messages: [{ role: "user", content: "routine" }] };
+  assert.deepEqual(shouldRunSymbolicCanvasAutoBuild(event, {}, { enabled: true, triggerMode: "always" }), {
+    ok: true,
+    reason: "trigger_mode_always",
+  });
 });
 
 test("buildTraceFromAgentEvent creates bounded sequential message graph", () => {
@@ -42,7 +79,7 @@ test("buildTraceFromAgentEvent creates bounded sequential message graph", () => 
   assert.equal(trace.nodes[0].refs[0].startsWith("artifact:openclaw-session-message:"), true);
 });
 
-test("runSymbolicCanvasAutoBuild skips when disabled or below min messages", async () => {
+test("runSymbolicCanvasAutoBuild skips when disabled, unqualified, or below min messages", async () => {
   assert.deepEqual(await runSymbolicCanvasAutoBuild({ config: { enabled: false } }), {
     ok: true,
     skipped: true,
@@ -50,9 +87,16 @@ test("runSymbolicCanvasAutoBuild skips when disabled or below min messages", asy
     elapsedMs: 0,
   });
 
+  const unqualified = await runSymbolicCanvasAutoBuild({
+    config: { enabled: true },
+    event: { success: true, messages: [{ role: "user", content: "ordinary chat" }, { role: "assistant", content: "ordinary reply" }] },
+  });
+  assert.equal(unqualified.skipped, true);
+  assert.equal(unqualified.skipReason, "not_qualified");
+
   const below = await runSymbolicCanvasAutoBuild({
-    config: { enabled: true, minMessages: 2 },
-    event: { success: true, messages: [{ role: "user", content: "only one" }] },
+    config: { enabled: true, minMessages: 3 },
+    event: { success: true, messages: [{ role: "user", content: "checkpoint" }, { role: "assistant", content: "receipt" }] },
   });
   assert.equal(below.skipped, true);
   assert.equal(below.skipReason, "too_few_messages");
@@ -66,8 +110,8 @@ test("runSymbolicCanvasAutoBuild writes json and mermaid via runner", async () =
     event: {
       success: true,
       messages: [
-        { role: "user", content: "Start" },
-        { role: "assistant", content: "Done" },
+        { role: "user", content: "checkpoint Start" },
+        { role: "assistant", content: "Done receipt" },
       ],
     },
     runner: async ({ args, input }) => {

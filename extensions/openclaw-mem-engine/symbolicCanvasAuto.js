@@ -15,6 +15,28 @@ const DEFAULT_MAX_NODES = 8;
 const DEFAULT_MAX_LABEL_CHARS = 120;
 const DEFAULT_MIN_MESSAGES = 4;
 const DEFAULT_OUTPUT_DIR = "memory/symbolic-canvas-auto";
+const DEFAULT_TRIGGER_MODE = "qualified";
+const VALID_TRIGGER_MODES = new Set(["qualified", "always"]);
+const DEFAULT_TRIGGER_PATTERNS = [
+  "handoff",
+  "closeout",
+  "closure",
+  "checkpoint",
+  "receipt",
+  "verifier",
+  "subagent",
+  "inter-session message",
+  "queued announce",
+  "工程規格",
+  "刀舞",
+  "non-stop",
+  "交接",
+  "收尾",
+  "驗證",
+  "完成",
+  "實作",
+  "測試",
+];
 
 function clampNumber(raw, fallback, { min, max, integer = true } = {}) {
   const parsed = typeof raw === "number" ? raw : Number(raw);
@@ -23,9 +45,14 @@ function clampNumber(raw, fallback, { min, max, integer = true } = {}) {
   return Math.max(min, Math.min(max, n));
 }
 
-function toStringArray(raw) {
-  if (!Array.isArray(raw)) return [];
+function toStringArray(raw, fallback = []) {
+  if (!Array.isArray(raw)) return [...fallback];
   return raw.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean).slice(0, 64);
+}
+
+function normalizeTriggerMode(raw) {
+  const text = String(raw || DEFAULT_TRIGGER_MODE).trim().toLowerCase();
+  return VALID_TRIGGER_MODES.has(text) ? text : DEFAULT_TRIGGER_MODE;
 }
 
 function compactText(raw, maxChars = DEFAULT_MAX_LABEL_CHARS) {
@@ -62,6 +89,8 @@ export function resolveSymbolicCanvasAutoConfig(config = {}) {
     maxNodes: clampNumber(config?.maxNodes, DEFAULT_MAX_NODES, { min: 2, max: 24 }),
     maxLabelChars: clampNumber(config?.maxLabelChars, DEFAULT_MAX_LABEL_CHARS, { min: 40, max: 300 }),
     minMessages: clampNumber(config?.minMessages, DEFAULT_MIN_MESSAGES, { min: 1, max: 64 }),
+    triggerMode: normalizeTriggerMode(config?.triggerMode),
+    triggerPatterns: toStringArray(config?.triggerPatterns, DEFAULT_TRIGGER_PATTERNS),
   };
 }
 
@@ -77,6 +106,32 @@ function extractMessageText(message) {
     }
   }
   return parts.join("\n");
+}
+
+function eventTextForTrigger(event = {}, cfg = {}) {
+  const messages = Array.isArray(event?.messages) ? event.messages : [];
+  const parts = [];
+  for (const message of messages.slice(-Math.max(cfg.maxNodes || DEFAULT_MAX_NODES, cfg.minMessages || DEFAULT_MIN_MESSAGES, 8))) {
+    if (!message || typeof message !== "object") continue;
+    const role = String(message.role || "unknown").toLowerCase();
+    if (role !== "user" && role !== "assistant") continue;
+    const text = extractMessageText(message);
+    if (text) parts.push(text);
+  }
+  return parts.join("\n").toLowerCase();
+}
+
+export function shouldRunSymbolicCanvasAutoBuild(event = {}, ctx = {}, config = {}) {
+  const cfg = resolveSymbolicCanvasAutoConfig(config);
+  if (!cfg.enabled) return { ok: false, reason: "disabled" };
+  if (event?.success === false) return { ok: false, reason: "agent_not_successful" };
+  if (cfg.triggerMode === "always") return { ok: true, reason: "trigger_mode_always" };
+
+  const text = eventTextForTrigger(event, cfg);
+  const matchedPattern = cfg.triggerPatterns.find((pattern) => text.includes(String(pattern).toLowerCase()));
+  if (matchedPattern) return { ok: true, reason: "qualified_pattern", matchedPattern };
+
+  return { ok: false, reason: "not_qualified" };
 }
 
 export function buildTraceFromAgentEvent(event = {}, ctx = {}, config = {}) {
@@ -122,6 +177,7 @@ export function buildTraceFromAgentEvent(event = {}, ctx = {}, config = {}) {
       totalMessages: messages.length,
       eligibleMessages: eligible.length,
       selectedMessages: selected.length,
+      triggerMode: cfg.triggerMode,
     },
   };
 }
@@ -167,11 +223,9 @@ export async function runSymbolicCanvasAutoBuild({ event = {}, ctx = {}, config 
   const cfg = resolveSymbolicCanvasAutoConfig(config);
   const started = Date.now();
 
-  if (!cfg.enabled) {
-    return { ok: true, skipped: true, skipReason: "disabled", elapsedMs: 0 };
-  }
-  if (event?.success === false) {
-    return { ok: true, skipped: true, skipReason: "agent_not_successful", elapsedMs: 0 };
+  const trigger = shouldRunSymbolicCanvasAutoBuild(event, ctx, cfg);
+  if (!trigger.ok) {
+    return { ok: true, skipped: true, skipReason: trigger.reason, elapsedMs: Date.now() - started };
   }
 
   const trace = buildTraceFromAgentEvent(event, ctx, cfg);

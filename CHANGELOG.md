@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.20] - 2026-05-16
+
+- Add `symbolicCanvas.autoBuild.triggerMode` with default `qualified` behavior to avoid noisy receipts on routine turns, heartbeat, and skill/tool-heavy turns.
+- Keep explicit broad behavior available via `triggerMode=always`.
+- Add counterfactual tests proving long skill/tool content does not qualify the hook by itself.
+
 ## [1.9.19] - 2026-05-16
 
 - Add opt-in `openclaw-mem-engine` `symbolicCanvas.autoBuild` agent-end hook for bounded JSON/Mermaid observe receipts.

@@ -68,7 +68,8 @@ The command is file-only. It does not open the memory DB and does not require Op
             "autoBuild": {
               "enabled": true,
               "outputDir": "memory/symbolic-canvas-auto",
-              "minMessages": 4
+              "minMessages": 4,
+              "triggerMode": "qualified"
             }
           }
         }

@@ -1,0 +1,12 @@
+{
+  "decision": {
+    "ok": false,
+    "reason": "not_qualified"
+  },
+  "receipt": {
+    "ok": true,
+    "skipped": true,
+    "skipReason": "not_qualified",
+    "elapsedMs": 1
+  }
+}
