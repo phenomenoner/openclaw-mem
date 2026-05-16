@@ -1,0 +1,46 @@
+TAP version 13
+# Subtest: symbolic canvas auto config is disabled by default and bounded
+ok 1 - symbolic canvas auto config is disabled by default and bounded
+  ---
+  duration_ms: 1.742374
+  type: 'test'
+  ...
+# Subtest: buildTraceFromAgentEvent creates bounded sequential message graph
+ok 2 - buildTraceFromAgentEvent creates bounded sequential message graph
+  ---
+  duration_ms: 1.187318
+  type: 'test'
+  ...
+# Subtest: runSymbolicCanvasAutoBuild skips when disabled or below min messages
+ok 3 - runSymbolicCanvasAutoBuild skips when disabled or below min messages
+  ---
+  duration_ms: 0.486548
+  type: 'test'
+  ...
+# Subtest: runSymbolicCanvasAutoBuild writes json and mermaid via runner
+ok 4 - runSymbolicCanvasAutoBuild writes json and mermaid via runner
+  ---
+  duration_ms: 2.007
+  type: 'test'
+  ...
+# Subtest: plugin schema exposes symbolicCanvas autoBuild disabled-by-default config
+ok 5 - plugin schema exposes symbolicCanvas autoBuild disabled-by-default config
+  ---
+  duration_ms: 1.647365
+  type: 'test'
+  ...
+# Subtest: inline config parser rejects invalid symbolicCanvas shapes
+ok 6 - inline config parser rejects invalid symbolicCanvas shapes
+  ---
+  duration_ms: 0.272628
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 73.122689
