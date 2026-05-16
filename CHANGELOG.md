@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.21] - 2026-05-16
+
+- Public docs hygiene release: include the symbolic-canvas `triggerMode=qualified` public-facing clarification in the tagged/PyPI artifact.
+- Clarify that long system/tool payloads, including skill text, do not qualify auto-build runs by themselves.
+- No runtime behavior change from v1.9.20.
+
 ## [1.9.20] - 2026-05-16
 
 - Add `symbolicCanvas.autoBuild.triggerMode` with default `qualified` behavior to avoid noisy receipts on routine turns, heartbeat, and skill/tool-heavy turns.
