@@ -9,7 +9,7 @@ It converts a small task trace into:
 - refs back to raw evidence/artifacts
 - warnings for missing refs or unresolved edges
 
-It performs **no model calls**, **no live capture**, **no Gateway patching**, and **no runtime memory mutation**.
+The standalone CLI performs **no model calls**, **no live capture**, **no Gateway patching**, and **no runtime memory mutation**. The optional engine auto-build hook below is observe-only `agent_end` receipt generation, not canonical memory capture.
 
 ## Why this fits Store / Pack / Observe
 

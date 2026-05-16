@@ -11,7 +11,7 @@ Use this lane when:
 - you need a Mermaid-style map plus `node_id` drill-down refs
 - you want a reviewable artifact before packing or handoff
 
-Do **not** use this lane as a memory writer, persona writer, or automatic tool-log capture engine.
+Do **not** use this lane as a memory writer, persona writer, or automatic tool-log capture engine. The optional auto-build hook is only bounded `agent_end` receipt generation.
 
 ## Command
 
