@@ -8,7 +8,7 @@ from pathlib import Path
 
 from openclaw_mem import self_model_sidecar
 from openclaw_mem.cli import _connect, build_parser
-from openclaw_mem.continuity_soak import SoakConfig, compute_drift_summary, ensure_baseline, evaluate_soak
+from openclaw_mem.continuity_soak import SoakConfig, compute_drift_summary, ensure_baseline, evaluate_soak, latest_receipt
 
 
 class TestSelfModelSidecarCli(unittest.TestCase):
@@ -688,3 +688,17 @@ class TestSelfModelSidecarCli(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_latest_receipt_skips_corrupt_tail():
+    with tempfile.TemporaryDirectory() as tmp:
+        soak = Path(tmp) / "soak"
+        soak.mkdir()
+        good = soak / "warning-20260519T155501.083057_0000.json"
+        good.write_text(json.dumps({"reason": "stale_autorun"}), encoding="utf-8")
+        bad = soak / "warning-20260519T160001.059105_0000.json"
+        bad.write_text("", encoding="utf-8")
+        receipt = latest_receipt(tmp, prefix="warning")
+        assert receipt is not None
+        assert receipt["reason"] == "stale_autorun"
+        assert receipt["path"] == str(good)

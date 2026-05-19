@@ -278,11 +278,14 @@ def write_receipt(run_dir: str, payload: Dict[str, Any], *, prefix: str) -> str:
 def latest_receipt(run_dir: str, *, prefix: str) -> Optional[Dict[str, Any]]:
     soak_dir = _soak_dir(run_dir)
     files = sorted(soak_dir.glob(f"{prefix}-*.json"))
-    if not files:
-        return None
-    payload = json.loads(files[-1].read_text(encoding="utf-8"))
-    payload["path"] = str(files[-1])
-    return payload
+    for file in reversed(files):
+        try:
+            payload = json.loads(file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        payload["path"] = str(file)
+        return payload
+    return None
 
 
 def run_one_cycle(*, repo_root: str, run_dir: str, db: Optional[str] = None, scope: Optional[str] = None, session_id: Optional[str] = None, limit: int = 50, persona_file: Optional[str] = None, observations_file: Optional[str] = None, episodes_file: Optional[str] = None) -> Dict[str, Any]:
