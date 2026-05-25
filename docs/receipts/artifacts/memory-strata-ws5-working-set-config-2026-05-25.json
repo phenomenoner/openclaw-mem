@@ -1,0 +1,13 @@
+{
+  "kind": "memory-strata.ws5.working-set-config.v0",
+  "ts": "2026-05-25T06:12:48.792303+00:00",
+  "workingSet": {
+    "enabled": true,
+    "persist": false,
+    "maxChars": 900,
+    "maxItemsPerSection": 3,
+    "maxGoalChars": 180,
+    "maxItemChars": 160
+  },
+  "topology_impact": "unchanged/read-only config inspection"
+}
