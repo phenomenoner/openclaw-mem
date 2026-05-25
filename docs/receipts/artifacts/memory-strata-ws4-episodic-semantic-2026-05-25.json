@@ -1,0 +1,73 @@
+{
+  "kind": "memory-strata.ws4.episodic-semantic-fixture.v0",
+  "db": ".tmp/memory-strata-ws4/episodes-semantic-fixture.sqlite",
+  "scope": "memory-strata-ws4-fixture",
+  "checks": {
+    "embed_ok": true,
+    "lexical_positive_finds_alpha": true,
+    "hybrid_positive_finds_alpha": true,
+    "negative_does_not_rank_only_alpha_as_confident": true,
+    "negative_returns_low_score_results_needs_threshold_policy": true
+  },
+  "all_passed": true,
+  "embed_receipt": {
+    "kind": "openclaw-mem.episodes.embed.v0",
+    "ts": "2026-05-25T04:52:49.768025+00:00",
+    "version": {
+      "openclaw_mem": "1.9.18",
+      "schema": "v0"
+    },
+    "ok": true,
+    "model": "text-embedding-3-small",
+    "scope_filter": "memory-strata-ws4-fixture",
+    "limit": 20,
+    "batch": 32,
+    "embedded": 3,
+    "ids": [
+      1,
+      2,
+      3
+    ],
+    "per_scope": [
+      {
+        "scope": "memory-strata-ws4-fixture",
+        "count": 3
+      }
+    ]
+  },
+  "lexical_positive_sessions": [
+    "ws4-session-alpha"
+  ],
+  "hybrid_positive_sessions": [
+    "ws4-session-alpha",
+    "ws4-session-beta"
+  ],
+  "hybrid_negative_sessions": [
+    "ws4-session-alpha",
+    "ws4-session-beta"
+  ],
+  "artifacts": [
+    ".tmp/memory-strata-ws4/embed.json",
+    ".tmp/memory-strata-ws4/search_hybrid_negative.json",
+    ".tmp/memory-strata-ws4/search_hybrid_positive.json",
+    ".tmp/memory-strata-ws4/search_lexical_positive.json",
+    ".tmp/memory-strata-ws4/ws4-event-001.json",
+    ".tmp/memory-strata-ws4/ws4-event-002.json",
+    ".tmp/memory-strata-ws4/ws4-event-003.json"
+  ],
+  "observations": {
+    "positive_top_lanes": [
+      "fts",
+      "vector"
+    ],
+    "positive_top_vector_score": 0.6267191344257868,
+    "positive_top_rrf_score": 0.03278688524590164,
+    "negative_top_lanes": [
+      "vector"
+    ],
+    "negative_top_vector_score": 0.17757844674300424,
+    "negative_top_rrf_score": 0.01639344262295082,
+    "negative_returns_results": true
+  },
+  "quality_verdict": "mechanics_pass_overclaim_policy_needed"
+}

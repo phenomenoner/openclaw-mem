@@ -1,0 +1,39 @@
+{
+  "kind": "memory-strata.ws8.pack-trace.v0",
+  "checks": {
+    "baseline_pack_ok": true,
+    "baseline_trace_has_lanes": true,
+    "baseline_trace_has_candidates": true,
+    "baseline_write_flags_off": true,
+    "graph_auto_fail_open_or_ok": true,
+    "write_counterfactual_command_completed": true
+  },
+  "all_passed": true,
+  "baseline_items": 6,
+  "baseline_trace_lanes": [
+    "hot",
+    "warm",
+    "cold"
+  ],
+  "baseline_candidates": 18,
+  "graph_auto_items": 6,
+  "graph_auto_trace_lanes": [
+    "hot",
+    "warm",
+    "cold"
+  ],
+  "write_counterfactual_exit_code": 0,
+  "write_counterfactual_keys": [
+    "bundle_text",
+    "items",
+    "citations",
+    "context_pack",
+    "lifecycle_write",
+    "trace"
+  ],
+  "artifacts": [
+    ".tmp/memory-strata-ws8/baseline.json",
+    ".tmp/memory-strata-ws8/graph_auto.json",
+    ".tmp/memory-strata-ws8/write_counterfactual.json"
+  ]
+}

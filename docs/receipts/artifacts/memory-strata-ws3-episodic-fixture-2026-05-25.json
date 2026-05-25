@@ -1,0 +1,30 @@
+{
+  "kind": "memory-strata.ws3.episodic-fixture.v0",
+  "db": ".tmp/memory-strata-ws3/episodes-fixture.sqlite",
+  "scope": "memory-strata-ws3-fixture",
+  "session_id": "ws3-fixture-session-001",
+  "secret_append_exit_code": 2,
+  "checks": {
+    "query_no_payload_hides_secret_marker": true,
+    "query_with_payload_contains_secret_marker": true,
+    "redact_clears_secret_marker": true,
+    "search_lexical_ok": true,
+    "gc_ok": true,
+    "explicit_secret_like_payload_rejected": true
+  },
+  "all_passed": true,
+  "artifacts": [
+    ".tmp/memory-strata-ws3/append_assistant.json",
+    ".tmp/memory-strata-ws3/append_secret_reject.json",
+    ".tmp/memory-strata-ws3/append_secret_reject_2.json",
+    ".tmp/memory-strata-ws3/append_user.json",
+    ".tmp/memory-strata-ws3/gc_scope.json",
+    ".tmp/memory-strata-ws3/query_after_redact.json",
+    ".tmp/memory-strata-ws3/query_no_payload.json",
+    ".tmp/memory-strata-ws3/query_with_payload.json",
+    ".tmp/memory-strata-ws3/redact_session.json",
+    ".tmp/memory-strata-ws3/replay_no_payload.json",
+    ".tmp/memory-strata-ws3/search_lexical.json"
+  ],
+  "secret_reject_stderr_head": ""
+}

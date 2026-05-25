@@ -1,0 +1,25 @@
+{
+  "kind": "memory-strata.ws8.lifecycle-write-rollback.v0",
+  "ts": "2026-05-25T05:29:31.933386+00:00",
+  "db": "/root/.openclaw/memory/openclaw-mem.sqlite",
+  "ids": [
+    31998,
+    48512
+  ],
+  "before": {
+    "31998": {
+      "last_used_at": "2026-05-25T04:54:21.679808+00:00",
+      "used_count": 1
+    },
+    "48512": {
+      "last_used_at": "2026-05-25T04:54:21.679808+00:00",
+      "used_count": 1
+    }
+  },
+  "after": {
+    "31998": null,
+    "48512": null
+  },
+  "action": "remove detail_json.lifecycle fields accidentally added by WS8 counterfactual",
+  "ok": true
+}
