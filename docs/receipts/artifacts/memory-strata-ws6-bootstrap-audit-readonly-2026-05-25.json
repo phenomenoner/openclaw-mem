@@ -1,0 +1,95 @@
+{
+  "kind": "memory-strata.ws6.bootstrap-audit-readonly.v0",
+  "ts": "2026-05-25T14:49:18.025267+00:00",
+  "topology_impact": "unchanged/read-only file audit",
+  "files": {
+    "MEMORY.md": {
+      "bytes": 13753,
+      "lines": 107,
+      "sections": [
+        {
+          "line": 10,
+          "heading": "Core stance"
+        },
+        {
+          "line": 19,
+          "heading": "Execution defaults"
+        },
+        {
+          "line": 31,
+          "heading": "Acceleration / non-stop"
+        },
+        {
+          "line": 39,
+          "heading": "Blockers / stop-loss"
+        },
+        {
+          "line": 46,
+          "heading": "Push / closure / authority"
+        },
+        {
+          "line": 61,
+          "heading": "Memory / openclaw-mem canon"
+        },
+        {
+          "line": 69,
+          "heading": "Standing lane defaults"
+        },
+        {
+          "line": 83,
+          "heading": "Named triggers"
+        },
+        {
+          "line": 94,
+          "heading": "Journals / writing / media"
+        },
+        {
+          "line": 104,
+          "heading": "Project notes that should not drift"
+        }
+      ]
+    },
+    "AGENTS.md": {
+      "bytes": 11972,
+      "lines": 100,
+      "sections": [
+        {
+          "line": 5,
+          "heading": "1) Core stance"
+        },
+        {
+          "line": 16,
+          "heading": "2) Context hygiene"
+        },
+        {
+          "line": 21,
+          "heading": "3) Execution defaults"
+        },
+        {
+          "line": 36,
+          "heading": "4) Acceleration / non-stop"
+        },
+        {
+          "line": 43,
+          "heading": "5) Stop-loss"
+        },
+        {
+          "line": 50,
+          "heading": "6) Ops + closure hygiene"
+        },
+        {
+          "line": 72,
+          "heading": "7) Standing defaults / lanes"
+        },
+        {
+          "line": 82,
+          "heading": "8) Named triggers"
+        },
+        {
+          "line": 96,
+          "heading": "9) Read-when-relevant appendix map"
+        }
+      ]
+    }
+  }
+}
