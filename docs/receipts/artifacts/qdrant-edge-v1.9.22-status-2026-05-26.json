@@ -1,0 +1,114 @@
+{
+  "kind": "openclaw-mem.status.v1",
+  "ts": "2026-05-25T16:04:24.276801+00:00",
+  "version": {
+    "openclaw_mem": "1.9.22",
+    "schema": "v1"
+  },
+  "db": {
+    "path": "<openclaw-home>/memory/openclaw-mem.sqlite",
+    "preexisting": true
+  },
+  "count": 63608,
+  "min_ts": "2026-02-10T04:34:17.336Z",
+  "max_ts": "2026-05-25T04:23:25.926330+00:00",
+  "embeddings": {
+    "count": 1,
+    "models": [
+      {
+        "model": "text-embedding-3-small",
+        "count": 1
+      }
+    ]
+  },
+  "embeddings_en": {
+    "count": 0,
+    "models": []
+  },
+  "backend": {
+    "memory_slot": "openclaw-mem-engine",
+    "entries": {
+      "memory-core": {
+        "enabled": false
+      },
+      "memory-lancedb": {
+        "enabled": false,
+        "embedding_api_key_ready": false
+      },
+      "openclaw-mem": {
+        "enabled": true
+      }
+    },
+    "fallback": {
+      "recommended_slot": "memory-core",
+      "reason": "Fast rollback path if memory-lancedb has runtime issues"
+    }
+  },
+  "runtime": {
+    "db": {
+      "path": "<openclaw-home>/memory/openclaw-mem.sqlite",
+      "preexisting": true
+    },
+    "config": {
+      "path": "<openclaw-home>/openclaw.json",
+      "exists": true,
+      "is_file": true,
+      "size_bytes": 49696
+    },
+    "state_files": {
+      "episodic_spool": {
+        "path": "<openclaw-home>/memory/openclaw-mem-episodes.jsonl",
+        "exists": true,
+        "is_file": true,
+        "size_bytes": 0
+      },
+      "episodic_ingest_state": {
+        "path": "<openclaw-home>/memory/openclaw-mem/episodes-ingest-state.json",
+        "exists": true,
+        "is_file": true,
+        "size_bytes": 235
+      },
+      "graph_capture_state": {
+        "path": "<openclaw-home>/memory/openclaw-mem/graph-capture-state.json",
+        "exists": true,
+        "is_file": true,
+        "size_bytes": 950
+      },
+      "graph_capture_md_state": {
+        "path": "<openclaw-home>/memory/openclaw-mem/graph-capture-md-state.json",
+        "exists": true,
+        "is_file": true,
+        "size_bytes": 53043
+      }
+    },
+    "graph_auto": {
+      "OPENCLAW_MEM_GRAPH_AUTO_RECALL": {
+        "present": false,
+        "raw": null,
+        "normalized": null,
+        "enabled": false,
+        "valid": true,
+        "default": false,
+        "reason": "unset_default"
+      },
+      "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": {
+        "present": false,
+        "raw": null,
+        "normalized": null,
+        "enabled": false,
+        "valid": true,
+        "default": false,
+        "reason": "unset_default"
+      },
+      "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": {
+        "present": false,
+        "raw": null,
+        "normalized": null,
+        "enabled": false,
+        "valid": true,
+        "default": false,
+        "reason": "unset_default"
+      }
+    }
+  }
+}

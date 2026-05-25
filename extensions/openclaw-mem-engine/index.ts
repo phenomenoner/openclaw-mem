@@ -47,6 +47,9 @@ import { runRouteAuto } from "./routeAuto.js";
 import { runTierFirstV1, selectTierQuotaV1 } from "./tierSelection.js";
 import { runWeiJiMemoryPreflight } from "./weiJiMemoryPreflight.js";
 import { mirrorMemoryToGbrain } from "./gbrainMirror.js";
+import { planRetrievalBackend, resolveRetrievalBackendConfig } from "./retrievalBackendBoundary.js";
+import { runRetrievalSearch } from "./retrievalRuntimeRouter.js";
+import { runQdrantEdgeSearch } from "./qdrantEdgeRuntimeAdapter.js";
 import { runSymbolicCanvasAutoBuild } from "./symbolicCanvasAuto.js";
 
 // ============================================================================
@@ -229,6 +232,20 @@ type DocsColdLaneConfig = {
   scopeMap: Record<string, string[]>;
 };
 
+type RetrievalBackendConfigInput = {
+  backend?: "lancedb" | "qdrant-edge";
+  qdrantEdge?: {
+    enabled?: boolean;
+    shardRoot?: string;
+    vectorName?: string;
+    optimizeOnRebuild?: boolean;
+    fallbackBackend?: "lancedb";
+    searchCommand?: string;
+    searchCommandArgs?: string[];
+    timeoutMs?: number;
+  };
+};
+
 type PluginConfig = {
   embedding?: {
     apiKey?: string;
@@ -251,6 +268,7 @@ type PluginConfig = {
   weijiMemoryPreflight?: boolean | WeiJiMemoryPreflightConfigInput;
   gbrainMirror?: boolean | GBrainMirrorConfigInput;
   symbolicCanvas?: boolean | SymbolicCanvasConfigInput;
+  retrievalBackend?: RetrievalBackendConfigInput;
   // only canonical durable-memory write lane
   // Hard write-path guard. When enabled, mem-engine remains the only canonical
   // durable-memory write lane for the active slot: explicit write tools are rejected,
@@ -1290,7 +1308,7 @@ function resolveSymbolicCanvasConfig(input: PluginConfig["symbolicCanvas"]): Sym
   }
 
   if (input === true) {
-    return { autoBuild: { ...cloneDefaults().autoBuild, enabled: true } };
+    return { ...cloneDefaults(), autoBuild: { ...cloneDefaults().autoBuild, enabled: true } };
   }
 
   if (typeof input !== "object" || Array.isArray(input)) {
@@ -1323,11 +1341,31 @@ function resolveSymbolicCanvasConfig(input: PluginConfig["symbolicCanvas"]): Sym
       commandArgs,
       outputDir: typeof rawAutoBuild.outputDir === "string" && rawAutoBuild.outputDir.trim() ? rawAutoBuild.outputDir.trim() : defaultsAuto.outputDir,
       baseDir: typeof rawAutoBuild.baseDir === "string" && rawAutoBuild.baseDir.trim() ? rawAutoBuild.baseDir.trim() : defaultsAuto.baseDir,
-      timeoutMs: normalizeNumberInRange(rawAutoBuild.timeoutMs, defaultsAuto.timeoutMs, { min: 200, max: 15_000, integer: true }),
-      maxBufferBytes: normalizeNumberInRange(rawAutoBuild.maxBufferBytes, defaultsAuto.maxBufferBytes, { min: 64 * 1024, max: 2 * 1024 * 1024, integer: true }),
-      maxNodes: normalizeNumberInRange(rawAutoBuild.maxNodes, defaultsAuto.maxNodes, { min: 2, max: 24, integer: true }),
-      maxLabelChars: normalizeNumberInRange(rawAutoBuild.maxLabelChars, defaultsAuto.maxLabelChars, { min: 40, max: 300, integer: true }),
-      minMessages: normalizeNumberInRange(rawAutoBuild.minMessages, defaultsAuto.minMessages, { min: 1, max: 64, integer: true }),
+      timeoutMs: normalizeNumberInRange(rawAutoBuild.timeoutMs, defaultsAuto.timeoutMs, {
+        min: 200,
+        max: 15_000,
+        integer: true,
+      }),
+      maxBufferBytes: normalizeNumberInRange(rawAutoBuild.maxBufferBytes, defaultsAuto.maxBufferBytes, {
+        min: 64 * 1024,
+        max: 2 * 1024 * 1024,
+        integer: true,
+      }),
+      maxNodes: normalizeNumberInRange(rawAutoBuild.maxNodes, defaultsAuto.maxNodes, {
+        min: 2,
+        max: 24,
+        integer: true,
+      }),
+      maxLabelChars: normalizeNumberInRange(rawAutoBuild.maxLabelChars, defaultsAuto.maxLabelChars, {
+        min: 40,
+        max: 300,
+        integer: true,
+      }),
+      minMessages: normalizeNumberInRange(rawAutoBuild.minMessages, defaultsAuto.minMessages, {
+        min: 1,
+        max: 64,
+        integer: true,
+      }),
       triggerMode: typeof rawAutoBuild.triggerMode === "string" && ["qualified", "always"].includes(rawAutoBuild.triggerMode)
         ? rawAutoBuild.triggerMode
         : defaultsAuto.triggerMode,
@@ -3825,6 +3863,7 @@ const memoryEngineConfigSchema = {
         "weijiMemoryPreflight",
         "gbrainMirror",
         "symbolicCanvas",
+        "retrievalBackend",
         "readOnly",
       ],
       "openclaw-mem-engine config",
@@ -4192,6 +4231,50 @@ const memoryEngineConfigSchema = {
       };
     };
 
+
+    const parseRetrievalBackend = (raw: unknown): PluginConfig["retrievalBackend"] => {
+      if (raw == null) return undefined;
+      if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("retrievalBackend config must be an object");
+      }
+      const obj = raw as Record<string, unknown>;
+      assertAllowedKeys(obj, ["backend", "qdrantEdge"], "retrievalBackend config");
+
+      let qdrantEdge: RetrievalBackendConfigInput["qdrantEdge"] | undefined;
+      if (obj.qdrantEdge != null) {
+        if (typeof obj.qdrantEdge !== "object" || Array.isArray(obj.qdrantEdge)) {
+          throw new Error("retrievalBackend.qdrantEdge config must be an object");
+        }
+        const q = obj.qdrantEdge as Record<string, unknown>;
+        assertAllowedKeys(
+          q,
+          ["enabled", "shardRoot", "vectorName", "optimizeOnRebuild", "fallbackBackend", "searchCommand", "searchCommandArgs", "timeoutMs"],
+          "retrievalBackend.qdrantEdge config",
+        );
+        qdrantEdge = {
+          enabled: typeof q.enabled === "boolean" ? q.enabled : undefined,
+          shardRoot: typeof q.shardRoot === "string" ? q.shardRoot : undefined,
+          vectorName: typeof q.vectorName === "string" ? q.vectorName : undefined,
+          optimizeOnRebuild: typeof q.optimizeOnRebuild === "boolean" ? q.optimizeOnRebuild : undefined,
+          fallbackBackend: q.fallbackBackend === "lancedb" ? q.fallbackBackend : undefined,
+          searchCommand: typeof q.searchCommand === "string" ? q.searchCommand : undefined,
+          searchCommandArgs: Array.isArray(q.searchCommandArgs)
+            ? q.searchCommandArgs.filter((item): item is string => typeof item === "string")
+            : undefined,
+          timeoutMs: typeof q.timeoutMs === "number" ? q.timeoutMs : undefined,
+        };
+      }
+
+      return {
+        backend: obj.backend === "lancedb" || obj.backend === "qdrant-edge" ? obj.backend : undefined,
+        qdrantEdge,
+      };
+    };
+
+    if (cfg.retrievalBackend != null && (typeof cfg.retrievalBackend !== "object" || Array.isArray(cfg.retrievalBackend))) {
+      throw new Error("retrievalBackend config must be an object");
+    }
+
     return {
       embedding,
       dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : undefined,
@@ -4203,7 +4286,6 @@ const memoryEngineConfigSchema = {
       workingSet: parseWorkingSet(cfg.workingSet),
       receipts: parseReceipts(cfg.receipts),
       docsColdLane: parseDocsColdLane(cfg.docsColdLane),
-      symbolicCanvas: parseSymbolicCanvas(cfg.symbolicCanvas),
       weijiMemoryPreflight:
         cfg.weijiMemoryPreflight === false || cfg.weijiMemoryPreflight === true
           ? cfg.weijiMemoryPreflight
@@ -4223,6 +4305,8 @@ const memoryEngineConfigSchema = {
                   failOnRejected: typeof cfg.weijiMemoryPreflight.failOnRejected === "boolean" ? cfg.weijiMemoryPreflight.failOnRejected : undefined,
                 }
               : undefined),
+      symbolicCanvas: parseSymbolicCanvas(cfg.symbolicCanvas),
+      retrievalBackend: parseRetrievalBackend(cfg.retrievalBackend),
       gbrainMirror:
         cfg.gbrainMirror === false || cfg.gbrainMirror === true
           ? cfg.gbrainMirror
@@ -4308,6 +4392,26 @@ const memoryEngineConfigSchema = {
     "symbolicCanvas.autoBuild.triggerMode": {
       label: "Symbolic Canvas Trigger Mode",
       help: "qualified runs only on handoff/closure/checkpoint-style turns; always runs on every successful eligible agent_end.",
+      advanced: true,
+    },
+    "retrievalBackend.backend": {
+      label: "Retrieval Backend",
+      help: "Read-index backend. LanceDB remains default; qdrant-edge requires explicit opt-in and falls back to LanceDB.",
+      advanced: true,
+    },
+    "retrievalBackend.qdrantEdge.enabled": {
+      label: "Qdrant Edge Enabled",
+      help: "Enable Qdrant Edge as an optional read-index backend. Does not make it canonical write storage.",
+      advanced: true,
+    },
+    "retrievalBackend.qdrantEdge.shardRoot": {
+      label: "Qdrant Edge Shard Root",
+      help: "Shard/cache root for the disposable Qdrant Edge read index.",
+      advanced: true,
+    },
+    "retrievalBackend.qdrantEdge.searchCommand": {
+      label: "Qdrant Edge Search Command",
+      help: "Command used by the bounded Qdrant Edge query bridge.",
       advanced: true,
     },
     readOnly: {
@@ -4664,9 +4768,26 @@ const memoryPlugin = {
     const db = new MemoryDB(resolvedDbPath, tableName, vectorDim);
     const embeddingClampCfg = resolveEmbeddingClampConfig(cfg.embedding);
     const embeddings = apiKey ? new OpenAIEmbeddings(apiKey, model, embeddingClampCfg) : null;
+    const retrievalBackendResolved = resolveRetrievalBackendConfig(cfg.retrievalBackend ?? {});
+    const qdrantShardRoot = resolveStateRelativePath(
+      api,
+      retrievalBackendResolved.qdrantEdge.shardRoot,
+      retrievalBackendResolved.qdrantEdge.shardRoot,
+    );
+    const retrievalBackendEffective = {
+      ...retrievalBackendResolved,
+      qdrantEdge: {
+        ...retrievalBackendResolved.qdrantEdge,
+        shardRoot: qdrantShardRoot,
+      },
+    };
+    const retrievalBackendPlan = planRetrievalBackend(retrievalBackendEffective, {
+      qdrantEdgeAvailable: retrievalBackendEffective.qdrantEdge.enabled && fs.existsSync(qdrantShardRoot),
+      qdrantEdgeDimensionMatches: true,
+    });
 
     api.logger.info(
-      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, routeAuto=${routeAutoResolved.enabled ? `on|timeout=${routeAutoResolved.timeoutMs}|buffer=${routeAutoResolved.maxBufferBytes}|chars=${routeAutoResolved.maxChars}|graph=${routeAutoResolved.maxGraphCandidates}|episodes=${routeAutoResolved.maxTranscriptSessions}|db=${routeAutoResolved.dbPath}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, weijiMemoryPreflight=${weijiMemoryPreflightResolved.enabled ? `${weijiMemoryPreflightResolved.failOnQueued || weijiMemoryPreflightResolved.failOnRejected ? "enforced" : "advisory"}|${weijiMemoryPreflightResolved.failMode}|cmd=${weijiMemoryPreflightResolved.command}` : "off"}, gbrainMirror=${gbrainMirrorResolved.enabled ? `${gbrainMirrorResolved.importOnStore ? "write-through" : "file-only"}|timeout=${gbrainMirrorResolved.timeoutMs}|root=${gbrainMirrorResolved.mirrorRoot}|cmd=${gbrainMirrorResolved.command}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
+      `openclaw-mem-engine: registered (db=${resolvedDbPath}, table=${tableName}, model=${model}, embedClamp=${embeddingClampCfg.maxChars}c/head=${embeddingClampCfg.headChars}${embeddingClampCfg.maxBytes ? ` bytes=${embeddingClampCfg.maxBytes}` : ""}, scopePolicy=${scopePolicyCfg.enabled ? `${scopePolicyCfg.defaultScope}|fallback=${scopePolicyCfg.fallbackScopes.join(",") || "none"}|validation=${scopePolicyCfg.validationMode}|skipInvalidFallback=${scopePolicyCfg.skipFallbackOnInvalidScope ? "on" : "off"}` : "off"}, budget=${budgetCfg.enabled ? `${budgetCfg.maxChars}c|minRecent=${budgetCfg.minRecentSlots}|${budgetCfg.overflowAction}` : "off"}, workingSet=${workingSetCfg.enabled ? `on|persist=${workingSetCfg.persist ? "on" : "off"}|max=${workingSetCfg.maxChars}|items=${workingSetCfg.maxItemsPerSection}` : "off"}, receipts=${receiptsCfg.enabled ? `${receiptsCfg.verbosity}/${receiptsCfg.maxItems}` : "off"}, routeAuto=${routeAutoResolved.enabled ? `on|timeout=${routeAutoResolved.timeoutMs}|buffer=${routeAutoResolved.maxBufferBytes}|chars=${routeAutoResolved.maxChars}|graph=${routeAutoResolved.maxGraphCandidates}|episodes=${routeAutoResolved.maxTranscriptSessions}|db=${routeAutoResolved.dbPath}` : "off"}, docsColdLane=${docsColdLaneResolved.enabled ? `on|db=${docsColdLaneResolved.sqlitePath}|roots=${docsColdLaneResolved.sourceRoots.length}|globs=${docsColdLaneResolved.sourceGlobs.length}|scope=${docsColdLaneResolved.scopeMappingStrategy}|minHot=${docsColdLaneResolved.minHotItems}` : "off"}, retrievalBackend=${retrievalBackendPlan.selectedBackend}|reason=${retrievalBackendPlan.reason}|fallback=${retrievalBackendPlan.fallbackBackend ?? "none"}|qdrant=${retrievalBackendEffective.qdrantEdge.enabled ? "enabled" : "disabled"}|shard=${qdrantShardRoot}, weijiMemoryPreflight=${weijiMemoryPreflightResolved.enabled ? `${weijiMemoryPreflightResolved.failOnQueued || weijiMemoryPreflightResolved.failOnRejected ? "enforced" : "advisory"}|${weijiMemoryPreflightResolved.failMode}|cmd=${weijiMemoryPreflightResolved.command}` : "off"}, gbrainMirror=${gbrainMirrorResolved.enabled ? `${gbrainMirrorResolved.importOnStore ? "write-through" : "file-only"}|timeout=${gbrainMirrorResolved.timeoutMs}|root=${gbrainMirrorResolved.mirrorRoot}|cmd=${gbrainMirrorResolved.command}` : "off"}, readOnly=${readOnlyEnabled ? `on(${readOnlySource})` : "off"}, lazyInit=true)`,
     );
 
     const memoryRuntimeManager: MemoryRuntimeManager = {
@@ -4687,7 +4808,24 @@ const memoryPlugin = {
         });
         const vecPromise = embeddings
           ? embeddings.embed(query)
-              .then((vector) => db.vectorSearch(vector, searchLimit, scopeInfo.scope))
+              .then((vector) => runRetrievalSearch({
+                plan: retrievalBackendPlan,
+                kind: "vector",
+                lanceSearch: () => db.vectorSearch(vector, searchLimit, scopeInfo.scope),
+                qdrantSearch: () => runQdrantEdgeSearch({
+                  config: retrievalBackendEffective.qdrantEdge,
+                  request: {
+                    shardRoot: qdrantShardRoot,
+                    vectorName: retrievalBackendEffective.qdrantEdge.vectorName,
+                    vector,
+                    limit: searchLimit,
+                    scope: scopeInfo.scope,
+                  },
+                }),
+                onFallback: (receipt: unknown) => {
+                  api.logger.warn(`openclaw-mem-engine:runtime qdrant fallback ${JSON.stringify(receipt)}`);
+                },
+              }).then((result: { results: RecallResult[] }) => result.results))
               .catch((err) => {
                 api.logger.warn(`openclaw-mem-engine:runtime vector search failed: ${String(err)}`);
                 return [] as RecallResult[];
@@ -4756,6 +4894,10 @@ const memoryPlugin = {
             scopePolicy: scopePolicyCfg.enabled ? scopePolicyCfg.defaultScope : "off",
             docsColdLane: docsColdLaneResolved.enabled,
             workingSet: workingSetCfg.enabled,
+            retrievalBackend: retrievalBackendPlan.selectedBackend,
+            retrievalBackendReason: retrievalBackendPlan.reason,
+            qdrantEdgeEnabled: retrievalBackendEffective.qdrantEdge.enabled,
+            qdrantEdgeShardRoot: qdrantShardRoot,
             readOnly: readOnlyEnabled,
           },
         };
@@ -5640,7 +5782,25 @@ const memoryPlugin = {
             search: async ({ query: textQuery, scope: targetScope, labels, searchLimit }) => {
               const ftsPromise = db.fullTextSearch(textQuery, searchLimit, targetScope, labels).catch(() => []);
               const vecPromise = vector
-                ? db.vectorSearch(vector, searchLimit, targetScope, labels).catch(() => [])
+                ? runRetrievalSearch({
+                    plan: retrievalBackendPlan,
+                    kind: "vector",
+                    lanceSearch: () => db.vectorSearch(vector!, searchLimit, targetScope, labels),
+                    qdrantSearch: () => runQdrantEdgeSearch({
+                      config: retrievalBackendEffective.qdrantEdge,
+                      request: {
+                        shardRoot: qdrantShardRoot,
+                        vectorName: retrievalBackendEffective.qdrantEdge.vectorName,
+                        vector,
+                        limit: searchLimit,
+                        scope: targetScope,
+                        labels,
+                      },
+                    }),
+                    onFallback: (receipt: unknown) => {
+                      api.logger.warn(`openclaw-mem-engine:qdrant fallback ${JSON.stringify(receipt)}`);
+                    },
+                  }).then((result: { results: RecallResult[] }) => result.results).catch(() => [])
                 : Promise.resolve([] as RecallResult[]);
 
               const [ftsResults, vecResults] = await Promise.all([ftsPromise, vecPromise]);
@@ -6713,7 +6873,27 @@ const memoryPlugin = {
               search: async ({ query: textQuery, scope, labels, searchLimit }) => {
                 const [ftsResults, vecResults] = await Promise.all([
                   db.fullTextSearch(textQuery, searchLimit, scope, labels).catch(() => []),
-                  vector ? db.vectorSearch(vector, searchLimit, scope, labels).catch(() => []) : Promise.resolve([]),
+                  vector
+                    ? runRetrievalSearch({
+                        plan: retrievalBackendPlan,
+                        kind: "vector",
+                        lanceSearch: () => db.vectorSearch(vector!, searchLimit, scope, labels),
+                        qdrantSearch: () => runQdrantEdgeSearch({
+                          config: retrievalBackendEffective.qdrantEdge,
+                          request: {
+                            shardRoot: qdrantShardRoot,
+                            vectorName: retrievalBackendEffective.qdrantEdge.vectorName,
+                            vector,
+                            limit: searchLimit,
+                            scope,
+                            labels,
+                          },
+                        }),
+                        onFallback: (receipt: unknown) => {
+                          api.logger.warn(`openclaw-mem-engine:autoRecall qdrant fallback ${JSON.stringify(receipt)}`);
+                        },
+                      }).then((result: { results: RecallResult[] }) => result.results).catch(() => [])
+                    : Promise.resolve([]),
                 ]);
                 return { ftsResults, vecResults };
               },

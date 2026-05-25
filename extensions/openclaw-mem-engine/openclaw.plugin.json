@@ -357,6 +357,26 @@
       "help": "Minimum eligible user/assistant messages required before auto-build runs.",
       "advanced": true
     },
+    "retrievalBackend.backend": {
+      "label": "Retrieval Backend",
+      "help": "Read-index backend. LanceDB remains default; qdrant-edge requires explicit opt-in and falls back to LanceDB.",
+      "advanced": true
+    },
+    "retrievalBackend.qdrantEdge.enabled": {
+      "label": "Qdrant Edge Enabled",
+      "help": "Enable Qdrant Edge as an optional read-index backend. Does not make it canonical write storage.",
+      "advanced": true
+    },
+    "retrievalBackend.qdrantEdge.shardRoot": {
+      "label": "Qdrant Edge Shard Root",
+      "help": "Shard/cache root for the disposable Qdrant Edge read index.",
+      "advanced": true
+    },
+    "retrievalBackend.qdrantEdge.searchCommand": {
+      "label": "Qdrant Edge Search Command",
+      "help": "Command used by the bounded Qdrant Edge query bridge.",
+      "advanced": true
+    },
     "symbolicCanvas.autoBuild.triggerMode": {
       "label": "Symbolic Canvas Trigger Mode",
       "help": "qualified runs only on handoff/closure/checkpoint-style turns; always runs on every successful eligible agent_end.",
@@ -1088,6 +1108,66 @@
                   "實作",
                   "測試"
                 ]
+              }
+            }
+          }
+        }
+      },
+      "retrievalBackend": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "backend": {
+            "type": "string",
+            "enum": [
+              "lancedb",
+              "qdrant-edge"
+            ],
+            "default": "lancedb"
+          },
+          "qdrantEdge": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false
+              },
+              "shardRoot": {
+                "type": "string",
+                "default": "memory/qdrant-edge"
+              },
+              "vectorName": {
+                "type": "string",
+                "default": "text"
+              },
+              "optimizeOnRebuild": {
+                "type": "boolean",
+                "default": true
+              },
+              "fallbackBackend": {
+                "type": "string",
+                "enum": [
+                  "lancedb"
+                ],
+                "default": "lancedb"
+              },
+              "searchCommand": {
+                "type": "string",
+                "default": "python3"
+              },
+              "searchCommandArgs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 30000,
+                "default": 1500
               }
             }
           }

@@ -1,0 +1,2 @@
+scan: grep -R -n -E 'sk-[A-Za-z0-9]|/root\.openclaw|user:902|OPENAI_API_KEY|Lyria' docs/specs/qdrant-edge-*.md docs/specs/rag-backend-qdrant-edge-ab-blade-map-v0.md docs/receipts/qdrant-edge-v1.9.22-release-review-2026-05-26.md
+result: 0 matches

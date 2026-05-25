@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.22] - 2026-05-26
+
+### Added
+
+- Add disabled-by-default Qdrant Edge retrieval backend wiring for `openclaw-mem-engine`, including backend planning, runtime routing, bounded bridge adapter, and LanceDB fallback.
+- Add Qdrant Edge implementation, lifecycle, no-restart enable, and live-activation runbook docs as public-facing optional-backend guidance.
+
+### Safety
+
+- Keep LanceDB as the default backend and preserve canonical write ownership outside Qdrant Edge.
+- Keep Qdrant Edge as an opt-in read-index/cache path; no live runtime config, Gateway restart, or write path is enabled by this release.
+
+### Testing
+
+- Add regression coverage for backend selection, plugin schema parsing, Qdrant adapter normalization/failure handling, runtime fallback, and FTS fallback behavior.
+
 ## [1.9.21] - 2026-05-16
 
 - Public docs hygiene release: include the symbolic-canvas `triggerMode=qualified` public-facing clarification in the tagged/PyPI artifact.

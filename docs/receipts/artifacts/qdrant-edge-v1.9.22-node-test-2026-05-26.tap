@@ -1,0 +1,136 @@
+TAP version 13
+# Subtest: FTS Qdrant bridge missing-vector failure falls back to LanceDB
+ok 1 - FTS Qdrant bridge missing-vector failure falls back to LanceDB
+  ---
+  duration_ms: 2.265736
+  type: 'test'
+  ...
+# Subtest: qdrant runtime adapter config defaults are bounded
+ok 2 - qdrant runtime adapter config defaults are bounded
+  ---
+  duration_ms: 2.946476
+  type: 'test'
+  ...
+# Subtest: qdrant runtime adapter sends bounded JSON request and normalizes hits
+ok 3 - qdrant runtime adapter sends bounded JSON request and normalizes hits
+  ---
+  duration_ms: 0.976358
+  type: 'test'
+  ...
+# Subtest: qdrant runtime adapter throws bounded errors for bridge failure
+ok 4 - qdrant runtime adapter throws bounded errors for bridge failure
+  ---
+  duration_ms: 1.345281
+  type: 'test'
+  ...
+# Subtest: qdrant runtime adapter throws bounded errors for invalid JSON
+ok 5 - qdrant runtime adapter throws bounded errors for invalid JSON
+  ---
+  duration_ms: 1.746105
+  type: 'test'
+  ...
+# Subtest: retrieval backend defaults to LanceDB with Qdrant Edge disabled
+ok 6 - retrieval backend defaults to LanceDB with Qdrant Edge disabled
+  ---
+  duration_ms: 1.50839
+  type: 'test'
+  ...
+# Subtest: qdrant-edge must be explicitly enabled before selection
+ok 7 - qdrant-edge must be explicitly enabled before selection
+  ---
+  duration_ms: 0.532832
+  type: 'test'
+  ...
+# Subtest: qdrant-edge plans as read-only index/cache when available
+ok 8 - qdrant-edge plans as read-only index/cache when available
+  ---
+  duration_ms: 0.282317
+  type: 'test'
+  ...
+# Subtest: qdrant-edge accepts bridge command config
+ok 9 - qdrant-edge accepts bridge command config
+  ---
+  duration_ms: 1.110166
+  type: 'test'
+  ...
+# Subtest: qdrant-edge falls back to LanceDB when unavailable
+ok 10 - qdrant-edge falls back to LanceDB when unavailable
+  ---
+  duration_ms: 0.374923
+  type: 'test'
+  ...
+# Subtest: qdrant-edge falls back to LanceDB on dimension mismatch
+ok 11 - qdrant-edge falls back to LanceDB on dimension mismatch
+  ---
+  duration_ms: 0.192111
+  type: 'test'
+  ...
+# Subtest: canonical write guard rejects malformed Qdrant ownership plan
+ok 12 - canonical write guard rejects malformed Qdrant ownership plan
+  ---
+  duration_ms: 0.275816
+  type: 'test'
+  ...
+# Subtest: config rejects unknown keys and non-LanceDB fallback
+ok 13 - config rejects unknown keys and non-LanceDB fallback
+  ---
+  duration_ms: 0.212013
+  type: 'test'
+  ...
+# Subtest: plugin schema exposes retrievalBackend disabled-by-default config
+ok 14 - plugin schema exposes retrievalBackend disabled-by-default config
+  ---
+  duration_ms: 1.963717
+  type: 'test'
+  ...
+# Subtest: plugin ui hints use retrievalBackend naming
+ok 15 - plugin ui hints use retrievalBackend naming
+  ---
+  duration_ms: 0.686141
+  type: 'test'
+  ...
+# Subtest: inline config parser rejects non-object retrievalBackend
+ok 16 - inline config parser rejects non-object retrievalBackend
+  ---
+  duration_ms: 0.263715
+  type: 'test'
+  ...
+# Subtest: plugin schema exposes symbolicCanvas autoBuild disabled-by-default config
+ok 17 - plugin schema exposes symbolicCanvas autoBuild disabled-by-default config
+  ---
+  duration_ms: 0.295918
+  type: 'test'
+  ...
+# Subtest: runtime router uses LanceDB by default
+ok 18 - runtime router uses LanceDB by default
+  ---
+  duration_ms: 2.17833
+  type: 'test'
+  ...
+# Subtest: runtime router falls back when Qdrant search is unwired
+ok 19 - runtime router falls back when Qdrant search is unwired
+  ---
+  duration_ms: 0.280016
+  type: 'test'
+  ...
+# Subtest: runtime router uses Qdrant search when wired
+ok 20 - runtime router uses Qdrant search when wired
+  ---
+  duration_ms: 0.248515
+  type: 'test'
+  ...
+# Subtest: runtime router falls back when Qdrant search throws
+ok 21 - runtime router falls back when Qdrant search throws
+  ---
+  duration_ms: 0.549233
+  type: 'test'
+  ...
+1..21
+# tests 21
+# suites 0
+# pass 21
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 110.119291
