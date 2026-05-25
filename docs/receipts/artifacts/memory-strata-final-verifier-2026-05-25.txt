@@ -1,0 +1,34 @@
+# git log
+e8fbfe7 docs: close memory strata ws1-ws10 line
+8558a5a docs: add memory strata ws9 promotion governor
+7de8bec docs: add memory strata ws6 bootstrap audit
+3ad1498 docs: add memory strata ws7 graph governance contract
+fe8cbae docs: add memory strata ws7 graph inventory
+73c6dc0 docs: record memory strata nonstop controller install
+789c43c docs: add memory strata ws5 working set contract
+96cb7e9 docs: add memory strata ws2 selection fixture
+a12689f docs: add memory strata ws2 gating audit
+6df770d docs: record memory strata ws8 stop-loss
+68d7988 docs: add memory strata milestone 2 receipts
+da16095 docs: add memory strata milestone 1 baseline receipts
+f74072b docs: add memory strata run-to-empty blade map
+53a3a75 docs: tighten memory strata boundary contract
+d4eecdb docs: map memory strata boundaries
+672d60a Skip corrupt soak warning receipts
+
+# closure files
+docs/receipts/memory-strata-final-closure-2026-05-25.md
+docs/receipts/memory-strata-five-qi-retirement-2026-05-25.md
+
+# receipt count
+16
+
+# uncommitted memory-strata docs
+?? docs/receipts/artifacts/memory-strata-final-verifier-2026-05-25.txt
+?? docs/specs/qdrant-edge-enable-no-restart-v0.md
+?? docs/specs/qdrant-edge-implementation-boundary-v0.md
+?? docs/specs/qdrant-edge-lifecycle-gates-v0.md
+?? docs/specs/qdrant-edge-live-activation-runbook-v0.md
+?? docs/specs/qdrant-edge-live-runtime-integration-v0.md
+?? docs/specs/qdrant-edge-optional-backend-design-v0.md
+?? docs/specs/rag-backend-qdrant-edge-ab-blade-map-v0.md
