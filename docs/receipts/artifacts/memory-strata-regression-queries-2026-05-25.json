@@ -1,0 +1,14 @@
+[
+  {"id":"q01-durable-slot","intent":"stable decision/preference","lane":"store_fts","query":"openclaw-mem-engine memory slot"},
+  {"id":"q02-durable-retention","intent":"durable policy","lane":"store_fts","query":"tier_quota_v1 retention activation"},
+  {"id":"q03-episodic-trail","intent":"session trail","lane":"episodes_lexical","query":"memory strata boundary"},
+  {"id":"q04-episodic-semantic","intent":"raw wording evidence","lane":"episodes_hybrid","query":"verbatim semantic lane"},
+  {"id":"q05-docs-cold","intent":"spec/doc lookup","lane":"docs_search","query":"docs cold lane scope pushdown"},
+  {"id":"q06-graph-topology","intent":"dependency relationship","lane":"graph_index","query":"graph topology provenance drift"},
+  {"id":"q07-pack-contract","intent":"final pack quality","lane":"pack_trace","query":"memory strata truth ownership retrieval activation"},
+  {"id":"q08-working-set","intent":"active goal/backbone","lane":"store_fts","query":"Working Set backbone repeat suppression"},
+  {"id":"q09-promotion","intent":"writeback governance","lane":"docs_search","query":"governed promotion writeback durable memory"},
+  {"id":"q10-privacy-scope","intent":"privacy/scope gate","lane":"episodes_lexical","query":"scope isolation payload redaction"},
+  {"id":"q11-bootstrap","intent":"bootstrap slimming","lane":"pack_trace","query":"MEMORY.md bootstrap slimming docs cold lane"},
+  {"id":"q12-release","intent":"release closure","lane":"store_fts","query":"openclaw-mem release tag WAL"}
+]

@@ -1,0 +1,479 @@
+{
+  "kind": "memory-strata.regression-baseline.v0",
+  "ts": "2026-05-25",
+  "topology_impact": "unchanged/read-only commands only; pack write flags off",
+  "results": [
+    {
+      "id": "q01-durable-slot",
+      "intent": "stable decision/preference",
+      "lane": "store_fts",
+      "query": "openclaw-mem-engine memory slot",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "search",
+        "openclaw-mem-engine memory slot",
+        "--limit",
+        "5",
+        "--json"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 342,
+      "stdout_chars": 5395,
+      "stderr_chars": 0,
+      "top_preview": [],
+      "stdout_head": "[\n  {\n    \"id\": 18509,\n    \"ts\": \"2026-03-10T18:24:28.986605+00:00\",\n    \"kind\": \"note\",\n    \"tool_name\": \"graph.capture-md\",\n    \"summary\": \"[MD] roadmap.md#0) OpenClaw Mem Engine (optional memory slot backend)\",\n    \"summary_en\": null,\n    \"lang\": null,\n    \"snippet\": \"[MD] roadmap.md#0) [OpenClaw] [Mem] [Engine] (optional [memory] [slot] backend)\",\n    \"snippet_en\": \"\",\n    \"score\": -10.268782175923885,\n    \"detail_json\": \"{\\\"source_path\\\": \\\"/root/.openclaw/workspace/openclaw-mem/docs/roadmap.md\\\", \\\"rel_path\\\": \\\"docs/roadmap.md\\\", \\\"heading\\\": \\\"0) OpenClaw Mem Engine (optional memory slot backend)\\\", \\\"heading_level\\\": 3, \\\"start_line\\\": 42, \\\"end_line\\\": 60, \\\"mtime\\\": 1773166932.384764, \\\"file_hash\\\": \\\"4e03b4803102c47ed2490a25d446495391abc62a\\\", \\\"section_fingerprint\\\": \\\"b2f50b41bb3b1d53765bcc2a88f727a4c46eaf99\\\"}\"\n  },\n  {\n    \"id\": 10656,\n    \"ts\": \"2026-02-28T05:20:31.124Z\",\n    \"kind\": \"tool\",\n    \"tool_name\": \"process\",\n    \"summary\": \"entries.memory-lancedb: plugin disabled (memory slot set to \\\"openclaw-mem-engine\\\") but config is present\\nConfig warnings:\\\\n- plugins.entries.memory-core: plugin disabled (memory slot set to \\\"openclaw-\",\n    \"summary_en\": null,\n  ",
+      "stderr_head": ""
+    },
+    {
+      "id": "q02-durable-retention",
+      "intent": "durable policy",
+      "lane": "store_fts",
+      "query": "tier_quota_v1 retention activation",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "search",
+        "tier_quota_v1 retention activation",
+        "--limit",
+        "5",
+        "--json"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 275,
+      "stdout_chars": 3,
+      "stderr_chars": 0,
+      "top_preview": [],
+      "stdout_head": "[]\n",
+      "stderr_head": ""
+    },
+    {
+      "id": "q03-episodic-trail",
+      "intent": "session trail",
+      "lane": "episodes_lexical",
+      "query": "memory strata boundary",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "episodes",
+        "search",
+        "memory strata boundary",
+        "--global",
+        "--mode",
+        "lexical",
+        "--limit",
+        "5",
+        "--per-session-limit",
+        "2",
+        "--json",
+        "--trace"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 230,
+      "stdout_chars": 18934,
+      "stderr_chars": 0,
+      "top_preview": [],
+      "stdout_head": "{\n  \"kind\": \"openclaw-mem.episodes.search.v0\",\n  \"ts\": \"2026-05-25T04:46:37.987150+00:00\",\n  \"version\": {\n    \"openclaw_mem\": \"1.9.18\",\n    \"schema\": \"v0\"\n  },\n  \"ok\": true,\n  \"scope\": \"global\",\n  \"query\": {\n    \"text\": \"memory strata boundary\",\n    \"text_en\": null\n  },\n  \"result\": {\n    \"count\": 4,\n    \"session_limit\": 5,\n    \"per_session_limit\": 2,\n    \"search_limit\": 40,\n    \"include_payload\": false,\n    \"mode\": \"lexical\",\n    \"sessions\": [\n      {\n        \"rank\": 1,\n        \"session_id\": \"unknown\",\n        \"hit_count\": 3,\n        \"best_match_rank\": 1,\n        \"best_match_score\": -29.260539057369314,\n        \"best_rrf_score\": 0.01639344262295082,\n        \"latest_ts_ms\": 1779683379599,\n        \"agent_ids\": [\n          \"unknown\"\n        ],\n        \"type_counts\": [\n          {\n            \"type\": \"conversation.assistant\",\n            \"count\": 2\n          },\n          {\n            \"type\": \"conversation.user\",\n            \"count\": 1\n          }\n        ],\n        \"summary\": \"conversation.assistant: 好了，寶。已完成並 **local commit**。 Commit: - `d4eecdb docs: map memory strata boundaries` 新增兩份文件： - `openclaw-mem/docs/specs/memory-strata-boundary-map-v0.md` - `openclaw-mem/docs/specs/memory-s",
+      "stderr_head": ""
+    },
+    {
+      "id": "q04-episodic-semantic",
+      "intent": "raw wording evidence",
+      "lane": "episodes_hybrid",
+      "query": "verbatim semantic lane",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "episodes",
+        "search",
+        "verbatim semantic lane",
+        "--global",
+        "--mode",
+        "hybrid",
+        "--limit",
+        "5",
+        "--per-session-limit",
+        "2",
+        "--json",
+        "--trace"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 2146,
+      "stdout_chars": 35872,
+      "stderr_chars": 0,
+      "top_preview": [],
+      "stdout_head": "{\n  \"kind\": \"openclaw-mem.episodes.search.v0\",\n  \"ts\": \"2026-05-25T04:46:40.130925+00:00\",\n  \"version\": {\n    \"openclaw_mem\": \"1.9.18\",\n    \"schema\": \"v0\"\n  },\n  \"ok\": true,\n  \"scope\": \"global\",\n  \"query\": {\n    \"text\": \"verbatim semantic lane\",\n    \"text_en\": null\n  },\n  \"result\": {\n    \"count\": 4,\n    \"session_limit\": 5,\n    \"per_session_limit\": 2,\n    \"search_limit\": 40,\n    \"include_payload\": false,\n    \"mode\": \"hybrid\",\n    \"sessions\": [\n      {\n        \"rank\": 1,\n        \"session_id\": \"agent:main:discord:direct:902441554659123201\",\n        \"hit_count\": 25,\n        \"best_match_rank\": 1,\n        \"best_match_score\": null,\n        \"best_rrf_score\": 0.01639344262295082,\n        \"latest_ts_ms\": 1775608401050,\n        \"agent_ids\": [\n          \"main\"\n        ],\n        \"type_counts\": [\n          {\n            \"type\": \"tool.result\",\n            \"count\": 16\n          },\n          {\n            \"type\": \"tool.call\",\n            \"count\": 9\n          }\n        ],\n        \"summary\": \"write: Successfully wrote 8666 bytes to /root/.openclaw/workspace/openclaw-async-coding-playbook/projects/openclaw-mem/TECH_NOTES/[REDACTED_PHONE]_autonomous-default-routing_system-assessment_and_feature-order.",
+      "stderr_head": ""
+    },
+    {
+      "id": "q05-docs-cold",
+      "intent": "spec/doc lookup",
+      "lane": "docs_search",
+      "query": "docs cold lane scope pushdown",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "docs",
+        "search",
+        "docs cold lane scope pushdown",
+        "--limit",
+        "5",
+        "--json",
+        "--trace"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 3672,
+      "stdout_chars": 34412,
+      "stderr_chars": 0,
+      "top_preview": [
+        {
+          "id": 587,
+          "doc_id": "openclaw-mem:docs/mem-engine.md",
+          "chunk_id": "openclaw-mem-engine-slot-backend-design-roadmap-retrieval-design-the-part-youll-feel-docs-memory-decisions-roadmaps-specs-as-a-cold-lane:001",
+          "repo": "openclaw-mem",
+          "path": "docs/mem-engine.md",
+          "doc_kind": "doc",
+          "heading_path": "OpenClaw Mem Engine (slot backend) — Design + Roadmap / Retrieval design (the part you’ll feel) / Docs memory (decisions/roadmaps/specs) as a cold lane",
+          "title": "Docs memory (decisions/roadmaps/specs) as a cold lane",
+          "text": "Operators feel recall failure most painfully on: “we already decided this.”\n\nSo the engine path should be able to **optionally** search an operator-authored docs corpus (DECISIONS / roadmaps / specs) using the same hybrid recipe (FTS + embeddings) and return bounded citations.\n\nStatus (current):\n- shipped as `docsColdLane` in `openclaw-mem-engine` config\n- installable tools: `memory_docs_ingest`, `memory_docs_search`\n- `memory_recall` + `autoRecall` can consult cold lane only after hot lane is insufficient (`minHotItems`)\n- results are marked `source_kind=operator`, `trust_tier=trusted`\n- embeddings are optional/fail-open (FTS-only still works)\n\n- Spec: Docs memory hybrid search v0 (maintainer archive; not part of the public evaluator path)\n- Ops guide: [mem-engine-admin-ops.md](mem-engine-admin-ops.md#docs-memory-cold-lane-installable)\n- Operational hardening note: scoped docs search starvation root cause and verifier (maintainer archive)\n- Next design slice: docs cold lane scope pushdown v1 (maintainer archive)\n- Stance: **no local LLM**; rerank (if needed) is remote + bounded.\n\n---",
+          "recordRef": "doc:openclaw-mem:docs/mem-engine.md#openclaw-mem-engine-slot-backend-design-roadmap-retrieval-design-the-part-youll-feel-docs-memory-decisions-roadmaps-specs-as-a-cold-lane:001",
+          "rrf_score": 0.026120660599932594,
+          "match": [
+            "fts",
+            "vector"
+          ]
+        },
+        {
+          "id": 1050,
+          "doc_id": "openclaw-mem:docs/specs/docs-cold-lane-scope-pushdown-v1.md",
+          "chunk_id": "docs-cold-lane-scope-pushdown-v1:001",
+          "repo": "openclaw-mem",
+          "path": "docs/specs/docs-cold-lane-scope-pushdown-v1.md",
+          "doc_kind": "spec",
+          "heading_path": "Docs cold lane — scope pushdown v1",
+          "title": "Docs cold lane — scope pushdown v1",
+          "text": "Status: **partial (first cut implemented: CLI repo allowlist + plugin repo pushdown; residual plugin-side filtering retained)**",
+          "recordRef": "doc:openclaw-mem:docs/specs/docs-cold-lane-scope-pushdown-v1.md#docs-cold-lane-scope-pushdown-v1:001",
+          "rrf_score": 0.01639344262295082,
+          "match": [
+            "fts"
+          ]
+        },
+        {
+          "id": 63323,
+          "doc_id": "StrategyExecuter_Steamer-Antigravity:projects/steamer/ops/execution-packets/2026-04-10_sakura-blade-map_steamer-openclaw-mem.md",
+          "chunk_id": "blade-map-2026-04-10-queue-board-blade-c-wal-push-docs-ingest-closure:001",
+          "repo": "StrategyExecuter_Steamer-Antigravity",
+          "path": "projects/steamer/ops/execution-packets/2026-04-10_sakura-blade-map_steamer-openclaw-mem.md",
+          "doc_kind": "doc",
+          "heading_path": "櫻花刀舞 blade map — 2026-04-10 / Queue board / Blade C — WAL / push / docs-ingest closure",
+          "title": "Blade C — WAL / push / docs-ingest closure",
+          "text": "Goal: keep repo truth, ledger truth, memory note, and docs cold lane synchronized in the same pass.",
+          "recordRef": "doc:StrategyExecuter_Steamer-Antigravity:projects/steamer/ops/execution-packets/2026-04-10_sakura-blade-map_steamer-openclaw-mem.md#blade-map-2026-04-10-queue-board-blade-c-wal-push-docs-ingest-closure:001",
+          "rrf_score": 0.01639344262295082,
+          "match": [
+            "vector"
+          ]
+        }
+      ],
+      "stdout_head": "{\n  \"query\": \"docs cold lane scope pushdown\",\n  \"results\": [\n    {\n      \"id\": 587,\n      \"doc_id\": \"openclaw-mem:docs/mem-engine.md\",\n      \"chunk_id\": \"openclaw-mem-engine-slot-backend-design-roadmap-retrieval-design-the-part-youll-feel-docs-memory-decisions-roadmaps-specs-as-a-cold-lane:001\",\n      \"repo\": \"openclaw-mem\",\n      \"path\": \"docs/mem-engine.md\",\n      \"doc_kind\": \"doc\",\n      \"heading_path\": \"OpenClaw Mem Engine (slot backend) — Design + Roadmap / Retrieval design (the part you’ll feel) / Docs memory (decisions/roadmaps/specs) as a cold lane\",\n      \"title\": \"Docs memory (decisions/roadmaps/specs) as a cold lane\",\n      \"text\": \"Operators feel recall failure most painfully on: “we already decided this.”\\n\\nSo the engine path should be able to **optionally** search an operator-authored docs corpus (DECISIONS / roadmaps / specs) using the same hybrid recipe (FTS + embeddings) and return bounded citations.\\n\\nStatus (current):\\n- shipped as `docsColdLane` in `openclaw-mem-engine` config\\n- installable tools: `memory_docs_ingest`, `memory_docs_search`\\n- `memory_recall` + `autoRecall` can consult cold lane only after hot lane is insufficient (`minHotItems`)\\n- results ar",
+      "stderr_head": ""
+    },
+    {
+      "id": "q06-graph-topology",
+      "intent": "dependency relationship",
+      "lane": "graph_index",
+      "query": "graph topology provenance drift",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "graph",
+        "index",
+        "graph topology provenance drift",
+        "--limit",
+        "8",
+        "--budget-tokens",
+        "800"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 239,
+      "stdout_chars": 414,
+      "stderr_chars": 0,
+      "top_preview": [],
+      "stdout_head": "{\n  \"kind\": \"openclaw-mem.graph.index.v0\",\n  \"ts\": \"2026-05-25T04:46:44.045452+00:00\",\n  \"query\": {\n    \"text\": \"graph topology provenance drift\",\n    \"scope\": null\n  },\n  \"budget\": {\n    \"budgetTokens\": 800,\n    \"estimatedTokens\": 19,\n    \"window\": 2\n  },\n  \"top_candidates\": [],\n  \"suggested_next_expansions\": [],\n  \"index_text\": \"[GRAPH_INDEX v0]\\nQuery: graph topology provenance drift\\n\\nTop candidates:\\n\"\n}\n",
+      "stderr_head": ""
+    },
+    {
+      "id": "q07-pack-contract",
+      "intent": "final pack quality",
+      "lane": "pack_trace",
+      "query": "memory strata truth ownership retrieval activation",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "pack",
+        "--query",
+        "memory strata truth ownership retrieval activation",
+        "--limit",
+        "6",
+        "--budget-tokens",
+        "800",
+        "--use-graph",
+        "off",
+        "--pack-lifecycle-shadow",
+        "off",
+        "--pack-lifecycle-write",
+        "off",
+        "--trace",
+        "--json"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 1036,
+      "stdout_chars": 21231,
+      "stderr_chars": 0,
+      "top_preview": [
+        {
+          "recordRef": "obs:39062",
+          "layer": "L1",
+          "id": 39062,
+          "summary": "[MD] 2026-04-09.md#D3 — Distinct-family morning deck activation must be explicit, receipted, and activation-scoped",
+          "kind": "note",
+          "lang": null
+        },
+        {
+          "recordRef": "obs:48235",
+          "layer": "L1",
+          "id": 48235,
+          "summary": "[MD] 2026-04-20.md#Decision: ship bounded `gbrain` side-car Phase 1 and Phase 2 inside `openclaw-mem`, without changing memory ownership",
+          "kind": "note",
+          "lang": null
+        },
+        {
+          "recordRef": "obs:9582",
+          "layer": "L1",
+          "id": 9582,
+          "summary": "[MD] 2026-02-25.md#3) openclaw-mem engine: add docs/decisions/roadmap/spec search (hybrid retrieval, no local LLM)",
+          "kind": "note",
+          "lang": null
+        }
+      ],
+      "stdout_head": "{\n  \"bundle_text\": \"- [obs:39062] [MD] 2026-04-09.md#D3 — Distinct-family morning deck activation must be explicit, receipted, and activation-scoped\\n- [obs:48235] [MD] 2026-04-20.md#Decision: ship bounded `gbrain` side-car Phase 1 and Phase 2 inside `openclaw-mem`, without changing memory ownership\\n- [obs:9582] [MD] 2026-02-25.md#3) openclaw-mem engine: add docs/decisions/roadmap/spec search (hybrid retrieval, no local LLM)\\n- [obs:45930] - VERDICT: Ordering is sound in shape, but slice A needs a pre-step: decide which side is ground truth (test expectation vs. actual `misconfigured_activation`). \\\"Align test to code\\\" and \\\"align code to\\n- [obs:27703] Found 2 docs snippets:  1. [spec] Graphic Memory query / topology retrieval is a natural extension of `openclaw-mem`: - `openclaw-mem` already owns structured memory, retrieval, context packing, and g\\n- [obs:38080] [MD] 2026-04-08.md#D1 — Ship OpenClaw-mem v1.4.0: episodic verbatim semantic lane (retrieval tactic)\",\n  \"items\": [\n    {\n      \"recordRef\": \"obs:39062\",\n      \"layer\": \"L1\",\n      \"id\": 39062,\n      \"summary\": \"[MD] 2026-04-09.md#D3 — Distinct-family morning deck activation must be explicit, receipted, and activation-",
+      "stderr_head": ""
+    },
+    {
+      "id": "q08-working-set",
+      "intent": "active goal/backbone",
+      "lane": "store_fts",
+      "query": "Working Set backbone repeat suppression",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "search",
+        "Working Set backbone repeat suppression",
+        "--limit",
+        "5",
+        "--json"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 251,
+      "stdout_chars": 3,
+      "stderr_chars": 0,
+      "top_preview": [],
+      "stdout_head": "[]\n",
+      "stderr_head": ""
+    },
+    {
+      "id": "q09-promotion",
+      "intent": "writeback governance",
+      "lane": "docs_search",
+      "query": "governed promotion writeback durable memory",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "docs",
+        "search",
+        "governed promotion writeback durable memory",
+        "--limit",
+        "5",
+        "--json",
+        "--trace"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 1805,
+      "stdout_chars": 29681,
+      "stderr_chars": 0,
+      "top_preview": [
+        {
+          "id": 26435,
+          "doc_id": "StrategyExecuter_Steamer-Antigravity:projects/steamer/TECH_NOTES/2026-03-21_strategy-powerhouse_learning-closure_priority_after_tradingagents_review.md",
+          "chunk_id": "2026-03-21-strategy-powerhouse-learning-closure-priority-after-tradingagents-review-what-learning-closure-should-mean-in-steamer:001",
+          "repo": "StrategyExecuter_Steamer-Antigravity",
+          "path": "projects/steamer/TECH_NOTES/2026-03-21_strategy-powerhouse_learning-closure_priority_after_tradingagents_review.md",
+          "doc_kind": "doc",
+          "heading_path": "2026-03-21 — Strategy powerhouse learning-closure priority after TradingAgents review / What \"learning closure\" should mean in Steamer",
+          "title": "What \"learning closure\" should mean in Steamer",
+          "text": "The target is **not** raw prompt-memory injection.\nIt is a governed closure loop with explicit writeback and retrieval surfaces.\n\nMore precisely:\n- convert important nightly outcomes, replay contradictions, operator corrections, and promotion/hold/reject decisions into durable lessons\n- attach those lessons to a bounded retrieval surface keyed by strategy family / regime / failure mode / evidence class\n- make future research, triage, and validation packets consume those lessons deliberately\n- keep the human/operator gate and canonical daily truth separate from any LLM narrative convenience layer\n\nIn other words:\n- **learn from the evidence chain**\n- do **not** just paste prior prose back into the next prompt and pretend that is memory",
+          "recordRef": "doc:StrategyExecuter_Steamer-Antigravity:projects/steamer/TECH_NOTES/2026-03-21_strategy-powerhouse_learning-closure_priority_after_tradingagents_review.md#2026-03-21-strategy-powerhouse-learning-closure-priority-after-tradingagents-review-what-learning-closure-should-mean-in-steamer:001",
+          "rrf_score": 0.01639344262295082,
+          "match": [
+            "fts"
+          ]
+        },
+        {
+          "id": 62976,
+          "doc_id": "workspace:skills/room-memory-judge/SKILL.md",
+          "chunk_id": "room-memory-judge-promotion-rule:001",
+          "repo": "workspace",
+          "path": "skills/room-memory-judge/SKILL.md",
+          "doc_kind": "doc",
+          "heading_path": "Room Memory Judge / Promotion rule",
+          "title": "Promotion rule",
+          "text": "If a memory seems bigger than room-local chat continuity, do **not** store it as room memory.\nInstead:\n- either keep it unstored,\n- or escalate to Lyria using `escalation-judge` if it may deserve durable/shared treatment.",
+          "recordRef": "doc:workspace:skills/room-memory-judge/SKILL.md#room-memory-judge-promotion-rule:001",
+          "rrf_score": 0.01639344262295082,
+          "match": [
+            "vector"
+          ]
+        },
+        {
+          "id": 24065,
+          "doc_id": "openclaw-async-coding-playbook:projects/steamer/TECH_NOTES/2026-03-21_strategy-powerhouse_learning-closure_priority_after_tradingagents_review.md",
+          "chunk_id": "2026-03-21-strategy-powerhouse-learning-closure-priority-after-tradingagents-review-what-learning-closure-should-mean-in-steamer:001",
+          "repo": "openclaw-async-coding-playbook",
+          "path": "projects/steamer/TECH_NOTES/2026-03-21_strategy-powerhouse_learning-closure_priority_after_tradingagents_review.md",
+          "doc_kind": "doc",
+          "heading_path": "2026-03-21 — Strategy powerhouse learning-closure priority after TradingAgents review / What \"learning closure\" should mean in Steamer",
+          "title": "What \"learning closure\" should mean in Steamer",
+          "text": "The target is **not** raw prompt-memory injection.\nIt is a governed closure loop with explicit writeback and retrieval surfaces.\n\nMore precisely:\n- convert important nightly outcomes, replay contradictions, operator corrections, and promotion/hold/reject decisions into durable lessons\n- attach those lessons to a bounded retrieval surface keyed by strategy family / regime / failure mode / evidence class\n- make future research, triage, and validation packets consume those lessons deliberately\n- keep the human/operator gate and canonical daily truth separate from any LLM narrative convenience layer\n\nIn other words:\n- **learn from the evidence chain**\n- do **not** just paste prior prose back into the next prompt and pretend that is memory",
+          "recordRef": "doc:openclaw-async-coding-playbook:projects/steamer/TECH_NOTES/2026-03-21_strategy-powerhouse_learning-closure_priority_after_tradingagents_review.md#2026-03-21-strategy-powerhouse-learning-closure-priority-after-tradingagents-review-what-learning-closure-should-mean-in-steamer:001",
+          "rrf_score": 0.016129032258064516,
+          "match": [
+            "fts"
+          ]
+        }
+      ],
+      "stdout_head": "{\n  \"query\": \"governed promotion writeback durable memory\",\n  \"results\": [\n    {\n      \"id\": 26435,\n      \"doc_id\": \"StrategyExecuter_Steamer-Antigravity:projects/steamer/TECH_NOTES/2026-03-21_strategy-powerhouse_learning-closure_priority_after_tradingagents_review.md\",\n      \"chunk_id\": \"2026-03-21-strategy-powerhouse-learning-closure-priority-after-tradingagents-review-what-learning-closure-should-mean-in-steamer:001\",\n      \"repo\": \"StrategyExecuter_Steamer-Antigravity\",\n      \"path\": \"projects/steamer/TECH_NOTES/2026-03-21_strategy-powerhouse_learning-closure_priority_after_tradingagents_review.md\",\n      \"doc_kind\": \"doc\",\n      \"heading_path\": \"2026-03-21 — Strategy powerhouse learning-closure priority after TradingAgents review / What \\\"learning closure\\\" should mean in Steamer\",\n      \"title\": \"What \\\"learning closure\\\" should mean in Steamer\",\n      \"text\": \"The target is **not** raw prompt-memory injection.\\nIt is a governed closure loop with explicit writeback and retrieval surfaces.\\n\\nMore precisely:\\n- convert important nightly outcomes, replay contradictions, operator corrections, and promotion/hold/reject decisions into durable lessons\\n- attach those lessons to a b",
+      "stderr_head": ""
+    },
+    {
+      "id": "q10-privacy-scope",
+      "intent": "privacy/scope gate",
+      "lane": "episodes_lexical",
+      "query": "scope isolation payload redaction",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "episodes",
+        "search",
+        "scope isolation payload redaction",
+        "--global",
+        "--mode",
+        "lexical",
+        "--limit",
+        "5",
+        "--per-session-limit",
+        "2",
+        "--json",
+        "--trace"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 487,
+      "stdout_chars": 41873,
+      "stderr_chars": 0,
+      "top_preview": [],
+      "stdout_head": "{\n  \"kind\": \"openclaw-mem.episodes.search.v0\",\n  \"ts\": \"2026-05-25T04:46:47.624328+00:00\",\n  \"version\": {\n    \"openclaw_mem\": \"1.9.18\",\n    \"schema\": \"v0\"\n  },\n  \"ok\": true,\n  \"scope\": \"global\",\n  \"query\": {\n    \"text\": \"scope isolation payload redaction\",\n    \"text_en\": null\n  },\n  \"result\": {\n    \"count\": 5,\n    \"session_limit\": 5,\n    \"per_session_limit\": 2,\n    \"search_limit\": 40,\n    \"include_payload\": false,\n    \"mode\": \"lexical\",\n    \"sessions\": [\n      {\n        \"rank\": 1,\n        \"session_id\": \"unknown\",\n        \"hit_count\": 12,\n        \"best_match_rank\": 2,\n        \"best_match_score\": -17.298974600204176,\n        \"best_rrf_score\": 0.016129032258064516,\n        \"latest_ts_ms\": 1778633625212,\n        \"agent_ids\": [\n          \"unknown\"\n        ],\n        \"type_counts\": [\n          {\n            \"type\": \"conversation.assistant\",\n            \"count\": 12\n          }\n        ],\n        \"summary\": \"conversation.assistant: 我先看最近那筆จริง際是卡在 `global_scope_write`、`oversized_payload`，還是兩個一起，免得放錯閘。 | conversation.assistant: [[reply_to_current]] 收斂完了，**現在 local + remote 都乾淨**。我把兩坨殘留改動都驗完、commit、push 了：`openclaw-mem` dev 是 **`5a4b83f`**（graph scope isolation），`openclaw-async-coding-\",\n   ",
+      "stderr_head": ""
+    },
+    {
+      "id": "q11-bootstrap",
+      "intent": "bootstrap slimming",
+      "lane": "pack_trace",
+      "query": "MEMORY.md bootstrap slimming docs cold lane",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "pack",
+        "--query",
+        "MEMORY.md bootstrap slimming docs cold lane",
+        "--limit",
+        "6",
+        "--budget-tokens",
+        "800",
+        "--use-graph",
+        "off",
+        "--pack-lifecycle-shadow",
+        "off",
+        "--pack-lifecycle-write",
+        "off",
+        "--trace",
+        "--json"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 810,
+      "stdout_chars": 20072,
+      "stderr_chars": 0,
+      "top_preview": [
+        {
+          "recordRef": "obs:19802",
+          "layer": "L1",
+          "id": 19802,
+          "summary": "[MD] 2026-03-12.md#D2 — openclaw-mem live-gap hardening：episodic ingest catch-up + q5m cron + graph init + docs cold-lane scopeMap casing fix",
+          "kind": "note",
+          "lang": null
+        },
+        {
+          "recordRef": "obs:14327",
+          "layer": "L1",
+          "id": 14327,
+          "summary": "[MD] 2026-03-05.md#D14 — 啟用 Docs cold lane + 初次索引 + 6h refresh cron（silent-on-green）",
+          "kind": "note",
+          "lang": null
+        },
+        {
+          "recordRef": "obs:14326",
+          "layer": "L1",
+          "id": 14326,
+          "summary": "[MD] 2026-03-05.md#D13 — Docs cold lane hardening：移除 trusted 標籤 + 限制 ingest roots 必須在 config allowlist",
+          "kind": "note",
+          "lang": null
+        }
+      ],
+      "stdout_head": "{\n  \"bundle_text\": \"- [obs:19802] [MD] 2026-03-12.md#D2 — openclaw-mem live-gap hardening：episodic ingest catch-up + q5m cron + graph init + docs cold-lane scopeMap casing fix\\n- [obs:14327] [MD] 2026-03-05.md#D14 — 啟用 Docs cold lane + 初次索引 + 6h refresh cron（silent-on-green）\\n- [obs:14326] [MD] 2026-03-05.md#D13 — Docs cold lane hardening：移除 trusted 標籤 + 限制 ingest roots 必須在 config allowlist\\n- [obs:15254] [MD] 2026-03-07.md#D11 — docs cold lane refresh cron 改成 WAL-style PASS/WARN/ALERT receipt（不再把成功收據打成 ALERT/raw JSON）\\n- [obs:39538] [MD] mem-engine.md#Docs memory (decisions/roadmaps/specs) as a cold lane\\n- [obs:33188] [MD] TOPOLOGY.md#6) Docs cold lane = policy gates + CLI credential mirror\",\n  \"items\": [\n    {\n      \"recordRef\": \"obs:19802\",\n      \"layer\": \"L1\",\n      \"id\": 19802,\n      \"summary\": \"[MD] 2026-03-12.md#D2 — openclaw-mem live-gap hardening：episodic ingest catch-up + q5m cron + graph init + docs cold-lane scopeMap casing fix\",\n      \"kind\": \"note\",\n      \"lang\": null\n    },\n    {\n      \"recordRef\": \"obs:14327\",\n      \"layer\": \"L1\",\n      \"id\": 14327,\n      \"summary\": \"[MD] 2026-03-05.md#D14 — 啟用 Docs cold lane + 初次索引 + 6h refresh cron（silent-on-green）\",\n      \"kind\"",
+      "stderr_head": ""
+    },
+    {
+      "id": "q12-release",
+      "intent": "release closure",
+      "lane": "store_fts",
+      "query": "openclaw-mem release tag WAL",
+      "cmd": [
+        "python3",
+        "-m",
+        "openclaw_mem",
+        "search",
+        "openclaw-mem release tag WAL",
+        "--limit",
+        "5",
+        "--json"
+      ],
+      "exit_code": 0,
+      "elapsed_ms": 243,
+      "stdout_chars": 1213,
+      "stderr_chars": 0,
+      "top_preview": [],
+      "stdout_head": "[\n  {\n    \"id\": 29226,\n    \"ts\": \"2026-03-25T02:19:18.463Z\",\n    \"kind\": \"tool\",\n    \"tool_name\": \"sessions_yield\",\n    \"summary\": \"{\\n  \\\"status\\\": \\\"yielded\\\",\\n  \\\"message\\\": \\\"Started the actual release cut for openclaw-mem. I scoped it to version/tag truth, release-note/changelog alignment, tag/push receipts, and WAL closure—no GTM or\",\n    \"summary_en\": null,\n    \"lang\": null,\n    \"snippet\": \"…[release] cut for [openclaw]-[mem]. I scoped it to version/[tag] truth…\",\n    \"snippet_en\": \"\",\n    \"score\": -19.743748615621715,\n    \"detail_json\": \"{\\\"memory_backend\\\": \\\"openclaw-mem-engine\\\", \\\"memory_backend_ready\\\": true, \\\"memory_backend_mode\\\": \\\"auto\\\", \\\"memory_tool\\\": false, \\\"tool_call_id\\\": \\\"call_SPgfNcBlV2swvdaangurDaSP|fc_09bb6e9fc06c15590169c3462530008191be3c08c65cbb71c4\\\", \\\"session_key\\\": \\\"agent:main:discord:direct:902441554659123201\\\", \\\"agent_id\\\": \\\"main\\\", \\\"is_synthetic\\\": false, \\\"importance\\\": {\\\"score\\\": 0.8, \\\"label\\\": \\\"must_remember\\\", \\\"rationale\\\": \\\"Captures a decision that should be consistent over time. Contains stable identifiers useful for future lookup/automation.\\\", \\\"method\\\": \\\"heuristic-v1\\\", \\\"version\\\": 1, \\\"graded_at\\\": \\\"2026-03-25T06:05:02",
+      "stderr_head": ""
+    }
+  ]
+}
