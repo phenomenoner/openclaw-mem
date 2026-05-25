@@ -1,0 +1,56 @@
+{
+  "kind": "memory-strata.ws2.selection-synthetic-fixture.v0",
+  "scenario": "must pool saturation vs nice reservation",
+  "limit": 4,
+  "quotas": {
+    "mustMax": 2,
+    "niceMin": 2,
+    "unknownMax": 1
+  },
+  "tier_quota_v1": {
+    "selectedIds": [
+      "m1",
+      "m2",
+      "n1",
+      "n2"
+    ],
+    "selectedByTier": {
+      "must": 2,
+      "nice": 2
+    },
+    "quota": {
+      "mustMax": 2,
+      "niceMin": 2,
+      "unknownMax": 1,
+      "wildcardUsed": 0
+    }
+  },
+  "tier_first_v1": {
+    "selectedIds": [
+      "m1",
+      "m2",
+      "m3",
+      "m4"
+    ],
+    "tierCounts": [
+      {
+        "tier": "must",
+        "labels": [
+          "must_remember"
+        ],
+        "candidates": 4,
+        "selected": 4
+      }
+    ],
+    "rejected": [
+      "budget_cap"
+    ]
+  },
+  "checks": {
+    "quota_caps_must_at_2": true,
+    "quota_reserves_nice_at_2": true,
+    "quota_selected_expected": true,
+    "tier_first_saturates_must": true
+  },
+  "all_passed": true
+}
