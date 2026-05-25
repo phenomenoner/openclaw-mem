@@ -1,8 +1,8 @@
 # Memory Strata WS8 Pack / Proactive Pack Integration Review — 2026-05-25
 
-Status: **completed with rollback receipt**  
+Status: **completed with rollback + stop-loss receipt**  
 Companion: `docs/specs/memory-strata-todo-v0.md#ws8--pack--proactive-pack-integration-review`  
-Topology impact: **unchanged** — no config, cron, slot, install, push, or tag changes were made.
+Data impact: **production lifecycle fields were mutated and rolled back** for two observations; no net schema/config/install/topology change remains.
 
 ## Goal
 
@@ -12,6 +12,8 @@ Verify Pack trace inspectability, lane evidence, write posture, and failure post
 
 - Pack trace summary: `docs/receipts/artifacts/memory-strata-ws8-pack-trace-2026-05-25.json`
 - Lifecycle-write rollback receipt: `docs/receipts/artifacts/memory-strata-ws8-lifecycle-write-rollback-2026-05-25.json`
+- Rollback verification: `docs/receipts/artifacts/memory-strata-ws8-rollback-verification-2026-05-25.json`
+- Stop-loss / WAL receipt: `docs/receipts/memory-strata-ws8-stop-loss-wal-2026-05-25.md`
 - Raw command outputs: `.tmp/memory-strata-ws8/*.json`
 
 ## Commands exercised
@@ -45,7 +47,7 @@ This WS8 result confirms the boundary-map posture:
 
 - Pack with lifecycle writes off is safe as a consumer/trace surface.
 - Pack with lifecycle writes on is **not read-only** and must be governed by WS5/WS9 before use in any default/runtime path.
-- Future tests must run lifecycle-write counterfactuals on an isolated fixture DB or explicitly approved production mutation window.
+- Future tests must run lifecycle-write counterfactuals on an isolated fixture DB or explicitly approved production mutation window. This is now a hard rule for WS5/WS9.
 
 ## Counterfactual value
 

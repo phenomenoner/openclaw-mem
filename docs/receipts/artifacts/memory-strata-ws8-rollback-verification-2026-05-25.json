@@ -1,0 +1,26 @@
+{
+  "kind": "memory-strata.ws8.rollback-verification.v0",
+  "ts": "2026-05-25T05:32:18.831246+00:00",
+  "db": "/root/.openclaw/memory/openclaw-mem.sqlite",
+  "ids": [
+    31998,
+    48512
+  ],
+  "rows": {
+    "31998": {
+      "lifecycle_present_after_rollback": false,
+      "lifecycle_value_after_rollback": null,
+      "summary_head": "{\n  \"id\": \"192548e6-1d2c-4e1e-bf00-008edfe2e162\",\n  \"agentId\": \"steamer-cron\",\n  \"name\": \"steamer weekend: counterfactua"
+    },
+    "48512": {
+      "lifecycle_present_after_rollback": false,
+      "lifecycle_value_after_rollback": null,
+      "summary_head": "{\n  \"id\": \"192548e6-1d2c-4e1e-bf00-008edfe2e162\",\n  \"agentId\": \"steamer-cron\",\n  \"name\": \"steamer weekend: counterfactua"
+    }
+  },
+  "notes": [],
+  "all_lifecycle_absent_after_rollback": true,
+  "pre_write_absence_confirmed": false,
+  "pre_write_absence_note": "Not directly confirmable after the fact. The pack lifecycle receipt recorded used_count_before=0, and rollback removed the lifecycle field. No separate pre-mutation snapshot existed.",
+  "fts_note": "detail_json lifecycle update does not alter summary text; no FTS rebuild was run. Row summary text remains present after rollback."
+}
