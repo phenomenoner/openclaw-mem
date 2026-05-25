@@ -26,7 +26,7 @@ Purpose: confirm the implemented product surfaces match the desired strata model
 - [ ] Inventory implemented commands and config for:
   - [ ] durable / long-term memory engine
   - [ ] episodic append/query/search/replay/redact/gc
-  - [ ] verbatim semantic lane (`episodes embed/search`)
+  - [ ] episodic semantic lane (`episodes embed/search`; shipped verbatim-semantic retrieval over episodic evidence, distinct from durable engine hybrid recall)
   - [ ] working set / backbone lane
   - [ ] docs cold lane
   - [ ] graph refresh/query/drift/provenance
@@ -103,16 +103,16 @@ Product vs ops:
 
 ---
 
-### WS4 — Verbatim semantic lane evaluation
+### WS4 — Episodic semantic lane evaluation
 
-Purpose: decide whether semantic retrieval over episodic evidence improves raw-trail recovery enough to use routinely.
+Purpose: decide whether semantic retrieval over episodic evidence improves raw-trail recovery enough to use routinely, without confusing it with durable engine hybrid recall.
 
 - [ ] Select 10 real episodic evidence queries.
 - [ ] Run lexical baseline.
 - [ ] Run hybrid/vector mode after `episodes embed` on the relevant scope.
 - [ ] Compare hit quality, noise, and trace receipts.
 - [ ] Check embedding freshness and model consistency.
-- [ ] Define when to use verbatim semantic lane vs durable recall.
+- [ ] Define when to use episodic semantic lane vs durable recall.
 
 Verifier:
 
@@ -157,12 +157,6 @@ Purpose: move low-frequency long-form truth out of hot bootstrap while keeping i
 - [ ] Identify content that should move to docs/operator canon/skill appendix.
 - [ ] Verify docs cold lane can retrieve moved content.
 - [ ] Create a retrieval test before deleting or moving any bootstrap rule.
-- [ ] Keep non-compressible semantics in bootstrap:
-  - [ ] CK address/pronoun rule
-  - [ ] core persona and truth-first stance
-  - [ ] authority boundaries
-  - [ ] memory recall requirement for prior context
-  - [ ] non-stop / stop-loss contract
 - [ ] Target `MEMORY.md` below safer operating size after moves.
 
 Verifier:
@@ -174,7 +168,12 @@ Verifier:
 Product vs ops:
 
 - Product: docs cold lane retrieval quality and receipts.
-- Ops: CK/Lyria bootstrap content choices.
+- Ops: CK/Lyria bootstrap content choices, including non-compressible semantics that must remain hot-loaded:
+  - CK address/pronoun rule
+  - core persona and truth-first stance
+  - authority boundaries
+  - memory recall requirement for prior context
+  - non-stop / stop-loss contract
 
 ---
 
@@ -239,12 +238,13 @@ Purpose: define when evidence becomes durable truth.
   - [ ] graph topology/provenance
   - [ ] pack traces
   - [ ] user explicit memory requests
+- [ ] State explicitly that none of these sources write durable memory until the governed promotion contract is implemented and enabled.
 - [ ] Define allowed candidate categories:
   - [ ] preference
   - [ ] decision
   - [ ] project state
   - [ ] operating rule
-  - [ ] relationship/topology fact
+  - [ ] relationship/topology fact, with explicit privacy/scope gate
 - [ ] Define blocked categories:
   - [ ] secrets
   - [ ] transient misunderstandings
@@ -263,11 +263,11 @@ Purpose: define when evidence becomes durable truth.
 Verifier:
 
 - Fixture with 5 candidates: 2 accepted, 2 rejected, 1 deferred.
-- Apply dry-run produces review packet without writes.
+- First implementation cycles require apply dry-run review packets without writes; live apply can be enabled only after reviewed receipts prove safe.
 
 Product vs ops:
 
-- Product: generic promotion/review/apply workflow.
+- Product: generic promotion/review/apply workflow, including dry-run-first and rollback receipt requirements.
 - Ops: CK/Lyria thresholds and categories.
 
 ---
@@ -316,7 +316,7 @@ Exit criteria:
 ### Milestone 2 — Evidence lanes
 
 - [ ] WS3 Episodic posture review
-- [ ] WS4 Verbatim semantic lane evaluation
+- [ ] WS4 Episodic semantic lane evaluation
 - [ ] WS8 Pack trace review
 
 Exit criteria:
@@ -327,7 +327,7 @@ Exit criteria:
 ### Milestone 3 — Activation quality
 
 - [ ] WS2 Durable / long-term policy hardening
-- [ ] WS5 Working Set contract
+- [ ] WS5 Working Set contract, including whether any pack/use-signal writeback is allowed
 
 Exit criteria:
 
@@ -361,7 +361,7 @@ These should be answered before broad rollout, not before this documentation com
 2. Which scopes are allowed to use episodic conversation capture by default?
 3. Should private relationship/narrative memory be excluded from all graph defaults unless explicitly scoped?
 4. What is the target safe size for `MEMORY.md` after slimming: 8KB, 10KB, or 12KB?
-5. Should `tier_quota_v1` be treated as a product promotion candidate now, or wait for a regression baseline?
+5. After verifying current gating/default state, should `tier_quota_v1` be treated as a product promotion candidate now, or wait for a regression baseline?
 6. Should graph be used in `pack --use-graph=auto` for CK/Lyria local tasks by default, or stay manual until regression evidence exists?
 
 ## 4. Stop-loss rules

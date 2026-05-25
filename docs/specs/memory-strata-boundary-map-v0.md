@@ -13,7 +13,7 @@ The current-known / target architecture contains multiple memory strata. Some ar
 
 1. **Durable / long-term memory** — canonical remembered facts and preferences served by `openclaw-mem-engine` when it owns the OpenClaw memory slot.
 2. **Episodic memory** — append-only session/event evidence for replay, audit, and raw-trail recovery.
-3. **Verbatim semantic lane** — hybrid/vector retrieval over bounded episodic evidence; a retrieval tactic, not a new truth store.
+3. **Episodic semantic lane** — hybrid/vector retrieval over bounded episodic evidence; this is the shipped verbatim-semantic retrieval tactic over `episodic_events`, not a new truth store and not the durable engine's normal hybrid recall.
 4. **Working Set / Backbone lane** — pinned activation layer for current durable constraints and active goal state.
 5. **Docs cold lane** — operator-authored specs, decisions, receipts, and long-form evidence.
 6. **Graph / topology layer** — structured relationship, dependency, provenance, and drift query layer.
@@ -46,7 +46,7 @@ When `openclaw-mem-engine` owns the OpenClaw memory slot, it should remain the *
 - `memory_forget`
 - `memory_import`
 - `memory_export`
-- `memory_docs_ingest` where configured as engine-owned durable ingest
+- docs ingest produces a derived docs/search index unless a separately specified, governed promotion flow writes durable memory
 
 The sidecar remains responsible for governance, capture, review, receipts, and optional enrichment. Helper lanes may improve retrieval or packing, but must not silently become competing durable truth owners.
 
@@ -64,12 +64,12 @@ A record can be worth preserving without deserving prompt space on every turn.
 | Layer | Product role | Truth owner | Write path | Retrieval path | Activation role | Retention / decay | Main risk |
 |---|---|---|---|---|---|---|---|
 | Durable / long-term memory | Stable facts, preferences, decisions | `openclaw-mem-engine` when slot owner | `memory_store`, import, governed promotion | `memory_recall`, engine hybrid search, pack | Hot recall candidate; sometimes backbone source | Importance, use-based decay, soft archive | Must pool saturates prompt; stale facts outrank relevant ones |
-| Episodic memory | Append-only evidence timeline | Episodic events ledger | sidecar spool, extractor, `episodes append/ingest` | `episodes query/search/replay` | Evidence retrieval; replay; audit | Type-based GC, redaction, scope isolation | Raw transient content mistaken for truth |
-| Verbatim semantic lane | Semantic retrieval over episodic evidence | Episodic ledger remains truth owner | `episodes embed` over bounded/redacted `search_text` | `episodes search --mode hybrid/vector` | Find raw trails; evidence support | Embedding freshness + episodic retention | Treated as a new memory type or auto-promoted |
+| Episodic memory | Append-only evidence timeline | Episodic events ledger | sidecar spool, extractor, `episodes append/ingest` | `episodes query/search/replay` | Evidence retrieval; replay; audit | Type-based GC and redaction; scope isolation is enforced as query/routing policy | Raw transient content mistaken for truth |
+| Episodic semantic lane | Semantic retrieval over episodic evidence | Episodic ledger remains truth owner | Derived embeddings over bounded/redacted `episodic_events.search_text` via `episodes embed` | `episodes search --mode hybrid/vector` | Find raw trails; evidence support | Embedding freshness + episodic retention | Treated as a new memory type, confused with durable engine hybrid recall, or auto-promoted |
 | Working Set / Backbone | Pinned current-state activation | Derived artifact; not source of truth | deterministic synthesis from governed sources | injected by autoRecall / pack | Stable active constraints and goal state | high churn; replace/update, not archive like durable memory | Becomes stale static prefix or competing memory |
 | Docs cold lane | Operator-authored long-form truth/evidence | Markdown/docs repo owners | docs ingest/index, repo allowlist | docs search / pack cold lane | Background evidence and specs | Git/history/operator curation | Docs treated as prompt dump instead of cited cold lane |
 | Graph / topology | Relationship, dependency, provenance, drift | Curated topology/docs as source; SQLite graph as derived cache | graph refresh / topology extraction | graph query, graph-aware pack, drift/provenance | Relationship expansion and impact analysis | drift checks, provenance freshness | Graph cache mistaken for source of truth |
-| Pack / Proactive Pack | Context assembly | None; consumes sources | no durable write by default | pack/search orchestration | Final bounded context injection | trace-based lifecycle refresh may update use signals | Pack decisions become opaque or over-broad |
+| Pack / Proactive Pack | Context assembly | None; consumes sources | zero durable writes; any future writeback requires a named governed exception | pack/search orchestration | Final bounded context injection | no writeback to other strata until WS5/WS9 define a governed contract | Pack decisions become opaque, over-broad, or quietly mutate other strata |
 
 ## 3. Boundary matrix
 
@@ -80,19 +80,19 @@ Legend:
 - **No direct write**: must not write directly; may cite or suggest.
 - **Derived only**: output is cache/projection, not source of truth.
 
-| From → To | Durable | Episodic | Verbatim semantic | Working Set | Docs cold lane | Graph | Pack |
+| From → To | Durable | Episodic | Episodic semantic | Working Set | Docs cold lane | Graph | Pack |
 |---|---|---|---|---|---|---|---|
 | Durable | — | No direct write | May be cited as comparison corpus | Allowed as backbone source | May be documented manually | May provide stable node facts | Allowed |
-| Episodic | **Review-gated promotion only** | — | Allowed: embed/search bounded evidence | May inform active summary if reviewed/bounded | May be summarized into receipt docs manually | May provide evidence refs | Allowed as evidence lane |
-| Verbatim semantic | No direct write | Derived only | — | No direct write | No direct write | No direct write | Allowed as evidence candidate |
+| Episodic | Planned governed promotion only; until WS9 ships, no direct durable promotion | — | Allowed as derived bounded embedding/search index | May inform Working Set only through a reviewed, cited synthesis flow | May be summarized into receipt docs manually | May provide evidence refs | Allowed as evidence lane |
+| Episodic semantic | No direct write | Derived index only | — | No direct write | No direct write | No direct write | Allowed as evidence candidate |
 | Working Set | No direct write | No direct write | No direct write | — | No direct write | No direct write | Allowed / injected first |
-| Docs cold lane | Review-gated ingest/promotion | No direct write | Separate docs substrate | May inform backbone if cited | — | May define topology source | Allowed |
+| Docs cold lane | Derived index by default; durable writes require planned governed promotion | No direct write | Separate docs substrate | May inform backbone if cited | — | May define topology source only through an explicit topology-source contract | Allowed |
 | Graph | No direct write | No direct write | No direct write | May suggest activation context | No direct write | Derived/cache unless topology file | Allowed for relationship expansion |
-| Pack | No durable write by default | May emit Observe receipts | No direct write | May refresh use-signal only if policy says so | No direct write | No direct write | — |
+| Pack | No durable writes | May emit Observe receipts | No direct write | No Working Set/use-signal writes until WS5 defines and verifies the policy contract | No direct write | No direct write | — |
 
 Hard boundary:
 
-> **Only governed promotion writes stable durable memory. Retrieval hits, graph paths, episodic matches, and pack selections are evidence — not automatic truth.**
+> **Only governed promotion writes stable durable memory. As of this draft, the generic promotion/writeback governor is planned in WS9, not assumed shipped. Retrieval hits, graph paths, episodic matches, and pack selections are evidence — not automatic truth.**
 
 ## 4. Product vs CK/Lyria ops boundary
 
@@ -103,7 +103,7 @@ These belong in `openclaw-mem` product design, tests, docs, or CLI/API contracts
 - Durable memory slot ownership and single-write-path rules.
 - `autoRecall` selection policy, quota mixing, repeat suppression, backbone dedupe, and receipts.
 - Episodic event schema, auto-capture, retention, replay, search, redaction, and GC.
-- Verbatim semantic lane behavior over episodic evidence.
+- Episodic semantic lane behavior over episodic evidence, explicitly distinct from durable engine hybrid recall.
 - Docs cold lane search, allowlist, scope pushdown, and pack integration.
 - Graph query/refresh/drift/provenance contracts.
 - Pack / Proactive Pack trace schema, budget enforcement, citation coverage, and failure posture.
@@ -142,8 +142,8 @@ Graduation test:
 | User intent | First lane | Secondary lane | Avoid |
 |---|---|---|---|
 | Stable preference / decision | Durable memory | Docs cold lane / receipts | Episodic raw text as truth |
-| What happened in a session/run | Episodic replay/query | Verbatim semantic search | Durable memory unless promoted |
-| Find exact/raw wording trail | Verbatim semantic over episodic | Replay selected session | Graph as evidence source |
+| What happened in a session/run | Episodic replay/query | Episodic semantic search | Durable memory unless promoted |
+| Find exact/raw wording trail | Episodic semantic over episodic evidence | Replay selected session | Graph as evidence source |
 | Current active goal/state | Working Set / backbone | Durable + recent docs | Re-searching all must memories every turn |
 | Specs/decisions/runbooks | Docs cold lane | Durable summary | Bootstrap stuffing |
 | Dependencies / impact / owners | Graph/topology | Docs provenance | Free-text-only recall |
@@ -151,7 +151,7 @@ Graduation test:
 
 ## 6. Anti-corruption rules
 
-1. **No raw episodic-to-durable auto-promotion.** Episodic evidence may propose a durable memory candidate, but apply must be governed.
+1. **No raw episodic-to-durable auto-promotion.** Episodic evidence may propose a durable memory candidate, but apply is blocked until the WS9 governed promotion/writeback contract exists and is verified.
 2. **Graph cache is not graph truth.** Source topology/docs/receipts own truth; SQLite graph is derived.
 3. **Working Set is activation, not memory.** It may be persisted as a derived artifact, but it must cite or derive from governed sources.
 4. **Docs cold lane should not become bootstrap.** It is searchable/citable, not a prompt prelude.
@@ -164,10 +164,10 @@ Graduation test:
 
 ### Product gaps
 
-- Is `tier_quota_v1` still non-default, and what evidence is required to promote it?
+- Verify the current `tier_quota_v1` default/gating state, then define what evidence is required before promotion.
 - Are Working Set records traceably derived from source records with enough citation coverage?
 - Does `pack --use-graph=auto` have a stable evaluation set showing real recall-quality lift?
-- Are episodic embeddings refreshed often enough for the verbatim semantic lane to be reliable?
+- Verify whether episodic embeddings are refreshed often enough for the episodic semantic lane to be reliable.
 - Is there a clean operator command for memory-strata status in one report?
 - Are graph orphan/stale-provenance checks productized or still ad hoc?
 - Is docs cold lane query-language mismatch handled well enough for bilingual CK/Lyria use?
@@ -204,7 +204,7 @@ These should describe CK/Lyria local usage without hard-coding private policy in
 For this review artifact:
 
 - Check both markdown files exist.
-- Check they mention all required strata: durable, episodic, verbatim semantic, working set, docs cold lane, graph, pack.
+- Check they mention all required strata: durable, episodic, episodic semantic, working set, docs cold lane, graph, pack.
 - Check they explicitly state topology/runtime impact is unchanged.
 - If this artifact is committed, keep the change scoped to these documentation files and preserve pre-existing working tree changes.
 
