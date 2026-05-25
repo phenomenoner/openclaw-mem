@@ -1,0 +1,255 @@
+{
+  "kind": "memory-strata.ws7.graph-inventory-readonly.v0",
+  "ts": "2026-05-25T06:32:31.082399+00:00",
+  "topology_impact": "unchanged/read-only CLI inspection",
+  "health": {
+    "kind": "openclaw-mem.graph.health.v0",
+    "ts": "2026-05-25T06:32:29.865424+00:00",
+    "result": {
+      "ok": true,
+      "query": "health",
+      "status": "stale",
+      "stale": true,
+      "stale_hours": 24.0,
+      "age_hours": 1087.277,
+      "node_count": 557,
+      "edge_count": 915,
+      "latest_receipt": {
+        "id": 2,
+        "refreshed_at": "2026-04-09T23:15:54Z",
+        "source_path": "/tmp/openclaw-mem-activation/topology-extract-full.json",
+        "topology_digest": "8a7dac372980d1377f0742b7cff2ed7882ce545e535cd1ce2d267a35fc381616",
+        "node_count": 557,
+        "edge_count": 915
+      },
+      "meta": {
+        "schema_version": "1",
+        "last_refresh_ts": "2026-04-09T23:15:54Z",
+        "last_source_path": "/tmp/openclaw-mem-activation/topology-extract-full.json",
+        "topology_digest": "8a7dac372980d1377f0742b7cff2ed7882ce545e535cd1ce2d267a35fc381616",
+        "node_count": "557",
+        "edge_count": "915"
+      },
+      "warnings": []
+    }
+  },
+  "readiness": {
+    "kind": "openclaw-mem.graph.readiness.v0",
+    "ts": "2026-05-25T06:32:30.085334+00:00",
+    "result": {
+      "ok": true,
+      "verdict": "red",
+      "ready_for_autonomous_match": false,
+      "checks": {
+        "fresh_graph_cache": false,
+        "non_empty_graph_cache": true,
+        "topology_source_present": false,
+        "topology_source_unchanged_since_refresh": true,
+        "graph_match_support_present": true
+      },
+      "health": {
+        "ok": true,
+        "query": "health",
+        "status": "stale",
+        "stale": true,
+        "stale_hours": 24.0,
+        "age_hours": 1087.277,
+        "node_count": 557,
+        "edge_count": 915,
+        "latest_receipt": {
+          "id": 2,
+          "refreshed_at": "2026-04-09T23:15:54Z",
+          "source_path": "/tmp/openclaw-mem-activation/topology-extract-full.json",
+          "topology_digest": "8a7dac372980d1377f0742b7cff2ed7882ce545e535cd1ce2d267a35fc381616",
+          "node_count": 557,
+          "edge_count": 915
+        },
+        "meta": {
+          "schema_version": "1",
+          "last_refresh_ts": "2026-04-09T23:15:54Z",
+          "last_source_path": "/tmp/openclaw-mem-activation/topology-extract-full.json",
+          "topology_digest": "8a7dac372980d1377f0742b7cff2ed7882ce545e535cd1ce2d267a35fc381616",
+          "node_count": "557",
+          "edge_count": "915"
+        },
+        "warnings": []
+      },
+      "source_status": {
+        "source_path": "/tmp/openclaw-mem-activation/topology-extract-full.json",
+        "format": "json",
+        "requires_yaml_loader": false,
+        "yaml_available": null,
+        "loadable": true,
+        "exists": false,
+        "mtime": null,
+        "newer_than_refresh": null
+      },
+      "support_plane": {
+        "window_hours": 168.0,
+        "cutoff_ts": "2026-05-18T06:32:30.085245Z",
+        "total_count": 20,
+        "latest_ts": "2026-05-23T19:24:47.654334+00:00",
+        "by_tool": [
+          {
+            "tool_name": "graph.capture-md",
+            "count": 20,
+            "latest_ts": "2026-05-23T19:24:47.654334+00:00"
+          }
+        ]
+      },
+      "blockers": [
+        "graph_cache_stale",
+        "topology_source_missing"
+      ],
+      "warnings": []
+    }
+  },
+  "auto_status": {
+    "kind": "openclaw-mem.graph.auto-status.v0",
+    "ts": "2026-05-25T06:32:30.794960+00:00",
+    "flags": {
+      "OPENCLAW_MEM_GRAPH_AUTO_RECALL": {
+        "present": false,
+        "raw": null,
+        "normalized": null,
+        "enabled": false,
+        "valid": true,
+        "default": false,
+        "reason": "unset_default"
+      },
+      "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": {
+        "present": false,
+        "raw": null,
+        "normalized": null,
+        "enabled": false,
+        "valid": true,
+        "default": false,
+        "reason": "unset_default"
+      },
+      "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": {
+        "present": false,
+        "raw": null,
+        "normalized": null,
+        "enabled": false,
+        "valid": true,
+        "default": false,
+        "reason": "unset_default"
+      }
+    }
+  },
+  "status": {
+    "kind": "openclaw-mem.status.v1",
+    "ts": "2026-05-25T06:32:31.044175+00:00",
+    "version": {
+      "openclaw_mem": "1.9.18",
+      "schema": "v1"
+    },
+    "db": {
+      "path": "/root/.openclaw/memory/openclaw-mem.sqlite",
+      "preexisting": true
+    },
+    "count": 63608,
+    "min_ts": "2026-02-10T04:34:17.336Z",
+    "max_ts": "2026-05-25T04:23:25.926330+00:00",
+    "embeddings": {
+      "count": 1,
+      "models": [
+        {
+          "model": "text-embedding-3-small",
+          "count": 1
+        }
+      ]
+    },
+    "embeddings_en": {
+      "count": 0,
+      "models": []
+    },
+    "backend": {
+      "memory_slot": "openclaw-mem-engine",
+      "entries": {
+        "memory-core": {
+          "enabled": false
+        },
+        "memory-lancedb": {
+          "enabled": false,
+          "embedding_api_key_ready": false
+        },
+        "openclaw-mem": {
+          "enabled": true
+        }
+      },
+      "fallback": {
+        "recommended_slot": "memory-core",
+        "reason": "Fast rollback path if memory-lancedb has runtime issues"
+      }
+    },
+    "runtime": {
+      "db": {
+        "path": "/root/.openclaw/memory/openclaw-mem.sqlite",
+        "preexisting": true
+      },
+      "config": {
+        "path": "/root/.openclaw/openclaw.json",
+        "exists": true,
+        "is_file": true,
+        "size_bytes": 49696
+      },
+      "state_files": {
+        "episodic_spool": {
+          "path": "/root/.openclaw/memory/openclaw-mem-episodes.jsonl",
+          "exists": true,
+          "is_file": true,
+          "size_bytes": 0
+        },
+        "episodic_ingest_state": {
+          "path": "/root/.openclaw/memory/openclaw-mem/episodes-ingest-state.json",
+          "exists": true,
+          "is_file": true,
+          "size_bytes": 235
+        },
+        "graph_capture_state": {
+          "path": "/root/.openclaw/memory/openclaw-mem/graph-capture-state.json",
+          "exists": true,
+          "is_file": true,
+          "size_bytes": 950
+        },
+        "graph_capture_md_state": {
+          "path": "/root/.openclaw/memory/openclaw-mem/graph-capture-md-state.json",
+          "exists": true,
+          "is_file": true,
+          "size_bytes": 53043
+        }
+      },
+      "graph_auto": {
+        "OPENCLAW_MEM_GRAPH_AUTO_RECALL": {
+          "present": false,
+          "raw": null,
+          "normalized": null,
+          "enabled": false,
+          "valid": true,
+          "default": false,
+          "reason": "unset_default"
+        },
+        "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": {
+          "present": false,
+          "raw": null,
+          "normalized": null,
+          "enabled": false,
+          "valid": true,
+          "default": false,
+          "reason": "unset_default"
+        },
+        "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": {
+          "present": false,
+          "raw": null,
+          "normalized": null,
+          "enabled": false,
+          "valid": true,
+          "default": false,
+          "reason": "unset_default"
+        }
+      }
+    }
+  },
+  "raw_capture": ".tmp/memory-strata-ws7/graph-inventory-readonly.txt"
+}
