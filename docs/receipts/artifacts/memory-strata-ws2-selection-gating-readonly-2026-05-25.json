@@ -1,0 +1,29 @@
+{
+  "kind": "memory-strata.ws2.selection-gating-readonly.v0",
+  "ts": "2026-05-25T05:56:20.938415+00:00",
+  "topology_impact": "unchanged/read-only config + source inspection",
+  "engine_enabled": true,
+  "autoRecall": {
+    "enabled": false,
+    "selectionMode": "tier_quota_v1",
+    "maxItems": 2,
+    "includeUnknownFallback": false,
+    "routeAutoEnabled": true
+  },
+  "workingSet": {
+    "enabled": true,
+    "persist": false,
+    "maxChars": 900,
+    "maxItemsPerSection": 3
+  },
+  "retrievalBackend": {
+    "backend": "qdrant-edge",
+    "qdrantEdgeEnabled": true,
+    "fallbackBackend": "lancedb"
+  },
+  "source_default_selectionMode": "tier_first_v1",
+  "plugin_schema_selectionMode_default": "tier_first_v1",
+  "live_config_selectionMode": "tier_quota_v1",
+  "finding": "Source/plugin defaults remain tier_first_v1 rollback default, but live config currently sets autoRecall.selectionMode=tier_quota_v1 while autoRecall.enabled=false. routeAuto is enabled separately.",
+  "security_note": "Config contains credentials; receipt intentionally omits secrets."
+}
