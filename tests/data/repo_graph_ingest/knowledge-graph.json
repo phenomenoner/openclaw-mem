@@ -1,0 +1,18 @@
+{
+  "version": "1.0.0",
+  "project": {"name": "fixture", "languages": ["python", "markdown"], "frameworks": [], "description": "fixture", "analyzedAt": "2026-05-27T00:00:00Z", "gitCommitHash": ""},
+  "nodes": [
+    {"id": "file:file_a.py", "type": "file", "name": "file_a.py", "filePath": "file_a.py", "summary": "Backend resolver file", "tags": ["backend"], "complexity": "simple"},
+    {"id": "function:file_a.py:resolve_backend", "type": "function", "name": "resolve_backend", "filePath": "file_a.py", "lineRange": [1, 2], "summary": "Resolves the retrieval backend", "tags": ["backend"], "complexity": "simple"},
+    {"id": "file:file_b.py", "type": "file", "name": "file_b.py", "filePath": "file_b.py", "summary": "Pack builder file", "tags": ["pack"], "complexity": "simple"},
+    {"id": "function:file_b.py:build_pack", "type": "function", "name": "build_pack", "filePath": "file_b.py", "lineRange": [1, 2], "summary": "Builds a context pack", "tags": ["pack"], "complexity": "simple"},
+    {"id": "document:notes.md", "type": "document", "name": "notes.md", "filePath": "notes.md", "summary": "Explains Pack and Observe boundaries", "tags": ["pack", "observe"], "complexity": "simple"}
+  ],
+  "edges": [
+    {"source": "file:file_a.py", "target": "function:file_a.py:resolve_backend", "type": "contains", "direction": "forward", "weight": 1},
+    {"source": "file:file_b.py", "target": "function:file_b.py:build_pack", "type": "contains", "direction": "forward", "weight": 1},
+    {"source": "function:file_b.py:build_pack", "target": "document:notes.md", "type": "documents", "direction": "forward", "weight": 0.6}
+  ],
+  "layers": [],
+  "tour": []
+}
