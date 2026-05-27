@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.24] - 2026-05-28
+
+### Fixed
+
+- Synchronize public version-reporting surfaces so package metadata, `openclaw_mem.__version__`, and `openclaw-mem status --json` all report `1.9.24`.
+
+### Notes
+
+- This is a release-hygiene patch and catch-up GitHub Release covering the intervening `v1.9.22` and `v1.9.23` tags, which were tags but not GitHub Releases.
+- The existing `v1.9.23` tag is retained as-is and is not rewritten.
+- No runtime behavior, backend topology, Gateway, plugin, cron, config, Store, retrieval, or Pack/Observe behavior changes in this release.
+
 ## [1.9.23] - 2026-05-27
 
 ### Experimental
