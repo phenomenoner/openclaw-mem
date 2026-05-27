@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.23] - 2026-05-27
+
 ### Experimental
 
 - Added `scripts/repo_graph_neighborhood_experiment.py` and `docs/repo-graph-ingest.md` for file-only repository graph neighborhood experiments using upstream `knowledge-graph.json` inputs as candidate Pack/Observe context.
@@ -258,12 +260,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regression coverage for compact route-auto graph and transcript payload shapes, broad transcript fallback suppression on long route-auto queries, the graph readiness support-plane index, and routeAuto timeout receipts.
 
 ## [1.9.0] - 2026-04-27
-=======
-### Experimental
-
-- Added `scripts/repo_graph_neighborhood_experiment.py` and `docs/repo-graph-ingest.md` for file-only repository graph neighborhood experiments using upstream `knowledge-graph.json` inputs as candidate Pack/Observe context.
->>>>>>> 7a021ea (Add repo graph neighborhood experiment)
-
 ### Changed
 
 - Hardened episodic conversation auto-capture so runtime recall blocks, channel metadata envelopes, internal delivery markers, and assistant control-only replies are stripped before events enter the episodic spool.
