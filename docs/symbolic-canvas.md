@@ -89,7 +89,10 @@ The hook is deliberately observe-only and narrow by default:
 - performs no model calls, no prompt injection, and no canonical memory mutation
 - skips failed agent runs and runs with fewer than `minMessages` eligible messages
 
-For local development without a globally installed `openclaw-mem`, set `command` and `commandArgs`, for example:
+For local development without a globally installed `openclaw-mem`, the default
+`command: "openclaw-mem"` retries through the repo-local module invocation when
+the binary is missing from `PATH`. Custom commands remain authoritative and do
+not fall back. You can still set `command` and `commandArgs` explicitly:
 
 ```json
 {

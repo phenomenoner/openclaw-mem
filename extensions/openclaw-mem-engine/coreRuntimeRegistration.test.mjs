@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(path.join(here, "index.ts"), "utf8");
+const manifest = JSON.parse(fs.readFileSync(path.join(here, "openclaw.plugin.json"), "utf8"));
 
 test("core runtime registration uses explicit capability/legacy/skipped branches", () => {
   assert.match(source, /registerMemoryCapability\?\s*:/, "declares capability host seam");
@@ -22,4 +23,13 @@ test("core runtime read previews are direct, bounded, and path-safe", () => {
   assert.match(source, /nextFrom: sliced\.nextFrom/, "returns continuation when sliced");
   assert.match(source, /sanitizeRuntimeMemoryIdForPath\(item\.row\.id\)/, "sanitizes synthetic paths");
   assert.doesNotMatch(source, /\(await db\.listScalars\(\)\)\.filter\(\(row\) => row\.id === id\)/, "does not scan full table for readFile by id");
+});
+
+test("manifest declares all registered agent tools", () => {
+  const registeredTools = [...source.matchAll(/api\.registerTool\([\s\S]*?name:\s*"([^"]+)"/g)].map(
+    (match) => match[1],
+  );
+  const declaredTools = manifest.contracts?.tools ?? [];
+
+  assert.deepEqual(declaredTools, registeredTools);
 });

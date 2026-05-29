@@ -5084,6 +5084,7 @@ const memoryPlugin = {
         sourceGlobs,
         maxChunkChars,
         embedOnIngest,
+        embedding: apiKey ? { apiKey, model } : undefined,
       });
 
       api.logger.info(
@@ -5151,6 +5152,7 @@ const memoryPlugin = {
         searchRrfK: docsColdLaneResolved.searchRrfK,
         scopeMappingStrategy: docsColdLaneResolved.scopeMappingStrategy,
         scopeMap: docsColdLaneResolved.scopeMap,
+        embedding: apiKey ? { apiKey, model } : undefined,
       });
 
       const receipt: RecallColdLaneReceipt = {

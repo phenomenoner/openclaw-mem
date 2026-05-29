@@ -112,6 +112,35 @@ test('docsSearchWithCli validates empty query', async () => {
   assert.equal(out.error, 'empty_query');
 });
 
+test('embeddingChildEnv forwards configured key/model without overriding process env', () => {
+  const originalKey = process.env.OPENAI_API_KEY;
+  const originalModel = process.env.OPENAI_EMBEDDING_MODEL;
+  try {
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_EMBEDDING_MODEL;
+
+    assert.deepEqual(__private__.embeddingChildEnv({
+      apiKey: ' configured-key ',
+      model: ' text-embedding-3-small ',
+    }), {
+      OPENAI_API_KEY: 'configured-key',
+      OPENAI_EMBEDDING_MODEL: 'text-embedding-3-small',
+    });
+
+    process.env.OPENAI_API_KEY = 'existing-key';
+    process.env.OPENAI_EMBEDDING_MODEL = 'existing-model';
+    assert.equal(__private__.embeddingChildEnv({
+      apiKey: 'configured-key',
+      model: 'text-embedding-3-small',
+    }), undefined);
+  } finally {
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalKey;
+    if (originalModel === undefined) delete process.env.OPENAI_EMBEDDING_MODEL;
+    else process.env.OPENAI_EMBEDDING_MODEL = originalModel;
+  }
+});
+
 test('matchesScope map strategy fails closed when scope is unmapped', () => {
   const row = { repo: 'local', path: 'DECISIONS/a.md' };
   const ok = __private__.matchesScope(row, 'openclaw-mem', 'map', {});

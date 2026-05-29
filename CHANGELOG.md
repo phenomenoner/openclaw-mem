@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.25] - 2026-05-30
+
+### Added
+
+- Add `openclaw-mem mem-system verify` as a read-only alias for the expanded system posture report.
+- Add symbolic-canvas auto-build fallback receipts that show configured command, executed command, fallback status, and per-attempt summaries.
+- Declare the `openclaw-mem-engine` exported memory tool contract in plugin metadata.
+
+### Fixed
+
+- Make Symbolic Canvas auto-build retry the default `openclaw-mem` command through the repo-local module path when the binary is missing from `PATH`.
+- Forward configured docs cold-lane embedding credentials to child processes without overriding parent environment variables.
+
+### Safety
+
+- Keep `mem-system verify` read-only with `writes_performed=false` and `topology_changed=false`.
+- Keep custom Symbolic Canvas commands authoritative; the fallback only applies to the default command on `ENOENT`.
+
 ## [1.9.24] - 2026-05-28
 
 ### Fixed

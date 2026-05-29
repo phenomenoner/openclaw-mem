@@ -4,6 +4,19 @@
   "description": "Optional memory slot backend with hybrid recall and Proactive Pack runtime recall",
   "kind": "memory",
   "version": "0.0.9",
+  "contracts": {
+    "tools": [
+      "memory_recall",
+      "memory_store",
+      "memory_forget",
+      "memory_list",
+      "memory_stats",
+      "memory_export",
+      "memory_import",
+      "memory_docs_ingest",
+      "memory_docs_search"
+    ]
+  },
   "uiHints": {
     "embedding.apiKey": {
       "label": "OpenAI API Key",

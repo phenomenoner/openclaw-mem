@@ -2,6 +2,7 @@ import { execFile as execFileCb } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCb);
@@ -219,6 +220,98 @@ function parseJsonLoose(raw) {
   return null;
 }
 
+function openclawMemProjectRoot() {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+}
+
+function fallbackCommandForOpenclawMem(args) {
+  return {
+    command: "uv",
+    args: [
+      "run",
+      "--project",
+      openclawMemProjectRoot(),
+      "--python",
+      "3.13",
+      "--frozen",
+      "python",
+      "-m",
+      "openclaw_mem",
+      ...args,
+    ],
+  };
+}
+
+function isMissingCommandResult(proc) {
+  return proc?.errorCode === "ENOENT";
+}
+
+function summarizeAttempt({ label, command, args, proc, elapsedMs }) {
+  return {
+    label,
+    command,
+    args,
+    ok: Boolean(proc?.ok),
+    exitCode: proc?.exitCode ?? null,
+    errorCode: proc?.errorCode ?? null,
+    errorMessage: proc?.errorMessage ? String(proc.errorMessage).slice(0, 300) : null,
+    timedOut: Boolean(proc?.timedOut),
+    elapsedMs,
+  };
+}
+
+async function runSymbolicCanvasCommand({ cfg, args, input, runner }) {
+  const attempts = [];
+  const primary = {
+    label: "configured",
+    command: cfg.command,
+    args,
+  };
+  const startedPrimary = Date.now();
+  let proc = await runner({
+    command: primary.command,
+    args: primary.args,
+    input,
+    timeoutMs: cfg.timeoutMs,
+    maxBufferBytes: cfg.maxBufferBytes,
+  });
+  attempts.push(summarizeAttempt({ ...primary, proc, elapsedMs: Date.now() - startedPrimary }));
+
+  if (cfg.command !== DEFAULT_COMMAND || !isMissingCommandResult(proc)) {
+    return {
+      proc,
+      command: primary.command,
+      args: primary.args,
+      fallbackUsed: false,
+      fallbackAvailable: cfg.command === DEFAULT_COMMAND,
+      attempts,
+    };
+  }
+
+  const fallback = {
+    label: "uv-project-module-fallback",
+    ...fallbackCommandForOpenclawMem(args),
+  };
+  const startedFallback = Date.now();
+  proc = await runner({
+    command: fallback.command,
+    args: fallback.args,
+    input,
+    timeoutMs: cfg.timeoutMs,
+    maxBufferBytes: cfg.maxBufferBytes,
+  });
+  attempts.push(summarizeAttempt({ ...fallback, proc, elapsedMs: Date.now() - startedFallback }));
+
+  return {
+    proc,
+    command: fallback.command,
+    args: fallback.args,
+    fallbackUsed: true,
+    fallbackAvailable: true,
+    attempts,
+  };
+}
+
 export async function runSymbolicCanvasAutoBuild({ event = {}, ctx = {}, config = {}, stateDir, runner = defaultRunner } = {}) {
   const cfg = resolveSymbolicCanvasAutoConfig(config);
   const started = Date.now();
@@ -265,13 +358,13 @@ export async function runSymbolicCanvasAutoBuild({ event = {}, ctx = {}, config 
   ];
   if (cfg.baseDir) args.push("--base-dir", cfg.baseDir);
 
-  const proc = await runner({
-    command: cfg.command,
+  const commandResult = await runSymbolicCanvasCommand({
+    cfg,
     args,
     input: JSON.stringify(trace),
-    timeoutMs: cfg.timeoutMs,
-    maxBufferBytes: cfg.maxBufferBytes,
+    runner,
   });
+  const proc = commandResult.proc;
   const payload = parseJsonLoose(proc.stdout);
   const ok = Boolean(proc.ok && payload?.ok !== false && fs.existsSync(jsonOut) && fs.existsSync(mermaidOut));
 
@@ -279,8 +372,14 @@ export async function runSymbolicCanvasAutoBuild({ event = {}, ctx = {}, config 
     ok,
     skipped: false,
     elapsedMs: Date.now() - started,
-    command: cfg.command,
+    configuredCommand: cfg.command,
+    command: commandResult.command,
     args,
+    configuredArgs: args,
+    executedArgs: commandResult.args,
+    fallbackUsed: commandResult.fallbackUsed,
+    fallbackAvailable: commandResult.fallbackAvailable,
+    attempts: commandResult.attempts,
     runDir,
     traceOut,
     jsonOut,

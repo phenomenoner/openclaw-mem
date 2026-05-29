@@ -279,10 +279,11 @@ function commandCandidates(args) {
   ];
 }
 
-async function runOneJsonCommand(candidate, timeoutMs) {
+async function runOneJsonCommand(candidate, timeoutMs, env = undefined) {
   const { stdout, stderr } = await execFile(candidate.command, candidate.args, {
     timeout: timeoutMs,
     maxBuffer: 8 * 1024 * 1024,
+    env: env ? { ...process.env, ...env } : undefined,
   });
 
   const payload = parseJsonLoose(stdout) ?? parseJsonLoose(stderr);
@@ -295,12 +296,12 @@ async function runOneJsonCommand(candidate, timeoutMs) {
   };
 }
 
-async function runOpenclawMemJson(args, timeoutMs = 240000) {
+async function runOpenclawMemJson(args, timeoutMs = 240000, env = undefined) {
   const failures = [];
 
   for (const candidate of commandCandidates(args)) {
     try {
-      return await runOneJsonCommand(candidate, timeoutMs);
+      return await runOneJsonCommand(candidate, timeoutMs, env);
     } catch (err) {
       const stdout = String(err?.stdout || "");
       const stderr = String(err?.stderr || "");
@@ -413,12 +414,26 @@ function normalizeDocsHit(row, maxSnippetChars) {
   };
 }
 
+function embeddingChildEnv(embedding = undefined) {
+  const env = {};
+  const apiKey = typeof embedding?.apiKey === "string" ? embedding.apiKey.trim() : "";
+  const model = typeof embedding?.model === "string" ? embedding.model.trim() : "";
+  if (apiKey && !process.env.OPENAI_API_KEY) {
+    env.OPENAI_API_KEY = apiKey;
+  }
+  if (model && !process.env.OPENAI_EMBEDDING_MODEL) {
+    env.OPENAI_EMBEDDING_MODEL = model;
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
 export async function docsIngestWithCli({
   sqlitePath,
   sourceRoots,
   sourceGlobs,
   maxChunkChars,
   embedOnIngest,
+  embedding,
 }) {
   const roots = coerceStringArray(sourceRoots);
   const globs = coerceStringArray(sourceGlobs, ["**/*.md"]);
@@ -484,7 +499,11 @@ export async function docsIngestWithCli({
     args.push("--max-chars", String(cap));
     args.push(embedOnIngest === false ? "--no-embed" : "--embed");
 
-    const result = await runOpenclawMemJson(args);
+    const result = await runOpenclawMemJson(
+      args,
+      240000,
+      embedOnIngest === false ? undefined : embeddingChildEnv(embedding),
+    );
     if (!result.ok && !result.payload) {
       errors.push(result.error || "ingest_failed");
       continue;
@@ -528,6 +547,7 @@ export async function docsSearchWithCli({
   searchRrfK,
   scopeMappingStrategy,
   scopeMap,
+  embedding,
 }) {
   const trimmedQuery = String(query || "").trim();
   if (!trimmedQuery) {
@@ -583,7 +603,7 @@ export async function docsSearchWithCli({
     args.push("--scope-repos", ...pushdownRepos);
   }
 
-  const result = await runOpenclawMemJson(args);
+  const result = await runOpenclawMemJson(args, 240000, embeddingChildEnv(embedding));
   if (!result.ok && !result.payload) {
     return {
       items: [],
@@ -624,6 +644,7 @@ export const __private__ = {
   normalizeScopeToken,
   matchesScope,
   computeScopePushdownRepos,
+  embeddingChildEnv,
   commandCandidates,
   openclawMemProjectRoot,
 };

@@ -20143,7 +20143,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("mem-system", help="Read-only Store/Pack/Observe/Review/Curate status")
     msub = sp.add_subparsers(dest="mem_system_cmd", required=True)
-    ms = msub.add_parser("status", help="Show OpenClaw Mem system surface inventory")
+    ms = msub.add_parser("status", aliases=["verify"], help="Show read-only OpenClaw Mem system posture")
     ms.add_argument("--workspace-root", default=".", help="Repository/workspace root to inspect")
     ms.add_argument("--state-root", help="OpenClaw state root to inspect (default: ~/.openclaw)")
     ms.add_argument("--out", help="Optional path to write the status JSON")

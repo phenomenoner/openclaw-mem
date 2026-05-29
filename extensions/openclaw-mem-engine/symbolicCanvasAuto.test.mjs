@@ -132,3 +132,68 @@ test("runSymbolicCanvasAutoBuild writes json and mermaid via runner", async () =
   assert.equal(fs.existsSync(receipt.jsonOut), true);
   assert.equal(fs.existsSync(receipt.mermaidOut), true);
 });
+
+test("runSymbolicCanvasAutoBuild falls back to repo-local uv module when default command is missing", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "symbolic-auto-fallback-"));
+  const calls = [];
+  const receipt = await runSymbolicCanvasAutoBuild({
+    stateDir: tmp,
+    config: { enabled: true, outputDir: "out", minMessages: 2 },
+    event: {
+      success: true,
+      messages: [
+        { role: "user", content: "checkpoint Start" },
+        { role: "assistant", content: "Done receipt" },
+      ],
+    },
+    runner: async ({ command, args }) => {
+      calls.push({ command, args });
+      if (command === "openclaw-mem") {
+        return { ok: false, exitCode: null, stdout: "", stderr: "", errorCode: "ENOENT", errorMessage: "spawn openclaw-mem ENOENT" };
+      }
+      const out = args[args.indexOf("--out") + 1];
+      const mmd = args[args.indexOf("--mermaid-out") + 1];
+      fs.writeFileSync(out, JSON.stringify({ ok: true, kind: "openclaw-mem.symbolic-canvas.v0" }));
+      fs.writeFileSync(mmd, "graph LR\n");
+      return { ok: true, exitCode: 0, stdout: JSON.stringify({ ok: true, kind: "openclaw-mem.symbolic-canvas.v0" }), stderr: "" };
+    },
+  });
+
+  assert.equal(receipt.ok, true);
+  assert.equal(receipt.configuredCommand, "openclaw-mem");
+  assert.equal(receipt.command, "uv");
+  assert.equal(receipt.fallbackUsed, true);
+  assert.equal(receipt.attempts.length, 2);
+  assert.equal(calls[0].command, "openclaw-mem");
+  assert.equal(calls[1].command, "uv");
+  assert.deepEqual(calls[1].args.slice(0, 2), ["run", "--project"]);
+  assert.equal(calls[1].args.includes("-m"), true);
+  assert.equal(calls[1].args.includes("openclaw_mem"), true);
+});
+
+test("runSymbolicCanvasAutoBuild preserves custom command behavior when command is missing", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "symbolic-auto-custom-"));
+  const calls = [];
+  const receipt = await runSymbolicCanvasAutoBuild({
+    stateDir: tmp,
+    config: { enabled: true, outputDir: "out", minMessages: 2, command: "custom-openclaw-mem" },
+    event: {
+      success: true,
+      messages: [
+        { role: "user", content: "checkpoint Start" },
+        { role: "assistant", content: "Done receipt" },
+      ],
+    },
+    runner: async ({ command, args }) => {
+      calls.push({ command, args });
+      return { ok: false, exitCode: null, stdout: "", stderr: "", errorCode: "ENOENT", errorMessage: "spawn custom-openclaw-mem ENOENT" };
+    },
+  });
+
+  assert.equal(receipt.ok, false);
+  assert.equal(receipt.configuredCommand, "custom-openclaw-mem");
+  assert.equal(receipt.command, "custom-openclaw-mem");
+  assert.equal(receipt.fallbackUsed, false);
+  assert.equal(receipt.attempts.length, 1);
+  assert.equal(calls.length, 1);
+});

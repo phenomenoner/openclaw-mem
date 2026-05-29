@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openclaw-context-pack"
-version = "1.9.24"
+version = "1.9.25"
 description = "Local-first AI agent memory governance: Store / Pack / Observe with citations, receipts, and rollback"
 requires-python = ">=3.10"
 readme = "README.md"

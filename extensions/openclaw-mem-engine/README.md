@@ -307,8 +307,10 @@ memory, call `memory_store`, or inject prompt context.
 }
 ```
 
-Local source checkouts can point the hook at the Python module instead of a
-global `openclaw-mem` binary:
+Local source checkouts retry the default `command: "openclaw-mem"` through the
+repo-local Python module when the binary is missing from `PATH`. Custom
+commands remain authoritative and do not fall back. You can still point the
+hook at the Python module explicitly:
 
 ```jsonc
 {
