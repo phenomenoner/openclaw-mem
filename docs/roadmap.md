@@ -205,6 +205,35 @@ Acceptance criteria:
 Artifacts:
 - Spec: `docs/specs/graphic-memory-compiled-synthesis-v0.md`
 
+### 1.7d) Temporal fact materialized view (KG facts without a new truth owner)
+
+Status: **ROADMAP** (planning accepted after 2026-06-03 second-brain review; no runtime change yet).
+
+- Problem: operators need a default experience for "what is currently true about X, how did that truth evolve, and which receipts support it?" without treating graph/wiki output as a new source of truth.
+- Decision: model KG facts as a **materialized view over Store evidence**, surfaced through Pack and proven by Observe receipts. The view is rebuildable and additive; it is not a hidden memory owner.
+- V0 scope:
+  - explicit assertions only; no automatic LLM extraction
+  - single-subject current truth + timeline + evidence pack
+  - controlled predicate registry
+  - deterministic lint for dangling sources, unknown predicates, interval conflicts, stale facts, and over-confident source tiers
+  - ContextPack-compatible `graph fact pack`
+- Non-goals:
+  - graph DB migration
+  - multi-hop inference
+  - free-form predicates
+  - "compiled wiki" as an authority surface
+
+Acceptance criteria:
+- A valid sourced assertion appears in `current` and `timeline`.
+- Dangling sources and unresolved overlapping contradictions fail lint.
+- Supersession and invalidation update timeline/current truth deterministically.
+- `graph fact pack` is byte-stable under the same inputs, budget-bounded, and cites every included fact.
+- Dropping the derived cache and rebuilding produces the same stable ids and current-truth set.
+
+Artifacts:
+- Spec: `docs/specs/temporal-fact-materialized-view-v0.md`
+- Dev phase map/backlog: `docs/specs/temporal-fact-materialized-view-dev-phases-v0.md`
+
 ### 1.6) Sunrise rollout (Stage A→B→C)
 
 Status: **PARTIAL** (Stage A running; Stage B/C pending).

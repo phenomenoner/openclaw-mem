@@ -219,6 +219,31 @@ Storage posture (today):
 
 The graph is optional: the Context Packer should degrade gracefully without it.
 
+### Temporal fact materialized view — **ROADMAP**
+
+The next graph-facing product step is not a graph DB migration or a wiki as truth.
+It is a derived temporal fact view:
+
+```text
+Store sources -> temporal fact view -> Pack output -> Observe receipts
+```
+
+The view answers operator questions such as "what is currently true about this
+subject?", "when did that change?", and "which receipts support it?" while
+preserving the existing ownership split:
+
+- Store owns source evidence.
+- Pack owns bounded context assembly.
+- Observe owns receipts and auditability.
+- The temporal fact view is rebuildable, linted, and never authoritative when its
+  sources are missing or stale.
+
+V0 is explicit-assertion only: controlled predicates, single-subject current
+truth, timeline, lint, and ContextPack-compatible fact packing. Automatic
+extraction and multi-hop inference are later, gated work.
+
+Spec: [Temporal fact materialized view v0](specs/temporal-fact-materialized-view-v0.md)
+
 ## Integration with OpenClaw memory backends
 
 OpenClaw’s memory backend (e.g. `memory-lancedb`) and `openclaw-mem` solve different problems:
