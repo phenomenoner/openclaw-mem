@@ -632,6 +632,54 @@ MEDIA:/tmp/not-memory.png
 
         conn.close()
 
+    def test_extract_sessions_ignores_file_vanished_after_discovery(self):
+        conn = _connect(":memory:")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sessions_root = root / "sessions"
+            sessions_root.mkdir(parents=True, exist_ok=True)
+            session_file = sessions_root / "thread-vanish.jsonl"
+            spool = root / "episodes.jsonl"
+            extract_state = root / "extract-state.json"
+
+            session_line = self._session_line(ts="2026-03-06T01:10:00Z", role="user", text="[SCOPE: proj-vanish] keep stable")
+            session_file.write_text(json.dumps(session_line, ensure_ascii=False) + "\n", encoding="utf-8")
+
+            original_stat = Path.stat
+            stat_calls = {"target": 0}
+
+            def flaky_stat(path_self, *args, **kwargs):
+                if path_self == session_file:
+                    stat_calls["target"] += 1
+                    if stat_calls["target"] >= 2:
+                        raise FileNotFoundError(str(path_self))
+                return original_stat(path_self, *args, **kwargs)
+
+            with patch.object(Path, "stat", flaky_stat):
+                out = self._run(
+                    conn,
+                    [
+                        "episodes",
+                        "extract-sessions",
+                        "--sessions-root",
+                        str(sessions_root),
+                        "--file",
+                        str(spool),
+                        "--state",
+                        str(extract_state),
+                        "--json",
+                    ],
+                )
+
+            self.assertEqual(out["files_seen"], 1)
+            self.assertEqual(out["emitted"], 0)
+            self.assertEqual(out["ignored_files"], 1)
+            self.assertTrue(any(str(item).endswith(":vanished") for item in out["errors_sample"]))
+            self.assertTrue(spool.exists())
+            self.assertEqual(spool.read_text(encoding="utf-8"), "")
+
+        conn.close()
+
     def test_append_session_store_receipt_uses_windows_basename_on_posix(self):
         conn = _connect(":memory:")
         out = self._run(

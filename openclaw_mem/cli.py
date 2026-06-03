@@ -17297,7 +17297,14 @@ def _episodes_extract_sessions_once(
         for fp in files:
             files_seen += 1
             key = str(fp)
-            stat = fp.stat()
+            try:
+                stat = fp.stat()
+            except OSError:
+                # TOCTOU: file vanished between rglob list and loop iteration (session GC)
+                ignored_files += 1
+                if len(errors_sample) < 5:
+                    errors_sample.append(f"{key}:vanished")
+                continue
 
             file_state = files_state.get(key) if isinstance(files_state.get(key), dict) else {}
             prev_offset = int(file_state.get("offset") or 0)
