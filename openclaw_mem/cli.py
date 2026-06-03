@@ -98,6 +98,7 @@ from openclaw_mem.graph.query import (
     query_writers,
     query_writers_topology,
 )
+from openclaw_mem.graph import facts as graph_facts
 from openclaw_mem.graph.topology_diff import compare_topology_files
 from openclaw_mem.graph.topology_extract import extract_topology_seed
 from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
@@ -14332,6 +14333,143 @@ def cmd_graph_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     )
 
 
+def _graph_fact_source_root(args: argparse.Namespace) -> Optional[str]:
+    raw = str(getattr(args, "source_root", "") or "").strip()
+    return raw or None
+
+
+def _graph_fact_error(exc: Exception) -> Dict[str, Any]:
+    issues = getattr(exc, "issues", None)
+    payload: Dict[str, Any] = {
+        "kind": "openclaw-mem.graph.fact.error.v0",
+        "error": str(exc),
+    }
+    if issues:
+        payload["issues"] = list(issues)
+    return payload
+
+
+def cmd_graph_fact(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    cmd = str(getattr(args, "graph_fact_cmd", "") or "").strip()
+    try:
+        if cmd == "registry":
+            payload = graph_facts.predicate_registry_payload()
+        elif cmd == "assert":
+            payload = graph_facts.assert_fact(
+                conn,
+                subject_ref=str(getattr(args, "subject", "") or ""),
+                subject_label=getattr(args, "subject_label", None),
+                predicate=str(getattr(args, "predicate", "") or ""),
+                object_type=str(getattr(args, "object_type", "literal") or "literal"),
+                object_value=getattr(args, "object_value", None),
+                valid_from=getattr(args, "valid_from", None),
+                valid_to=getattr(args, "valid_to", None),
+                confidence_tier=str(getattr(args, "confidence_tier", "source_capped") or "source_capped"),
+                source_refs=list(getattr(args, "source_ref", None) or []),
+                assertion_ref=getattr(args, "assertion_ref", None),
+                supersedes=list(getattr(args, "supersedes", None) or []),
+                asserted_by=str(getattr(args, "asserted_by", "operator") or "operator"),
+                source_root=_graph_fact_source_root(args),
+            )
+        elif cmd == "current":
+            payload = graph_facts.current_facts(
+                conn,
+                subject_ref=str(getattr(args, "subject", "") or ""),
+                as_of=getattr(args, "as_of", None),
+                include_stale=bool(getattr(args, "include_stale", False)),
+                source_root=_graph_fact_source_root(args),
+            )
+        elif cmd == "timeline":
+            payload = graph_facts.timeline(
+                conn,
+                subject_ref=str(getattr(args, "subject", "") or ""),
+                predicate=getattr(args, "predicate", None),
+                source_root=_graph_fact_source_root(args),
+            )
+        elif cmd == "lint":
+            payload = graph_facts.lint_facts(conn, source_root=_graph_fact_source_root(args))
+            _emit(payload, bool(getattr(args, "json", True)))
+            if not bool(payload.get("ok")):
+                sys.exit(1)
+            return
+        elif cmd == "pack":
+            payload = graph_facts.fact_pack(
+                conn,
+                subject_ref=str(getattr(args, "subject", "") or ""),
+                budget_tokens=int(getattr(args, "budget_tokens", 1200) or 1200),
+                max_items=int(getattr(args, "max_items", 20) or 20),
+                include_stale=bool(getattr(args, "include_stale", False)),
+                source_root=_graph_fact_source_root(args),
+            )
+        elif cmd == "stale":
+            payload = graph_facts.stale_facts(
+                conn,
+                apply=bool(getattr(args, "apply", False)),
+                source_root=_graph_fact_source_root(args),
+            )
+        elif cmd == "invalidate":
+            payload = graph_facts.invalidate_fact(
+                conn,
+                fact_id=str(getattr(args, "fact_id", "") or ""),
+                invalidated_at=getattr(args, "invalidated_at", None),
+                assertion_ref=getattr(args, "assertion_ref", None),
+                source_refs=list(getattr(args, "source_ref", None) or []),
+                source_root=_graph_fact_source_root(args),
+            )
+        elif cmd == "route":
+            payload = graph_facts.route_fact_query(
+                conn,
+                query=str(getattr(args, "query", "") or ""),
+                subject_ref=getattr(args, "subject", None),
+                budget_tokens=int(getattr(args, "budget_tokens", 1200) or 1200),
+                max_items=int(getattr(args, "max_items", 20) or 20),
+                source_root=_graph_fact_source_root(args),
+            )
+        elif cmd == "propose":
+            text_value = str(getattr(args, "text", "") or "")
+            file_value = str(getattr(args, "file", "") or "").strip()
+            if file_value:
+                text_value = Path(file_value).read_text(encoding="utf-8")
+            if not text_value.strip():
+                raise graph_facts.FactValidationError(
+                    "propose requires --text or --file",
+                    issues=[{"code": "missing_proposal_input", "severity": "error"}],
+                )
+            payload = graph_facts.propose_extractions(
+                text=text_value,
+                source_refs=list(getattr(args, "source_ref", None) or []),
+                max_proposals=int(getattr(args, "max_proposals", 20) or 20),
+            )
+        elif cmd == "measure-extraction":
+            payload = graph_facts.measure_extraction_precision(
+                corpus_rows=graph_facts.load_jsonl(str(getattr(args, "corpus", "") or "")),
+                golden_rows=graph_facts.load_jsonl(str(getattr(args, "golden", "") or "")),
+            )
+        elif cmd == "rebuild":
+            records = graph_facts.load_jsonl(str(getattr(args, "file", "") or ""))
+            payload = graph_facts.rebuild_from_records(
+                conn,
+                records,
+                clear=not bool(getattr(args, "append", False)),
+                source_root=_graph_fact_source_root(args),
+                require_resolved_sources=not bool(getattr(args, "allow_dangling_source", False)),
+            )
+        else:
+            _emit({"error": f"unsupported graph fact command: {cmd}"}, True)
+            sys.exit(2)
+    except Exception as exc:
+        _emit(_graph_fact_error(exc), True)
+        sys.exit(2)
+
+    if bool(getattr(args, "json", True)):
+        _emit(payload, True)
+        return
+    if isinstance(payload, dict) and payload.get("bundle_text"):
+        print(str(payload.get("bundle_text")), end="")
+        return
+    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+
+
 def _graph_env_bool_status(name: str, *, default: bool = False) -> Dict[str, Any]:
     raw = os.getenv(name)
     if raw is None:
@@ -19620,6 +19758,93 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = ssub.add_parser("recommend", help="Emit bounded zero-write maintenance recommendations from synthesis health and coverage pressure")
     s.set_defaults(func=cmd_graph_synth)
+
+    g = gsub.add_parser("fact", help="Temporal fact materialized view helpers")
+    fsub = g.add_subparsers(dest="graph_fact_cmd", required=True)
+
+    f = fsub.add_parser("registry", help="Emit the controlled predicate registry")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("assert", help="Assert a source-linked temporal fact")
+    f.add_argument("--subject", required=True, help="Subject ref, e.g. entity:openclaw-mem")
+    f.add_argument("--subject-label", dest="subject_label", help="Human label for the subject")
+    f.add_argument("--predicate", required=True, help="Controlled predicate id")
+    f.add_argument("--object", dest="object_value", required=True, help="Fact object value")
+    f.add_argument("--object-type", dest="object_type", default="literal", choices=["literal", "entity_ref", "json"], help="Fact object type (default: literal)")
+    f.add_argument("--valid-from", dest="valid_from", required=True, help="ISO-8601 validity start")
+    f.add_argument("--valid-to", dest="valid_to", help="Optional ISO-8601 validity end")
+    f.add_argument("--confidence-tier", dest="confidence_tier", default="source_capped", choices=["low", "source_capped", "corroborated", "operator_asserted"], help="Confidence tier capped by source evidence")
+    f.add_argument("--source-ref", dest="source_ref", action="append", required=True, help="Evidence source ref, repeatable (doc:path, memory:path, obs:123)")
+    f.add_argument("--assertion-ref", dest="assertion_ref", required=True, help="Receipt ref for the assertion act")
+    f.add_argument("--supersedes", action="append", default=None, help="Existing fact id superseded by this assertion")
+    f.add_argument("--asserted-by", dest="asserted_by", default="operator", help="Asserting actor (default: operator)")
+    f.add_argument("--source-root", dest="source_root", help="Root for relative file source refs")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("current", help="Show current facts for one subject")
+    f.add_argument("--subject", required=True, help="Subject ref")
+    f.add_argument("--as-of", dest="as_of", help="Optional ISO-8601 as-of time")
+    f.add_argument("--include-stale", action="store_true", help="Include stale facts instead of excluding them")
+    f.add_argument("--source-root", dest="source_root", help="Root for relative file source refs")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("timeline", help="Show temporal fact timeline for one subject")
+    f.add_argument("--subject", required=True, help="Subject ref")
+    f.add_argument("--predicate", help="Optional predicate filter")
+    f.add_argument("--source-root", dest="source_root", help="Root for relative file source refs")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("lint", help="Lint the temporal fact view")
+    f.add_argument("--source-root", dest="source_root", help="Root for relative file source refs")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("pack", help="Emit a ContextPack-compatible temporal fact pack")
+    f.add_argument("--subject", required=True, help="Subject ref")
+    f.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle_text")
+    f.add_argument("--max-items", dest="max_items", type=int, default=20, help="Max facts to include")
+    f.add_argument("--include-stale", action="store_true", help="Include stale facts instead of excluding them")
+    f.add_argument("--source-root", dest="source_root", help="Root for relative file source refs")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("stale", help="Detect source-hash drift for facts")
+    f.add_argument("--apply", action="store_true", help="Persist stale status for changed-source facts")
+    f.add_argument("--source-root", dest="source_root", help="Root for relative file source refs")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("invalidate", help="Invalidate an existing fact with a receipt")
+    f.add_argument("--fact-id", dest="fact_id", required=True, help="Fact id to invalidate")
+    f.add_argument("--invalidated-at", dest="invalidated_at", help="ISO-8601 invalidation time (default: now)")
+    f.add_argument("--source-ref", dest="source_ref", action="append", required=True, help="Evidence source ref for invalidation, repeatable")
+    f.add_argument("--assertion-ref", dest="assertion_ref", required=True, help="Receipt ref for the invalidation act")
+    f.add_argument("--source-root", dest="source_root", help="Root for relative file source refs")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("route", help="Route current-truth/timeline/evidence queries through the fact view when possible")
+    f.add_argument("query", help="Operator query text")
+    f.add_argument("--subject", help="Optional explicit subject ref")
+    f.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for fact pack")
+    f.add_argument("--max-items", dest="max_items", type=int, default=20, help="Max facts to include")
+    f.add_argument("--source-root", dest="source_root", help="Root for relative file source refs")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("propose", help="Review-only extraction proposal from explicit source text")
+    f.add_argument("--text", help="Text to scan")
+    f.add_argument("--file", help="File containing text to scan")
+    f.add_argument("--source-ref", dest="source_ref", action="append", required=True, help="Required source ref for every proposal")
+    f.add_argument("--max-proposals", dest="max_proposals", type=int, default=20, help="Max proposals to emit")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("measure-extraction", help="Measure review-only extractor precision/recall on JSONL fixtures")
+    f.add_argument("--corpus", required=True, help="Corpus JSONL: {text, source_refs}")
+    f.add_argument("--golden", required=True, help="Golden JSONL: {subject, predicate, object}")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("rebuild", help="Rebuild the derived fact view from JSONL records")
+    f.add_argument("--file", required=True, help="Fact JSONL file")
+    f.add_argument("--append", action="store_true", help="Append instead of clearing graph_facts first")
+    f.add_argument("--allow-dangling-source", dest="allow_dangling_source", action="store_true", help="Allow unresolved sources during fixture rebuild")
+    f.add_argument("--source-root", dest="source_root", help="Root for relative file source refs")
+    f.set_defaults(func=cmd_graph_fact)
 
     g = gsub.add_parser("lint", help="Run deterministic health checks for synthesis-card coverage / staleness")
     g.set_defaults(func=cmd_graph_lint)

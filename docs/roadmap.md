@@ -207,7 +207,7 @@ Artifacts:
 
 ### 1.7d) Temporal fact materialized view (KG facts without a new truth owner)
 
-Status: **ROADMAP** (planning accepted after 2026-06-03 second-brain review; no runtime change yet).
+Status: **SHIPPED v1.9.26** (CLI lane implemented; no Gateway, cron, memory backend, or prompt-injection topology change).
 
 - Problem: operators need a default experience for "what is currently true about X, how did that truth evolve, and which receipts support it?" without treating graph/wiki output as a new source of truth.
 - Decision: model KG facts as a **materialized view over Store evidence**, surfaced through Pack and proven by Observe receipts. The view is rebuildable and additive; it is not a hidden memory owner.
@@ -217,6 +217,8 @@ Status: **ROADMAP** (planning accepted after 2026-06-03 second-brain review; no 
   - controlled predicate registry
   - deterministic lint for dangling sources, unknown predicates, interval conflicts, stale facts, and over-confident source tiers
   - ContextPack-compatible `graph fact pack`
+  - visible `graph fact route` receipt when the fact view is used
+  - review-only `graph fact propose` / `measure-extraction` extraction assist with `writes_performed=false`
 - Non-goals:
   - graph DB migration
   - multi-hop inference
@@ -233,6 +235,8 @@ Acceptance criteria:
 Artifacts:
 - Spec: `docs/specs/temporal-fact-materialized-view-v0.md`
 - Dev phase map/backlog: `docs/specs/temporal-fact-materialized-view-dev-phases-v0.md`
+- Public docs: `docs/temporal-facts.md`
+- Ops skill card: `skills/temporal-facts.ops.md`
 
 ### 1.6) Sunrise rollout (Stage A→B→C)
 

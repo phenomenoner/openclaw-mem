@@ -83,6 +83,7 @@ nav:
       - Engine admin ops: mem-engine-admin-ops.md
       - Architecture: architecture.md
       - Context pack: context-pack.md
+      - Temporal facts: temporal-facts.md
       - Symbolic Canvas: symbolic-canvas.md
       - Agent memory skill (SOP): agent-memory-skill.md
       - Harness-persistent memory: harness-persistent-memory.md

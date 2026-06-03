@@ -1,6 +1,6 @@
 # Temporal fact materialized view v0
 
-Status: ROADMAP.
+Status: IMPLEMENTED v1.9.26 for explicit assertions, current/timeline/lint/pack/stale/route, and review-only extraction proposals.
 
 Decision: build this lane as a source-linked materialized view over Store evidence, not as a new source of truth.
 

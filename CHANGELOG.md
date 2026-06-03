@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.26] - 2026-06-03
+
+### Added
+
+- Add `openclaw-mem graph fact ...`, a temporal fact materialized view over source evidence.
+- Add explicit fact assertion, current truth, timeline, lint, stale detection, ContextPack-compatible fact pack, route helper, and review-only extraction proposal/measurement commands.
+- Add a controlled predicate registry and deterministic fact fixtures covering rebuild-stable ids, source resolution, interval conflicts, supersession, invalidation, staleness, and budgeted packing.
+- Add public Temporal Facts docs and an operator skill card.
+
+### Safety
+
+- Keep facts source-linked and rebuildable; unresolved source refs are rejected by assertion and fail lint if injected.
+- Keep stale facts excluded from current truth by default.
+- Keep extraction assist review-only with `writes_performed=false`; no extraction apply lane is enabled.
+- No Gateway, cron, memory backend, prompt injection, or runtime topology change is introduced.
+
 ## [1.9.25] - 2026-05-30
 
 ### Added

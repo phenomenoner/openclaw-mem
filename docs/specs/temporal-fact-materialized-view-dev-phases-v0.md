@@ -1,6 +1,6 @@
 # Temporal fact materialized view dev phases v0
 
-Status: active planning backlog.
+Status: implemented in v1.9.26 for explicit assertions, current/timeline/lint/pack/stale/route, and review-only extraction proposals.
 
 This map turns `temporal-fact-materialized-view-v0.md` into a staged engineering line. It is intentionally phase-gated: no live memory backend, Gateway, or cron topology changes are part of this plan.
 
@@ -175,27 +175,27 @@ Exit gate:
 
 | ID | Phase | Status | Work item | Acceptance |
 | --- | --- | --- | --- | --- |
-| TFMV-P0-001 | 0 | ready | Freeze fact schema and source/assertion split | schema doc and fixtures cover source refs vs assertion refs |
-| TFMV-P0-002 | 0 | ready | Define predicate registry v0 | unknown predicate fixture fails lint |
-| TFMV-P0-003 | 0 | ready | Define interval semantics | open interval, overlap, supersede, invalidate fixtures pass |
-| TFMV-P0-004 | 0 | ready | Define stable-id algorithm | rebuild fixture produces same ids |
-| TFMV-P1-001 | 1 | next | Implement fact core dataclasses/parser | fixture load validates and rejects malformed records |
-| TFMV-P1-002 | 1 | next | Implement source resolver interface | valid/dangling source results are typed and test-covered |
-| TFMV-P1-003 | 1 | next | Implement lint rules | dangling, unknown predicate, interval conflict, over-cap confidence detected |
-| TFMV-P1-004 | 1 | next | Implement derived store/rebuild | drop/rebuild preserves stable ids/current set |
-| TFMV-P2-001 | 2 | queued | Add `graph fact assert` | valid source assertion writes fact + receipt |
-| TFMV-P2-002 | 2 | queued | Add `graph fact current` | current truth omits superseded/invalidated facts |
-| TFMV-P2-003 | 2 | queued | Add `graph fact timeline` | chronological timeline includes supersede/invalidate events |
-| TFMV-P2-004 | 2 | queued | Add `graph fact lint` CLI | CLI exits nonzero on unresolved conflicts |
-| TFMV-P3-001 | 3 | queued | Add `graph fact pack` | ContextPack-compatible JSON cites every included fact |
-| TFMV-P3-002 | 3 | queued | Add pack trace integration | trace records include/exclude/freshness/source reasons |
-| TFMV-P3-003 | 3 | queued | Add budget behavior tests | deterministic exclusion order under fixed budget |
-| TFMV-P4-001 | 4 | queued | Wire stale-source detection | changed source marks dependent fact stale |
-| TFMV-P4-002 | 4 | queued | Document graph synth reuse boundary | docs make facts a view, not synth-card replacement |
-| TFMV-P5-001 | 5 | queued | Add operator query helper/route | known-subject route returns fact pack receipt |
-| TFMV-P5-002 | 5 | queued | Add synthetic demo | docs demo proves current/timeline/evidence loop |
-| TFMV-P6-001 | 6 | deferred | Add extraction proposal command | proposal is review-only and writes nothing |
-| TFMV-P6-002 | 6 | deferred | Measure extraction precision | no apply lane before measured acceptance |
+| TFMV-P0-001 | 0 | done | Freeze fact schema and source/assertion split | schema doc and fixtures cover source refs vs assertion refs |
+| TFMV-P0-002 | 0 | done | Define predicate registry v0 | unknown predicate fixture fails lint |
+| TFMV-P0-003 | 0 | done | Define interval semantics | open interval, overlap, supersede, invalidate fixtures pass |
+| TFMV-P0-004 | 0 | done | Define stable-id algorithm | rebuild fixture produces same ids |
+| TFMV-P1-001 | 1 | done | Implement fact core dataclasses/parser | fixture load validates and rejects malformed records |
+| TFMV-P1-002 | 1 | done | Implement source resolver interface | valid/dangling source results are typed and test-covered |
+| TFMV-P1-003 | 1 | done | Implement lint rules | dangling, unknown predicate, interval conflict, over-cap confidence detected |
+| TFMV-P1-004 | 1 | done | Implement derived store/rebuild | drop/rebuild preserves stable ids/current set |
+| TFMV-P2-001 | 2 | done | Add `graph fact assert` | valid source assertion writes fact + receipt |
+| TFMV-P2-002 | 2 | done | Add `graph fact current` | current truth omits superseded/invalidated facts |
+| TFMV-P2-003 | 2 | done | Add `graph fact timeline` | chronological timeline includes supersede/invalidate events |
+| TFMV-P2-004 | 2 | done | Add `graph fact lint` CLI | CLI exits nonzero on unresolved conflicts |
+| TFMV-P3-001 | 3 | done | Add `graph fact pack` | ContextPack-compatible JSON cites every included fact |
+| TFMV-P3-002 | 3 | done | Add pack trace integration | trace records include/exclude/freshness/source reasons |
+| TFMV-P3-003 | 3 | done | Add budget behavior tests | deterministic exclusion order under fixed budget |
+| TFMV-P4-001 | 4 | done | Wire stale-source detection | changed source marks dependent fact stale |
+| TFMV-P4-002 | 4 | done | Document graph synth reuse boundary | docs make facts a view, not synth-card replacement |
+| TFMV-P5-001 | 5 | done | Add operator query helper/route | known-subject route returns fact pack receipt |
+| TFMV-P5-002 | 5 | done | Add synthetic demo | docs demo proves current/timeline/evidence loop |
+| TFMV-P6-001 | 6 | done | Add extraction proposal command | proposal is review-only and writes nothing |
+| TFMV-P6-002 | 6 | done | Measure extraction precision | no apply lane before measured acceptance |
 
 ## Risk ledger
 

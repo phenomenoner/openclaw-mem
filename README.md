@@ -20,6 +20,7 @@
 | Sidecar observation capture | Automatic when the plugin is enabled | Captures JSONL observations with backend/action annotations. |
 | Harvest, triage, and graph capture | Scheduled on configured hosts | Converts captured records into searchable stores and receipts. |
 | `pack` | CLI core | Produces bounded `ContextPack` output with citations and trace receipts. |
+| Temporal facts | CLI advanced lane | Source-linked current truth, timelines, and fact packs without making graph data a new truth owner. |
 | Harness-persistent memory | Opt-in via Gateway + CLI install card | Installs a persistent Codex / Claude / Gemini / generic agent memory posture backed by capability-scoped gateway tokens and parity-aware read diagnostics. |
 | Graph routing, optimize assist, continuity, GBrain | Advanced Labs / opt-in lanes | Available for mature operators, but not part of the first evaluation path. |
 | Mem-engine Proactive Pack | Optional promotion | Bounded pre-reply recall orchestration after explicit engine adoption. |
@@ -30,6 +31,7 @@
 - **Local-first by default** — JSONL + SQLite, no external database required.
 - **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
 - **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, trust-policy receipts, and trace-backed debugging.
+- **Temporal fact view** — `graph fact` turns explicit sourced assertions into current truth, timelines, and ContextPack-compatible fact packs while keeping Store evidence authoritative.
 - **Symbolic canvas helper** — `symbolic-canvas` can turn task traces into compact Mermaid + `node_id` drill-down artifacts without live capture, Gateway patching, or memory mutation.
 - **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, sanitize runtime artifacts, and keep rollback simple.
 - **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
@@ -107,6 +109,7 @@ The first-time evaluator path is **Store / Pack / Observe**. Everything below is
 Advanced lanes currently include:
 
 - **Graph routing** for topology-aware recall experiments.
+- **Temporal facts** for source-linked current truth and timelines over explicit assertions.
 - **GBrain sidecar** for bounded read-only lookup and restricted helper-job experiments.
 - **Governed continuity side-car** for derived continuity inspection and public-safe summaries.
 - **Dream Lite / deeper optimize loops** for research-grade memory maintenance workflows.
@@ -121,8 +124,10 @@ Read more:
 - [Evaluator path](docs/evaluator-path.md)
 - [Architecture](docs/architecture.md)
 - [Context pack](docs/context-pack.md)
+- [Temporal facts](docs/temporal-facts.md)
 - [Symbolic Canvas](docs/symbolic-canvas.md)
 - [Symbolic canvas ops skill card](skills/symbolic-canvas.ops.md)
+- [Temporal facts ops skill card](skills/temporal-facts.ops.md)
 - [Experimental GBrain sidecar](docs/experimental/gbrain-sidecar/README.md)
 - [Optional Mem Engine](docs/mem-engine.md)
 

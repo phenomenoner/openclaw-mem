@@ -219,9 +219,9 @@ Storage posture (today):
 
 The graph is optional: the Context Packer should degrade gracefully without it.
 
-### Temporal fact materialized view — **ROADMAP**
+### Temporal fact materialized view — **SHIPPED v1.9.26**
 
-The next graph-facing product step is not a graph DB migration or a wiki as truth.
+The graph-facing current-truth lane is not a graph DB migration or a wiki as truth.
 It is a derived temporal fact view:
 
 ```text
@@ -240,9 +240,11 @@ preserving the existing ownership split:
 
 V0 is explicit-assertion only: controlled predicates, single-subject current
 truth, timeline, lint, and ContextPack-compatible fact packing. Automatic
-extraction and multi-hop inference are later, gated work.
+extraction apply and multi-hop inference are later, gated work. The shipped
+extraction surface is review-only and reports `writes_performed=false`.
 
-Spec: [Temporal fact materialized view v0](specs/temporal-fact-materialized-view-v0.md)
+Public docs: [Temporal facts](temporal-facts.md)
+Source spec: [Temporal fact materialized view v0](https://github.com/phenomenoner/openclaw-mem/blob/main/docs/specs/temporal-fact-materialized-view-v0.md)
 
 ## Integration with OpenClaw memory backends
 
