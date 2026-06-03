@@ -121,7 +121,7 @@ Each predicate declares:
 
 ## CLI surface
 
-Proposed namespace:
+Shipped namespace:
 
 ```bash
 openclaw-mem graph fact assert \
@@ -134,11 +134,15 @@ openclaw-mem graph fact assert \
 
 openclaw-mem graph fact current --subject entity:openclaw-mem --json
 openclaw-mem graph fact timeline --subject entity:openclaw-mem --predicate source_of_truth --json
-openclaw-mem graph fact pack --subject entity:openclaw-mem --budget-tokens 1200 --json --trace
+openclaw-mem graph fact pack --subject entity:openclaw-mem --budget-tokens 1200 --json
 openclaw-mem graph fact lint --json
-openclaw-mem graph fact supersede --fact-id fact_... --source-ref ...
+openclaw-mem graph fact assert ... --supersedes fact_...
 openclaw-mem graph fact invalidate --fact-id fact_... --source-ref ...
 openclaw-mem graph fact stale --json
+openclaw-mem graph fact route "current truth for entity:openclaw-mem" --json
+openclaw-mem graph fact propose --text "entity:openclaw-mem status active" --source-ref doc:source.md
+openclaw-mem graph fact measure-extraction --corpus corpus.jsonl --golden golden.jsonl
+openclaw-mem graph fact rebuild --file facts.jsonl --json
 ```
 
 `graph fact pack` should emit a ContextPack-compatible object plus a trace showing included facts, excluded facts, source resolution, freshness, and budget decisions.
