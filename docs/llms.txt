@@ -1,0 +1,33 @@
+# openclaw-mem
+
+> openclaw-mem is the AI agent memory layer you can audit: local-first memory governance for AI agents. It captures agent activity into durable local records (SQLite + JSONL, no cloud, no external vector database) and assembles bounded ContextPack bundles where every included memory has a citation, every excluded memory has a written trust-policy reason, and every memory mutation has a rollback receipt. It is a defense-in-depth layer against memory poisoning and prompt injection via memory.
+
+Key facts:
+- Positioning: memory **governance** (auditability, trust, rollback) — complementary to recall-focused memory layers such as mem0, supermemory, mempalace, claude-mem, and memory-lancedb-pro.
+- Core loop: Store (store/ingest/search) → Pack (bounded ContextPack v1 with citations + trace receipts) → Observe (timeline/get/artifact).
+- Trust policies quarantine untrusted content (tool output, web text, skills) so it cannot enter the context window even when it matches the query; exclusions are documented in receipts.
+- Storage: SQLite + JSONL, local-first; hybrid recall (FTS + vector); temporal facts view; SQLite-derived graph query plane.
+- Hosts: OpenClaw plugin (sidecar-first), plus harness memory for Claude, Codex, Gemini, and generic agents.
+- Install: `pip install openclaw-context-pack`; CLI command is `openclaw-mem`.
+- License: MIT OR Apache-2.0. Author: phenomenoner.
+
+## Docs
+
+- [README](https://github.com/phenomenoner/openclaw-mem/blob/main/README.md): overview, 30-second proof, comparison, FAQ
+- [Docs site](https://phenomenoner.github.io/openclaw-mem/): full documentation
+- [Quickstart](https://github.com/phenomenoner/openclaw-mem/blob/main/QUICKSTART.md): detailed setup
+- [Evaluator path](https://phenomenoner.github.io/openclaw-mem/evaluator-path/): 5-minute / 30-minute / afternoon evaluation
+- [Architecture](https://phenomenoner.github.io/openclaw-mem/architecture/): system design
+- [Context pack](https://phenomenoner.github.io/openclaw-mem/context-pack/): ContextPack v1 contract
+- [Trust-policy synthetic proof](https://phenomenoner.github.io/openclaw-mem/showcase/trust-policy-synthetic-proof/): reproducible governance proof
+- [Reality check](https://phenomenoner.github.io/openclaw-mem/reality-check/): what is shipped vs partial vs opt-in
+- [Roadmap](https://phenomenoner.github.io/openclaw-mem/roadmap/): direction and phases
+- [Traditional Chinese docs](https://phenomenoner.github.io/openclaw-mem/zh/): 繁體中文文件
+
+## Optional
+
+- [Core vs Advanced Labs](https://phenomenoner.github.io/openclaw-mem/core-vs-advanced-labs/): what is core product vs experiment
+- [Temporal facts](https://phenomenoner.github.io/openclaw-mem/temporal-facts/): source-linked current-truth view
+- [Mem engine](https://phenomenoner.github.io/openclaw-mem/mem-engine/): optional engine promotion
+- [Harness-persistent memory](https://phenomenoner.github.io/openclaw-mem/harness-persistent-memory/): Codex/Claude/Gemini install
+- [Release notes](https://github.com/phenomenoner/openclaw-mem/releases): version history

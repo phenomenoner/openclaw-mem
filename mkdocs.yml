@@ -1,5 +1,5 @@
 site_name: openclaw-mem
-site_description: Trust-aware context packing + review-gated memory hygiene (sidecar-first) for OpenClaw
+site_description: The AI agent memory layer you can audit — local-first memory governance for AI agents with citations, trust policies, trace receipts, and rollback. SQLite, sidecar-first, OpenClaw plugin.
 site_url: https://phenomenoner.github.io/openclaw-mem/
 repo_url: https://github.com/phenomenoner/openclaw-mem
 repo_name: phenomenoner/openclaw-mem
@@ -20,6 +20,7 @@ exclude_docs: |
   series/**
   portfolio/**
   *.txt
+  !llms.txt
   context-supply-chain-blueprint.md
   context-bloat-mitigation-rollout.md
   context-budget-sidecar-v0-receipt.md

@@ -1,217 +1,179 @@
 # openclaw-mem
 
-**Local-first context supply chain for AI agents — Store / Pack / Observe with citations, trust-policy receipts, and rollback.**
+> **The AI agent memory layer you can audit.**
+> Local-first memory governance for AI agents — every context item cited, every exclusion explained, every mutation reversible.
 
-`openclaw-mem` captures agent activity as durable local records, then assembles bounded `ContextPack` bundles with inspectable include/exclude reasons and citation coverage. Use it first as a plain SQLite sidecar; promote to deeper OpenClaw integration only after the local proof earns the extra surface.
+[![PyPI](https://img.shields.io/pypi/v/openclaw-context-pack?label=PyPI)](https://pypi.org/project/openclaw-context-pack/)
+[![CI](https://github.com/phenomenoner/openclaw-mem/actions/workflows/ci.yml/badge.svg)](https://github.com/phenomenoner/openclaw-mem/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-phenomenoner.github.io-blue)](https://phenomenoner.github.io/openclaw-mem/)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green)](#license)
+[![繁體中文](https://img.shields.io/badge/docs-%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87-orange)](docs/zh/index.md)
 
-## Start here
+Most AI agent memory systems compete on **recall** — remember more, retrieve better. `openclaw-mem` competes on a different axis: **governance**. It captures agent activity as durable local records (SQLite + JSONL, no external database), then assembles bounded `ContextPack` bundles where every included memory carries a **citation**, every excluded memory carries a **written reason**, and every memory mutation ships with a **rollback receipt**.
 
-1. **Run the synthetic proof:** [Trust-policy synthetic proof](docs/showcase/trust-policy-synthetic-proof.md)
-2. **Pick an evaluation path:** [5 minutes / 30 minutes / one afternoon](docs/evaluator-path.md)
-3. **Check Core vs Advanced Labs:** [Core vs Advanced Labs](docs/core-vs-advanced-labs.md)
-4. **Choose sidecar vs engine:** [Install modes](docs/install-modes.md)
-5. **Check shipped vs partial status:** [Reality check & status](docs/reality-check.md)
-6. **Read in Traditional Chinese:** [Traditional Chinese edition](docs/zh/index.md)
+Built sidecar-first for [OpenClaw](https://github.com/openclaw), usable with Claude, Codex, Gemini, and generic agent harnesses.
 
-## What is automatic today?
+**Not bigger memory — safer, explainable context.**
 
-| Surface | Status | Meaning |
-| --- | --- | --- |
-| Sidecar observation capture | Automatic when the plugin is enabled | Captures JSONL observations with backend/action annotations. |
-| Harvest, triage, and graph capture | Scheduled on configured hosts | Converts captured records into searchable stores and receipts. |
-| `pack` | CLI core | Produces bounded `ContextPack` output with citations and trace receipts. |
-| Temporal facts | CLI advanced lane | Source-linked current truth, timelines, and fact packs without making graph data a new truth owner. |
-| Harness-persistent memory | Opt-in via Gateway + CLI install card | Installs a persistent Codex / Claude / Gemini / generic agent memory posture backed by capability-scoped gateway tokens and parity-aware read diagnostics. |
-| Graph routing, optimize assist, continuity, GBrain | Advanced Labs / opt-in lanes | Available for mature operators, but not part of the first evaluation path. |
-| Mem-engine Proactive Pack | Optional promotion | Bounded pre-reply recall orchestration after explicit engine adoption. |
+---
 
-## Why it is different
+## Why agent memory needs governance, not just recall
 
-- **Governance before recall theater** — trust policy, citations, trace receipts, and rollback posture make memory inclusion inspectable instead of opaque.
-- **Local-first by default** — JSONL + SQLite, no external database required.
-- **Cheap recall loop** — `search → timeline → get` keeps routine lookups fast and inspectable.
-- **Bounded packing** — `pack` emits a stable `ContextPack` contract for injection, citations, trust-policy receipts, and trace-backed debugging.
-- **Temporal fact view** — `graph fact` turns explicit sourced assertions into current truth, timelines, and ContextPack-compatible fact packs while keeping Store evidence authoritative.
-- **Symbolic canvas helper** — `symbolic-canvas` can turn task traces into compact Mermaid + `node_id` drill-down artifacts without live capture, Gateway patching, or memory mutation.
-- **Fits real OpenClaw ops** — capture tool outcomes, retain receipts, sanitize runtime artifacts, and keep rollback simple.
-- **Upgradeable path** — sidecar first, engine later; no forced migration on day one.
-- **Harness-friendly** — external coding agents can get a persistent memory posture through the Memory Gateway without receiving raw SQLite or workspace-file authority. Parity-aware gateway reads can search/pack configured workspace Markdown memory and report when a no-result answer is only partial.
-- **Advanced labs are opt-in** — graph routing, GBrain, continuity, Dream Lite, Self Curator review packets, and deeper optimization lanes stay out of the first evaluation path.
+Long-running agents don't just forget. Their memory **degrades silently**:
 
-## Why this exists
+- **Stale notes** still match queries long after they stop being true.
+- **Untrusted or hostile content** — tool output, scraped web text, injected instructions — retrieves well and slips into the prompt. This is the *memory poisoning* path of prompt injection, and similarity search alone cannot stop it.
+- **Context bloat**: prompts swell into unbounded memory dumps nobody can review.
+- **No accountability**: when the agent goes wrong, nothing explains *why* a memory was included.
 
-Long-running agents do not just forget. They also accumulate memory that quietly degrades:
+Recall-focused memory layers make these failures *more* likely as they get better at retrieving. `openclaw-mem` adds the missing control layer: **trust policies decide what may enter context, receipts prove why, and rollback undoes what shouldn't have happened.**
 
-- old notes still match the query even when they are no longer useful
-- untrusted or hostile content can retrieve well and slip into context
-- prompts bloat into giant memory dumps instead of a small, inspectable bundle
-- when something goes wrong, it is hard to explain **why** a memory was included
-
-`openclaw-mem` tackles that by building compact memory packs with citations, trace receipts, and trust-policy controls.
-
-## Try it in 5 minutes
-
-You can prove the core behavior locally without touching OpenClaw config.
-
-For the packaged CLI:
+## See it in 30 seconds
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
 pip install openclaw-context-pack
 openclaw-mem --db /tmp/openclaw-mem-demo.sqlite status --json
 ```
 
-For the repository proof fixture:
+Or run the reproducible trust-policy proof from the repo — no OpenClaw config, no real memory store, synthetic fixture only:
 
 ```bash
 git clone https://github.com/phenomenoner/openclaw-mem.git
 cd openclaw-mem
 uv sync --locked
-
-uv run --python 3.13 --frozen -- \
-  python benchmarks/trust_policy_synthetic_proof.py --json
+uv run --python 3.13 --frozen -- python benchmarks/trust_policy_synthetic_proof.py --json
 ```
 
-### What this proof shows
+The proof runs the **same query twice** against the same synthetic memory:
 
-- vanilla packing selects a quarantined row from synthetic memory
-- trust-aware packing excludes that row with an explicit reason
-- selected rows keep citation coverage and traceable receipts
+1. **Vanilla pack** — retrieval without a trust policy → a *quarantined* row gets selected, because its text matches the query.
+2. **Trust-aware pack** (`--pack-trust-policy exclude_quarantined_fail_open`) → the quarantined row is **excluded, with an explicit receipt reason**, while citation coverage stays intact.
 
-Full proof path:
-- [Evaluator path](docs/evaluator-path.md)
-- [Trust-policy synthetic proof](docs/showcase/trust-policy-synthetic-proof.md)
-- [Trust-aware pack proof](docs/showcase/trust-aware-context-pack-proof.md)
-- [Command-aware compaction proof](docs/showcase/command-aware-compaction-proof.md)
-- [Metrics JSON](docs/showcase/artifacts/trust-aware-context-pack.metrics.json)
-- [Synthetic fixture + receipts](docs/showcase/artifacts/index.md)
-- [Inside-out demo](docs/showcase/inside-out-demo.md)
+The assertion block it must pass:
 
-## Store + Pack + Observe
-
-The product loop is simple and stable:
-
-1. **Store**: capture, ingest, and query observations with `store`/`ingest`/`search`.
-2. **Pack**: run `pack` to get a bounded `bundle_text` and `context_pack` (`schema: openclaw-mem.context-pack.v1`), with citations, trust policy, and trace receipts.
-3. **Observe**: use `timeline`, `get`, and `artifact` outputs for explainability and rollback.
-
-When mem-engine is active, **Proactive Pack** extends the same Pack contract into live turns as a small, receipt-backed pre-reply bundle.
-
-For external AI harnesses, `openclaw-mem harness install` writes a managed persistent instruction card for Codex, Claude, Gemini, or a generic agent surface. The card points the harness at `OPENCLAW_MEM_GATEWAY_URL` / `OPENCLAW_MEM_GATEWAY_TOKEN`; raw tokens are never written into prompt files. Capability-scoped tokens let operators choose read-only, proposal/append write, admin, or owner-equivalent direct-store authority. For Codex specifically, `openclaw-mem codex install` adds a stronger Superpowers-style surface with generated CLI shims, env/gateway checks, and `codex doctor` verification.
-
-Read more: [Harness-persistent memory install](docs/harness-persistent-memory.md) and the release notes for version-specific gateway behavior.
-
-## Advanced labs
-
-The first-time evaluator path is **Store / Pack / Observe**. Everything below is opt-in after the core proof is clear.
-
-Advanced lanes currently include:
-
-- **Graph routing** for topology-aware recall experiments.
-- **Temporal facts** for source-linked current truth and timelines over explicit assertions.
-- **GBrain sidecar** for bounded read-only lookup and restricted helper-job experiments.
-- **Governed continuity side-car** for derived continuity inspection and public-safe summaries.
-- **Dream Lite / deeper optimize loops** for research-grade memory maintenance workflows.
-- **Self Curator engine** for checkpointed skill lifecycle review/apply loops. The current scheduled lane can mutate `SKILL.md` body sections with rollback receipts; memory/dream/authority expansion remains gated behind explicit review.
-
-These lanes are not required for the 5-minute proof, the sidecar install path, or the basic `ContextPack` contract. Treat them as labs until your use case needs them.
-
-Read more:
-- [Product positioning](PRODUCT_POSITIONING.md)
-- [Compounding Context OS roadmap](docs/compounding-context-os.md)
-- [Core vs Advanced Labs](docs/core-vs-advanced-labs.md)
-- [Evaluator path](docs/evaluator-path.md)
-- [Architecture](docs/architecture.md)
-- [Context pack](docs/context-pack.md)
-- [Temporal facts](docs/temporal-facts.md)
-- [Symbolic Canvas](docs/symbolic-canvas.md)
-- [Symbolic canvas ops skill card](skills/symbolic-canvas.ops.md)
-- [Temporal facts ops skill card](skills/temporal-facts.ops.md)
-- [Experimental GBrain sidecar](docs/experimental/gbrain-sidecar/README.md)
-- [Optional Mem Engine](docs/mem-engine.md)
-
-## OpenClaw 2026.4.15 and `openclaw-mem`
-
-By OpenClaw 2026.4.15, the native memory and prompt-time integration experience had become noticeably stronger. We are genuinely happy to see that direction mature.
-
-That is good for the ecosystem, good for operators, and good for `openclaw-mem` too.
-A stronger foundation makes it easier to keep our own work focused on what matters most: better packs, clearer evidence, and safer memory maintenance.
-
-Our direction is not to shrink back into native features.
-It is to build a clearer, more opinionated product layer on top of a stronger foundation.
-
-Read more:
-- [Why openclaw-mem still exists in a stronger OpenClaw world](docs/why-openclaw-mem-still-exists.md)
-- [openclaw-mem and OpenClaw 2026.4.15](docs/openclaw-2026-4-15-comparison.md)
-
-## Deeper operations live below the fold
-
-`openclaw-mem` also has governed memory-hygiene and artifact-observation tools for mature operator stacks. They are useful after the core product is proven, but they are not required for the first evaluation path.
-
-Start with:
-
-- [Core vs Advanced Labs](docs/core-vs-advanced-labs.md)
-- [Evaluator path](docs/evaluator-path.md)
-- [Governed optimize assist](docs/optimize-assist.md)
-- [Hermes Curator adoption review](docs/hermes-curator-adoption-review.md)
-- [Self Curator v0 review-only sidecar contract](docs/specs/self-curator-sidecar-v0.md)
-- [Command-aware compaction proof](docs/showcase/command-aware-compaction-proof.md)
-
-Manual Self Curator scout smoke:
-
-```bash
-openclaw-mem self-curator skill-review \
-  --skill-root ~/.openclaw/workspace/skills \
-  --out-root .state/self-curator/runs \
-  --json
+```json
+{
+  "synthetic_fixture_only": true,
+  "no_real_memory_paths_used": true,
+  "quarantined_removed": true,
+  "citation_coverage_preserved": true,
+  "trust_policy_explains_exclusion": true
+}
 ```
 
-Checkpointed Self Curator apply flow:
+That is the product in one JSON object: **same memory, same query — but governed context, with evidence.** Details: [trust-policy synthetic proof](docs/showcase/trust-policy-synthetic-proof.md).
 
-```bash
-openclaw-mem self-curator plan --mutations-file mutations.json --out plan.json --workspace-root . --json
-openclaw-mem self-curator apply --plan plan.json --workspace-root . --checkpoint-root .state/self-curator/checkpoints --receipt-root .state/self-curator/apply-runs --json
-openclaw-mem self-curator verify --receipt .state/self-curator/apply-runs/<run>/apply-receipt.json --json
-openclaw-mem self-curator rollback --receipt .state/self-curator/apply-runs/<run>/apply-receipt.json --json
+## How it works: Store → Pack → Observe
+
+```mermaid
+flowchart LR
+  A[Agent activity] -->|store / ingest| DB[(SQLite + JSONL<br/>local, durable)]
+  DB -->|"pack (trust policy + citations)"| CP["ContextPack v1<br/>bounded bundle + receipts"]
+  CP -->|inject| P[Agent prompt]
+  DB -->|search / timeline / get| O[Observe & debug]
+  CP -.->|"trace receipts: why included, why excluded"| O
 ```
 
-The scout emits review-only lifecycle artifacts. The apply flow may mutate whitelisted relative workspace files through explicit plans, checkpoints, diffs, receipts, verification, and rollback.
+1. **Store** — capture, ingest, and query observations with `store` / `ingest` / `search`. Records keep backend/action annotations and provenance.
+2. **Pack** — `pack` emits a bounded `bundle_text` + `context_pack` (`schema: openclaw-mem.context-pack.v1`) with citations, trust-policy decisions, and trace receipts.
+3. **Observe** — `timeline`, `get`, and artifact outputs explain what happened, support debugging, and back rollback.
 
-Autonomy controller / cron posture:
+When the optional mem-engine is active, **Proactive Pack** extends the same contract into live turns as a small, receipt-backed pre-reply bundle.
 
-```bash
-python3 /root/.openclaw/workspace/openclaw-mem/tools/self_curator_controller.py \
-  --repo /root/.openclaw/workspace/openclaw-mem \
-  --workspace-root /root/.openclaw/workspace \
-  --skill-root /root/.openclaw/workspace/skills \
-  --out-root /root/.openclaw/workspace/.state/self-curator/controller-runs \
-  --mode unattended_apply \
-  --max-mutations 5 \
-  --cron-output
-```
+## Core features
 
-Scheduled operation should use a separate cron-runner job, not heartbeat. Unattended apply is 事後報備制: the controller applies whitelisted low-risk changes first, emits `NEEDS_CK` with report/rollback paths when changes happen, and rollback is available from the apply receipt. The scheduled policy mutates `SKILL.md` directly by appending a bounded `## Curator lifecycle` section rather than writing detached metadata only.
+| Capability | What you get |
+| --- | --- |
+| **Trust-aware packing** | Quarantined/untrusted records are excluded by policy, with written reasons in the receipt — a defense-in-depth layer against memory poisoning |
+| **Citations everywhere** | Every packed item traces back to its source record; citation coverage is measured |
+| **Trace receipts** | Include/exclude decisions are structured JSON, not vibes — auditable after the fact |
+| **Rollback** | Memory and skill mutations go through plan → checkpoint → apply → receipt → rollback |
+| **Hybrid recall** | SQLite FTS + vector search, with scopes and auditable policies |
+| **Temporal facts** | "What is currently true about X" — source-linked assertions, timelines, conflict/staleness lint |
+| **Graph query plane** | `graph query` for upstream/downstream/lineage over a SQLite-derived graph |
+| **Local-first** | JSONL + SQLite. No cloud service, no external vector DB required, data stays on your machine |
 
-## More links
+Advanced opt-in labs (graph routing, GBrain sidecar, governed continuity, Dream Lite, Self Curator engine) stay out of the first evaluation path: [Core vs Advanced Labs](docs/core-vs-advanced-labs.md).
 
-### Core and adoption
+## How it compares
 
-- **Why openclaw-mem still exists:** [`docs/why-openclaw-mem-still-exists.md`](docs/why-openclaw-mem-still-exists.md)
-- **OpenClaw 2026.4.15 comparison:** [`docs/openclaw-2026-4-15-comparison.md`](docs/openclaw-2026-4-15-comparison.md)
-- **About the product:** [`docs/about.md`](docs/about.md)
-- **Proactive Pack:** [`docs/proactive-pack.md`](docs/proactive-pack.md)
-- **Choose an install path:** [`docs/install-modes.md`](docs/install-modes.md)
-- **Detailed quickstart:** [`QUICKSTART.md`](QUICKSTART.md)
+Honest framing: if you want maximum recall benchmarks, the projects below are excellent — and `openclaw-mem` is *not* trying to beat them at that game. It governs what enters your context window.
+
+| | Recall-focused memory layers<br/>(mem0, supermemory, mempalace, claude-mem, memory-lancedb-pro…) | `openclaw-mem` |
+| --- | --- | --- |
+| Primary question | "Did the agent remember the right thing?" | "Should this memory be trusted — and can you prove why it's in the prompt?" |
+| Inclusion logic | Similarity / relevance scores (opaque) | Explicit receipts with include & exclude reasons |
+| Untrusted content | Retrieves whenever it matches | Quarantined by trust policy; exclusion documented |
+| Mistake recovery | Delete and hope | Checkpointed mutations with rollback receipts |
+| Storage default | Vector DB, often cloud | SQLite + JSONL, local-first |
+| Best at | Recall quality, token savings | Auditability, safety, explainability |
+
+They are **complementary**: openclaw-mem already pushes bounded metadata to LanceDB via its writeback loop, and the long-term direction is governance-as-a-layer over whatever recall engine you prefer.
+
+## Quickstart paths
+
+| Time | Path | Where |
+| --- | --- | --- |
+| 5 min | pip CLI + synthetic proof | [Evaluator path](docs/evaluator-path.md) |
+| 30 min | Sidecar install, real capture, first governed pack | [Install modes](docs/install-modes.md) |
+| Afternoon | OpenClaw plugin / mem-engine promotion, harness memory for Codex/Claude/Gemini | [Harness-persistent memory](docs/harness-persistent-memory.md) |
+
+## FAQ
+
+### What is memory governance for AI agents?
+
+Memory governance means treating an agent's memory like a supply chain with controls: provenance for every record, trust tiers for every source, explicit policy decisions about what may enter the context window, receipts documenting those decisions, and rollback when something was wrong. Recall answers *"what matches?"*; governance answers *"what is allowed in, and why?"*
+
+### How is openclaw-mem different from mem0, claude-mem, or mempalace?
+
+Those projects optimize recall quality and token efficiency — and do it well. openclaw-mem optimizes **auditability**: citations, trust policies, trace receipts, and rollback are the core contract, not add-ons. See [How it compares](#how-it-compares). You can use them together.
+
+### Does it protect against memory poisoning / prompt injection via memory?
+
+It is a defense-in-depth layer, not a silver bullet. Content from tools, web pages, and skills starts untrusted; trust policies keep quarantined records out of packs even when they match the query, and the receipt documents the exclusion. The [synthetic proof](docs/showcase/trust-policy-synthetic-proof.md) demonstrates exactly this behavior, reproducibly.
+
+### Do I need a vector database or a cloud service?
+
+No. The default stack is SQLite + JSONL on your own machine. Hybrid recall (FTS + vector) works locally. There is no hosted service and no telemetry.
+
+### Can I use it outside OpenClaw — with Claude, Codex, or Gemini?
+
+Yes. `openclaw-mem harness install` writes a managed persistent-memory instruction card for Codex, Claude, Gemini, or a generic agent surface. OpenClaw is the first-class host, not a requirement.
+
+### What is a ContextPack?
+
+A bounded, injectable bundle (`openclaw-mem.context-pack.v1`) containing the selected memory text plus structured metadata: citations for every item, trust-policy decisions, and a trace receipt explaining the selection. It is designed to be small, inspectable, and stable as a contract.
+
+### Is the retrieval quality competitive?
+
+Retrieval is hybrid (FTS + vector) with scopes and policy-aware ranking — solid, but openclaw-mem does not currently publish comparative recall benchmarks, and the [reality check](docs/reality-check.md) is candid about what is and isn't measured. The differentiated value is governance; broader public benchmarks are on the roadmap.
+
+### How do I undo a bad memory change?
+
+Mutations flow through explicit plans, checkpoints, diffs, and receipts. `self-curator rollback --receipt <apply-receipt.json>` restores the previous state from the receipt. The same posture applies to engine adoption: promotion is a one-line slot switch, and so is retreat.
+
+### Is this production ready?
+
+It is a young, actively developed project (v1.9.x, single maintainer, 800+ commits). Core Store/Pack/Observe and the trust-policy path are shipped and tested; advanced lanes are explicitly labeled labs. Start with the [reality check](docs/reality-check.md) — it tells you what is automatic, what is partial, and what is opt-in.
+
+## OpenClaw native memory and openclaw-mem
+
+OpenClaw's native memory got noticeably stronger by 2026.4.15 — good for the ecosystem, and good for this project. openclaw-mem doesn't duplicate native recall; it builds an opinionated **governance layer** on top of a stronger foundation: better packs, clearer evidence, safer memory maintenance. More: [why openclaw-mem still exists](docs/why-openclaw-mem-still-exists.md) · [2026.4.15 comparison](docs/openclaw-2026-4-15-comparison.md).
+
+## Documentation
+
 - **Docs site:** <https://phenomenoner.github.io/openclaw-mem/>
-- **Traditional Chinese edition:** [`docs/zh/index.md`](docs/zh/index.md)
-- **Reality check / status:** [`docs/reality-check.md`](docs/reality-check.md)
-- **Deployment patterns:** [`docs/deployment.md`](docs/deployment.md)
-- **Auto-capture plugin:** [`docs/auto-capture.md`](docs/auto-capture.md)
-- **Agent memory skill (SOP):** [`docs/agent-memory-skill.md`](docs/agent-memory-skill.md)
-- **Optional Mem Engine:** [`docs/mem-engine.md`](docs/mem-engine.md)
-- **Release notes:** <https://github.com/phenomenoner/openclaw-mem/releases>
+- [Quickstart](QUICKSTART.md) · [Architecture](docs/architecture.md) · [Context pack](docs/context-pack.md) · [Install modes](docs/install-modes.md)
+- [Evaluator path](docs/evaluator-path.md) · [Core vs Advanced Labs](docs/core-vs-advanced-labs.md) · [Reality check](docs/reality-check.md)
+- [Temporal facts](docs/temporal-facts.md) · [Optional Mem Engine](docs/mem-engine.md) · [Self Curator (review-gated)](docs/specs/self-curator-sidecar-v0.md)
+- [Agent memory SOP](docs/agent-memory-skill.md) · [Deployment patterns](docs/deployment.md) · [Product positioning](PRODUCT_POSITIONING.md)
+- **繁體中文文件:** [docs/zh/index.md](docs/zh/index.md)
+- [Release notes](https://github.com/phenomenoner/openclaw-mem/releases) · [Changelog](CHANGELOG.md)
+
+## Project status
+
+Actively developed by a single maintainer; issues and reproducible bug reports are welcome. The roadmap favors small, receipt-backed, rollbackable releases over big-bang features — see [docs/roadmap.md](docs/roadmap.md).
 
 ## License
 
-Dual-licensed: **MIT OR Apache-2.0**. See `LICENSE`, `LICENSE-MIT`, and `LICENSE-APACHE`.
+Dual-licensed under **MIT OR Apache-2.0** — see [`LICENSE`](LICENSE) (MIT) and [`LICENSE-APACHE`](LICENSE-APACHE).
