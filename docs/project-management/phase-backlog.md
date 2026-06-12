@@ -27,7 +27,7 @@ Immediate cut line:
 | Phase | Name | Suggested window | Core delivery | Status |
 |---|---|---|---|
 | P0 | Convergence and foundation | 2 weeks | labs freeze, docs reorg, naming, CI baseline, KPI baseline | todo |
-| P1 | Integration base | 4 weeks | MCP v1, ContextPack v1 compatibility, file contract producer, fixtures, hooks, quickstart | implementation-complete-local |
+| P1 | Integration base | 4 weeks | MCP v1, ContextPack v1 compatibility, file contract producer, fixtures, hooks, quickstart | released-v1.9.27 |
 | P2 | Retrieval catch-up and public scores | 4-6 weeks | rerank, decay v2, LongMemEval/LoCoMo results | todo |
 | P3 | Governance depth and governance benchmark | 4-6 weeks | trust tiers GA, conflict detection, MemGov-Bench v1, Self Curator write channel | todo |
 | P4 | Ecosystem integration and growth | continuous | harness channel B, lancedb-pro governance plugin, web viewer, launch | todo |
@@ -59,15 +59,15 @@ Exit criteria: a Claude Code/Cursor user can install in 5 minutes and see a cite
 
 | ID | Priority | Size | Status | Delivery | Acceptance |
 |---|---:|---:|---|---|---|
-| P1-1 | P0 | L | done-local | stdio MCP server v1 with 7 stable tools via `openclaw-mem-mcp`; committed tool-description hash manifest. | One-line `claude mcp add`; JSON schema and integration tests; deterministic tool descriptions and hash list; latency receipts. |
-| P1-2 | P0 | M | done-local | Keep `openclaw-mem.context-pack.v1` canonical for v1 and preserve shipped field casing; prove compatibility with shared fixtures/adapters instead of renaming v1. | Compatibility fixtures and schema tests are in repo; v1 stability statement is documented. |
-| P1-3 | P0 | M | done-local | Lifecycle hooks package via `openclaw-mem-hooks` for SessionStart/PostToolUse/SessionEnd. | Fail-open SessionStart/PostToolUse/SessionEnd helpers and tests. |
-| P1-4 | P0 | S | done-local | Quickstart refresh into CLI proof, MCP route, Channel A route, and hooks route. | Three integration routes documented; zh follow-up remains docs hygiene. |
-| P1-5 | P1 | M | done-local | Progressive reveal/token visibility through compact MCP search, ContextPack budgets, and receipts. | Search includes compact summaries and estimated tokens; pack receipts include token budgets. |
-| P1-6 | P2 | S | done-local | `<private>` / redaction markers skipped by MCP store and Channel A ingest. | Marked content skipped with tests. |
-| P1-7 | P2 | S | done-local | CLI UX pass through focused integration entrypoints and docs. | New user can complete quickstart integration routes without deeper docs. |
-| P1-8 | P0 | M | done-local | Channel A file contract producer via `openclaw-mem-channel-a`. | JSONL -> ingest -> pack -> `<packs-dir>/<agent>/latest.json`; per-agent namespace; private/missing rows safe. |
-| P1-9 | P0 | S | done-local | Shared fixtures for pack validation and ingest idempotency plus committed MCP tool hash fixture. | Legal, oversized, missing-field, and idempotency fixtures pass producer CI; harness-side import remains downstream. |
+| P1-1 | P0 | L | released | stdio MCP server v1 with 7 stable tools via `openclaw-mem-mcp`; committed tool-description hash manifest. | One-line `claude mcp add`; JSON schema and integration tests; deterministic tool descriptions and hash list; latency receipts. |
+| P1-2 | P0 | M | released | Keep `openclaw-mem.context-pack.v1` canonical for v1 and preserve shipped field casing; prove compatibility with shared fixtures/adapters instead of renaming v1. | Compatibility fixtures and schema tests are in repo; v1 stability statement is documented. |
+| P1-3 | P0 | M | released | Lifecycle hooks package via `openclaw-mem-hooks` for SessionStart/PostToolUse/SessionEnd. | Fail-open SessionStart/PostToolUse/SessionEnd helpers and tests. |
+| P1-4 | P0 | S | released | Quickstart refresh into CLI proof, MCP route, Channel A route, and hooks route. | Three integration routes documented; zh follow-up remains docs hygiene. |
+| P1-5 | P1 | M | released | Progressive reveal/token visibility through compact MCP search, ContextPack budgets, and receipts. | Search includes compact summaries and estimated tokens; pack receipts include token budgets. |
+| P1-6 | P2 | S | released | `<private>` / redaction markers skipped by MCP store and Channel A ingest. | Marked content skipped with tests. |
+| P1-7 | P2 | S | released | CLI UX pass through focused integration entrypoints and docs. | New user can complete quickstart integration routes without deeper docs. |
+| P1-8 | P0 | M | released | Channel A file contract producer via `openclaw-mem-channel-a`. | JSONL -> ingest -> pack -> `<packs-dir>/<agent>/latest.json`; per-agent namespace; private/missing rows safe. |
+| P1-9 | P0 | S | released | Shared fixtures for pack validation and ingest idempotency plus committed MCP tool hash fixture. | Legal, oversized, missing-field, and idempotency fixtures pass producer CI; harness-side import remains downstream. |
 
 P1 cut line: P1-5 and P1-6 are deferred to P2. P1-3 starts with Claude Code only.
 

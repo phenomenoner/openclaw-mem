@@ -104,3 +104,10 @@ Observed failures are existing Windows portability/test-environment surfaces out
 
 - Import `docs/fixtures/context-pack-v1-compat/` into the Rust harness CI/validator so host-side fixture pinning is also green.
 - Consider a separate Windows-portability hardening pass for the full-suite residual failures.
+
+## Publication receipt
+
+- main push: `ed22b9d Complete P1 integration surfaces`
+- release receipt sync: this commit records the final checklist/backlog publication state
+- tag: `v1.9.27`
+- GitHub release: <https://github.com/phenomenoner/openclaw-mem/releases/tag/v1.9.27>
