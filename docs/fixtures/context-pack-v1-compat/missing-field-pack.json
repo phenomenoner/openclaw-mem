@@ -1,0 +1,14 @@
+{
+  "schema": "openclaw-mem.context-pack.v1",
+  "meta": {
+    "ts": "2026-06-12T00:00:00Z",
+    "query": "invalid missing field fixture",
+    "scope": "project:openclaw-mem",
+    "budgetTokens": 120,
+    "maxItems": 2
+  },
+  "items": [],
+  "notes": {
+    "how_to_use": []
+  }
+}

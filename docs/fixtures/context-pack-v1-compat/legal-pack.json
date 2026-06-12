@@ -1,0 +1,31 @@
+{
+  "schema": "openclaw-mem.context-pack.v1",
+  "meta": {
+    "ts": "2026-06-12T00:00:00Z",
+    "query": "context pack compatibility fixture",
+    "scope": "project:openclaw-mem",
+    "budgetTokens": 120,
+    "maxItems": 2
+  },
+  "bundle_text": "- [obs:fixture-001] Keep ContextPack v1 schema id stable for producer/consumer compatibility.",
+  "items": [
+    {
+      "recordRef": "obs:fixture-001",
+      "layer": "L1",
+      "type": "memory",
+      "importance": "must_remember",
+      "trust": "trusted",
+      "text": "Keep ContextPack v1 schema id stable for producer/consumer compatibility.",
+      "citations": {
+        "url": null,
+        "recordRef": "obs:fixture-001"
+      }
+    }
+  ],
+  "notes": {
+    "how_to_use": [
+      "Prefer bundle_text for direct injection.",
+      "Use items[].recordRef as the citation key."
+    ]
+  }
+}

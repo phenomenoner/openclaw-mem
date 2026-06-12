@@ -7,7 +7,6 @@ Default posture is dry-run. Use --apply to allow bounded writes.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import signal
@@ -28,6 +27,14 @@ from openclaw_mem.optimization import (
     normalize_importance_drift_profile,
 )
 from openclaw_mem.optimize_assist_families import FAMILY_NAMES, candidate_family_from_item
+
+try:
+    import fcntl  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - exercised on Windows
+    fcntl = None  # type: ignore
+    import msvcrt
+else:  # pragma: no cover - exercised on POSIX
+    msvcrt = None  # type: ignore
 
 
 DEFAULT_STATE_DIR = os.path.abspath(os.path.expanduser(os.getenv("OPENCLAW_STATE_DIR", "~/.openclaw")))
@@ -207,7 +214,15 @@ def _locked_controller_state(path: Path, *, allow_unsigned_legacy: bool = False)
     lock_path = _controller_state_lock_path(path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        else:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write("0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
         try:
             hold_secs_raw = str(os.getenv("OPENCLAW_MEM_TEST_CONTROLLER_LOCK_HOLD_SECS", "") or "").strip()
             if hold_secs_raw:
@@ -219,7 +234,11 @@ def _locked_controller_state(path: Path, *, allow_unsigned_legacy: bool = False)
                     time.sleep(hold_secs)
             yield _load_controller_state(path, allow_unsigned_legacy=allow_unsigned_legacy)
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            else:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _resolve_family_state(args: argparse.Namespace, prior_state: dict[str, Any]) -> dict[str, Any]:

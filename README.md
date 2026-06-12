@@ -35,6 +35,8 @@ pip install openclaw-context-pack
 openclaw-mem --db /tmp/openclaw-mem-demo.sqlite status --json
 ```
 
+The PyPI distribution remains `openclaw-context-pack`; it installs the `openclaw-mem` CLI plus `openclaw-mem-mcp`, `openclaw-mem-channel-a`, and `openclaw-mem-hooks` for agent integration.
+
 Or run the reproducible trust-policy proof from the repo — no OpenClaw config, no real memory store, synthetic fixture only:
 
 ```bash
@@ -164,6 +166,7 @@ OpenClaw's native memory got noticeably stronger by 2026.4.15 — good for the e
 
 - **Docs site:** <https://phenomenoner.github.io/openclaw-mem/>
 - [Quickstart](QUICKSTART.md) · [Architecture](docs/architecture.md) · [Context pack](docs/context-pack.md) · [Install modes](docs/install-modes.md)
+- [MCP integration](docs/mcp-integration.md) · [Channel A file contract](docs/channel-a-file-contract.md) · [Lifecycle hooks](docs/lifecycle-hooks.md)
 - [Evaluator path](docs/evaluator-path.md) · [Core vs Advanced Labs](docs/core-vs-advanced-labs.md) · [Reality check](docs/reality-check.md)
 - [Temporal facts](docs/temporal-facts.md) · [Optional Mem Engine](docs/mem-engine.md) · [Self Curator (review-gated)](docs/specs/self-curator-sidecar-v0.md)
 - [Agent memory SOP](docs/agent-memory-skill.md) · [Deployment patterns](docs/deployment.md) · [Product positioning](PRODUCT_POSITIONING.md)

@@ -27,6 +27,7 @@ exclude_docs: |
   context-engineering-lessons.md
   rerank-poc-plan.md
   releases-v1.6.0.md
+  project-management/**
 
 theme:
   name: material
@@ -84,6 +85,9 @@ nav:
       - Engine admin ops: mem-engine-admin-ops.md
       - Architecture: architecture.md
       - Context pack: context-pack.md
+      - MCP integration: mcp-integration.md
+      - Channel A file contract: channel-a-file-contract.md
+      - Lifecycle hooks: lifecycle-hooks.md
       - Temporal facts: temporal-facts.md
       - Symbolic Canvas: symbolic-canvas.md
       - Agent memory skill (SOP): agent-memory-skill.md

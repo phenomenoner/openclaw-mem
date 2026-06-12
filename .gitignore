@@ -4,13 +4,16 @@ __pycache__/
 *.sqlite
 .DS_Store
 SESSION_SUMMARY*.md
+memory/
 
 # Local hot-reload scratch dirs (do not commit)
 extensions-hot/
 extensions/*-hot/
+.tmp-*/
 
 # MkDocs build output
 site/
+.local-server/
 
 # Python packaging
 build/

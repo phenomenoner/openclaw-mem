@@ -1,0 +1,40 @@
+{
+  "schema": "openclaw-mem.mcp.tools.v1",
+  "tools": [
+    {
+      "description": "Search local openclaw-mem observations and return compact cited matches.",
+      "descriptionSha256": "b4d360338cebd92635f6a5c6bea5d9c34e4210ea4fbf4ad1cf0992f21fdf035d",
+      "name": "mem_search"
+    },
+    {
+      "description": "Return recent local openclaw-mem observations in timestamp order.",
+      "descriptionSha256": "4d58e7e929de29544a66fa3308d89a10c82ebe136dfab1dad10f0536bba3238e",
+      "name": "mem_timeline"
+    },
+    {
+      "description": "Get one local openclaw-mem observation by record reference or numeric id.",
+      "descriptionSha256": "0ceabb606f8c454837e41793f2e8546616cdd040ccff2dce309295666217bb1a",
+      "name": "mem_get"
+    },
+    {
+      "description": "Build a bounded ContextPack v1 with citations for an agent query.",
+      "descriptionSha256": "f5683f4e6ff6f71fbb52a6130f406061388e94fc8b99780b261715e7e771e311",
+      "name": "mem_pack"
+    },
+    {
+      "description": "Store one local observation without requiring embedding availability.",
+      "descriptionSha256": "be0ab9ca2f10295d7690c9fb6c726d5a23f0157f9d1b5c3674aeff73cceb4a43",
+      "name": "mem_store"
+    },
+    {
+      "description": "Return local openclaw-mem store health, counts, and latency receipt.",
+      "descriptionSha256": "17ea00516b0fa46413ca862f5261e92f1b9bb80a3db86abafc96b7f62a2c0244",
+      "name": "mem_status"
+    },
+    {
+      "description": "Inspect trust metadata for one local observation and explain pack eligibility hints.",
+      "descriptionSha256": "ec05e278d88275f053d7a9fcc340c69498577f0b9291a3de0d8d2d3a9436f9ad",
+      "name": "mem_trust_inspect"
+    }
+  ]
+}

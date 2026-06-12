@@ -1,0 +1,30 @@
+{
+  "schema": "openclaw-mem.context-pack.v1",
+  "meta": {
+    "ts": "2026-06-12T00:00:00Z",
+    "query": "oversized compatibility fixture",
+    "scope": "project:openclaw-mem",
+    "budgetTokens": 10,
+    "maxItems": 1
+  },
+  "bundle_text": "- [obs:fixture-oversized-001] This intentionally long fixture line exceeds the tiny declared token budget so consumers can test safe rejection or fail-open degradation instead of blindly injecting an oversized pack into an agent prompt.",
+  "items": [
+    {
+      "recordRef": "obs:fixture-oversized-001",
+      "layer": "L1",
+      "type": "memory",
+      "importance": "must_remember",
+      "trust": "trusted",
+      "text": "This intentionally long fixture line exceeds the tiny declared token budget so consumers can test safe rejection or fail-open degradation instead of blindly injecting an oversized pack into an agent prompt.",
+      "citations": {
+        "url": null,
+        "recordRef": "obs:fixture-oversized-001"
+      }
+    }
+  ],
+  "notes": {
+    "how_to_use": [
+      "This fixture is structurally valid but budget-invalid."
+    ]
+  }
+}

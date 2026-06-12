@@ -161,6 +161,11 @@ Golden regression fixture lane:
 - deterministic mirror: `tests/data/CONTEXT_PACK_GOLDEN_SCENARIOS.v0.jsonl`
 - verifier: `tests/test_context_pack_golden.py`
 
+Producer/consumer compatibility fixture lane:
+- fixture directory: `docs/fixtures/context-pack-v1-compat/`
+- verifier: `tests/test_context_pack_v1_compat_fixtures.py`
+- contract decision: `openclaw-mem.context-pack.v1` remains canonical for v1; host adapters should prove compatibility with fixtures instead of renaming the shipped schema.
+
 ### Graph-aware synthesis preference inside pack
 
 Pack selection now reuses the existing synthesis-coverage logic before final admission:

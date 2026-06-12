@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openclaw-context-pack"
-version = "1.9.26"
+version = "1.9.27"
 description = "Local-first AI agent memory governance: Store / Pack / Observe with citations, receipts, and rollback"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -34,3 +34,6 @@ dev = [
 openclaw-mem = "openclaw_mem.cli:main"
 openclaw-mem-gateway = "openclaw_mem.gateway:main"
 openclaw-mem-pack-capsule = "openclaw_mem.capsule:standalone_main"
+openclaw-mem-mcp = "openclaw_mem.mcp_server:main"
+openclaw-mem-channel-a = "openclaw_mem.channel_a:main"
+openclaw-mem-hooks = "openclaw_mem.hooks:main"

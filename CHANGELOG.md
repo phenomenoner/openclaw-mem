@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.27] - 2026-06-12
+
+### Added
+
+- Add `openclaw-mem-mcp`, a minimal stdio MCP server with stable tool descriptions, hash manifest, and 7 tools: search, timeline, get, pack, store, status, and trust inspect.
+- Add `openclaw-mem-channel-a`, an offline per-agent ContextPack producer that ingests JSONL idempotently and writes `<packs-dir>/<agent>/latest.json`.
+- Add `openclaw-mem-hooks`, fail-open lifecycle hook helpers for SessionStart, PostToolUse, and SessionEnd.
+- Add ContextPack v1 compatibility fixtures for legal, oversized, missing-field, and ingest-idempotency scenarios.
+- Add public docs for MCP integration, Channel A file contract, lifecycle hooks, and refreshed quickstart integration routes.
+
+### Safety
+
+- Keep `openclaw-mem.context-pack.v1` as the canonical v1 schema id and preserve shipped field casing.
+- Skip `<private>`, `[NOEXPORT]`, `[PRIVATE]`, and `[NOMEM]` rows in Channel A ingest; MCP store also skips private-marker content.
+- Keep lifecycle hooks fail-open and Channel A file injection optional for hosts.
+
+### Testing
+
+- Add regression coverage for MCP server JSON-RPC/tool calls, Channel A idempotency/private skipping, lifecycle hooks, ContextPack v1 compatibility fixtures, and MCP tool-description hash manifest sync.
+- Validate focused P1 paths and strict docs build on Windows.
+
 ## [1.9.26] - 2026-06-03
 
 ### Added
