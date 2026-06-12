@@ -1,6 +1,13 @@
 # Harness-persistent memory install
 
-Status: v0 design and operator contract
+Status: **LEGACY / RETIRED gateway install contract**
+
+This page describes the old gateway-oriented harness install. It is retained
+for compatibility and migration reference only. Current installs should use:
+
+- `openclaw-mem-mcp` for online tool calls
+- `openclaw-mem-channel-a` for fail-open file packs
+- `openclaw-mem-hooks` for host lifecycle integration
 
 `openclaw-mem` can be installed into external AI harnesses as a persistent memory posture: every new Codex / Claude Code / Gemini / generic agent session gets the same memory-use contract and calls the remote Memory Gateway instead of reading SQLite or workspace files directly.
 

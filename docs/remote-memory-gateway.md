@@ -1,6 +1,17 @@
 # Remote Memory Gateway deployment
 
-Status: v0 sidecar deployment guide
+Status: **LEGACY / RETIRED deployment path**
+
+This Docker/HTTP gateway route is retained for historical compatibility and
+rollback reference only. New agent-host integration should use the active P1
+surfaces instead:
+
+- stdio MCP: `docs/mcp-integration.md`
+- fail-open ContextPack files: `docs/channel-a-file-contract.md`
+- lifecycle hooks: `docs/lifecycle-hooks.md`
+
+Do not treat this page as the current install or enablement path unless an
+operator explicitly asks for a legacy gateway recovery.
 
 This guide exposes `openclaw-mem` to remote agents without starting a second full OpenClaw instance and without direct SQLite/file access.
 

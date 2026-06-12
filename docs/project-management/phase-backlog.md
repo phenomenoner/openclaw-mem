@@ -40,7 +40,7 @@ Exit criteria: a new visitor can explain the product in 5 minutes; core module l
 
 | ID | Priority | Size | Status | Delivery | Acceptance |
 |---|---:|---:|---|---|---|
-| P0-1 | P0 | M | todo | Labs freeze, `core` vs `experimental/labs`, and legacy gateway deprecation plan. | Core modules <= 15; labs README; compatibility shim; README/CHANGELOG deprecation and replacement path. |
+| P0-1 | P0 | M | docs-retired | Gateway docs are marked legacy/retired so they are not mistaken for the active install path. Code-level deprecation and labs/core split remain future compatibility work. | Core modules <= 15; labs README; compatibility shim; README/CHANGELOG deprecation and replacement path. |
 | P0-2 | P0 | S | todo | Docs reorg into user docs, specs, archive. | User docs <= 10; any user doc reachable in <= 2 clicks; archive excluded from navigation. |
 | P0-3 | P0 | S | decided-doc-pass-needed | Keep `openclaw-context-pack` as the PyPI distribution because `openclaw-mem` is already taken; preserve `openclaw-mem` as the CLI/import-facing product name where shipped. | Install/import behavior documented and tested; README relationship statement is consistent. |
 | P0-4 | P0 | S | ready | One-sentence story. | Repo description and README first line use the agreed tagline; 30-second blind read passes. |

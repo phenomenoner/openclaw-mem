@@ -1,6 +1,11 @@
 # OpenClaw Memory Gateway — Agent/Harness Guide
 
-Status: v0 operator guide
+Status: **LEGACY / RETIRED operator guide**
+
+The gateway surface described here is no longer the default product
+integration route. It remains in the repository for compatibility, historical
+receipts, and emergency rollback only. New installs should use the active P1
+route: MCP online tools, Channel A file packs, and lifecycle hooks.
 
 Use this when another agent, CLI harness, Windows-side tool, or Docker-side worker needs to read or propose updates to the shared `openclaw-mem` memory without direct SQLite/file access.
 

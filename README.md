@@ -118,7 +118,7 @@ They are **complementary**: openclaw-mem already pushes bounded metadata to Lanc
 | --- | --- | --- |
 | 5 min | pip CLI + synthetic proof | [Evaluator path](docs/evaluator-path.md) |
 | 30 min | Sidecar install, real capture, first governed pack | [Install modes](docs/install-modes.md) |
-| Afternoon | OpenClaw plugin / mem-engine promotion, harness memory for Codex/Claude/Gemini | [Harness-persistent memory](docs/harness-persistent-memory.md) |
+| Afternoon | OpenClaw plugin / mem-engine promotion, MCP/Channel A/hooks integration for Codex/Claude/Gemini | [MCP integration](docs/mcp-integration.md), [Channel A](docs/channel-a-file-contract.md), [Lifecycle hooks](docs/lifecycle-hooks.md) |
 
 ## FAQ
 
