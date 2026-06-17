@@ -127,8 +127,10 @@ def _load_cron_jobs(path: Path) -> List[Dict[str, Any]]:
 
     obj = json.loads(path.read_text(encoding="utf-8"))
     jobs = obj.get("jobs")
+    if jobs is None:
+        jobs = _cron_jobs_from_active_crons(obj)
     if not isinstance(jobs, list):
-        raise ValueError("cron jobs root must include list key: jobs")
+        raise ValueError("cron jobs root must include list key: jobs or activeCrons")
 
     cleaned: List[Dict[str, Any]] = []
     for raw in jobs:
@@ -141,6 +143,53 @@ def _load_cron_jobs(path: Path) -> List[Dict[str, Any]]:
 
     cleaned.sort(key=lambda j: str(j.get("id") or ""))
     return cleaned
+
+
+def _cron_jobs_from_active_crons(obj: Dict[str, Any]) -> List[Dict[str, Any]]:
+    active_crons = obj.get("activeCrons")
+    if not isinstance(active_crons, list):
+        return []
+
+    jobs: List[Dict[str, Any]] = []
+    for raw in active_crons:
+        if not isinstance(raw, dict):
+            continue
+        job_id = str(raw.get("id") or "").strip()
+        if not job_id:
+            continue
+        script = str(raw.get("script") or "").strip()
+        source_path = str(raw.get("sourcePath") or "").strip()
+        payload_parts = [
+            str(raw.get("name") or "").strip(),
+            script,
+            source_path,
+        ]
+        jobs.append(
+            {
+                "id": job_id,
+                "name": str(raw.get("name") or "").strip(),
+                "enabled": bool(raw.get("enabled")),
+                "agentId": str(raw.get("agentId") or "main").strip(),
+                "sessionTarget": str(raw.get("sessionTarget") or "").strip(),
+                "wakeMode": str(raw.get("wakeMode") or "deterministic-cron").strip(),
+                "schedule": {
+                    "kind": "cron",
+                    "expr": str(raw.get("schedule") or "").strip(),
+                    "tz": str(raw.get("timezone") or "").strip(),
+                },
+                "delivery": {
+                    "mode": str(raw.get("deliveryMode") or "internal").strip(),
+                    "channel": str(raw.get("channel") or "").strip(),
+                    "to": str(raw.get("target") or "").strip(),
+                },
+                "payload": {
+                    "message": " ".join(part for part in payload_parts if part),
+                },
+                "script": script,
+                "sourcePath": source_path,
+            }
+        )
+    return jobs
 
 
 def _cron_job_node(job: Dict[str, Any]) -> Dict[str, Any]:
@@ -191,7 +240,7 @@ def _extract_workspace_paths_from_spec(spec_path: Path, *, workspace_path: Path)
 def _path_node(path_token: str) -> Dict[str, Any]:
     p = Path(path_token)
     suffix = p.suffix.lower()
-    is_script = suffix in {".py", ".sh", ".bash"}
+    is_script = suffix in {".py", ".sh", ".bash", ".ps1", ".cmd", ".bat"}
     node_type = "script" if is_script else "artifact"
     edge_role = "runs" if is_script else "reads"
     node_id = f"{node_type}.path.{_safe_slug(p.as_posix())}"
@@ -208,6 +257,17 @@ def _path_node(path_token: str) -> Dict[str, Any]:
         },
         "edge_role": edge_role,
     }
+
+
+def _resolve_workspace_relative_path(raw_path: str, *, workspace_path: Path) -> Optional[Path]:
+    token = str(raw_path or "").strip()
+    if not token:
+        return None
+    token = _normalize_workspace_path_token(token, workspace_path=workspace_path)
+    path = Path(token)
+    if not path.is_absolute():
+        path = workspace_path / path
+    return path
 
 
 def _provenance_group(
@@ -328,6 +388,23 @@ def extract_topology_seed(
                     "targets_repo",
                     f"{cron_jobs_file.as_posix()}#job={job_id}",
                 )
+
+        for field_name in ("script", "sourcePath"):
+            path_value = str(job.get(field_name) or "").strip()
+            resolved_path = _resolve_workspace_relative_path(path_value, workspace_path=workspace_path)
+            if resolved_path is None:
+                continue
+            parsed = _path_node(resolved_path.as_posix())
+            path_node = parsed["node"]
+            edge_role = parsed["edge_role"] if field_name == "script" else "reads"
+            upsert_node(path_node)
+            add_edge(
+                job_node["id"],
+                path_node["id"],
+                edge_role,
+                f"{cron_jobs_file.as_posix()}#job={job_id}:{field_name}",
+                {"field": field_name},
+            )
 
     spec_files = _iter_spec_files(spec_dir_path)
     for spec_path in spec_files:

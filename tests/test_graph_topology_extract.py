@@ -131,6 +131,57 @@ class TestGraphTopologyExtract(unittest.TestCase):
             self.assertIn((workspace / "repo-alpha" / "tools" / "run.py").as_posix(), derived_paths)
             self.assertIn((workspace / "repo-alpha" / "docs" / "receipt.json").as_posix(), derived_paths)
 
+    def test_extract_topology_seed_accepts_active_cron_canon_scripts(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            workspace = root / "workspace"
+            workspace.mkdir(parents=True)
+            (workspace / "repo-alpha").mkdir()
+            (workspace / "repo-alpha" / ".git").mkdir()
+            script_path = workspace / "tools" / "cron-runner" / "jobs" / "repo_alpha.ps1"
+            script_path.parent.mkdir(parents=True)
+            script_path.write_text("Write-Host repo-alpha\n", encoding="utf-8")
+
+            cron_canon_path = root / "cron-canon.json"
+            cron_canon_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "openclaw.agent-harness.cron-canon.v1",
+                        "activeCrons": [
+                            {
+                                "id": "repo-alpha-daily",
+                                "name": "Daily repo-alpha job",
+                                "enabled": True,
+                                "schedule": "10 5 * * *",
+                                "timezone": "Asia/Taipei",
+                                "sourcePath": "workspace/tools/cron-runner/crontab/openclaw-mem.crontab",
+                                "script": "tools/cron-runner/jobs/repo_alpha.ps1",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            out = extract_topology_seed(
+                workspace=workspace,
+                cron_jobs_path=cron_canon_path,
+                spec_dir=workspace / "tools" / "cron-runner" / "jobs",
+            )
+
+            self.assertEqual(out["counts"]["cron_jobs"], 1)
+            self.assertGreaterEqual(out["counts"]["edge_types"].get("runs", 0), 1)
+            self.assertGreaterEqual(out["counts"]["edge_types"].get("reads", 0), 1)
+            self.assertGreaterEqual(out["counts"]["edge_types"].get("targets_repo", 0), 1)
+            self.assertEqual(out["counts"]["provenance_groups"].get("cron_jobs"), 3)
+
+            script_nodes = [
+                node for node in out["nodes"]
+                if node.get("type") == "script"
+                and node.get("metadata", {}).get("basename") == "repo_alpha.ps1"
+            ]
+            self.assertEqual(len(script_nodes), 1)
+
     def test_repo_node_prefers_origin_head_for_default_branch(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             workspace = Path(td) / "workspace"

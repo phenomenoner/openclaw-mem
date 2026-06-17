@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.29] - 2026-06-18
+
+### Added
+
+- Support active Windows Agent Harness cron canon topology extraction via `activeCrons[]`, including deterministic cron-to-script/source-path graph edges.
+
+### Fixed
+
+- Treat Windows script launchers (`.ps1`, `.cmd`, `.bat`) as script nodes in topology extraction so graph readiness can prove a non-empty topology on the Windows harness lane.
+
 ## [1.9.28] - 2026-06-18
 
 ### Added
