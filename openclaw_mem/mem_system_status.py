@@ -172,10 +172,33 @@ def _engine_project_root(workspace_root: Path) -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def build_status(*, workspace_root: str | Path = ".", state_root: str | Path | None = None) -> dict[str, Any]:
+def _infer_state_root_from_db_path(db_path: Path) -> Path | None:
+    parts = db_path.parts
+    if len(parts) >= 3 and parts[-2] == "memory" and parts[-1] == "openclaw-mem.sqlite":
+        return db_path.parent.parent
+    return None
+
+
+def build_status(
+    *,
+    workspace_root: str | Path = ".",
+    state_root: str | Path | None = None,
+    harness_home: str | Path | None = None,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
     root = Path(workspace_root).expanduser().resolve()
-    state = Path(state_root).expanduser().resolve() if state_root else Path.home() / ".openclaw"
+    resolved_db_path = Path(db_path).expanduser().resolve() if db_path else None
+    inferred_state = _infer_state_root_from_db_path(resolved_db_path) if resolved_db_path else None
+    if state_root:
+        state = Path(state_root).expanduser().resolve()
+    elif harness_home:
+        state = Path(harness_home).expanduser().resolve()
+    elif inferred_state:
+        state = inferred_state.resolve()
+    else:
+        state = Path.home() / ".openclaw"
     mem = state / "memory"
+    sqlite_db_path = resolved_db_path or (mem / "openclaw-mem.sqlite")
     config_path = state / "openclaw.json"
     config = _load_json(config_path)
     engine_config = _config_for_plugin(config, "openclaw-mem-engine")
@@ -322,7 +345,7 @@ def build_status(*, workspace_root: str | Path = ".", state_root: str | Path | N
     for item in surfaces:
         key = str(item["state"])
         counts[key] = counts.get(key, 0) + 1
-    sqlite_counts = _read_sqlite_counts(mem / "openclaw-mem.sqlite")
+    sqlite_counts = _read_sqlite_counts(sqlite_db_path)
     return {
         "schema_version": SCHEMA_VERSION,
         "ok": True,
@@ -331,10 +354,11 @@ def build_status(*, workspace_root: str | Path = ".", state_root: str | Path | N
         "state_root": str(state),
         "config_path": str(config_path),
         "config_loaded": bool(config),
+        "db_path": str(sqlite_db_path),
         "memory_slot": memory_slot,
         "durable_truth_owner": {
             "surface_id": "store.sqlite",
-            "path": str(mem / "openclaw-mem.sqlite"),
+            "path": str(sqlite_db_path),
             "role": "canonical_local_store",
         },
         "planes": ["Store", "Pack", "Observe", "Review", "Curate"],

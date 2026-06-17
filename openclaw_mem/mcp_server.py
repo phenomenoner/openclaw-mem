@@ -37,6 +37,9 @@ class ToolDef:
     name: str
     description: str
     input_schema: dict[str, Any]
+    approval_required: bool = False
+    read_only: bool = True
+    timeout_ms: int = 3000
 
 
 TOOLS: tuple[ToolDef, ...] = (
@@ -92,6 +95,8 @@ TOOLS: tuple[ToolDef, ...] = (
     ToolDef(
         name="mem_store",
         description="Store one local observation without requiring embedding availability.",
+        approval_required=True,
+        read_only=False,
         input_schema={
             "type": "object",
             "properties": {
@@ -125,15 +130,30 @@ def tool_manifest() -> dict[str, Any]:
     tools = []
     for tool in TOOLS:
         desc_hash = hashlib.sha256(tool.description.encode("utf-8")).hexdigest()
+        schema_json = json.dumps(tool.input_schema, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        schema_hash = hashlib.sha256(schema_json.encode("utf-8")).hexdigest()
         tools.append(
             {
                 "name": tool.name,
                 "description": tool.description,
                 "descriptionSha256": desc_hash,
+                "inputSchemaSha256": schema_hash,
                 "inputSchema": tool.input_schema,
+                "approvalRequired": tool.approval_required,
+                "readOnly": tool.read_only,
+                "timeoutMs": tool.timeout_ms,
             }
         )
-    return {"schema": SCHEMA, "tools": tools}
+    return {
+        "schema": SCHEMA,
+        "contractVersion": 1,
+        "errorShape": {
+            "ok": False,
+            "error": {"type": "string", "message": "string"},
+            "receipt": {"tool": "string", "latencyMs": "integer"},
+        },
+        "tools": tools,
+    }
 
 
 def _record_id(record_ref: Any) -> int:
@@ -386,6 +406,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="openclaw-mem stdio MCP server")
     parser.add_argument("--db", default=None, help="SQLite DB path (default: openclaw-mem default)")
     parser.add_argument("--tool-descriptions", action="store_true", help="Print stable tool description hash manifest and exit")
+    parser.add_argument("--json", action="store_true", help="Accepted with --tool-descriptions for CLI contract symmetry")
     args = parser.parse_args(argv)
     if args.tool_descriptions:
         print(json.dumps(tool_manifest(), ensure_ascii=False, indent=2, sort_keys=True))

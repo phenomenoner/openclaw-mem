@@ -28,6 +28,9 @@ from openclaw_mem.optimization import (
 )
 from openclaw_mem.optimize_assist_families import FAMILY_NAMES, candidate_family_from_item
 
+if not hasattr(signal, "SIGKILL"):  # pragma: no cover - Windows compatibility
+    signal.SIGKILL = signal.SIGTERM  # type: ignore[attr-defined]
+
 try:
     import fcntl  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover - exercised on Windows
@@ -79,18 +82,24 @@ def _parse_iso_utc(raw: Any) -> Optional[datetime]:
 
 
 def _run(argv: list[str]) -> CommandResult:
+    popen_argv = list(argv)
+    if os.name == "nt" and popen_argv and str(popen_argv[0]).lower().endswith(".py"):
+        popen_argv = [sys.executable, *popen_argv]
     proc = subprocess.Popen(
-        argv,
+        popen_argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        start_new_session=True,
+        start_new_session=os.name != "nt",
     )
     try:
         stdout, stderr = proc.communicate(timeout=_ACTIVE_SUBPROCESS_TIMEOUT_SECS)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            if os.name == "nt":
+                proc.kill()
+            else:
+                os.killpg(proc.pid, signal.SIGKILL)
         except OSError:
             pass
         try:
@@ -222,7 +231,12 @@ def _locked_controller_state(path: Path, *, allow_unsigned_legacy: bool = False)
                 handle.write("0")
                 handle.flush()
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            while True:
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.05)
         try:
             hold_secs_raw = str(os.getenv("OPENCLAW_MEM_TEST_CONTROLLER_LOCK_HOLD_SECS", "") or "").strip()
             if hold_secs_raw:

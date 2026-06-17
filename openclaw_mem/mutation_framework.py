@@ -86,7 +86,7 @@ def _safe_target(path: str, *, allowed_root: Path) -> Path:
     if not path:
         raise ValueError("path_required")
     p = Path(path)
-    if p.is_absolute():
+    if p.is_absolute() or p.drive or p.root:
         raise ValueError("absolute_paths_forbidden")
     if any(part in {"..", ""} for part in p.parts):
         raise ValueError("path_traversal_forbidden")

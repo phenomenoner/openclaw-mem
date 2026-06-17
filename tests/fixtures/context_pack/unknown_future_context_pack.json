@@ -1,0 +1,28 @@
+{
+  "schema": "openclaw-mem.context-pack.v99",
+  "meta": {
+    "ts": "2026-06-17T00:00:00Z",
+    "query": "future schema must fail open",
+    "scope": "project:openclaw-mem",
+    "budgetTokens": 256,
+    "maxItems": 1
+  },
+  "bundle_text": "- [obs:future-001] Future schemas must not be treated as v1.",
+  "items": [
+    {
+      "recordRef": "obs:future-001",
+      "layer": "L1",
+      "type": "memory",
+      "importance": "must_remember",
+      "trust": "trusted",
+      "text": "Future schemas must not be treated as v1.",
+      "citations": {
+        "url": null,
+        "recordRef": "obs:future-001"
+      }
+    }
+  ],
+  "notes": {
+    "how_to_use": []
+  }
+}

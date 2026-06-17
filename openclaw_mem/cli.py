@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import hashlib
+import io
 import importlib.util
 import json
 import math
@@ -29,7 +30,7 @@ import unicodedata
 import urllib.error
 import urllib.request
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -721,7 +722,7 @@ def _episodic_lock_path(target: Path) -> Path:
 
 @contextmanager
 def _episodic_flock(lock_path: Path, *, exclusive: bool, timeout_s: float = 5.0):
-    """Best-effort advisory file lock (POSIX flock).
+    """Best-effort advisory file lock.
 
     Uses a dedicated lock file so rotations don't race writers holding the
     spool file descriptor.
@@ -731,25 +732,70 @@ def _episodic_flock(lock_path: Path, *, exclusive: bool, timeout_s: float = 5.0)
 
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fp = lock_path.open("a", encoding="utf-8")
+    locked = False
     try:
-        import fcntl  # POSIX only
+        try:
+            import fcntl  # type: ignore
+        except ModuleNotFoundError:
+            fcntl = None  # type: ignore
 
-        flags = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
-        if timeout_s <= 0:
-            fcntl.flock(fp.fileno(), flags)
+        if fcntl is not None:
+            flags = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            if timeout_s <= 0:
+                fcntl.flock(fp.fileno(), flags)
+                locked = True
+            else:
+                deadline = time.monotonic() + float(timeout_s)
+                while True:
+                    try:
+                        fcntl.flock(fp.fileno(), flags | fcntl.LOCK_NB)
+                        locked = True
+                        break
+                    except BlockingIOError:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(f"timed out acquiring lock: {lock_path}")
+                        time.sleep(0.05)
         else:
-            deadline = time.monotonic() + float(timeout_s)
-            while True:
-                try:
-                    fcntl.flock(fp.fileno(), flags | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() >= deadline:
-                        raise TimeoutError(f"timed out acquiring lock: {lock_path}")
-                    time.sleep(0.05)
+            import msvcrt
+
+            fp.seek(0, os.SEEK_END)
+            if fp.tell() == 0:
+                fp.write("0")
+                fp.flush()
+            fp.seek(0)
+            if timeout_s <= 0:
+                while True:
+                    try:
+                        msvcrt.locking(fp.fileno(), msvcrt.LK_NBLCK, 1)
+                        locked = True
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+            else:
+                deadline = time.monotonic() + float(timeout_s)
+                while True:
+                    try:
+                        msvcrt.locking(fp.fileno(), msvcrt.LK_NBLCK, 1)
+                        locked = True
+                        break
+                    except OSError:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(f"timed out acquiring lock: {lock_path}")
+                        time.sleep(0.05)
 
         yield fp
     finally:
+        if locked:
+            try:
+                if "fcntl" in locals() and fcntl is not None:
+                    fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
+                else:
+                    import msvcrt
+
+                    fp.seek(0)
+                    msvcrt.locking(fp.fileno(), msvcrt.LK_UNLCK, 1)
+            except Exception:
+                pass
         try:
             fp.close()
         except Exception:
@@ -1508,6 +1554,7 @@ def _build_runtime_health(config: Dict[str, Any], args: argparse.Namespace) -> D
             "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_CAPTURE", default=False),
             "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD", default=False),
         },
+        "harness_env_bridge": getattr(args, "harness_env_bridge", {"enabled": False}),
     }
 
 
@@ -6471,6 +6518,77 @@ def _get_api_key(env_var: str = "OPENAI_API_KEY") -> Optional[str]:
     return None
 
 
+def _parse_env_file(path: Path) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    if not path.exists():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            values[key] = value
+    return values
+
+
+def _apply_harness_env_bridge(args: argparse.Namespace) -> Dict[str, Any]:
+    harness_home_raw = getattr(args, "harness_home", None) or getattr(args, "harness_home_global", None)
+    if not harness_home_raw:
+        return {"enabled": False}
+    harness_home = Path(harness_home_raw).expanduser().resolve()
+    credentials_path = harness_home / "secrets" / "memory-credentials.env"
+    env_values = _parse_env_file(credentials_path)
+    mappings = {
+        "OPENAI_API_KEY": (
+            "OPENAI_API_KEY",
+            "OPENCLAW_MEM_OPENAI_API_KEY",
+            "OPENCLAW_MEM_EMBEDDING_API_KEY",
+            "AGENT_HARNESS_MEMORY_EMBEDDING_API_KEY",
+        ),
+        "OPENCLAW_MEM_OPENAI_BASE_URL": (
+            "OPENCLAW_MEM_OPENAI_BASE_URL",
+            "OPENAI_BASE_URL",
+            "AGENT_HARNESS_MEMORY_EMBEDDING_BASE_URL",
+        ),
+        "OPENCLAW_MEM_EMBED_MODEL": (
+            "OPENCLAW_MEM_EMBED_MODEL",
+            "OPENAI_EMBEDDING_MODEL",
+            "AGENT_HARNESS_MEMORY_EMBEDDING_MODEL",
+        ),
+        "OPENCLAW_MEM_RERANK_MODEL": ("OPENCLAW_MEM_RERANK_MODEL",),
+    }
+    applied: list[dict[str, Any]] = []
+    for target, sources in mappings.items():
+        source_used = None
+        for source in sources:
+            if env_values.get(source):
+                source_used = source
+                break
+        if source_used and not os.environ.get(target):
+            os.environ[target] = env_values[source_used]
+            applied.append({"target": target, "source": source_used, "valuePresent": True, "valueRedacted": True})
+
+    db_path = harness_home / "memory" / "openclaw-mem.sqlite"
+    if not getattr(args, "db", None) and not getattr(args, "db_global", None) and not os.environ.get("OPENCLAW_MEM_DB"):
+        os.environ["OPENCLAW_MEM_DB"] = str(db_path)
+
+    receipt = {
+        "enabled": True,
+        "harnessHome": str(harness_home),
+        "credentialsPath": str(credentials_path),
+        "credentialsLoaded": bool(env_values),
+        "dbPath": str(db_path),
+        "dbPathExists": db_path.exists(),
+        "applied": applied,
+        "secretValuesPrinted": False,
+    }
+    args.harness_env_bridge = receipt
+    return receipt
+
+
 def _get_gateway_config(args: argparse.Namespace, *, want_v1: bool = True) -> Dict[str, str]:
     """Resolve Gateway connection details (URL, token, agent_id).
 
@@ -10802,6 +10920,8 @@ def cmd_mem_system_status(conn: sqlite3.Connection, args: argparse.Namespace) ->
     payload = mem_system_status.build_status(
         workspace_root=getattr(args, "workspace_root", "."),
         state_root=getattr(args, "state_root", None),
+        harness_home=getattr(args, "harness_home", None),
+        db_path=getattr(args, "db", None),
     )
     if getattr(args, "out", None):
         out = Path(args.out)
@@ -10811,6 +10931,150 @@ def cmd_mem_system_status(conn: sqlite3.Connection, args: argparse.Namespace) ->
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         print(mem_system_status.render_status(payload))
+
+
+def cmd_service_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    db_path = str(getattr(args, "db", None) or os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB))
+    qdrant_path = Path(db_path).expanduser().parent / "qdrant-edge"
+    _emit(
+        {
+            "schema": "openclaw-mem.service.status.v0",
+            "ok": True,
+            "serviceVersion": __version__,
+            "engineOwnerId": None,
+            "activeSlotId": None,
+            "rollbackSlotId": None,
+            "shadowMode": True,
+            "promotionReady": False,
+            "promotionBlockedReasons": ["contract_stub_shadow_only", "fresh_heartbeat_required", "rollback_proof_required"],
+            "graphReadiness": "not_ready",
+            "embeddingModelNamespace": os.environ.get("OPENCLAW_MEM_EMBED_MODEL") or "unknown",
+            "qdrantNativeRecallMode": "snapshot-preserved" if qdrant_path.exists() else "not-present",
+            "dbPath": db_path,
+            "writesPerformed": False,
+        },
+        getattr(args, "json", True),
+    )
+
+
+def cmd_service_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    ns = argparse.Namespace(
+        db=getattr(args, "db", None),
+        json=True,
+        query=getattr(args, "query", ""),
+        query_en=None,
+        limit=getattr(args, "limit", 5),
+        budget_tokens=getattr(args, "budget_tokens", 800),
+        tail_text=None,
+        tail_file=None,
+        tail_max_items=4,
+        tail_budget_tokens=0,
+        use_gbrain="off",
+        gbrain_bin=gbrain_sidecar.DEFAULT_GBRAIN_BIN,
+        gbrain_limit=gbrain_sidecar.DEFAULT_CONSULT_LIMIT,
+        gbrain_timeout_ms=gbrain_sidecar.DEFAULT_CONSULT_TIMEOUT_MS,
+        gbrain_expand=False,
+        use_graph="off",
+        graph_scope=None,
+        graph_budget_tokens=1200,
+        graph_take=12,
+        graph_query_db=None,
+        graph_provenance_policy="off",
+        graph_require_structured_provenance=True,
+        graph_provenance_hops=1,
+        graph_provenance_max_nodes=40,
+        graph_provenance_max_edges=80,
+        pack_trust_policy="off",
+        pack_lifecycle_shadow="off",
+        pack_lifecycle_log_max_rows=_PACK_LIFECYCLE_LOG_MAX_ROWS_DEFAULT,
+        pack_lifecycle_write="off",
+        graph_probe=None,
+        graph_probe_limit=5,
+        graph_probe_t_high=-5.0,
+        graph_probe_t_marginal=-2.0,
+        graph_probe_n_min=3,
+        graph_latency_soft_ms=150,
+        graph_latency_hard_ms=300,
+        trace=False,
+    )
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        cmd_pack(conn, ns)
+    pack_payload = json.loads(buf.getvalue())
+    _emit(
+        {
+            "schema": "openclaw-mem.service.recall.v0",
+            "ok": True,
+            "shadowMode": True,
+            "activePromptOwner": False,
+            "query": getattr(args, "query", ""),
+            "context_pack": pack_payload.get("context_pack"),
+            "resultCount": len(pack_payload.get("items") or []),
+            "writesPerformed": False,
+        },
+        getattr(args, "json", True),
+    )
+
+
+def cmd_service_lease(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    owner = str(getattr(args, "owner", "") or "").strip()
+    ttl_ms = int(getattr(args, "ttl_ms", 0) or 0)
+    _emit(
+        {
+            "schema": "openclaw-mem.service.lease.v0",
+            "ok": bool(owner and ttl_ms > 0),
+            "owner": owner or None,
+            "ttlMs": ttl_ms,
+            "activeOwner": False,
+            "shadowMode": True,
+            "staleLeaseIsActiveOwner": False,
+            "leaseMode": "shadow_contract_only",
+            "writesPerformed": False,
+        },
+        getattr(args, "json", True),
+    )
+
+
+def _qdrant_mode(db_path: Path) -> str:
+    return "snapshot-preserved" if (db_path.expanduser().parent / "qdrant-edge").exists() else "not-present"
+
+
+def cmd_qdrant_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    db_path = Path(str(getattr(args, "db", None) or os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB))).expanduser()
+    _emit(
+        {
+            "schema": "openclaw-mem.qdrant.status.v0",
+            "ok": True,
+            "qdrantNativeRecall": _qdrant_mode(db_path),
+            "path": str(db_path.parent / "qdrant-edge"),
+            "collection": None,
+            "vectorDimension": None,
+            "embeddingModelNamespace": os.environ.get("OPENCLAW_MEM_EMBED_MODEL") or "unknown",
+            "indexedRowCount": None,
+            "lastRefresh": None,
+            "nativeRecallAvailable": False,
+            "fallback": "sqlite",
+            "writesPerformed": False,
+        },
+        getattr(args, "json", True),
+    )
+
+
+def cmd_qdrant_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    db_path = Path(str(getattr(args, "db", None) or os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB))).expanduser()
+    _emit(
+        {
+            "schema": "openclaw-mem.qdrant.recall.v0",
+            "ok": False,
+            "qdrantNativeRecall": _qdrant_mode(db_path),
+            "error": "native_qdrant_recall_not_active",
+            "fallback": "use openclaw-mem pack/search sqlite lane",
+            "query": getattr(args, "query", ""),
+            "items": [],
+            "writesPerformed": False,
+        },
+        getattr(args, "json", True),
+    )
 
 
 def _load_mutation_input(args: argparse.Namespace) -> dict[str, Any]:
@@ -12021,28 +12285,42 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         conn.commit()
         print("Warning: No API key, skipping embedding", file=sys.stderr)
 
-    # 3. Append to memory/YYYY-MM-DD.md
-    workspace = Path(args.workspace) if hasattr(args, "workspace") and args.workspace else DEFAULT_WORKSPACE
+    markdown_path: Optional[str] = None
+    markdown_write_status = "skipped:no_file_write"
+    if not bool(getattr(args, "no_file_write", False)):
+        notes_dir = getattr(args, "memory_notes_dir", None)
+        if notes_dir:
+            memory_dir = Path(notes_dir)
+        else:
+            workspace = Path(args.workspace) if hasattr(args, "workspace") and args.workspace else DEFAULT_WORKSPACE
+            memory_dir = workspace / "memory"
+            if not memory_dir.exists():
+                alt = Path(os.path.expanduser("~/.openclaw/memory"))
+                if alt.exists():
+                    memory_dir = alt
 
-    # Fallback logic for workspace memory dir
-    memory_dir = workspace / "memory"
-    if not memory_dir.exists():
-         alt = Path(os.path.expanduser("~/.openclaw/memory"))
-         if alt.exists():
-             memory_dir = alt
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        md_file = memory_dir / f"{date_str}.md"
+        md_entry = f"- [{args.category.upper()}] {text} (importance: {importance_obj['score']:.2f}, {importance_obj['label']})\n"
 
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    md_file = memory_dir / f"{date_str}.md"
+        try:
+            _atomic_append_file(md_file, md_entry)
+            markdown_path = str(md_file)
+            markdown_write_status = "written"
+        except Exception as e:
+            markdown_write_status = f"failed:{e}"
 
-    md_entry = f"- [{args.category.upper()}] {text} (importance: {importance_obj['score']:.2f}, {importance_obj['label']})\n"
-
-    try:
-        _atomic_append_file(md_file, md_entry)
-        stored_path = str(md_file)
-    except Exception as e:
-        stored_path = f"failed ({e})"
-
-    _emit({"ok": True, "id": rowid, "file": stored_path, "embedded": bool(api_key)}, args.json)
+    _emit(
+        {
+            "ok": True,
+            "id": rowid,
+            "file": markdown_path,
+            "markdownPath": markdown_path,
+            "markdownWriteStatus": markdown_write_status,
+            "embedded": bool(api_key),
+        },
+        args.json,
+    )
 
 
 def cmd_artifact_stash(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -18138,11 +18416,6 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
             raise ValueError("--rotate-min-bytes must be > 0")
         if rotate_on_idle_seconds > 0 and not follow:
             raise ValueError("--rotate-on-idle-seconds requires --follow")
-        if rotate_on_idle_seconds > 0:
-            try:
-                import fcntl  # noqa: F401
-            except Exception:
-                raise ValueError("--rotate-on-idle-seconds requires POSIX fcntl/flock")
     except ValueError as e:
         _emit({"kind": "openclaw-mem.episodes.ingest.v0", "ok": False, "error": str(e)}, True)
         sys.exit(2)
@@ -18798,6 +19071,7 @@ def build_parser() -> argparse.ArgumentParser:
     # Global flags (before the subcommand). These are merged with per-command flags.
     p.add_argument("--db", dest="db_global", default=None, help="SQLite DB path")
     p.add_argument("--json", dest="json_global", action="store_true", help="Structured JSON output")
+    p.add_argument("--harness-home", dest="harness_home_global", default=None, help="Agent Harness home for explicit env/db bridge")
     # Keep historical Namespace shape (`args.db` / `args.json` exist even when
     # omitted) while nested child parsers use SUPPRESS so they do not overwrite
     # parent-level values.
@@ -18816,6 +19090,7 @@ def build_parser() -> argparse.ArgumentParser:
         # actually saw the flag, and main() falls back only after parsing is done.
         sp.add_argument("--db", default=argparse.SUPPRESS, help="SQLite DB path")
         sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
+        sp.add_argument("--harness-home", default=argparse.SUPPRESS, help="Agent Harness home for explicit env/db bridge")
 
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -19524,6 +19799,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("pack", help="Build a compact, cited bundle from hybrid retrieval")
     sp.add_argument("--db", default=None, help="SQLite DB path")
+    sp.add_argument("--harness-home", default=None, help="Agent Harness home for explicit env/db bridge")
     sp.add_argument(
         "--json",
         dest="json",
@@ -20269,6 +20545,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="OpenAI API base URL (env: OPENCLAW_MEM_OPENAI_BASE_URL)",
     )
     sp.add_argument("--workspace", type=Path, help="Workspace root (default: cwd)")
+    sp.add_argument("--no-file-write", action="store_true", help="Store only in SQLite/vector lanes; skip Markdown memory note append")
+    sp.add_argument("--memory-notes-dir", help="Directory for Markdown memory note side effects when file writes are enabled")
     sp.set_defaults(func=cmd_store)
 
     sp = sub.add_parser("index", help="Build Markdown index for OpenClaw memory_search (Route A)")
@@ -20378,9 +20656,41 @@ def build_parser() -> argparse.ArgumentParser:
     ms = msub.add_parser("status", aliases=["verify"], help="Show read-only OpenClaw Mem system posture")
     ms.add_argument("--workspace-root", default=".", help="Repository/workspace root to inspect")
     ms.add_argument("--state-root", help="OpenClaw state root to inspect (default: ~/.openclaw)")
+    ms.add_argument("--harness-home", help="Agent Harness home/state root to inspect")
+    ms.add_argument("--db", help="SQLite DB path; infers harness/state root from <home>/memory/openclaw-mem.sqlite when no stronger root is supplied")
     ms.add_argument("--out", help="Optional path to write the status JSON")
     ms.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Structured JSON output")
     ms.set_defaults(func=cmd_mem_system_status)
+
+    sp = sub.add_parser("service", help="Contract-first remote mem-engine service probes")
+    add_common(sp)
+    ssub = sp.add_subparsers(dest="service_cmd", required=True)
+    svc = ssub.add_parser("status", help="Emit shadow-mode service status contract")
+    add_common(svc)
+    svc.set_defaults(func=cmd_service_status)
+    svc = ssub.add_parser("recall", help="Emit shadow-mode recall contract using the local pack lane")
+    add_common(svc)
+    svc.add_argument("--query", required=True)
+    svc.add_argument("--limit", type=int, default=5)
+    svc.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=800)
+    svc.set_defaults(func=cmd_service_recall)
+    svc = ssub.add_parser("lease", help="Emit shadow-mode lease contract without active ownership")
+    add_common(svc)
+    svc.add_argument("--owner", required=True)
+    svc.add_argument("--ttl-ms", dest="ttl_ms", type=int, required=True)
+    svc.set_defaults(func=cmd_service_lease)
+
+    sp = sub.add_parser("qdrant", help="Native Qdrant recall status probes")
+    add_common(sp)
+    qsub = sp.add_subparsers(dest="qdrant_cmd", required=True)
+    q = qsub.add_parser("status", help="Report native Qdrant recall mode")
+    add_common(q)
+    q.set_defaults(func=cmd_qdrant_status)
+    q = qsub.add_parser("recall", help="Attempt native Qdrant recall; fail closed when inactive")
+    add_common(q)
+    q.add_argument("--query", required=True)
+    q.add_argument("--limit", type=int, default=5)
+    q.set_defaults(func=cmd_qdrant_recall)
 
     sp = sub.add_parser("mutation", help="Local staged mutation framework (synthetic L0-L2 only)")
     musub = sp.add_subparsers(dest="mutation_cmd", required=True)
@@ -20648,6 +20958,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    bridge_receipt = _apply_harness_env_bridge(args)
+    if not hasattr(args, "harness_env_bridge"):
+        args.harness_env_bridge = bridge_receipt
     cmd = getattr(args, "cmd", None)
     self_cmd = getattr(args, "self_cmd", None)
     optimize_cmd = getattr(args, "optimize_cmd", None)

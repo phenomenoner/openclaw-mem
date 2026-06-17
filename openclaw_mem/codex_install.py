@@ -105,7 +105,7 @@ def install_codex(*, codex_home: str | Path | None = None, output: str | Path | 
     return {
         "ok": True,
         "dry_run": bool(dry_run),
-        "path": str(path),
+        "path": path.as_posix(),
         "changed": changed,
         "action": action if changed else "unchanged",
         "mode": mode,

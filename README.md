@@ -93,6 +93,7 @@ When the optional mem-engine is active, **Proactive Pack** extends the same cont
 | **Hybrid recall** | SQLite FTS + vector search, with scopes and auditable policies |
 | **Temporal facts** | "What is currently true about X" — source-linked assertions, timelines, conflict/staleness lint |
 | **Graph query plane** | `graph query` for upstream/downstream/lineage over a SQLite-derived graph |
+| **Contract-first harness integration** | MCP hash manifests, Channel A file packs, harness-home env bridge, and shadow-only service/Qdrant probes for safe cutover checks |
 | **Local-first** | JSONL + SQLite. No cloud service, no external vector DB required, data stays on your machine |
 
 Advanced opt-in labs (graph routing, GBrain sidecar, governed continuity, Dream Lite, Self Curator engine) stay out of the first evaluation path: [Core vs Advanced Labs](docs/core-vs-advanced-labs.md).
@@ -119,6 +120,17 @@ They are **complementary**: openclaw-mem already pushes bounded metadata to Lanc
 | 5 min | pip CLI + synthetic proof | [Evaluator path](docs/evaluator-path.md) |
 | 30 min | Sidecar install, real capture, first governed pack | [Install modes](docs/install-modes.md) |
 | Afternoon | OpenClaw plugin / mem-engine promotion, MCP/Channel A/hooks integration for Codex/Claude/Gemini | [MCP integration](docs/mcp-integration.md), [Channel A](docs/channel-a-file-contract.md), [Lifecycle hooks](docs/lifecycle-hooks.md) |
+
+Harness operators can verify integration without promoting a new memory owner:
+
+```bash
+openclaw-mem --harness-home /path/to/.agent-harness status --json
+openclaw-mem service status --json
+openclaw-mem qdrant status --json
+openclaw-mem-mcp --tool-descriptions --json
+```
+
+These commands are read-only. The service and Qdrant probes are contract-first v0 surfaces: they report shadow/fallback posture and do not claim active prompt ownership.
 
 ## FAQ
 

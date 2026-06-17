@@ -38,8 +38,14 @@ Rules:
 
 - `observationId` is the idempotency key
 - duplicate ids are skipped on retry
+- UTF-8 BOM JSONL input is accepted
+- `text` is required; legacy `summary` is not silently promoted to memory text
 - `<private>`, `[NOEXPORT]`, `[PRIVATE]`, and `[NOMEM]` rows are skipped
 - invalid rows are skipped and counted in the receipt
+
+Migration note: producers that previously emitted only `summary` must emit `text`
+before relying on Channel A injection. Rows without `text` are treated as invalid
+instead of being converted implicitly.
 
 ## Shared fixtures
 

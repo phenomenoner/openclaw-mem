@@ -174,6 +174,43 @@ See: `docs/dual-language-memory-strategy.md`.
 
 ---
 
+## Step 4.6b: Harness-safe command probes (optional)
+
+When running inside an agent harness checkout, pass the harness home explicitly.
+This lets the CLI resolve the harness memory DB and embedding credential env file
+without printing secret values:
+
+```bash
+openclaw-mem --harness-home /path/to/.agent-harness status --json
+openclaw-mem pack --harness-home /path/to/.agent-harness --query "current memory posture" --limit 5 --json
+```
+
+For isolated test databases, use DB-only store mode so smoke tests do not append
+Markdown notes to the operator workspace:
+
+```bash
+openclaw-mem store --db /tmp/openclaw-mem-smoke.sqlite \
+  --text "temp store isolation smoke" \
+  --no-file-write \
+  --json
+```
+
+Contract-first cutover probes are read-only and shadow-only:
+
+```bash
+openclaw-mem service status --json
+openclaw-mem service lease --owner agent-harness --ttl-ms 60000 --json
+openclaw-mem qdrant status --json
+openclaw-mem qdrant recall --query "memory engine recovery" --json
+```
+
+See:
+- `docs/specs/context-pack-schema-compatibility-v1.md`
+- `docs/specs/remote-mem-engine-service-contract-v0.md`
+- `docs/specs/native-qdrant-recall-contract-v0.md`
+
+---
+
 ## Step 4.7: Verbatim semantic lane for episodic evidence (optional)
 
 ```bash

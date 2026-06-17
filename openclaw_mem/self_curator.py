@@ -679,6 +679,7 @@ def _candidate_to_unattended_mutation(candidate: dict[str, Any], *, workspace_ro
             target_ref = str(Path(target_ref).resolve().relative_to(workspace_root))
         except ValueError:
             return None
+    target_ref = target_ref.replace("\\", "/")
     if not target_ref.endswith("/SKILL.md"):
         return None
     skill_path = _resolve_under(workspace_root, target_ref)
@@ -750,11 +751,12 @@ def build_policy_for_plan(*, plan: dict[str, Any], mode: str, unattended: bool) 
     for m in plan.get("mutations") or []:
         action = m.get("action")
         target = str(m.get("target_ref") or "")
+        target_norm = target.replace("\\", "/")
         risk = m.get("risk_class")
         if risk != "skill_surface":
             allowed = False
             reasons.append(f"unsupported_risk:{risk}")
-        if action == "replace_text" and target.endswith("/SKILL.md"):
+        if action == "replace_text" and target_norm.endswith("/SKILL.md"):
             patch = m.get("patch") if isinstance(m.get("patch"), dict) else {}
             old_text = str(patch.get("old_text") or "")
             new_text = str(patch.get("new_text") or "")
@@ -767,7 +769,8 @@ def build_policy_for_plan(*, plan: dict[str, Any], mode: str, unattended: bool) 
             )
             if delta and "## Curator lifecycle" not in old_text and lifecycle_re.fullmatch(delta):
                 continue
-        if action == "archive_file" and target.endswith("/SKILL.md") and str(m.get("dest_ref") or "").startswith("skills/.archive/"):
+        dest_norm = str(m.get("dest_ref") or "").replace("\\", "/")
+        if action == "archive_file" and target_norm.endswith("/SKILL.md") and dest_norm.startswith("skills/.archive/"):
             continue
         allowed = False
         reasons.append(f"unsupported_unattended_mutation:{action}:{target}")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from openclaw_mem.cli import _connect, _insert_observation
@@ -11,11 +13,24 @@ from openclaw_mem.mcp_server import TOOLS, call_tool, handle_jsonrpc, tool_manif
 def test_tool_manifest_has_stable_description_hashes():
     manifest = tool_manifest()
     assert manifest["schema"] == "openclaw-mem.mcp.tools.v1"
+    assert manifest["contractVersion"] == 1
+    assert manifest["errorShape"]["ok"] is False
     assert len(manifest["tools"]) >= 7
     for tool in manifest["tools"]:
         assert tool["name"]
         assert tool["description"]
         assert len(tool["descriptionSha256"]) == 64
+        assert len(tool["inputSchemaSha256"]) == 64
+        assert isinstance(tool["approvalRequired"], bool)
+        assert isinstance(tool["readOnly"], bool)
+        assert isinstance(tool["timeoutMs"], int)
+    store = next(tool for tool in manifest["tools"] if tool["name"] == "mem_store")
+    assert store["approvalRequired"] is True
+    assert store["readOnly"] is False
+    for tool in manifest["tools"]:
+        if tool["name"] != "mem_store":
+            assert tool["approvalRequired"] is False
+            assert tool["readOnly"] is True
 
 
 def test_committed_tool_description_manifest_stays_in_sync():
@@ -24,16 +39,33 @@ def test_committed_tool_description_manifest_stays_in_sync():
     live = tool_manifest()
     live_compact = {
         "schema": live["schema"],
+        "contractVersion": live["contractVersion"],
+        "errorShape": live["errorShape"],
         "tools": [
             {
                 "name": tool["name"],
                 "description": tool["description"],
                 "descriptionSha256": tool["descriptionSha256"],
+                "inputSchemaSha256": tool["inputSchemaSha256"],
+                "approvalRequired": tool["approvalRequired"],
+                "readOnly": tool["readOnly"],
+                "timeoutMs": tool["timeoutMs"],
             }
             for tool in live["tools"]
         ],
     }
     assert committed == live_compact
+
+
+def test_tool_descriptions_accept_json_flag():
+    proc = subprocess.run(
+        [sys.executable, "-m", "openclaw_mem.mcp_server", "--tool-descriptions", "--json"],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    payload = json.loads(proc.stdout)
+    assert payload["schema"] == "openclaw-mem.mcp.tools.v1"
 
 
 def test_tools_list_jsonrpc_contract():

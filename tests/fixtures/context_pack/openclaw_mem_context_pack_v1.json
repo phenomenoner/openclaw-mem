@@ -1,0 +1,31 @@
+{
+  "schema": "openclaw-mem.context-pack.v1",
+  "meta": {
+    "ts": "2026-06-17T00:00:00Z",
+    "query": "context pack compatibility",
+    "scope": "project:openclaw-mem",
+    "budgetTokens": 256,
+    "maxItems": 2
+  },
+  "bundle_text": "- [obs:compat-001] ContextPack v1 keeps citation ids and text stable for host adapters.",
+  "items": [
+    {
+      "recordRef": "obs:compat-001",
+      "layer": "L1",
+      "type": "memory",
+      "importance": "must_remember",
+      "trust": "trusted",
+      "text": "ContextPack v1 keeps citation ids and text stable for host adapters.",
+      "citations": {
+        "url": "file://memory/2026-06-17.md#obs-compat-001",
+        "recordRef": "obs:compat-001"
+      }
+    }
+  ],
+  "notes": {
+    "how_to_use": [
+      "Use bundle_text for prompt injection.",
+      "Use items[].citations.recordRef as the stable citation id."
+    ]
+  }
+}

@@ -45,3 +45,52 @@ def test_channel_a_ingests_idempotently_and_writes_latest_pack(tmp_path):
     receipt2 = run(args)
     assert receipt2["ingest"]["inserted"] == 0
     assert receipt2["ingest"]["skippedDuplicate"] == 3
+
+
+def test_channel_a_accepts_utf8_bom_jsonl(tmp_path):
+    db = tmp_path / "mem.sqlite"
+    input_jsonl = tmp_path / "events-bom.jsonl"
+    input_jsonl.write_text(
+        json.dumps({"observationId": "obs-bom", "kind": "decision", "text": "BOM JSONL should ingest."}) + "\n",
+        encoding="utf-8-sig",
+    )
+    packs_dir = tmp_path / "packs"
+    args = argparse.Namespace(
+        db=str(db),
+        input_jsonl=str(input_jsonl),
+        packs_dir=str(packs_dir),
+        agent="main",
+        query="BOM JSONL",
+        limit=5,
+        budget_tokens=400,
+    )
+
+    receipt = run(args)
+
+    assert receipt["ingest"]["inserted"] == 1
+    assert receipt["ingest"]["skippedInvalid"] == 0
+    assert (packs_dir / "main" / "latest.json").exists()
+
+
+def test_channel_a_rejects_summary_only_rows_as_invalid_schema(tmp_path):
+    db = tmp_path / "mem.sqlite"
+    input_jsonl = tmp_path / "events-invalid.jsonl"
+    input_jsonl.write_text(
+        json.dumps({"observationId": "obs-summary", "kind": "decision", "summary": "summary is not a Channel A text field"}) + "\n",
+        encoding="utf-8",
+    )
+    packs_dir = tmp_path / "packs"
+    args = argparse.Namespace(
+        db=str(db),
+        input_jsonl=str(input_jsonl),
+        packs_dir=str(packs_dir),
+        agent="main",
+        query="invalid schema",
+        limit=5,
+        budget_tokens=400,
+    )
+
+    receipt = run(args)
+
+    assert receipt["ingest"]["inserted"] == 0
+    assert receipt["ingest"]["skippedInvalid"] == 1

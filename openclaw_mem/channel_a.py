@@ -25,7 +25,7 @@ PRIVATE_MARKERS = ("<private>", "</private>", "[NOEXPORT]", "[PRIVATE]", "[NOMEM
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8-sig") as f:
         for line_no, line in enumerate(f, start=1):
             line = line.strip()
             if not line:
@@ -69,7 +69,7 @@ def ingest_rows(conn, rows: list[dict[str, Any]]) -> dict[str, Any]:
     ids: list[str] = []
     for row in rows:
         observation_id = str(row.get("observationId") or row.get("id") or "").strip()
-        text = str(row.get("text") or row.get("summary") or "").strip()
+        text = str(row.get("text") or "").strip()
         if not observation_id or not text:
             skipped_invalid += 1
             continue

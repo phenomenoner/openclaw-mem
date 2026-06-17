@@ -429,12 +429,20 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         popen.pid = 4321
         popen.communicate.side_effect = [subprocess.TimeoutExpired(cmd=["python3", "-m", "openclaw_mem"], timeout=7), ("", "")]
         popen.returncode = -signal.SIGKILL
-        with patch.object(runner.subprocess, "Popen", return_value=popen), patch.object(runner.os, "killpg") as killpg:
+        if os.name == "nt":
+            popen.kill = Mock()
+            patches = (patch.object(runner.subprocess, "Popen", return_value=popen),)
+        else:
+            patches = (patch.object(runner.subprocess, "Popen", return_value=popen), patch.object(runner.os, "killpg"))
+        with patches[0] as _, (patches[1] if len(patches) > 1 else patch.object(runner.os, "getpid", return_value=0)) as killpg:
             with self.assertRaises(runner.RunnerError) as ctx:
                 runner._run(["python3", "-m", "openclaw_mem"])
 
         self.assertIn("subprocess timed out", str(ctx.exception))
-        killpg.assert_called_once_with(4321, signal.SIGKILL)
+        if os.name == "nt":
+            popen.kill.assert_called_once()
+        else:
+            killpg.assert_called_once_with(4321, signal.SIGKILL)
 
     def test_run_timeout_second_communicate_does_not_hang(self):
         popen = Mock()
@@ -444,12 +452,20 @@ class TestOptimizeAssistRunner(unittest.TestCase):
             subprocess.TimeoutExpired(cmd=["python3", "-m", "openclaw_mem"], timeout=5),
         ]
         popen.returncode = -signal.SIGKILL
-        with patch.object(runner.subprocess, "Popen", return_value=popen), patch.object(runner.os, "killpg") as killpg:
+        if os.name == "nt":
+            popen.kill = Mock()
+            patches = (patch.object(runner.subprocess, "Popen", return_value=popen),)
+        else:
+            patches = (patch.object(runner.subprocess, "Popen", return_value=popen), patch.object(runner.os, "killpg"))
+        with patches[0] as _, (patches[1] if len(patches) > 1 else patch.object(runner.os, "getpid", return_value=0)) as killpg:
             with self.assertRaises(runner.RunnerError) as ctx:
                 runner._run(["python3", "-m", "openclaw_mem"])
 
         self.assertIn("subprocess timed out", str(ctx.exception))
-        killpg.assert_called_once_with(4321, signal.SIGKILL)
+        if os.name == "nt":
+            popen.kill.assert_called_once()
+        else:
+            killpg.assert_called_once_with(4321, signal.SIGKILL)
         self.assertEqual(popen.communicate.call_count, 2)
 
     def test_run_timeout_handles_permission_error_from_killpg(self):
@@ -457,7 +473,12 @@ class TestOptimizeAssistRunner(unittest.TestCase):
         popen.pid = 4321
         popen.communicate.side_effect = [subprocess.TimeoutExpired(cmd=["python3", "-m", "openclaw_mem"], timeout=7), ("", "")]
         popen.returncode = -signal.SIGKILL
-        with patch.object(runner.subprocess, "Popen", return_value=popen), patch.object(runner.os, "killpg", side_effect=PermissionError("denied")):
+        if os.name == "nt":
+            popen.kill = Mock(side_effect=PermissionError("denied"))
+            patches = (patch.object(runner.subprocess, "Popen", return_value=popen),)
+        else:
+            patches = (patch.object(runner.subprocess, "Popen", return_value=popen), patch.object(runner.os, "killpg", side_effect=PermissionError("denied")))
+        with patches[0], (patches[1] if len(patches) > 1 else patch.object(runner.os, "getpid", return_value=0)):
             with self.assertRaises(runner.RunnerError) as ctx:
                 runner._run(["python3", "-m", "openclaw_mem"])
 

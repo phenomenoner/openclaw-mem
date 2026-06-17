@@ -2,11 +2,13 @@ import io
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 from contextlib import redirect_stdout
+from pathlib import Path
 
 from openclaw_mem.cli import _connect, _enable_wal_best_effort, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, _pack_graph_resolve_scope, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export, cmd_graph_synth, cmd_graph_lint, cmd_vsearch
 
@@ -3630,6 +3632,159 @@ class TestCliM0(unittest.TestCase):
         self.assertIn("graded_at", detail["importance"])
 
         conn.close()
+
+    def test_store_no_file_write_skips_markdown_side_effect(self):
+        conn = _connect(":memory:")
+        notes_dir = Path(tempfile.mkdtemp())
+
+        args = type(
+            "Args",
+            (),
+            {
+                "text": "temp store isolation smoke",
+                "text_en": None,
+                "lang": "en",
+                "category": "fact",
+                "importance": 0.7,
+                "model": "test-model",
+                "base_url": "https://example.com/v1",
+                "workspace": None,
+                "memory_notes_dir": str(notes_dir),
+                "no_file_write": True,
+                "json": True,
+            },
+        )()
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value=None):
+            with redirect_stdout(buf):
+                cmd_store(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["markdownWriteStatus"], "skipped:no_file_write")
+        self.assertIsNone(out["markdownPath"])
+        self.assertEqual(list(notes_dir.glob("*.md")), [])
+        conn.close()
+
+    def test_store_memory_notes_dir_writes_markdown_under_requested_dir(self):
+        conn = _connect(":memory:")
+        notes_dir = Path(tempfile.mkdtemp())
+
+        args = type(
+            "Args",
+            (),
+            {
+                "text": "write this note under requested dir",
+                "text_en": None,
+                "lang": "en",
+                "category": "fact",
+                "importance": 0.7,
+                "model": "test-model",
+                "base_url": "https://example.com/v1",
+                "workspace": None,
+                "memory_notes_dir": str(notes_dir),
+                "no_file_write": False,
+                "json": True,
+            },
+        )()
+
+        from unittest.mock import patch
+
+        buf = io.StringIO()
+        with patch("openclaw_mem.cli._get_api_key", return_value=None):
+            with redirect_stdout(buf):
+                cmd_store(conn, args)
+
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["markdownWriteStatus"], "written")
+        markdown_path = Path(out["markdownPath"])
+        self.assertEqual(markdown_path.parent, notes_dir)
+        self.assertTrue(markdown_path.exists())
+        self.assertIn("write this note under requested dir", markdown_path.read_text(encoding="utf-8"))
+        conn.close()
+
+    def test_status_harness_env_bridge_redacts_secret_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            harness_home = Path(tmp) / ".agent-harness"
+            secrets_dir = harness_home / "secrets"
+            secrets_dir.mkdir(parents=True)
+            (secrets_dir / "memory-credentials.env").write_text(
+                "AGENT_HARNESS_MEMORY_EMBEDDING_API_KEY=sk-test-secret-value\n"
+                "AGENT_HARNESS_MEMORY_EMBEDDING_BASE_URL=https://example.invalid/v1\n"
+                "AGENT_HARNESS_MEMORY_EMBEDDING_MODEL=text-embedding-test\n",
+                encoding="utf-8",
+            )
+            env = dict(os.environ)
+            env.pop("OPENAI_API_KEY", None)
+            env.pop("OPENCLAW_MEM_OPENAI_BASE_URL", None)
+            env.pop("OPENCLAW_MEM_EMBED_MODEL", None)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "openclaw_mem",
+                    "--harness-home",
+                    str(harness_home),
+                    "status",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+            self.assertNotIn("sk-test-secret-value", proc.stdout)
+            out = json.loads(proc.stdout)
+            bridge = out["runtime"]["harness_env_bridge"]
+            self.assertTrue(bridge["enabled"])
+            self.assertTrue(bridge["credentialsLoaded"])
+            self.assertFalse(bridge["secretValuesPrinted"])
+            self.assertEqual(bridge["applied"][0]["target"], "OPENAI_API_KEY")
+            self.assertEqual(bridge["applied"][0]["source"], "AGENT_HARNESS_MEMORY_EMBEDDING_API_KEY")
+            self.assertTrue(bridge["applied"][0]["valueRedacted"])
+            applied = {item["target"]: item["source"] for item in bridge["applied"]}
+            self.assertEqual(applied["OPENCLAW_MEM_OPENAI_BASE_URL"], "AGENT_HARNESS_MEMORY_EMBEDDING_BASE_URL")
+            self.assertEqual(applied["OPENCLAW_MEM_EMBED_MODEL"], "AGENT_HARNESS_MEMORY_EMBEDDING_MODEL")
+
+    def test_service_and_qdrant_contract_probes_are_shadow_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "openclaw-mem.sqlite"
+            service = subprocess.run(
+                [sys.executable, "-m", "openclaw_mem", "--db", str(db), "service", "status", "--json"],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            service_payload = json.loads(service.stdout)
+            self.assertEqual(service_payload["schema"], "openclaw-mem.service.status.v0")
+            self.assertTrue(service_payload["shadowMode"])
+            self.assertFalse(service_payload["promotionReady"])
+            self.assertFalse(service_payload["writesPerformed"])
+
+            lease = subprocess.run(
+                [sys.executable, "-m", "openclaw_mem", "--db", str(db), "service", "lease", "--owner", "agent-harness", "--ttl-ms", "60000", "--json"],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            lease_payload = json.loads(lease.stdout)
+            self.assertFalse(lease_payload["activeOwner"])
+            self.assertFalse(lease_payload["staleLeaseIsActiveOwner"])
+
+            qdrant = subprocess.run(
+                [sys.executable, "-m", "openclaw_mem", "--db", str(db), "qdrant", "status", "--json"],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            qdrant_payload = json.loads(qdrant.stdout)
+            self.assertEqual(qdrant_payload["schema"], "openclaw-mem.qdrant.status.v0")
+            self.assertIn(qdrant_payload["qdrantNativeRecall"], {"not-present", "snapshot-preserved"})
+            self.assertFalse(qdrant_payload["nativeRecallAvailable"])
 
     def test_vsearch_filters_to_query_dimension_and_skips_zero_dim_rows(self):
         conn = _connect(":memory:")

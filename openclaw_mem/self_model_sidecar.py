@@ -570,7 +570,7 @@ def _iter_persisted_snapshots(run_dir: Optional[str], *, scope: Optional[str] = 
     snapshots: List[Dict[str, Any]] = []
     if not root.exists():
         return snapshots
-    for path in sorted(root.glob("sms:v0:*.json")):
+    for path in sorted(list(root.glob("sms:v0:*.json")) + list(root.glob("sms-v0-*.json"))):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
@@ -1321,7 +1321,8 @@ def compare_snapshots(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str
 def persist_snapshot(snapshot: Dict[str, Any], run_dir: Optional[str] = None, *, update_latest: bool = True) -> Dict[str, str]:
     root = Path(run_dir or default_run_dir())
     snapshots_dir = _mkdir(root / "snapshots")
-    snapshot_path = snapshots_dir / f"{snapshot['snapshot_id']}.json"
+    snapshot_filename = str(snapshot["snapshot_id"]).replace(":", "-")
+    snapshot_path = snapshots_dir / f"{snapshot_filename}.json"
     snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     paths = {"snapshot_path": str(snapshot_path)}
     if update_latest:

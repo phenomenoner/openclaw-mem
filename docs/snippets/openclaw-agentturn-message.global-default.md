@@ -59,12 +59,16 @@ Never store:
 - Python import package: `openclaw_mem`.
 - If the CLI is missing in an agent lane, first try `pip install openclaw-context-pack` in that lane's virtual environment; do not rename commands to `openclaw-context-pack`.
 - For source checkouts, `uv sync --locked` remains the repo-maintainer path; packaged users should prefer PyPI.
+- In Agent Harness lanes, prefer explicit `--harness-home <path>` for naked CLI use so DB/env resolution is deterministic and secret values stay redacted.
+- For smoke tests against temporary DBs, use `store --no-file-write` unless a Markdown note side effect is intentionally under test.
 
 ## Tool mapping
 - Recall (L1): `memory_recall(query)`
 - Store (L1): `memory_store(text, category, importance, scope)`
 - Docs search (L2): `memory_docs_search(query)`
 - Gateway (optional HTTP bridge): if the operator provides `OPENCLAW_MEM_GATEWAY_URL` plus a role/capability token, prefer `/v1/pack` or `/v1/search` for bounded external-harness context. For persistent Codex/Claude/Gemini-style installs, follow `docs/harness-persistent-memory.md`: read tokens are default; write tokens may append scoped episodes or submit store proposals; direct durable store requires explicit owner/`store.direct` authority plus gateway direct-store enablement. Read-only deployments may answer `/v1/search` from `workspace_markdown_readthrough` when the SQLite/docs index is stale or unavailable; treat diagnostics as retrieval provenance, not as a request for write/admin tokens. Never ask lightweight helpers to hold admin/owner tokens.
+- MCP contract: `openclaw-mem-mcp --tool-descriptions --json` emits hash-pinnable descriptions, input schema hashes, approval flags, and read-only/write metadata.
+- Cutover probes: `openclaw-mem service status --json` and `openclaw-mem qdrant status --json` are read-only shadow/fallback checks; do not treat them as active memory-owner promotion.
 - Topology (L3): repo inspection + (if available) `openclaw-mem graph query ...`
   - prerequisite: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`)
 - Graph match (L3): `openclaw-mem graph match "…"` for idea → project candidate routing

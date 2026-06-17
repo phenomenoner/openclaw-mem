@@ -116,7 +116,10 @@ class TestEngineSnapshotsCli(unittest.TestCase):
             db.mkdir()
             outside = root / "outside-secret.txt"
             outside.write_text("do not copy", encoding="utf-8")
-            (db / "external-link").symlink_to(outside)
+            try:
+                (db / "external-link").symlink_to(outside)
+            except OSError:
+                self.skipTest("symlink unavailable")
             snaps = root / "snapshots"
 
             out = self._run(

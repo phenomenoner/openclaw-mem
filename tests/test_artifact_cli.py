@@ -62,7 +62,7 @@ class TestArtifactCli(unittest.TestCase):
                     "artifact.stash",
                 )
                 self.assertEqual(stash_out["meta"], {"step": "contract-test", "scope": "cli"})
-                self.assertEqual(stash_out["bytes"], len(text.encode("utf-8")))
+                self.assertEqual(stash_out["bytes"], len(src.read_bytes()))
 
                 handle = stash_out["handle"]
 

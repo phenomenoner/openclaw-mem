@@ -129,6 +129,60 @@ class TestMemSystemStatus(unittest.TestCase):
         self.assertFalse(payload["writes_performed"])
         self.assertFalse(payload["topology_changed"])
 
+    def test_build_status_infers_state_root_from_active_harness_db(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            harness_home = Path(tmp) / ".agent-harness"
+            db = harness_home / "memory" / "openclaw-mem.sqlite"
+            root.mkdir(parents=True)
+            db.parent.mkdir(parents=True)
+            conn = sqlite3.connect(db)
+            try:
+                conn.execute("CREATE TABLE observations (id INTEGER PRIMARY KEY)")
+                conn.execute("INSERT INTO observations DEFAULT VALUES")
+                conn.commit()
+            finally:
+                conn.close()
+
+            status = build_status(workspace_root=root, db_path=db)
+
+        self.assertEqual(Path(status["state_root"]), harness_home.resolve())
+        self.assertEqual(Path(status["db_path"]), db.resolve())
+        self.assertEqual(status["coverage"]["sqlite"]["tables"]["observations"]["count"], 1)
+
+    def test_mem_system_status_accepts_harness_home_and_db_cli_options(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            harness_home = Path(tmp) / ".agent-harness"
+            db = harness_home / "memory" / "openclaw-mem.sqlite"
+            root.mkdir(parents=True)
+            db.parent.mkdir(parents=True)
+            sqlite3.connect(db).close()
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "openclaw_mem",
+                    "mem-system",
+                    "status",
+                    "--workspace-root",
+                    str(root),
+                    "--harness-home",
+                    str(harness_home),
+                    "--db",
+                    str(db),
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            payload = json.loads(proc.stdout)
+
+        self.assertEqual(Path(payload["state_root"]), harness_home.resolve())
+        self.assertEqual(Path(payload["db_path"]), db.resolve())
+
 
 if __name__ == "__main__":
     unittest.main()

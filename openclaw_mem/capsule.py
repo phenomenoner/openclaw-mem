@@ -19,7 +19,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 
 CANONICAL_MANIFEST_SCHEMA = "openclaw-mem.canonical-capsule.v1"
@@ -787,10 +787,14 @@ def _read_jsonl_records(path: Path) -> List[Dict[str, Any]]:
 def _sha256_jsonl_records(records: Sequence[Dict[str, Any]], columns: Sequence[str]) -> str:
     h = hashlib.sha256()
     for record in records:
-        ordered = {col: record.get(col) for col in columns}
-        line = json.dumps(ordered, ensure_ascii=False) + "\n"
+        line = _canonical_jsonl_line(record, columns)
         h.update(line.encode("utf-8"))
     return h.hexdigest()
+
+
+def _canonical_jsonl_line(record: Mapping[str, Any], columns: Sequence[str]) -> str:
+    ordered = {col: record.get(col) for col in columns}
+    return json.dumps(ordered, ensure_ascii=False) + "\n"
 
 
 def _canonical_to_sql_value(value: Any) -> Any:
@@ -1626,7 +1630,7 @@ def _write_export_canonical_artifact(*, db_path: str, artifact_dir: Path) -> Dic
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='observations'"
                 ).fetchone()
             )
-            with observations_path.open("w", encoding="utf-8") as out_fh:
+            with observations_path.open("w", encoding="utf-8", newline="\n") as out_fh:
                 if table_exists:
                     pragma_rows = conn.execute("PRAGMA table_info(observations)").fetchall()
                     columns = [str(row[1]) for row in pragma_rows if row and len(row) > 1]
@@ -1643,7 +1647,7 @@ def _write_export_canonical_artifact(*, db_path: str, artifact_dir: Path) -> Dic
                         rows = conn.execute(sql)
                         for row in rows:
                             record = {col: _jsonable_sql_value(row[col]) for col in columns}
-                            out_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                            out_fh.write(_canonical_jsonl_line(record, columns))
                             observations_count += 1
 
                             if "ts" in record and record["ts"] is not None:

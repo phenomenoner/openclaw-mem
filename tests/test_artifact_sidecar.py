@@ -1,3 +1,4 @@
+import os
 import stat
 import json
 import tempfile
@@ -44,8 +45,9 @@ class TestArtifactSidecar(unittest.TestCase):
             blob, meta = _artifact_paths(root, stash["sha256"], gzip_blob=False)
             self.assertTrue(blob.exists())
             self.assertTrue(meta.exists())
-            self.assertEqual(stat.S_IMODE(blob.stat().st_mode), 0o600)
-            self.assertEqual(stat.S_IMODE(meta.stat().st_mode), 0o600)
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(blob.stat().st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE(meta.stat().st_mode), 0o600)
 
     def test_artifact_handle_parser_is_strict(self) -> None:
         valid = "ocm_artifact:v1:sha256:" + ("a" * 64)

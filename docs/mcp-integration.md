@@ -42,10 +42,24 @@ claude mcp add openclaw-mem -- uv run --python 3.13 --frozen openclaw-mem-mcp --
 Generate the stable tool-description hash manifest:
 
 ```bash
-openclaw-mem-mcp --tool-descriptions
+openclaw-mem-mcp --tool-descriptions --json
 ```
 
 The committed release fixture is `docs/fixtures/mcp-tool-descriptions.v1.json`.
+
+The manifest includes:
+
+- `contractVersion`
+- `descriptionSha256`
+- `inputSchemaSha256`
+- `approvalRequired`
+- `readOnly`
+- `timeoutMs`
+- a stable error shape for host fail-open handling
+
+`mem_store` is the only write-capable tool in the default set and is marked
+`approvalRequired=true`. Search, timeline, get, pack, status, and trust inspect
+are read-only.
 
 ## Contract posture
 

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.28] - 2026-06-18
+
+### Added
+
+- Add harness-safe CLI integration contracts: explicit `--harness-home` env/DB bridge, DB-only `store --no-file-write`, shadow-only `service` probes, and read-only/fail-closed `qdrant` probes.
+- Document service/Qdrant contract probes, Channel A BOM handling, strict Channel A `text` requirement, MCP approval/hash metadata, and harness-safe smoke commands.
+
+### Changed
+
+- Treat Channel A `summary`-only rows as invalid instead of silently promoting them to memory text; producers should emit `text`.
+
+### Fixed
+
+- Make the full Python test suite pass on Windows by hardening portable locks, subprocess timeout handling, canonical capsule JSONL newlines, self-model snapshot filenames, mutation path validation, and self-curator path normalization.
+- Keep artifact and engine-snapshot tests portable on Windows where POSIX file modes and symlink privileges are not guaranteed.
+
 ## [1.9.27] - 2026-06-12
 
 ### Added
