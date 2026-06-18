@@ -17,6 +17,7 @@ Status: draft
   - `<home>/state/memory/openclaw-mem-writeback.jsonl`
 - Store readiness `init` commands create empty JSONL files only; they do not append memory facts or promote ownership.
 - `qdrant recall --vector <json-array>` can attempt a bounded Qdrant Edge bridge call when a shard and dependency are present, and remains fail-closed otherwise.
+- Package metadata is bumped to `1.9.30` in `pyproject.toml`, `openclaw_mem/__init__.py`, and `uv.lock`.
 
 ## Verification
 
