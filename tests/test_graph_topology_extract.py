@@ -389,6 +389,48 @@ class TestGraphTopologyExtract(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_cmd_graph_topology_extract_defaults_out_from_harness_home(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            harness_home = root / ".agent-harness"
+            workspace = root / "workspace"
+            workspace.mkdir(parents=True)
+            (workspace / "repo-alpha").mkdir()
+            (workspace / "repo-alpha" / ".git").mkdir()
+
+            cron_jobs_path = root / "jobs.json"
+            cron_jobs_path.write_text(json.dumps({"version": 1, "jobs": []}), encoding="utf-8")
+            spec_dir = workspace / "openclaw-async-coding-playbook" / "cron" / "jobs"
+            spec_dir.mkdir(parents=True)
+
+            conn = _connect(str(root / "mem.sqlite"))
+            try:
+                args = type(
+                    "Args",
+                    (),
+                    {
+                        "harness_home": str(harness_home),
+                        "workspace": str(workspace),
+                        "cron_jobs": str(cron_jobs_path),
+                        "spec_dir": str(spec_dir),
+                        "out": "",
+                        "json": True,
+                    },
+                )()
+
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    cmd_graph_topology_extract(conn, args)
+
+                receipt = json.loads(buf.getvalue())
+                out_path = harness_home / "state" / "memory" / "graph" / "topology-extract-full.json"
+                self.assertEqual(receipt["harnessHome"], str(harness_home.resolve()))
+                self.assertEqual(receipt["out"], str(out_path.resolve()))
+                self.assertTrue(out_path.exists())
+                self.assertTrue(receipt["result"]["support_plane_ready"])
+            finally:
+                conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

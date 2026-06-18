@@ -183,6 +183,9 @@ without printing secret values:
 ```bash
 openclaw-mem --harness-home /path/to/.agent-harness status --json
 openclaw-mem pack --harness-home /path/to/.agent-harness --query "current memory posture" --limit 5 --json
+openclaw-mem --harness-home /path/to/.agent-harness service-store init --json
+openclaw-mem --harness-home /path/to/.agent-harness writeback-store init --json
+openclaw-mem --json graph topology-extract --harness-home /path/to/.agent-harness --workspace /path/to/.agent-harness/workspace
 ```
 
 For isolated test databases, use DB-only store mode so smoke tests do not append
@@ -201,8 +204,10 @@ Contract-first cutover probes are read-only and shadow-only:
 openclaw-mem service status --json
 openclaw-mem service lease --owner agent-harness --ttl-ms 60000 --json
 openclaw-mem qdrant status --json
-openclaw-mem qdrant recall --query "memory engine recovery" --json
+openclaw-mem qdrant recall --db /path/to/.agent-harness/memory/openclaw-mem.sqlite --vector "[0.1]" --json
 ```
+
+`service-store init` and `writeback-store init` create empty readiness JSONL files only. Qdrant vector recall is optional and fail-closed; it reports a fallback when the local shard or `qdrant_edge` dependency is unavailable.
 
 See:
 - `docs/specs/context-pack-schema-compatibility-v1.md`

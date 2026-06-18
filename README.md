@@ -125,12 +125,16 @@ Harness operators can verify integration without promoting a new memory owner:
 
 ```bash
 openclaw-mem --harness-home /path/to/.agent-harness status --json
+openclaw-mem --harness-home /path/to/.agent-harness service-store init --json
+openclaw-mem --harness-home /path/to/.agent-harness writeback-store init --json
+openclaw-mem --json graph topology-extract --harness-home /path/to/.agent-harness --workspace /path/to/.agent-harness/workspace
 openclaw-mem service status --json
 openclaw-mem qdrant status --json
+openclaw-mem qdrant recall --db /path/to/.agent-harness/memory/openclaw-mem.sqlite --vector "[0.1]" --json
 openclaw-mem-mcp --tool-descriptions --json
 ```
 
-These commands are read-only. The service and Qdrant probes are contract-first v0 surfaces: they report shadow/fallback posture and do not claim active prompt ownership.
+The status, topology, service, and Qdrant probes are contract-first v0 surfaces. Store `init` commands only create empty readiness JSONL files under the harness-managed memory/state trees; they do not promote active prompt ownership or write memory content. Qdrant vector recall remains optional/fail-closed and falls back to the SQLite/search lane when the shard or dependency is unavailable.
 
 ## FAQ
 

@@ -3750,6 +3750,96 @@ class TestCliM0(unittest.TestCase):
             self.assertEqual(applied["OPENCLAW_MEM_OPENAI_BASE_URL"], "AGENT_HARNESS_MEMORY_EMBEDDING_BASE_URL")
             self.assertEqual(applied["OPENCLAW_MEM_EMBED_MODEL"], "AGENT_HARNESS_MEMORY_EMBEDDING_MODEL")
 
+    def test_status_harness_home_reports_state_files_under_harness_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            harness_home = Path(tmp) / ".agent-harness"
+            (harness_home / "secrets").mkdir(parents=True)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "openclaw_mem",
+                    "--harness-home",
+                    str(harness_home),
+                    "status",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            out = json.loads(proc.stdout)
+            self.assertEqual(out["runtime"]["harnessHomeBridge"]["source"], "explicit-harness-home")
+            self.assertEqual(out["runtime"]["harness_env_bridge"]["configPath"], str(harness_home / "openclaw.json"))
+            self.assertEqual(out["runtime"]["config"]["path"], str(harness_home / "openclaw.json"))
+            state_files = out["runtime"]["state_files"]
+            self.assertIn(str(harness_home / "state" / "memory"), state_files["episodic_spool"]["path"])
+            self.assertNotIn(str(Path.home() / ".openclaw"), state_files["episodic_spool"]["path"])
+
+    def test_service_and_writeback_store_init_status_are_file_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            harness_home = Path(tmp) / ".agent-harness"
+            service_init = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "openclaw_mem",
+                    "--harness-home",
+                    str(harness_home),
+                    "service-store",
+                    "init",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            service_payload = json.loads(service_init.stdout)
+            self.assertEqual(service_payload["kind"], "openclaw-mem.service-store.init.v0")
+            self.assertTrue(service_payload["mutated"])
+            self.assertEqual(service_payload["store"]["status"], "present_empty")
+            self.assertEqual(service_payload["store"]["lines"], 0)
+            self.assertTrue((harness_home / "memory" / "openclaw-mem-service-store.jsonl").exists())
+
+            writeback_status = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "openclaw_mem",
+                    "--harness-home",
+                    str(harness_home),
+                    "writeback-store",
+                    "status",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            writeback_payload = json.loads(writeback_status.stdout)
+            self.assertEqual(writeback_payload["kind"], "openclaw-mem.writeback-store.status.v0")
+            self.assertFalse(writeback_payload["mutated"])
+            self.assertEqual(writeback_payload["store"]["status"], "missing")
+
+            writeback_init = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "openclaw_mem",
+                    "--harness-home",
+                    str(harness_home),
+                    "writeback-store",
+                    "init",
+                    "--json",
+                ],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            writeback_init_payload = json.loads(writeback_init.stdout)
+            self.assertEqual(writeback_init_payload["store"]["status"], "present_empty")
+            self.assertTrue((harness_home / "state" / "memory" / "openclaw-mem-writeback.jsonl").exists())
+
     def test_service_and_qdrant_contract_probes_are_shadow_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "openclaw-mem.sqlite"
@@ -3785,6 +3875,18 @@ class TestCliM0(unittest.TestCase):
             self.assertEqual(qdrant_payload["schema"], "openclaw-mem.qdrant.status.v0")
             self.assertIn(qdrant_payload["qdrantNativeRecall"], {"not-present", "snapshot-preserved"})
             self.assertFalse(qdrant_payload["nativeRecallAvailable"])
+
+            qdrant_recall = subprocess.run(
+                [sys.executable, "-m", "openclaw_mem", "--db", str(db), "qdrant", "recall", "--vector", "[0.1]", "--json"],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            qdrant_recall_payload = json.loads(qdrant_recall.stdout)
+            self.assertEqual(qdrant_recall_payload["schema"], "openclaw-mem.qdrant.recall.v0")
+            self.assertFalse(qdrant_recall_payload["ok"])
+            self.assertFalse(qdrant_recall_payload.get("writesPerformed"))
+            self.assertEqual(qdrant_recall_payload["hits"], [])
 
     def test_vsearch_filters_to_query_dimension_and_skips_zero_dim_rows(self):
         conn = _connect(":memory:")

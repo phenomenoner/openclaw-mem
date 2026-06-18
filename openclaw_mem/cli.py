@@ -1537,24 +1537,39 @@ def _build_backend_status(config: Dict[str, Any]) -> Dict[str, Any]:
 def _build_runtime_health(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
     db_preexisted = getattr(args, "db_preexisted", None)
     config_path = _resolve_openclaw_config_path()
+    bridge = getattr(args, "harness_env_bridge", {"enabled": False})
+    harness_home = bridge.get("harnessHome") if isinstance(bridge, dict) and bridge.get("enabled") else None
+    if harness_home:
+        memory_state_dir = Path(str(harness_home)) / "state" / "memory"
+        state_files = {
+            "episodic_spool": _path_health(memory_state_dir / "openclaw-mem-episodes.jsonl"),
+            "episodic_ingest_state": _path_health(memory_state_dir / "openclaw-mem" / "episodes-ingest-state.json"),
+            "graph_capture_state": _path_health(memory_state_dir / "openclaw-mem" / "graph-capture-state.json"),
+            "graph_capture_md_state": _path_health(memory_state_dir / "openclaw-mem" / "graph-capture-md-state.json"),
+        }
+        bridge_source = "explicit-harness-home"
+    else:
+        state_files = {
+            "episodic_spool": _path_health(DEFAULT_EPISODIC_SPOOL_PATH),
+            "episodic_ingest_state": _path_health(DEFAULT_EPISODIC_INGEST_STATE_PATH),
+            "graph_capture_state": _path_health(DEFAULT_GRAPH_CAPTURE_STATE_PATH),
+            "graph_capture_md_state": _path_health(DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH),
+        }
+        bridge_source = "explicit-db" if getattr(args, "db_global", None) or os.environ.get("OPENCLAW_MEM_DB") else "default"
     return {
         "db": {
             "path": str(args.db),
             "preexisting": None if db_preexisted is None else bool(db_preexisted),
         },
         "config": _path_health(config_path),
-        "state_files": {
-            "episodic_spool": _path_health(DEFAULT_EPISODIC_SPOOL_PATH),
-            "episodic_ingest_state": _path_health(DEFAULT_EPISODIC_INGEST_STATE_PATH),
-            "graph_capture_state": _path_health(DEFAULT_GRAPH_CAPTURE_STATE_PATH),
-            "graph_capture_md_state": _path_health(DEFAULT_GRAPH_CAPTURE_MD_STATE_PATH),
-        },
+        "state_files": state_files,
         "graph_auto": {
             "OPENCLAW_MEM_GRAPH_AUTO_RECALL": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_RECALL", default=False),
             "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_CAPTURE", default=False),
             "OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD": _graph_env_bool_status("OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD", default=False),
         },
-        "harness_env_bridge": getattr(args, "harness_env_bridge", {"enabled": False}),
+        "harness_env_bridge": bridge,
+        "harnessHomeBridge": {"source": bridge_source},
     }
 
 
@@ -6540,6 +6555,7 @@ def _apply_harness_env_bridge(args: argparse.Namespace) -> Dict[str, Any]:
         return {"enabled": False}
     harness_home = Path(harness_home_raw).expanduser().resolve()
     credentials_path = harness_home / "secrets" / "memory-credentials.env"
+    config_path = harness_home / "openclaw.json"
     env_values = _parse_env_file(credentials_path)
     mappings = {
         "OPENAI_API_KEY": (
@@ -6574,11 +6590,14 @@ def _apply_harness_env_bridge(args: argparse.Namespace) -> Dict[str, Any]:
     db_path = harness_home / "memory" / "openclaw-mem.sqlite"
     if not getattr(args, "db", None) and not getattr(args, "db_global", None) and not os.environ.get("OPENCLAW_MEM_DB"):
         os.environ["OPENCLAW_MEM_DB"] = str(db_path)
+    os.environ["OPENCLAW_CONFIG_PATH"] = str(config_path)
 
     receipt = {
         "enabled": True,
         "harnessHome": str(harness_home),
         "credentialsPath": str(credentials_path),
+        "configPath": str(config_path),
+        "configPathExists": config_path.exists(),
         "credentialsLoaded": bool(env_values),
         "dbPath": str(db_path),
         "dbPathExists": db_path.exists(),
@@ -11062,6 +11081,73 @@ def cmd_qdrant_status(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
 
 def cmd_qdrant_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     db_path = Path(str(getattr(args, "db", None) or os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB))).expanduser()
+    vector_raw = str(getattr(args, "vector", "") or "").strip()
+    shard_root = db_path.parent / "qdrant-edge"
+    if vector_raw and shard_root.exists():
+        try:
+            vector = json.loads(vector_raw)
+            if not isinstance(vector, list) or not all(isinstance(item, (int, float)) for item in vector):
+                raise ValueError("--vector must be a JSON array of numbers")
+            bridge = Path(__file__).resolve().parent.parent / "extensions" / "openclaw-mem-engine" / "scripts" / "qdrant_edge_query_bridge.py"
+            request = {
+                "shardRoot": str(shard_root),
+                "vector": [float(item) for item in vector],
+                "limit": int(getattr(args, "limit", 5) or 5),
+            }
+            proc = subprocess.run(
+                [sys.executable, str(bridge)],
+                input=json.dumps(request),
+                text=True,
+                capture_output=True,
+                timeout=10,
+            )
+            payload = json.loads(proc.stdout or "{}")
+            if proc.returncode == 0 and payload.get("ok"):
+                _emit(
+                    {
+                        "schema": "openclaw-mem.qdrant.recall.v0",
+                        "ok": True,
+                        "qdrantNativeRecall": _qdrant_mode(db_path),
+                        "nativeRecallAvailable": True,
+                        "backend": "qdrant-edge",
+                        "fallbackUsed": False,
+                        "hits": payload.get("hits") or [],
+                        "writesPerformed": False,
+                    },
+                    getattr(args, "json", True),
+                )
+                return
+            _emit(
+                {
+                    "schema": "openclaw-mem.qdrant.recall.v0",
+                    "ok": False,
+                    "qdrantNativeRecall": _qdrant_mode(db_path),
+                    "nativeRecallAvailable": False,
+                    "error": payload.get("error") or "qdrant_edge_query_failed",
+                    "detail": payload.get("detail") or payload.get("message") or proc.stderr.strip() or None,
+                    "fallback": "use openclaw-mem pack/search sqlite lane",
+                    "hits": [],
+                    "writesPerformed": False,
+                },
+                getattr(args, "json", True),
+            )
+            return
+        except Exception as e:
+            _emit(
+                {
+                    "schema": "openclaw-mem.qdrant.recall.v0",
+                    "ok": False,
+                    "qdrantNativeRecall": _qdrant_mode(db_path),
+                    "nativeRecallAvailable": False,
+                    "error": "qdrant_edge_vector_recall_failed",
+                    "detail": str(e),
+                    "fallback": "use openclaw-mem pack/search sqlite lane",
+                    "hits": [],
+                    "writesPerformed": False,
+                },
+                getattr(args, "json", True),
+            )
+            return
     _emit(
         {
             "schema": "openclaw-mem.qdrant.recall.v0",
@@ -11070,7 +11156,7 @@ def cmd_qdrant_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
             "error": "native_qdrant_recall_not_active",
             "fallback": "use openclaw-mem pack/search sqlite lane",
             "query": getattr(args, "query", ""),
-            "items": [],
+            "hits": [],
             "writesPerformed": False,
         },
         getattr(args, "json", True),
@@ -15420,13 +15506,20 @@ def cmd_graph_topology_extract(conn: sqlite3.Connection, args: argparse.Namespac
     """Extract a deterministic topology seed from workspace + cron registry + cron specs."""
 
     _ = conn
+    harness_home = str(getattr(args, "harness_home", "") or getattr(args, "harness_home_global", "") or "").strip()
     workspace = str(getattr(args, "workspace", "") or "").strip() or str(DEFAULT_WORKSPACE)
     cron_jobs = str(getattr(args, "cron_jobs", "") or "").strip() or DEFAULT_CRON_JOBS_JSON
+    if harness_home and cron_jobs == DEFAULT_CRON_JOBS_JSON and not Path(cron_jobs).expanduser().exists():
+        workspace_cron_canon = Path(workspace) / "docs" / "ops" / "cron-canon.json"
+        if workspace_cron_canon.exists():
+            cron_jobs = str(workspace_cron_canon)
     spec_dir = str(getattr(args, "spec_dir", "") or "").strip()
     if not spec_dir:
         spec_dir = str(Path(workspace) / "openclaw-async-coding-playbook" / "cron" / "jobs")
 
     out_path = str(getattr(args, "out", "") or "").strip()
+    if not out_path and harness_home:
+        out_path = str(Path(harness_home).expanduser() / "state" / "memory" / "graph" / "topology-extract-full.json")
     if not out_path:
         _emit({"error": "missing --out"}, True)
         sys.exit(2)
@@ -15448,6 +15541,7 @@ def cmd_graph_topology_extract(conn: sqlite3.Connection, args: argparse.Namespac
     payload = {
         "kind": "openclaw-mem.graph.topology-extract.v0",
         "ts": _utcnow_iso(),
+        "harnessHome": str(Path(harness_home).expanduser().resolve()) if harness_home else None,
         "workspace": str(Path(workspace).resolve()),
         "cron_jobs": str(Path(cron_jobs).resolve()),
         "spec_dir": str(Path(spec_dir).resolve()),
@@ -15456,6 +15550,8 @@ def cmd_graph_topology_extract(conn: sqlite3.Connection, args: argparse.Namespac
             "ok": True,
             "node_count": int(counts.get("nodes") or 0),
             "edge_count": int(counts.get("edges") or 0),
+            "provenance_ready": True,
+            "support_plane_ready": True,
             "repo_count": int(counts.get("repos") or 0),
             "cron_job_count": int(counts.get("cron_jobs") or 0),
             "spec_count": int(counts.get("spec_files") or 0),
@@ -15537,6 +15633,72 @@ def cmd_graph_topology_diff(conn: sqlite3.Connection, args: argparse.Namespace) 
             ]
         )
     )
+
+
+def _require_harness_home_for_store(args: argparse.Namespace) -> Path:
+    raw = str(getattr(args, "harness_home", "") or getattr(args, "harness_home_global", "") or "").strip()
+    if not raw:
+        _emit({"error": "missing --harness-home"}, True)
+        sys.exit(2)
+    return Path(raw).expanduser().resolve()
+
+
+def _store_probe_path(args: argparse.Namespace, store_kind: str) -> Path:
+    harness_home = _require_harness_home_for_store(args)
+    if store_kind == "service":
+        return harness_home / "memory" / "openclaw-mem-service-store.jsonl"
+    if store_kind == "writeback":
+        return harness_home / "state" / "memory" / "openclaw-mem-writeback.jsonl"
+    raise ValueError(f"unsupported store kind: {store_kind}")
+
+
+def _jsonl_probe_status(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {"path": str(path), "exists": False, "status": "missing", "bytes": 0, "lines": 0}
+    text = path.read_text(encoding="utf-8")
+    lines = [line for line in text.splitlines() if line.strip()]
+    return {
+        "path": str(path),
+        "exists": True,
+        "status": "present_empty" if not lines else "present",
+        "bytes": path.stat().st_size,
+        "lines": len(lines),
+    }
+
+
+def _cmd_store_probe(conn: sqlite3.Connection, args: argparse.Namespace, *, store_kind: str, mutate: bool) -> None:
+    _ = conn
+    path = _store_probe_path(args, store_kind)
+    if mutate:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
+    action = "init" if mutate else "status"
+    payload = {
+        "kind": f"openclaw-mem.{store_kind}-store.{action}.v0",
+        "ts": _utcnow_iso(),
+        "harnessHome": str(_require_harness_home_for_store(args)),
+        "mutated": bool(mutate),
+        "recordSchema": None,
+        "recordSchemaReason": "init creates an empty JSONL readiness file; append schema is out of scope",
+        "store": _jsonl_probe_status(path),
+    }
+    _emit(payload, bool(args.json))
+
+
+def cmd_service_store_init(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _cmd_store_probe(conn, args, store_kind="service", mutate=True)
+
+
+def cmd_service_store_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _cmd_store_probe(conn, args, store_kind="service", mutate=False)
+
+
+def cmd_writeback_store_init(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _cmd_store_probe(conn, args, store_kind="writeback", mutate=True)
+
+
+def cmd_writeback_store_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _cmd_store_probe(conn, args, store_kind="writeback", mutate=False)
 
 
 def _graph_capture_md_norm_ext(ext: str) -> str:
@@ -19102,6 +19264,26 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.set_defaults(func=cmd_doctor)
 
+    sp = sub.add_parser("service-store", help="Inspect or initialize harness service-store readiness file")
+    add_common(sp)
+    ss = sp.add_subparsers(dest="service_store_cmd", required=True)
+    s = ss.add_parser("init", help="Create empty service-store JSONL readiness file if missing")
+    add_common(s)
+    s.set_defaults(func=cmd_service_store_init)
+    s = ss.add_parser("status", help="Inspect service-store JSONL readiness file without mutating")
+    add_common(s)
+    s.set_defaults(func=cmd_service_store_status)
+
+    sp = sub.add_parser("writeback-store", help="Inspect or initialize harness writeback-store readiness file")
+    add_common(sp)
+    ws = sp.add_subparsers(dest="writeback_store_cmd", required=True)
+    w = ws.add_parser("init", help="Create empty writeback-store JSONL readiness file if missing")
+    add_common(w)
+    w.set_defaults(func=cmd_writeback_store_init)
+    w = ws.add_parser("status", help="Inspect writeback-store JSONL readiness file without mutating")
+    add_common(w)
+    w.set_defaults(func=cmd_writeback_store_status)
+
     sp = sub.add_parser("profile", help="Show ops profile (counts/ranges/labels/recent)")
     add_common(sp)
     sp.add_argument("--recent-limit", type=int, default=10, help="Number of recent rows to include (default: 10)")
@@ -20142,10 +20324,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.set_defaults(func=cmd_graph_topology_refresh)
 
     g = gsub.add_parser("topology-extract", help="Extract a deterministic topology seed from workspace + cron + specs")
+    g.add_argument("--harness-home", default=argparse.SUPPRESS, help="Agent Harness home for default support-plane output")
     g.add_argument("--workspace", default=str(DEFAULT_WORKSPACE), help="Workspace root to scan for repo roots (default: cwd)")
     g.add_argument("--cron-jobs", dest="cron_jobs", default=DEFAULT_CRON_JOBS_JSON, help=f"Cron jobs registry JSON path (default: {DEFAULT_CRON_JOBS_JSON})")
     g.add_argument("--spec-dir", dest="spec_dir", help="Cron spec directory (default: <workspace>/openclaw-async-coding-playbook/cron/jobs)")
-    g.add_argument("--out", required=True, help="Output topology seed JSON path")
+    g.add_argument("--out", help="Output topology seed JSON path (default: <harness-home>/state/memory/graph/topology-extract-full.json when --harness-home is provided)")
     g.set_defaults(func=cmd_graph_topology_extract)
 
     g = gsub.add_parser("topology-diff", help="Compare extracted seed topology with curated topology (suggest-only)")
@@ -20688,7 +20871,8 @@ def build_parser() -> argparse.ArgumentParser:
     q.set_defaults(func=cmd_qdrant_status)
     q = qsub.add_parser("recall", help="Attempt native Qdrant recall; fail closed when inactive")
     add_common(q)
-    q.add_argument("--query", required=True)
+    q.add_argument("--query", default="")
+    q.add_argument("--vector", default="", help="Optional JSON array vector for bounded qdrant-edge recall smoke")
     q.add_argument("--limit", type=int, default=5)
     q.set_defaults(func=cmd_qdrant_recall)
 
@@ -20971,7 +21155,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "harness", "codex", "symbolic-canvas"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "harness", "codex", "symbolic-canvas", "service-store", "writeback-store"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.
