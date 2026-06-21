@@ -7,10 +7,11 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from openclaw_mem.cli import _connect, _enable_wal_best_effort, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, _pack_graph_resolve_scope, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export, cmd_graph_synth, cmd_graph_lint, cmd_vsearch
+from openclaw_mem.cli import _connect, _enable_wal_best_effort, _insert_observation, _summary_has_task_marker, _normalize_importance_scorer_value, _pack_graph_resolve_scope, build_parser, cmd_ingest, cmd_search, cmd_get, cmd_timeline, cmd_triage, cmd_store, cmd_hybrid, cmd_pack, cmd_status, cmd_doctor, cmd_profile, cmd_backend, cmd_graph_index, cmd_graph_pack, cmd_graph_preflight, cmd_graph_auto_status, cmd_graph_capture_git, cmd_graph_capture_md, cmd_graph_export, cmd_graph_synth, cmd_graph_lint, cmd_vsearch, main as cli_main
+from openclaw_mem.pack_artifacts import retrieve_artifact, PACK_RECEIPT_SCHEMA
 
 
 
@@ -66,6 +67,21 @@ class TestParserContracts(unittest.TestCase):
 
         self.assertTrue(parent.json)
         self.assertTrue(child.json)
+
+    def test_pack_artifact_numeric_flags_reject_zero_or_negative_values(self):
+        parser = build_parser()
+
+        bad_values = [
+            ("--pack-artifact-min-bytes", "0"),
+            ("--pack-artifact-min-tokens", "-1"),
+            ("--pack-artifact-max-bytes", "0"),
+            ("--pack-artifact-max-session-bytes", "-10"),
+        ]
+        for flag, value in bad_values:
+            with self.subTest(flag=flag, value=value):
+                with redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        parser.parse_args(["pack", "--query", "query", flag, value])
 
 
 class TestCliM0(unittest.TestCase):
@@ -147,7 +163,142 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(payload["context_pack"]["bundle_text"], payload["bundle_text"])
         texts = [it.get("summary") for it in payload.get("items", [])]
         self.assertTrue(any("UTC+8" in (t or "") for t in texts))
+        self.assertNotIn("pack_artifact", payload)
         conn.close()
+
+    def test_pack_artifacts_opt_in_exposes_packed_prompt_text_and_exact_retrieval(self):
+        conn = _connect(":memory:")
+        for index in range(40):
+            _insert_observation(
+                conn,
+                {
+                    "kind": "tool.result",
+                    "summary": f"pack artifact row {index} status {'ERROR AUTH_EXPIRED' if index == 2 else 'ok'} " + ("x" * 120),
+                    "tool_name": "memory_store",
+                    "detail": {"importance": {"score": 0.8, "label": "must_remember"}},
+                },
+            )
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            store = Path(td) / "pack-artifacts.sqlite"
+            args = build_parser().parse_args(
+                [
+                    "pack",
+                    "--query",
+                    "pack artifact",
+                    "--json",
+                    "--pack-artifacts",
+                    "on",
+                    "--pack-artifact-store",
+                    str(store),
+                    "--pack-artifact-min-bytes",
+                    "1",
+                    "--pack-artifact-min-tokens",
+                    "1",
+                ]
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(conn, args)
+            payload = json.loads(buf.getvalue())
+
+            self.assertIn("pack_artifact", payload)
+            self.assertEqual(payload["pack_artifact"]["decision"], "packed")
+            self.assertEqual(payload["pack_artifact"]["strategy"], "log-anomaly-v1")
+            self.assertIn("<<ocm:artifact:v1:sha256:", payload["bundle_text_packed"])
+            self.assertLess(len(payload["bundle_text_packed"]), len(payload["bundle_text"]))
+
+            retrieved = retrieve_artifact(
+                payload["pack_artifact"]["marker"],
+                {
+                    "agentId": "main",
+                    "sessionKey": "pack-cli",
+                    "trustLevel": "trusted",
+                    "scope": "project:default",
+                },
+                store_path=store,
+            )
+            self.assertEqual(retrieved["decision"], "returned")
+            raw = retrieved["rawBytes"].decode("utf-8")
+            self.assertEqual(raw, payload["bundle_text"])
+        conn.close()
+
+    def test_pack_artifacts_observe_cli_reports_disabled_and_retrieval_counts(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            receipts = root / "receipts"
+            receipts.mkdir()
+            (receipts / "receipts.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "schema": PACK_RECEIPT_SCHEMA,
+                                "decision": "pass-through",
+                                "reason": "strategy-disabled",
+                                "strategy": "json-shape-v1",
+                                "tokensBefore": 100,
+                                "tokensAfter": 100,
+                                "latencyMs": 5,
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "schema": "openclaw-mem.pack-retrieve-receipt.v1",
+                                "decision": "missing",
+                                "latencyMs": 7,
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            args = build_parser().parse_args(
+                [
+                    "pack-artifacts-observe",
+                    "--receipts-dir",
+                    str(receipts),
+                    "--disable-strategy",
+                    "json-shape-v1",
+                    "--json",
+                ]
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                args.func(None, args)
+            payload = json.loads(buf.getvalue())
+
+            self.assertEqual(payload["schema"], "openclaw-mem.pack-observe-report.v1")
+            self.assertEqual(payload["retrieval"]["missing"], 1)
+            self.assertEqual(payload["disabledStrategies"]["observed"]["json-shape-v1"], 1)
+
+    def test_pack_artifacts_observe_main_path_does_not_create_memory_db(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+            root = Path(td)
+            receipts = root / "receipts"
+            receipts.mkdir()
+            (receipts / "receipts.jsonl").write_text("", encoding="utf-8")
+            default_db = root / "should-not-exist.sqlite3"
+
+            argv = [
+                "openclaw-mem",
+                "pack-artifacts-observe",
+                "--receipts-dir",
+                str(receipts),
+                "--json",
+            ]
+            with patch.dict(os.environ, {"OPENCLAW_MEM_DB": str(default_db)}):
+                with patch.object(sys, "argv", argv):
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        cli_main()
+            payload = json.loads(buf.getvalue())
+
+            self.assertEqual(payload["schema"], "openclaw-mem.pack-observe-report.v1")
+            self.assertFalse(default_db.exists())
 
     def test_pack_prefers_compaction_sideband_text_and_exposes_raw_rehydrate_hint(self):
         conn = _connect(":memory:")
@@ -568,6 +719,27 @@ class TestCliM0(unittest.TestCase):
         a = build_parser().parse_args(["pack", "--query", "trust", "--pack-lifecycle-shadow", "off", "--pack-lifecycle-log-max-rows", "9"])
         self.assertEqual(a.pack_lifecycle_shadow, "off")
         self.assertEqual(a.pack_lifecycle_log_max_rows, 9)
+
+        a = build_parser().parse_args([
+            "pack",
+            "--query",
+            "pack artifacts",
+            "--pack-artifacts",
+            "on",
+            "--pack-artifact-store",
+            "/tmp/pack.sqlite",
+            "--pack-artifact-min-bytes",
+            "1",
+            "--pack-artifact-min-tokens",
+            "1",
+            "--pack-artifact-disable-strategy",
+            "json-shape-v1",
+        ])
+        self.assertEqual(a.pack_artifacts, "on")
+        self.assertEqual(a.pack_artifact_store, "/tmp/pack.sqlite")
+        self.assertEqual(a.pack_artifact_min_bytes, 1)
+        self.assertEqual(a.pack_artifact_min_tokens, 1)
+        self.assertEqual(a.pack_artifact_disable_strategy, ["json-shape-v1"])
 
 
     def test_writeback_lancedb_parser_accepts_flags(self):

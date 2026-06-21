@@ -46,6 +46,7 @@ from openclaw_mem import governed_release
 from openclaw_mem import goal_primitive
 from openclaw_mem import mem_system_status
 from openclaw_mem import mutation_framework
+from openclaw_mem import pack_artifacts
 from openclaw_mem import pack_trace_v1
 from openclaw_mem import self_model_sidecar
 from openclaw_mem import self_curator
@@ -9445,6 +9446,104 @@ def _pack_gbrain_bundle_text(payload: Dict[str, Any], *, bundle_text: str, gbrai
         payload["bundle_text_with_gbrain"] = "\n".join(joined_parts).strip() + "\n"
 
 
+def _pack_artifacts_apply_optional(payload: Dict[str, Any], args: argparse.Namespace, *, query: str) -> None:
+    mode = str(getattr(args, "pack_artifacts", "off") or "off").strip().lower()
+    if mode == "off":
+        return
+
+    store_arg = getattr(args, "pack_artifact_store", None)
+    if store_arg:
+        store_path = Path(str(store_arg))
+    else:
+        harness_home = getattr(args, "harness_home", None) or getattr(args, "harness_home_global", None)
+        if harness_home:
+            state_root = Path(str(harness_home)) / "state"
+        else:
+            db_path = getattr(args, "db", None) or getattr(args, "db_global", None) or "."
+            state_root = Path(str(db_path)).expanduser().resolve().parent / "state"
+        store_path = pack_artifacts.default_store_path(state_root)
+
+    raw_text = str(
+        payload.get("bundle_text_with_gbrain")
+        or payload.get("bundle_text_with_graph")
+        or payload.get("bundle_text")
+        or ""
+    )
+    admission = {
+        "minPackBytes": int(getattr(args, "pack_artifact_min_bytes", 4096) or 4096),
+        "minPackTokensEstimate": int(getattr(args, "pack_artifact_min_tokens", 1000) or 1000),
+        "maxArtifactBytes": int(getattr(args, "pack_artifact_max_bytes", 10 * 1024 * 1024) or 10 * 1024 * 1024),
+        "maxStoreBytesPerSession": int(
+            getattr(args, "pack_artifact_max_session_bytes", 100 * 1024 * 1024) or 100 * 1024 * 1024
+        ),
+    }
+    disabled = list(getattr(args, "pack_artifact_disable_strategy", None) or [])
+    strategy_config = {
+        "strategies": {strategy: {"enabled": False} for strategy in disabled},
+    }
+    metadata = {
+        "agentId": str(getattr(args, "pack_artifact_agent", "main") or "main"),
+        "sessionKey": str(getattr(args, "pack_artifact_session", "pack-cli") or "pack-cli"),
+        "sourceKind": "log",
+        "sourceId": f"pack:{hashlib.sha256(query.encode('utf-8')).hexdigest()[:16]}",
+        "trustLevel": "trusted",
+        "scope": str(getattr(args, "pack_artifact_scope", "project:default") or "project:default"),
+        "contentType": "text/plain",
+        "producer": "openclaw-mem",
+        "commandOrTool": "pack",
+        "receiptId": f"pack-artifact:{hashlib.sha256(raw_text.encode('utf-8')).hexdigest()[:16]}",
+        "ttlPolicy": "session",
+    }
+    result = pack_artifacts.pack_candidate(
+        raw_text.encode("utf-8"),
+        metadata,
+        store_path=store_path,
+        admission=admission,
+        strategy_config=strategy_config,
+    )
+    packed_text = result["content"].decode("utf-8", errors="replace")
+    payload["bundle_text_packed"] = packed_text
+    payload["pack_artifact"] = {
+        "schema": "openclaw-mem.pack-artifact.prompt.v1",
+        "decision": result.get("decision"),
+        "reason": result.get("reason"),
+        "strategy": result.get("strategy"),
+        "marker": result.get("marker"),
+        "artifactHash": result.get("hash"),
+        "storePath": str(store_path),
+        "receipt": result.get("receipt"),
+    }
+
+
+def _positive_int_arg(raw: str) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("must be an integer >= 1") from exc
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be an integer >= 1")
+    return value
+
+
+def cmd_pack_artifacts_observe(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    strategy_config = {
+        "strategies": {strategy: {"enabled": False} for strategy in list(getattr(args, "disable_strategy", None) or [])}
+    }
+    report = pack_artifacts.collect_observe_report(
+        Path(str(args.receipts_dir)),
+        strategy_config=strategy_config,
+    )
+    if bool(getattr(args, "json", True)):
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print("OpenClaw-mem Pack artifact observe")
+        print(f"retrieval.returned={report['retrieval']['returned']}")
+        print(f"retrieval.missing={report['retrieval']['missing']}")
+        disabled = report.get("disabledStrategies", {}).get("configured", [])
+        if disabled:
+            print(f"disabledStrategies={','.join(disabled)}")
+
+
 def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Build a compact, cited L1-style bundle from hybrid retrieval."""
     query = (args.query or "").strip()
@@ -9846,6 +9945,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             payload["bundle_text_with_graph"] = combined
 
     _pack_gbrain_bundle_text(payload, bundle_text=bundle_text, gbrain_consult=gbrain_consult)
+    _pack_artifacts_apply_optional(payload, args, query=query)
 
     policy_surface = _pack_compose_policy_surface(
         selected_items=selected_items,
@@ -20056,6 +20156,26 @@ def build_parser() -> argparse.ArgumentParser:
         default="off",
         help="Opt-in lifecycle writeback: refresh detail_json.lifecycle.last_used_at/used_count for records selected into the final pack (default: off).",
     )
+    sp.add_argument(
+        "--pack-artifacts",
+        choices=["off", "on"],
+        default="off",
+        help="Opt-in artifact-backed packing for final bundle text (default: off).",
+    )
+    sp.add_argument("--pack-artifact-store", default=None, help="Optional Pack artifact SQLite store path")
+    sp.add_argument("--pack-artifact-agent", default="main", help="Pack artifact agent id metadata (default: main)")
+    sp.add_argument("--pack-artifact-session", default="pack-cli", help="Pack artifact session key metadata (default: pack-cli)")
+    sp.add_argument("--pack-artifact-scope", default="project:default", help="Pack artifact scope metadata (default: project:default)")
+    sp.add_argument("--pack-artifact-min-bytes", type=_positive_int_arg, default=4096, help="Minimum raw bytes before Pack artifact packing")
+    sp.add_argument("--pack-artifact-min-tokens", type=_positive_int_arg, default=1000, help="Minimum estimated tokens before Pack artifact packing")
+    sp.add_argument("--pack-artifact-max-bytes", type=_positive_int_arg, default=10 * 1024 * 1024, help="Maximum artifact bytes to store")
+    sp.add_argument("--pack-artifact-max-session-bytes", type=_positive_int_arg, default=100 * 1024 * 1024, help="Maximum Pack artifact bytes per session")
+    sp.add_argument(
+        "--pack-artifact-disable-strategy",
+        action="append",
+        default=None,
+        help="Disable one Pack artifact strategy by id (repeatable)",
+    )
 
     # Probe knobs (used in --use-graph=auto)
     sp.add_argument("--graph-probe", choices=["on", "off"], default=None, help="Enable index-probe stage in auto mode (default: on)")
@@ -20068,6 +20188,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
     sp.set_defaults(func=cmd_pack)
+
+    sp = sub.add_parser("pack-artifacts-observe", help="Summarize Pack artifact receipts and strategy health")
+    sp.add_argument("--receipts-dir", required=True, help="Directory containing Pack artifact JSONL receipts")
+    sp.add_argument("--disable-strategy", action="append", default=None, help="Report one configured disabled strategy (repeatable)")
+    sp.add_argument(
+        "--json",
+        dest="json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Structured JSON output (default: true).",
+    )
+    sp.set_defaults(func=cmd_pack_artifacts_observe)
 
     sp = sub.add_parser("gbrain-sidecar", help="Experimental gbrain consult + bounded phase-2 jobs bridge")
     sp.add_argument("--db", default=None, help="SQLite DB path")
@@ -21155,7 +21287,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "harness", "codex", "symbolic-canvas", "service-store", "writeback-store"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "harness", "codex", "symbolic-canvas", "service-store", "writeback-store", "pack-artifacts-observe"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

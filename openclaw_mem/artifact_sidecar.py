@@ -68,7 +68,8 @@ def _secure_write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".tmp_", dir=str(path.parent))
     try:
-        os.fchmod(fd, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         os.replace(tmp, path)
