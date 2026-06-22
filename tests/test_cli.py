@@ -741,6 +741,12 @@ class TestCliM0(unittest.TestCase):
         self.assertEqual(a.pack_artifact_min_tokens, 1)
         self.assertEqual(a.pack_artifact_disable_strategy, ["json-shape-v1"])
 
+        with patch.dict("os.environ", {"OPENCLAW_MEM_PACK_ARTIFACTS": "on"}, clear=False):
+            a = build_parser().parse_args(["pack", "--query", "pack artifacts"])
+            self.assertEqual(a.pack_artifacts, "on")
+            a = build_parser().parse_args(["pack", "--query", "pack artifacts", "--pack-artifacts", "off"])
+            self.assertEqual(a.pack_artifacts, "off")
+
 
     def test_writeback_lancedb_parser_accepts_flags(self):
         a = build_parser().parse_args([

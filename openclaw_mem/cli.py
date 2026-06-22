@@ -114,6 +114,14 @@ from openclaw_mem.capsule import add_capsule_parser_to_cli
 from openclaw_mem.importance import label_from_score, make_importance, parse_importance_score
 from openclaw_mem.optimize_assist_families import action_family_from_action_patch
 
+
+def _env_choice(name: str, choices: Set[str], default: str) -> str:
+    raw = str(os.getenv(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw if raw in choices else default
+
+
 def _resolve_home_dir() -> str:
     """Best-effort OpenClaw-style home resolution.
 
@@ -11158,20 +11166,69 @@ def _qdrant_mode(db_path: Path) -> str:
     return "snapshot-preserved" if (db_path.expanduser().parent / "qdrant-edge").exists() else "not-present"
 
 
+def _qdrant_snapshot_probe(shard_root: Path) -> Dict[str, Any]:
+    config_path = shard_root / "edge_config.json"
+    config: Dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            config = {"readError": f"{type(exc).__name__}: {exc}"}
+
+    vectors = config.get("vectors") if isinstance(config.get("vectors"), dict) else {}
+    text_vector = vectors.get("text") if isinstance(vectors.get("text"), dict) else {}
+    vector_dimension = text_vector.get("size")
+
+    probe: Dict[str, Any] = {
+        "collection": None,
+        "vectorDimension": vector_dimension if isinstance(vector_dimension, int) else None,
+        "indexedRowCount": None,
+        "lastRefresh": None,
+        "nativeRecallAvailable": False,
+        "probeError": None,
+    }
+    if not shard_root.exists():
+        probe["probeError"] = "missing_shard"
+        return probe
+
+    try:
+        import qdrant_edge as q  # type: ignore
+
+        shard = q.EdgeShard.load(str(shard_root))
+        try:
+            info = shard.info()
+            points_count = getattr(info, "points_count", None)
+            if points_count is None and hasattr(q, "CountRequest"):
+                points_count = shard.count(q.CountRequest())
+            probe["indexedRowCount"] = int(points_count) if points_count is not None else None
+            probe["nativeRecallAvailable"] = True
+        finally:
+            try:
+                shard.close()
+            except Exception:
+                pass
+    except Exception as exc:
+        probe["probeError"] = f"{type(exc).__name__}: {exc}"
+    return probe
+
+
 def cmd_qdrant_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     db_path = Path(str(getattr(args, "db", None) or os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB))).expanduser()
+    shard_root = db_path.parent / "qdrant-edge"
+    probe = _qdrant_snapshot_probe(shard_root)
     _emit(
         {
             "schema": "openclaw-mem.qdrant.status.v0",
             "ok": True,
             "qdrantNativeRecall": _qdrant_mode(db_path),
-            "path": str(db_path.parent / "qdrant-edge"),
-            "collection": None,
-            "vectorDimension": None,
+            "path": str(shard_root),
+            "collection": probe.get("collection"),
+            "vectorDimension": probe.get("vectorDimension"),
             "embeddingModelNamespace": os.environ.get("OPENCLAW_MEM_EMBED_MODEL") or "unknown",
-            "indexedRowCount": None,
-            "lastRefresh": None,
-            "nativeRecallAvailable": False,
+            "indexedRowCount": probe.get("indexedRowCount"),
+            "lastRefresh": probe.get("lastRefresh"),
+            "nativeRecallAvailable": bool(probe.get("nativeRecallAvailable")),
+            "probeError": probe.get("probeError"),
             "fallback": "sqlite",
             "writesPerformed": False,
         },
@@ -20159,8 +20216,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument(
         "--pack-artifacts",
         choices=["off", "on"],
-        default="off",
-        help="Opt-in artifact-backed packing for final bundle text (default: off).",
+        default=_env_choice("OPENCLAW_MEM_PACK_ARTIFACTS", {"off", "on"}, "off"),
+        help="Opt-in artifact-backed packing for final bundle text (default: OPENCLAW_MEM_PACK_ARTIFACTS or off).",
     )
     sp.add_argument("--pack-artifact-store", default=None, help="Optional Pack artifact SQLite store path")
     sp.add_argument("--pack-artifact-agent", default="main", help="Pack artifact agent id metadata (default: main)")
