@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.31] - 2026-06-29
+
+### Difference from 1.9.30
+
+`1.9.31` adds the native bridge and graph-analysis surfaces needed by
+Agent Harness bridge-primary memory ownership. Compared with `1.9.30`, the
+package can emit stable bridge envelopes for Agent Harness status, recall, and
+approved store operations, and it includes the first preview native code graph
+extractor foundation for future graph-aware recall experiments.
+
+### Added
+
+- Add `openclaw-mem bridge status|recall|store` with stable JSON envelopes for
+  Agent Harness integration, including request ids, provider/operation fields,
+  backend/fallback telemetry, policy source, and approved-store acceptance.
+- Add regression coverage for bridge recall and approved-store behavior.
+- Add the preview native code graph extractor foundation for repository topology
+  nodes, edges, provenance, and future graph-aware Pack/search selection.
+- Add the Qdrant Edge local read probe dependency and CLI/readiness receipt
+  updates used by the optional read-index lane.
+
+### Safety
+
+- Keep canonical writes governed by OpenClaw-mem policy; unapproved bridge store
+  requests are denied instead of falling back to a host-local write path.
+- Keep Qdrant Edge as a read-index/cache proof lane, not canonical storage.
+- Keep Agent Harness integration as a subprocess bridge contract rather than a
+  live service dependency.
+
+### Verification
+
+- Bridge CLI pytest coverage for recall and approved store.
+- Native code graph extractor tests.
+- Qdrant Edge probe/readiness tests.
+- Version surfaces synchronized across package metadata and
+  `openclaw_mem.__version__`.
+
 ## [1.9.29] - 2026-06-18
 
 ### Added

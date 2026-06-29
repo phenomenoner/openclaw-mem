@@ -372,7 +372,7 @@ wheels = [
 
 [[package]]
 name = "openclaw-context-pack"
-version = "1.9.30"
+version = "1.9.31"
 source = { editable = "." }
 dependencies = [
     { name = "qdrant-edge-py" },
