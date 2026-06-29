@@ -11167,6 +11167,293 @@ def cmd_service_lease(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
     )
 
 
+def _bridge_request(args: argparse.Namespace) -> Dict[str, Any]:
+    if bool(getattr(args, "stdin_json", False)):
+        raw = sys.stdin.read()
+    else:
+        request_path = getattr(args, "request", None)
+        if not request_path:
+            raise ValueError("bridge command requires --stdin-json or --request")
+        raw = Path(str(request_path)).read_text(encoding="utf-8")
+    payload = json.loads(raw or "{}")
+    if not isinstance(payload, dict):
+        raise ValueError("bridge request must be a JSON object")
+    return payload
+
+
+def _bridge_emit(args: argparse.Namespace, payload: Dict[str, Any]) -> None:
+    response_path = getattr(args, "response", None)
+    if response_path:
+        out = Path(str(response_path))
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _emit(payload, getattr(args, "json", True))
+
+
+def _bridge_envelope(
+    *,
+    request: Dict[str, Any],
+    operation: str,
+    status: str,
+    payload: Dict[str, Any],
+    error_code: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> Dict[str, Any]:
+    request_id = str(request.get("requestId") or f"missing-request-{operation}")
+    return {
+        "v": 1,
+        "requestId": request_id,
+        "provider": "openclaw-mem-engine",
+        "operation": operation,
+        "status": status,
+        "receiptId": f"ocm-bridge-{operation}-{request_id}",
+        "errorCode": error_code,
+        "errorMessage": error_message,
+        "payload": payload,
+    }
+
+
+def _bridge_payload_base(*, backend: str, writes_performed: bool, canonical_writes_allowed: bool) -> Dict[str, Any]:
+    return {
+        "backend": backend,
+        "attemptedBackend": backend,
+        "fallbackUsed": False,
+        "fallbackBackend": "sqlite-vector+service-writeback" if backend != "sqlite-vector+service-writeback" else None,
+        "fallbackReason": None,
+        "writesPerformed": writes_performed,
+        "canonicalWritesAllowed": canonical_writes_allowed,
+        "policySource": "openclaw-mem-engine",
+    }
+
+
+def _bridge_search_hits(conn: sqlite3.Connection, query: str, limit: int) -> List[Dict[str, Any]]:
+    ns = argparse.Namespace(query=query, limit=max(1, int(limit or 5)), json=True)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        cmd_search(conn, ns)
+    try:
+        rows = json.loads(buf.getvalue() or "[]")
+    except json.JSONDecodeError:
+        rows = []
+    if not isinstance(rows, list):
+        return []
+    hits: List[Dict[str, Any]] = []
+    for index, row in enumerate(rows[: max(1, int(limit or 5))]):
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("summary") or row.get("snippet") or row.get("summary_en") or "").strip()
+        if not text:
+            continue
+        hits.append(
+            {
+                "lane": "store",
+                "id": f"obs:{row.get('id', index)}",
+                "score": float(row.get("score") or 1.0),
+                "title": str(row.get("kind") or row.get("tool_name") or "memory"),
+                "text": text,
+                "source": "openclaw-mem.sqlite",
+            }
+        )
+    return hits
+
+
+def cmd_bridge_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    db_path = Path(str(getattr(args, "db", None) or os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB))).expanduser()
+    qdrant_path = db_path.parent / "qdrant-edge"
+    request = {"requestId": str(getattr(args, "request_id", "") or "status")}
+    payload = _bridge_payload_base(
+        backend="sqlite-vector+service-writeback",
+        writes_performed=False,
+        canonical_writes_allowed=False,
+    )
+    payload.update(
+        {
+            "status": "ready",
+            "serviceVersion": __version__,
+            "dbPath": str(db_path),
+            "qdrantEdgePresent": qdrant_path.exists(),
+            "supportedOperations": ["status", "recall", "store"],
+        }
+    )
+    _bridge_emit(
+        args,
+        _bridge_envelope(request=request, operation="status", status="ready", payload=payload),
+    )
+
+
+def cmd_bridge_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        request = _bridge_request(args)
+    except Exception as exc:
+        request = {"requestId": "invalid-request"}
+        payload = _bridge_payload_base(
+            backend="sqlite-vector+service-writeback",
+            writes_performed=False,
+            canonical_writes_allowed=False,
+        )
+        payload.update({"hitCount": 0, "hits": []})
+        _bridge_emit(
+            args,
+            _bridge_envelope(
+                request=request,
+                operation="recall",
+                status="error",
+                payload=payload,
+                error_code="bridge_protocol",
+                error_message=str(exc),
+            ),
+        )
+        return
+    if str(request.get("op") or "recall") != "recall":
+        payload = _bridge_payload_base(
+            backend="sqlite-vector+service-writeback",
+            writes_performed=False,
+            canonical_writes_allowed=False,
+        )
+        payload.update({"hitCount": 0, "hits": []})
+        _bridge_emit(
+            args,
+            _bridge_envelope(
+                request=request,
+                operation="recall",
+                status="error",
+                payload=payload,
+                error_code="unsupported_operation",
+                error_message="bridge recall received non-recall request",
+            ),
+        )
+        return
+    body = request.get("payload") if isinstance(request.get("payload"), dict) else {}
+    query = str(body.get("query") or "").strip()
+    limit = int(body.get("limit") or getattr(args, "limit", 5) or 5)
+    payload = _bridge_payload_base(
+        backend="sqlite-vector+service-writeback",
+        writes_performed=False,
+        canonical_writes_allowed=False,
+    )
+    if not query:
+        payload.update({"hitCount": 0, "hits": []})
+        _bridge_emit(
+            args,
+            _bridge_envelope(
+                request=request,
+                operation="recall",
+                status="policy_denied",
+                payload=payload,
+                error_code="empty_query",
+                error_message="recall query is empty",
+            ),
+        )
+        return
+    hits = _bridge_search_hits(conn, query, limit)
+    payload.update({"hitCount": len(hits), "hits": hits})
+    _bridge_emit(
+        args,
+        _bridge_envelope(
+            request=request,
+            operation="recall",
+            status="ready" if hits else "degraded",
+            payload=payload,
+        ),
+    )
+
+
+def cmd_bridge_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        request = _bridge_request(args)
+    except Exception as exc:
+        request = {"requestId": "invalid-request"}
+        payload = _bridge_payload_base(
+            backend="sqlite",
+            writes_performed=False,
+            canonical_writes_allowed=True,
+        )
+        _bridge_emit(
+            args,
+            _bridge_envelope(
+                request=request,
+                operation="store",
+                status="error",
+                payload=payload,
+                error_code="bridge_protocol",
+                error_message=str(exc),
+            ),
+        )
+        return
+    if str(request.get("op") or "store") != "store":
+        payload = _bridge_payload_base(
+            backend="sqlite",
+            writes_performed=False,
+            canonical_writes_allowed=True,
+        )
+        _bridge_emit(
+            args,
+            _bridge_envelope(
+                request=request,
+                operation="store",
+                status="error",
+                payload=payload,
+                error_code="unsupported_operation",
+                error_message="bridge store received non-store request",
+            ),
+        )
+        return
+    body = request.get("payload") if isinstance(request.get("payload"), dict) else {}
+    text = str(body.get("text") or "").strip()
+    approved = bool(body.get("approved"))
+    payload = _bridge_payload_base(
+        backend="sqlite",
+        writes_performed=False,
+        canonical_writes_allowed=True,
+    )
+    if not text:
+        _bridge_emit(
+            args,
+            _bridge_envelope(
+                request=request,
+                operation="store",
+                status="policy_denied",
+                payload=payload,
+                error_code="empty_text",
+                error_message="store text is empty",
+            ),
+        )
+        return
+    if not approved:
+        _bridge_emit(
+            args,
+            _bridge_envelope(
+                request=request,
+                operation="store",
+                status="policy_denied",
+                payload=payload,
+                error_code="approval_required",
+                error_message="bridge store requires approved=true",
+            ),
+        )
+        return
+    obs = {
+        "kind": str(body.get("category") or body.get("kind") or "fact"),
+        "summary": text,
+        "summary_en": body.get("text_en") or body.get("summary_en"),
+        "lang": body.get("lang"),
+        "tool_name": "memory_store",
+        "detail": {
+            "source": "openclaw-mem-engine.bridge.store.v1",
+            "host": request.get("host") if isinstance(request.get("host"), dict) else {},
+            "importance": body.get("importance"),
+            "payload": body.get("metadata") or body.get("payload") or {},
+        },
+    }
+    rowid = _insert_observation(conn, obs)
+    conn.commit()
+    payload.update({"writesPerformed": True, "storeId": f"obs:{rowid}", "rowId": rowid})
+    _bridge_emit(
+        args,
+        _bridge_envelope(request=request, operation="store", status="ready", payload=payload),
+    )
+
+
 def _qdrant_mode(db_path: Path) -> str:
     return "snapshot-preserved" if (db_path.expanduser().parent / "qdrant-edge").exists() else "not-present"
 
@@ -21174,6 +21461,30 @@ def build_parser() -> argparse.ArgumentParser:
     svc.add_argument("--owner", required=True)
     svc.add_argument("--ttl-ms", dest="ttl_ms", type=int, required=True)
     svc.set_defaults(func=cmd_service_lease)
+
+    sp = sub.add_parser("bridge", help="Agent Harness memory-owner bridge envelope")
+    add_common(sp)
+    bsub = sp.add_subparsers(dest="bridge_cmd", required=True)
+    b = bsub.add_parser("status", help="Emit bridge status envelope")
+    add_common(b)
+    b.add_argument("--request-id", default="status")
+    b.add_argument("--response", help="Optional response JSON mirror path")
+    b.set_defaults(func=cmd_bridge_status)
+    b = bsub.add_parser("recall", help="Run bridge recall from Agent Harness request envelope")
+    add_common(b)
+    bsrc = b.add_mutually_exclusive_group(required=True)
+    bsrc.add_argument("--stdin-json", action="store_true", help="Read request envelope from stdin")
+    bsrc.add_argument("--request", help="Read request envelope from this JSON file")
+    b.add_argument("--response", help="Optional response JSON mirror path")
+    b.add_argument("--limit", type=int, default=5)
+    b.set_defaults(func=cmd_bridge_recall)
+    b = bsub.add_parser("store", help="Run bridge store from Agent Harness request envelope")
+    add_common(b)
+    bsrc = b.add_mutually_exclusive_group(required=True)
+    bsrc.add_argument("--stdin-json", action="store_true", help="Read request envelope from stdin")
+    bsrc.add_argument("--request", help="Read request envelope from this JSON file")
+    b.add_argument("--response", help="Optional response JSON mirror path")
+    b.set_defaults(func=cmd_bridge_store)
 
     sp = sub.add_parser("qdrant", help="Native Qdrant recall status probes")
     add_common(sp)
