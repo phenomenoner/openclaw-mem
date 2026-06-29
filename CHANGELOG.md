@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.32] - 2026-06-29
+
+### Difference from 1.9.31
+
+`1.9.32` keeps the `1.9.31` bridge contract unchanged and adds Windows console
+wrapper proof for the generated `.venv\Scripts\openclaw-mem.exe` entrypoint.
+Compared with `1.9.31`, the release closes the bypass-only wrapper gap by
+testing the installed console script directly for bridge `status`, approved
+`store`, and follow-up `recall` operations under UTF-8 subprocess settings.
+
+### Added
+
+- Add Windows console-wrapper bridge regression coverage for `bridge status`,
+  approved `bridge store`, and `bridge recall`.
+
+### Verification
+
+- `uv run python -m pytest tests\test_windows_console_wrapper_bridge.py -q`
+- `openclaw-mem governed release-check --expected-version 1.9.32`
+
 ## [1.9.31] - 2026-06-29
 
 ### Difference from 1.9.30
