@@ -85,6 +85,11 @@ from openclaw_mem.optimization import (
     render_memory_health_review,
 )
 from openclaw_mem.graph.drift import query_drift
+from openclaw_mem.graph.code_extract import (
+    extract_code_graph,
+    query_impact as query_code_impact,
+    query_symbol as query_code_symbol,
+)
 from openclaw_mem.graph.query import (
     query_downstream,
     query_downstream_topology,
@@ -15740,6 +15745,62 @@ def cmd_graph_topology_extract(conn: sqlite3.Connection, args: argparse.Namespac
     )
 
 
+def cmd_graph_code_extract(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Extract a native source-linked code graph from a repository."""
+
+    _ = conn
+    repo_path = str(getattr(args, "repo", "") or "").strip()
+    out_path = str(getattr(args, "out", "") or "").strip()
+    if not repo_path:
+        _emit({"error": "missing --repo"}, True)
+        sys.exit(2)
+    if not out_path:
+        _emit({"error": "missing --out"}, True)
+        sys.exit(2)
+
+    try:
+        graph = extract_code_graph(repo=repo_path)
+        out_file = Path(out_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(graph, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except Exception as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    counts = graph.get("counts") if isinstance(graph.get("counts"), dict) else {}
+    result = {
+        "ok": True,
+        "to": str(Path(out_path).resolve()),
+        "node_count": int(counts.get("nodes") or 0),
+        "edge_count": int(counts.get("edges") or 0),
+        "topology_digest": graph.get("topology_digest"),
+        "receipt_id": graph.get("receipt_id"),
+    }
+    payload = {
+        "kind": "openclaw-mem.graph.code-extract.v0",
+        "ts": _utcnow_iso(),
+        "repo": str(Path(repo_path).resolve()),
+        "out": str(Path(out_path).resolve()),
+        "result": result,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    print(
+        " ".join(
+            [
+                "ok=true",
+                f"nodes={result['node_count']}",
+                f"edges={result['edge_count']}",
+                f"digest={result['topology_digest']}",
+                f"to={result['to']}",
+            ]
+        )
+    )
+
+
 def cmd_graph_topology_diff(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Compare extracted seed topology against a curated topology file (suggest-only)."""
 
@@ -16638,20 +16699,28 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     query_cmd = str(getattr(args, "graph_query_cmd", "") or "").strip().lower()
     db_path = str(getattr(args, "db", "") or "").strip()
     topology_path = str(getattr(args, "topology", "") or "").strip()
+    graph_path = str(getattr(args, "graph", "") or "").strip()
 
     topology_supported = {"upstream", "downstream", "writers", "filter"}
+    graph_file_supported = {"symbol"}
     use_topology = bool(topology_path)
+    use_graph_file = bool(graph_path)
 
-    if not db_path and not use_topology:
-        _emit({"error": "missing --db or --topology"}, True)
+    if not db_path and not use_topology and not use_graph_file:
+        _emit({"error": "missing --db, --topology, or --graph"}, True)
         sys.exit(2)
 
     if use_topology and query_cmd not in topology_supported:
         _emit({"error": f"--topology is not supported for query command: {query_cmd}"}, True)
         sys.exit(2)
+    if use_graph_file and query_cmd not in graph_file_supported:
+        _emit({"error": f"--graph is not supported for query command: {query_cmd}"}, True)
+        sys.exit(2)
 
     try:
-        if query_cmd == "upstream":
+        if query_cmd == "symbol":
+            result = query_code_symbol(graph_path=graph_path, symbol=getattr(args, "symbol", None))
+        elif query_cmd == "upstream":
             if use_topology:
                 result = query_upstream_topology(topology_path=topology_path, node_id=getattr(args, "node_id", None))
             else:
@@ -16751,6 +16820,13 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             print(f"nodes={int(result.get('node_count', 0))} edges={int(result.get('edge_count', 0))}")
         return
 
+    if query_cmd == "symbol":
+        print(f"count={int(result.get('count', 0))}")
+        for node in list(result.get("nodes") or []):
+            meta = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+            print(f"{node.get('id')} source={meta.get('source_path')} span={meta.get('span')}")
+        return
+
     if query_cmd == "filter":
         print(f"count={int(result.get('count', 0))}")
         for node in list(result.get("nodes") or []):
@@ -16823,6 +16899,38 @@ def cmd_graph_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     print(f"count={int(result.get('count', 0))}")
     for edge in edges:
+        print(f"{edge.get('src')} --{edge.get('type')}--> {edge.get('dst')}")
+
+
+def cmd_graph_code_impact(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    _ = conn
+    graph_path = str(getattr(args, "graph", "") or "").strip()
+    rel_path = str(getattr(args, "path", "") or "").strip()
+    if not graph_path:
+        _emit({"error": "missing --graph"}, True)
+        sys.exit(2)
+    if not rel_path:
+        _emit({"error": "missing --path"}, True)
+        sys.exit(2)
+
+    try:
+        result = query_code_impact(graph_path=graph_path, path=rel_path)
+    except ValueError as e:
+        _emit({"error": str(e)}, True)
+        sys.exit(2)
+
+    payload = {
+        "kind": "openclaw-mem.graph.impact.v0",
+        "ts": _utcnow_iso(),
+        "result": result,
+    }
+
+    if bool(args.json):
+        _emit(payload, True)
+        return
+
+    print(f"path={result.get('path')} nodes={int(result.get('node_count', 0))} edges={int(result.get('edge_count', 0))}")
+    for edge in list(result.get("edges") or []):
         print(f"{edge.get('src')} --{edge.get('type')}--> {edge.get('dst')}")
 
 
@@ -20520,6 +20628,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--out", help="Output topology seed JSON path (default: <harness-home>/state/memory/graph/topology-extract-full.json when --harness-home is provided)")
     g.set_defaults(func=cmd_graph_topology_extract)
 
+    g = gsub.add_parser("extract", help="Extract a native source-linked code graph from a repository")
+    g.add_argument("--repo", required=True, help="Repository root to scan")
+    g.add_argument("--out", required=True, help="Output portable code graph JSON path")
+    g.set_defaults(func=cmd_graph_code_extract)
+
     g = gsub.add_parser("topology-diff", help="Compare extracted seed topology with curated topology (suggest-only)")
     g.add_argument("--seed", required=True, help="Extracted topology seed file (.json/.yaml)")
     g.add_argument("--curated", required=True, help="Curated topology file (.json/.yaml)")
@@ -20589,6 +20702,11 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--topology", help="Structured topology file path (.json/.yaml) for direct Stage-1 queries")
     q.set_defaults(func=cmd_graph_query)
 
+    q = qsub.add_parser("symbol", help="Find symbol nodes in a portable code graph")
+    q.add_argument("--graph", required=True, help="Portable code graph JSON path")
+    q.add_argument("--symbol", required=True, help="Symbol name or qualname to find")
+    q.set_defaults(func=cmd_graph_query)
+
     q = qsub.add_parser("receipts", help="List recent deterministic refresh receipts")
     q.add_argument("--limit", type=int, default=10, help="Max receipts to return (default: 10)")
     q.add_argument("--source-path", dest="source_path", help="Optional exact source_path filter")
@@ -20609,6 +20727,11 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--live-json", dest="live_json", required=True, help="Runtime state JSON path (nodes/status_by_node)")
     q.add_argument("--limit", type=int, default=50, help="Max node ids to include per drift bucket (default: 50)")
     q.set_defaults(func=cmd_graph_query)
+
+    g = gsub.add_parser("impact", help="Show direct impact neighbors for a file in a portable code graph")
+    g.add_argument("--graph", required=True, help="Portable code graph JSON path")
+    g.add_argument("--path", required=True, help="Repository-relative file path")
+    g.set_defaults(func=cmd_graph_code_impact)
 
     g = gsub.add_parser("capture-git", help="Capture recent git commits as observations (idempotent)")
     g.add_argument("--repo", action="append", required=True, help="Git repository path (repeatable)")
