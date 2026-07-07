@@ -58,6 +58,60 @@ class TestBridgeRecallV1(unittest.TestCase):
         self.assertIs(out["payload"]["fallbackUsed"], True)
         self.assertEqual(out["payload"]["fallbackReason"], "no_hits")
 
+    def test_agent_service_writeback_is_recalled_when_sqlite_has_no_hits(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            db = self._db(root)
+            harness_home = root / ".agent-harness"
+            service_store = harness_home / "agents" / "main" / "memory" / "openclaw-mem-service-store.jsonl"
+            service_store.parent.mkdir(parents=True)
+            service_store.write_text(
+                json.dumps(
+                    {
+                        "schema": "openclaw-mem.service-store.v1",
+                        "agentId": "main",
+                        "storeId": "rust-harness:service-writeback-marker",
+                        "storedAtMs": 1783436978242,
+                        "text": "KGI formal offer yijing increase holding together service writeback marker",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            request = {
+                "requestId": "r2b",
+                "op": "recall",
+                "host": {"agentId": "main", "platform": "windows"},
+                "payload": {
+                    "query": "KGI formal offer yijing increase holding together",
+                    "limit": 3,
+                },
+            }
+            conn = _connect(str(db))
+            try:
+                args = SimpleNamespace(
+                    db=str(db),
+                    harness_home=None,
+                    harness_home_global=str(harness_home),
+                    json=True,
+                    stdin_json=True,
+                    request=None,
+                    response=None,
+                    limit=5,
+                )
+                with patch("sys.stdin", io.StringIO(json.dumps(request))):
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        cmd_bridge_recall(conn, args)
+            finally:
+                conn.close()
+            out = json.loads(buf.getvalue())
+        self.assertEqual(out["status"], "ready")
+        self.assertIs(out["payload"]["fallbackUsed"], False)
+        self.assertEqual(out["payload"]["hits"][0]["lane"], "service-writeback")
+        self.assertEqual(out["payload"]["hits"][0]["id"], "rust-harness:service-writeback-marker")
+
     def test_unavailable_when_db_path_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             missing = Path(td) / "missing.sqlite"

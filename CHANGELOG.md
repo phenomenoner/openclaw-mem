@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keep bridge canonical writes governed: unapproved `bridge store` requests are
   denied with `approval_required`; only explicit operator-approved requests
   perform a canonical write, and forget operations remain unsupported.
+- Include agent-scoped service-writeback files in `bridge recall` when harness
+  home and agent context are provided, preserving recall parity after an Agent
+  Harness memory-owner promotion.
 - Keep all new graph surfaces opt-in with byte-stable default-off behavior and
   fail-open degradation receipts.
 
@@ -42,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `uv run -- python -m unittest discover -s tests -p "test_*.py"`
 - `uv run python -m pytest tests\test_bridge_recall_v1.py tests\test_windows_console_wrapper_bridge.py -q`
+- `uv run --with pytest -- python -m pytest tests -q`
 
 ## [1.9.32] - 2026-06-29
 

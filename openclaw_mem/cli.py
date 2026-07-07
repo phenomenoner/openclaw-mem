@@ -11398,6 +11398,128 @@ def _bridge_search_hits(conn: sqlite3.Connection, query: str, limit: int) -> Lis
     return hits
 
 
+def _bridge_request_harness_home(args: argparse.Namespace, request: Dict[str, Any]) -> Optional[Path]:
+    body = request.get("payload") if isinstance(request.get("payload"), dict) else {}
+    host = request.get("host") if isinstance(request.get("host"), dict) else {}
+    candidates = [
+        getattr(args, "harness_home", None),
+        getattr(args, "harness_home_global", None),
+        body.get("harnessHome") if isinstance(body, dict) else None,
+        host.get("harnessHome") if isinstance(host, dict) else None,
+        os.environ.get("OPENCLAW_HARNESS_HOME"),
+        os.environ.get("AGENT_HARNESS_HOME"),
+    ]
+    for raw in candidates:
+        text = str(raw or "").strip()
+        if text:
+            return Path(text).expanduser().resolve()
+    return None
+
+
+def _bridge_request_agent_id(request: Dict[str, Any]) -> str:
+    host = request.get("host") if isinstance(request.get("host"), dict) else {}
+    raw = host.get("agentId") if isinstance(host, dict) else None
+    agent_id = str(raw or "global").strip()
+    return agent_id or "global"
+
+
+def _bridge_service_writeback_paths(harness_home: Optional[Path], agent_id: str) -> List[Path]:
+    if harness_home is None:
+        return []
+    paths: List[Path] = []
+    if agent_id and agent_id != "global":
+        paths.append(harness_home / "agents" / agent_id / "memory" / "openclaw-mem-service-store.jsonl")
+    paths.append(harness_home / "memory" / "openclaw-mem-service-store.jsonl")
+    return paths
+
+
+def _bridge_query_terms(query: str) -> List[str]:
+    terms: List[str] = []
+    for raw in re.findall(r"[\w\u3400-\u9fff]+", query.lower()):
+        token = raw.strip()
+        if len(token) < 2 or token in terms:
+            continue
+        terms.append(token)
+    return terms
+
+
+def _bridge_text_score(text: str, terms: List[str]) -> float:
+    if not terms:
+        return 0.0
+    lower = text.lower()
+    matched = sum(1 for term in terms if term in lower)
+    if matched <= 0:
+        return 0.0
+    return matched / max(1, len(terms))
+
+
+def _bridge_service_writeback_hits(
+    *,
+    harness_home: Optional[Path],
+    agent_id: str,
+    query: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    terms = _bridge_query_terms(query)
+    rows: List[Tuple[float, int, Dict[str, Any]]] = []
+    for path in _bridge_service_writeback_paths(harness_home, agent_id):
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for ordinal, line in enumerate(lines):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            row_agent = str(row.get("agentId") or row.get("agent_id") or "global").strip() or "global"
+            if row_agent != "global" and agent_id != "global" and row_agent != agent_id:
+                continue
+            text = str(row.get("text") or row.get("summary") or "").strip()
+            if not text:
+                continue
+            score = _bridge_text_score(text, terms)
+            if score <= 0.0:
+                continue
+            rows.append(
+                (
+                    score,
+                    int(row.get("storedAtMs") or row.get("createdAtMs") or ordinal),
+                    {
+                        "lane": "service-writeback",
+                        "id": str(row.get("storeId") or row.get("id") or f"service-writeback:{ordinal}"),
+                        "score": score,
+                        "title": str(row.get("schema") or row.get("kind") or "service-writeback"),
+                        "text": text,
+                        "source": str(path),
+                    },
+                )
+            )
+    rows.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [row for _, _, row in rows[: max(1, int(limit or 5))]]
+
+
+def _bridge_merge_hits(*hit_groups: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    seen: Set[str] = set()
+    merged: List[Dict[str, Any]] = []
+    for group in hit_groups:
+        for hit in group:
+            key = str(hit.get("id") or hit.get("text") or "")
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            merged.append(hit)
+    merged.sort(key=lambda hit: float(hit.get("score") or 0.0), reverse=True)
+    return merged[: max(1, int(limit or 5))]
+
+
 def cmd_bridge_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     db_path = Path(str(getattr(args, "db", None) or os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB))).expanduser()
     qdrant_path = db_path.parent / "qdrant-edge"
@@ -11507,7 +11629,14 @@ def cmd_bridge_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
             ),
         )
         return
-    hits = _bridge_search_hits(conn, query, limit)
+    sqlite_hits = _bridge_search_hits(conn, query, limit)
+    service_hits = _bridge_service_writeback_hits(
+        harness_home=_bridge_request_harness_home(args, request),
+        agent_id=_bridge_request_agent_id(request),
+        query=query,
+        limit=limit,
+    )
+    hits = _bridge_merge_hits(service_hits, sqlite_hits, limit=limit)
     if not hits:
         payload["fallbackUsed"] = True
         payload["fallbackReason"] = "no_hits"
