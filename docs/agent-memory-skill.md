@@ -58,18 +58,18 @@ Use for:
 6. **Do nothing** (session-local)
 
 If the request asks for **exact policy/contract wording**, use **docs search** even when recall contains a summary.
-If the request asks **“what existing project/work is this idea most related to?”**, use **graph match** before generic recall.
+If the request asks **“what existing project/work is this idea most related to?”**, run `openclaw-mem graph readiness` before graph match. Use `graph match` only when readiness is green or when you explicitly report the stale/missing graph limits and keep fallback recall/repo inspection in scope.
 
 ### One-screen flow
 - Prior preference/decision/standing rule? → **Recall**
 - Documented system behavior / authored guidance? → **Docs search**
 - Repo/path/entrypoint/impact navigation? → **Topology search**
-- Idea → project / concept → project association? → **Graph match**
+- Idea → project / concept → project association? → **Graph readiness, then graph match or fallback recall/repo inspection**
 - Did this turn produce a stable, confirmed fact worth keeping? → **Store**
 - Otherwise → **Do nothing**
 
 ### Practical loop
-1. **Recall / docs / topology / graph match first** depending on the question.
+1. **Recall / docs / topology / graph readiness + match first** depending on the question.
 2. Answer from the best lane with provenance.
 3. **Store only if** this turn created a *newly confirmed durable fact*.
 
@@ -114,7 +114,7 @@ If recall/docs results are weak, conflicting, or low-confidence:
 - **Store (L1):** `memory_store(text, category, importance, scope)`
 - **Docs search (L2):** `memory_docs_search(query)`
 - **Docs ingest (L2, operator-authored only):** `memory_docs_ingest(...)`
-- **Topology / Graph match (L3):** direct repo inspection tools (read/rg/tree) + curated topo note in L2 + (when available) `openclaw-mem graph query ...` / `openclaw-mem graph match ...`
+- **Topology / Graph match (L3):** direct repo inspection tools (read/rg/tree) + curated topo note in L2 + (when available) `openclaw-mem graph query ...` / `openclaw-mem graph readiness` before `openclaw-mem graph match ...`
 
 ### If you are using `openclaw-mem` directly (CLI)
 - **Recall (L1):** `openclaw-mem search "…"` (FTS) or `openclaw-mem hybrid "…"` (if embeddings)
@@ -198,7 +198,8 @@ Current decision ladder:
 - Prefer them when they reduce truthful repetition during retrieval.
 - Keep raw refs reachable through receipts, citations, or covered-ref metadata.
 - **Graph match (L3):** `openclaw-mem graph match "…"` for idea → project / concept → project candidate routing.
-  - For unattended use, prefer `openclaw-mem graph readiness` (bridges freshness + topology-source drift + match-support availability).
+  - Run `openclaw-mem graph readiness` first; it bridges freshness, topology-source drift, and match-support availability.
+  - If readiness is red, do not use graph match as an autonomous router. Report the limits and fall back to ordinary recall, docs search, or direct repo inspection.
   - If you want a single deterministic router across graph-semantic and transcript recall, use `openclaw-mem route auto "<query>"` (fail-open).
     - when graph candidates are truthfully covered by a fresh synthesis card, the router should prefer that synthesis card while keeping `preferredCardRefs` / `coveredRawRefs` receipts visible.
   - If `openclaw-mem-engine` is your active memory slot, you can also enable `autoRecall.routeAuto` so **Proactive Pack** consults that router automatically during prompt build and injects the same synthesis-aware hint.

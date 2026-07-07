@@ -65,7 +65,7 @@ If asked to “remember” routine logs/OK checks:
 - Gateway (optional): if the operator provides `OPENCLAW_MEM_GATEWAY_URL` plus a **read-role** token, use the HTTP gateway for `/v1/status`, `/v1/search`, and `/v1/pack`; do not request write/admin tokens for read-only lanes. On read-only gateway deployments, `/v1/search` may report `workspace_markdown_readthrough` in diagnostics when it answers from configured Markdown memory instead of a refreshed SQLite/docs index.
 - Topology: repo inspection + (if available) `openclaw-mem graph query ...`
   - prerequisite: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`)
-- Graph match: `openclaw-mem graph match "…"` for bounded idea → project candidate routing; for unattended use, check `openclaw-mem graph health` first
+- Graph match: `openclaw-mem graph match "…"` for bounded idea → project candidate routing; run `openclaw-mem graph readiness` first, and if readiness is red, report the limits and fall back to recall/docs/repo inspection
 - Store: **disabled by default** in this lane
 
 ## Dream Lite plan-only note

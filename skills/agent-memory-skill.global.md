@@ -64,7 +64,8 @@ Never store:
 - Topology (L3): repo inspection + (if available) `openclaw-mem graph query ...`
   - prerequisite: refresh from a curated topology file first (`openclaw-mem graph topology-refresh --file docs/topology.json`)
 - Graph match (L3): `openclaw-mem graph match "…"` for idea → project candidate routing
-  - unattended: prefer `openclaw-mem graph readiness` first
+  - run `openclaw-mem graph readiness` first
+  - if readiness is red, do not use graph match as an autonomous router; report the limits and fall back to recall/docs/repo inspection
   - single entrypoint router: `openclaw-mem route auto "<query>"` (fail-open)
     - when graph candidates are truthfully covered by a fresh synthesis card, prefer the synthesis card but keep `preferredCardRefs` / `coveredRawRefs` receipts
   - pre-action repo grounding: `openclaw-mem routing resolve "<project task>" --workspace-root <workspace> --json` before file-changing work when project names or product terms are ambiguous
