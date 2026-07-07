@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Include agent-scoped service-writeback files in `bridge recall` when harness
   home and agent context are provided, preserving recall parity after an Agent
   Harness memory-owner promotion.
+- Clarify the Agent Harness memory-owner cutover posture: qdrant-edge /
+  sqlite-vector service-writeback bridge recall is the primary path, while the
+  legacy LanceDB snapshot rehearsal lane is optional and non-blocking when that
+  primary path is green.
 - Keep all new graph surfaces opt-in with byte-stable default-off behavior and
   fail-open degradation receipts.
 
