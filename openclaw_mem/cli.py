@@ -90,6 +90,9 @@ from openclaw_mem.graph.code_extract import (
     query_impact as query_code_impact,
     query_symbol as query_code_symbol,
 )
+from openclaw_mem.graph.search_adapter import HYBRID_SEARCH_KIND, graph_search_candidates
+from openclaw_mem.graph.render_topology import render_topology
+from openclaw_mem.graph import fact_guard
 from openclaw_mem.graph.query import (
     query_downstream,
     query_downstream_topology,
@@ -5549,6 +5552,74 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     rows = _filter_superseded_rows(rows)
     out = _search_prefer_synthesis_rows(conn, rows=rows, limit=max(1, int(args.limit)))
+
+    graph_enabled = bool(getattr(args, "graph", False) or str(getattr(args, "graph_path", "") or "").strip())
+    if graph_enabled:
+        graph_path = str(getattr(args, "graph_path", "") or "").strip()
+        graph_payload = graph_search_candidates(
+            query=q,
+            graph_path=graph_path,
+            limit=max(1, int(args.limit)),
+            stale_after_days=max(0, int(getattr(args, "graph_stale_after_days", 30) or 30)),
+            readiness_state_path=str(getattr(args, "graph_readiness_state", "") or "").strip() or None,
+        )
+        graph_hits = list(graph_payload.get("candidates") or [])
+        results: List[Dict[str, Any]] = []
+        for rank, item in enumerate(out, start=1):
+            result = dict(item)
+            result["lane"] = "lexical"
+            lexical_component = 1.0 / float(rank + 1)
+            result["rank_components"] = {
+                "lexical": lexical_component,
+                "vector": 0.0,
+                "graph": 0.0,
+            }
+            result["hybrid_score"] = lexical_component
+            results.append(result)
+        for rank, item in enumerate(graph_hits, start=1):
+            result = dict(item)
+            graph_component = float(result.get("score") or 0.0)
+            result["rank_components"] = {
+                "lexical": 0.0,
+                "vector": 0.0,
+                "graph": graph_component,
+            }
+            result["hybrid_score"] = graph_component
+            results.append(result)
+        results.sort(
+            key=lambda item: (
+                -float(item.get("hybrid_score") or 0.0),
+                str(item.get("lane") or ""),
+                str(item.get("source_path") or item.get("id") or item.get("node_id") or ""),
+            )
+        )
+        for rank, item in enumerate(results, start=1):
+            item["rank"] = rank
+        _emit(
+            {
+                "kind": HYBRID_SEARCH_KIND,
+                "query": q,
+                "limit": max(1, int(args.limit)),
+                "results": results,
+                "ranking": {
+                    "kind": "deterministic_blended_rank.v0",
+                    "components": ["lexical", "vector", "graph"],
+                    "weights": {"lexical": 1.0, "vector": 1.0, "graph": 1.0},
+                    "note": "Vector component is zero in the FTS search path unless a future vector route provides scores.",
+                },
+                "graph": {
+                    "enabled": True,
+                    "path": graph_path or None,
+                    "count": len(graph_hits),
+                    "fallback_reason": graph_payload.get("fallback_reason"),
+                    "dropped": graph_payload.get("dropped") or {},
+                },
+                "lexical": {"count": len(out)},
+            },
+            args.json,
+        )
+        return
+
     _emit(out, args.json)
 
 
@@ -9433,6 +9504,69 @@ def _pack_graph_trace_extension(graph_state: dict) -> dict:
     }
 
 
+def _pack_graph_aware_optional(*, query: str, args: argparse.Namespace) -> Optional[Dict[str, Any]]:
+    if not bool(getattr(args, "graph_aware", False)):
+        return None
+    graph_path = str(getattr(args, "graph_aware_path", "") or "").strip()
+    active_files = [str(x).replace("\\", "/") for x in list(getattr(args, "graph_aware_active_file", None) or [])]
+    recent_files = [str(x).replace("\\", "/") for x in list(getattr(args, "graph_aware_recent_file", None) or [])]
+    base = {
+        "kind": "openclaw-mem.pack.graph-aware.v0",
+        "enabled": True,
+        "selected": [],
+        "writes_performed": False,
+        "ranking_inputs": {
+            "active_files": active_files,
+            "recent_files": recent_files,
+            "searched_files": [],
+            "symbol_neighborhood": False,
+            "impact_radius": "direct-neighborhood-v0",
+            "memory_freshness": "snapshot-or-iso-age",
+            "provenance_quality": "receipt_id-required",
+        },
+    }
+    if not graph_path:
+        return {**base, "fallback_reason": "missing_graph_path"}
+    payload = graph_search_candidates(
+        query=" ".join([query, " ".join(active_files), " ".join(recent_files)]).strip(),
+        graph_path=graph_path,
+        limit=max(1, int(getattr(args, "limit", 12) or 12)),
+        stale_after_days=max(0, int(getattr(args, "graph_aware_stale_after_days", 30) or 30)),
+    )
+    active_set = set(active_files)
+    recent_set = set(recent_files)
+    selected = []
+    for hit in list(payload.get("candidates") or []):
+        source_path = str(hit.get("source_path") or "").replace("\\", "/")
+        components = {
+            "active_file": 1.0 if source_path in active_set else 0.0,
+            "recent_file": 0.5 if source_path in recent_set else 0.0,
+            "symbol_neighborhood": float(hit.get("score") or 0.0),
+            "impact_radius": 0.0,
+            "memory_freshness": 1.0 if str(hit.get("freshness") or "") == "snapshot" else 0.5,
+            "provenance_quality": 1.0 if str(hit.get("receipt_id") or "") else 0.0,
+        }
+        selected.append(
+            {
+                "node_id": hit.get("node_id"),
+                "source_path": source_path,
+                "score": round(sum(components.values()), 6),
+                "score_components": components,
+                "trace": {
+                    "reason": "graph-aware-pack-ranking",
+                    "node_id": hit.get("node_id"),
+                    "edge_path": [],
+                    "receipt_id": hit.get("receipt_id"),
+                },
+            }
+        )
+    selected.sort(key=lambda item: (-float(item.get("score") or 0.0), str(item.get("source_path") or ""), str(item.get("node_id") or "")))
+    base["selected"] = selected
+    base["fallback_reason"] = payload.get("fallback_reason")
+    base["ranking_inputs"]["symbol_neighborhood"] = bool(selected)
+    return base
+
+
 def _pack_gbrain_consult_optional(args: argparse.Namespace, query: str) -> Optional[Dict[str, Any]]:
     use_gbrain = str(getattr(args, "use_gbrain", "off") or "off").strip().lower()
     if use_gbrain == "off":
@@ -9572,6 +9706,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     started = time.perf_counter()
 
     graph_state = _pack_graph_preflight_optional(conn, query=query, args=args)
+    graph_aware_pack = _pack_graph_aware_optional(query=query, args=args)
 
     retrieval_args = argparse.Namespace(
         query=query,
@@ -9901,6 +10036,9 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "usedTokens": used_tail_tokens,
         }
 
+    if graph_aware_pack is not None:
+        payload["graph_aware_pack"] = graph_aware_pack
+
     # Optional graph output (kept separate for safety; consumer may choose to inject).
     if (graph_state or {}).get("use_graph") != "off":
         graph_pack = (((graph_state.get("payload") or {}).get("pack") or {}) if isinstance((graph_state.get("payload") or {}).get("pack"), dict) else {})
@@ -10062,6 +10200,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         trace_extensions: Dict[str, Any] = {}
         if (graph_state or {}).get("use_graph") != "off":
             trace_extensions["graph"] = _pack_graph_trace_extension(graph_state)
+        if graph_aware_pack is not None:
+            trace_extensions["graph_aware_pack"] = graph_aware_pack
         if gbrain_consult is not None:
             trace_extensions["gbrain"] = gbrain_sidecar.trace_extension(gbrain_consult)
         if trust_policy_mode != "off":
@@ -11201,6 +11341,7 @@ def _bridge_envelope(
 ) -> Dict[str, Any]:
     request_id = str(request.get("requestId") or f"missing-request-{operation}")
     return {
+        "kind": f"openclaw-mem-engine.bridge.{operation}.v1",
         "v": 1,
         "requestId": request_id,
         "provider": "openclaw-mem-engine",
@@ -11273,6 +11414,7 @@ def cmd_bridge_status(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
             "dbPath": str(db_path),
             "qdrantEdgePresent": qdrant_path.exists(),
             "supportedOperations": ["status", "recall", "store"],
+            "rejectedOperations": ["memory_forget", "forget"],
         }
     )
     _bridge_emit(
@@ -11316,10 +11458,30 @@ def cmd_bridge_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
             _bridge_envelope(
                 request=request,
                 operation="recall",
-                status="error",
+                status="policy_denied" if str(request.get("op") or "") in {"memory_store", "memory_forget", "store", "forget"} else "error",
                 payload=payload,
-                error_code="unsupported_operation",
+                error_code="recall_only_bridge" if str(request.get("op") or "") in {"memory_store", "memory_forget", "store", "forget"} else "unsupported_operation",
                 error_message="bridge recall received non-recall request",
+            ),
+        )
+        return
+    db_arg = str(getattr(args, "db", "") or "").strip()
+    if db_arg and db_arg != ":memory:" and not Path(db_arg).expanduser().exists():
+        payload = _bridge_payload_base(
+            backend="sqlite-vector+service-writeback",
+            writes_performed=False,
+            canonical_writes_allowed=False,
+        )
+        payload.update({"hitCount": 0, "hits": [], "fallbackUsed": True, "fallbackReason": "db_unavailable"})
+        _bridge_emit(
+            args,
+            _bridge_envelope(
+                request=request,
+                operation="recall",
+                status="unavailable",
+                payload=payload,
+                error_code="db_unavailable",
+                error_message="bridge recall DB path does not exist",
             ),
         )
         return
@@ -11346,6 +11508,9 @@ def cmd_bridge_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
         )
         return
     hits = _bridge_search_hits(conn, query, limit)
+    if not hits:
+        payload["fallbackUsed"] = True
+        payload["fallbackReason"] = "no_hits"
     payload.update({"hitCount": len(hits), "hits": hits})
     _bridge_emit(
         args,
@@ -11380,7 +11545,7 @@ def cmd_bridge_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None
             ),
         )
         return
-    if str(request.get("op") or "store") != "store":
+    if str(request.get("op") or "store") not in {"store", "memory_store"}:
         payload = _bridge_payload_base(
             backend="sqlite",
             writes_performed=False,
@@ -15238,6 +15403,22 @@ def cmd_graph_fact(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 max_items=int(getattr(args, "max_items", 20) or 20),
                 source_root=_graph_fact_source_root(args),
             )
+        elif cmd == "guard":
+            payload = fact_guard.guard(
+                facts_path=str(getattr(args, "facts", "") or ""),
+                target=str(getattr(args, "target", "") or ""),
+                intent=str(getattr(args, "intent", "") or ""),
+                stale_after_days=int(getattr(args, "stale_after_days", 30) or 30),
+            )
+        elif cmd == "guard-lint":
+            payload = fact_guard.lint_guard_facts(
+                facts_path=str(getattr(args, "facts", "") or ""),
+                stale_after_days=int(getattr(args, "stale_after_days", 30) or 30),
+            )
+            _emit(payload, bool(getattr(args, "json", True)))
+            if not bool(payload.get("ok")):
+                sys.exit(1)
+            return
         elif cmd == "propose":
             text_value = str(getattr(args, "text", "") or "")
             file_value = str(getattr(args, "file", "") or "").strip()
@@ -15248,11 +15429,36 @@ def cmd_graph_fact(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                     "propose requires --text or --file",
                     issues=[{"code": "missing_proposal_input", "severity": "error"}],
                 )
-            payload = graph_facts.propose_extractions(
-                text=text_value,
-                source_refs=list(getattr(args, "source_ref", None) or []),
-                max_proposals=int(getattr(args, "max_proposals", 20) or 20),
-            )
+            proposal_kind = str(getattr(args, "kind", "") or "").strip()
+            if proposal_kind:
+                payload = fact_guard.propose_fact(
+                    kind=proposal_kind,
+                    text=text_value,
+                    target=getattr(args, "target", None),
+                    source_refs=list(getattr(args, "source_ref", None) or []),
+                )
+                if not bool(payload.get("ok")):
+                    _emit(payload, bool(getattr(args, "json", True)))
+                    sys.exit(2)
+                    return
+            else:
+                source_refs = list(getattr(args, "source_ref", None) or [])
+                if not source_refs:
+                    payload = {
+                        "kind": "openclaw-mem.graph.fact.proposal.v0",
+                        "ok": False,
+                        "status": "policy_denied",
+                        "rejection_reason": "missing_source_ref",
+                        "writes_performed": False,
+                    }
+                    _emit(payload, bool(getattr(args, "json", True)))
+                    sys.exit(2)
+                    return
+                payload = graph_facts.propose_extractions(
+                    text=text_value,
+                    source_refs=source_refs,
+                    max_proposals=int(getattr(args, "max_proposals", 20) or 20),
+                )
         elif cmd == "measure-extraction":
             payload = graph_facts.measure_extraction_precision(
                 corpus_rows=graph_facts.load_jsonl(str(getattr(args, "corpus", "") or "")),
@@ -16086,6 +16292,22 @@ def cmd_graph_code_extract(conn: sqlite3.Connection, args: argparse.Namespace) -
             ]
         )
     )
+
+
+def cmd_graph_render_topology(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Render generated review-only topology docs from a portable graph."""
+
+    _ = conn
+    try:
+        payload = render_topology(
+            repo=str(getattr(args, "repo", "") or ""),
+            graph=str(getattr(args, "graph", "") or ""),
+            out=str(getattr(args, "out", "") or ""),
+        )
+    except Exception as e:
+        _emit({"ok": False, "error": str(e), "writes_performed": 0}, True)
+        sys.exit(2)
+    _emit(payload, bool(getattr(args, "json", True)))
 
 
 def cmd_graph_topology_diff(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
@@ -20372,6 +20594,19 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.add_argument("query", help="Search query (FTS5 syntax)")
     sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--graph", action="store_true", help="Opt in to derived graph-assisted search output")
+    sp.add_argument("--graph-path", default="", help="Portable graph JSON path for graph-assisted search")
+    sp.add_argument(
+        "--graph-readiness-state",
+        default="",
+        help="Optional graph readiness JSON state; non-green fails open to lexical-only",
+    )
+    sp.add_argument(
+        "--graph-stale-after-days",
+        type=int,
+        default=30,
+        help="Exclude graph facts with ISO freshness older than this many days",
+    )
     sp.set_defaults(func=cmd_search)
 
     sp = sub.add_parser("docs", help="Docs memory (operator-authored markdown ingest/search)")
@@ -20565,6 +20800,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--graph-scope", default=None, help="Optional scope hint for graph preflight (default: unset)")
     sp.add_argument("--graph-budget-tokens", type=int, default=1200, help="Token budget for graph preflight bundle_text (default: 1200)")
     sp.add_argument("--graph-take", type=int, default=12, help="Max selected refs to pack for graph preflight (default: 12)")
+    sp.add_argument("--graph-aware", action="store_true", help="Opt in to graph-aware pack ranking trace; default off and fail-open")
+    sp.add_argument("--graph-aware-path", default="", help="Portable graph JSON path for --graph-aware")
+    sp.add_argument("--graph-aware-active-file", action="append", default=None, help="Active file path hint for graph-aware ranking (repeatable)")
+    sp.add_argument("--graph-aware-recent-file", action="append", default=None, help="Recently read/changed/searched file hint for graph-aware ranking (repeatable)")
+    sp.add_argument("--graph-aware-stale-after-days", type=int, default=30, help="Exclude stale graph facts for graph-aware ranking")
 
     # Graph query-plane provenance gate for graph-derived preflight selection.
     sp.add_argument("--graph-query-db", default=None, help="Optional graph query-plane SQLite DB path for provenance checks")
@@ -20869,11 +21109,25 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--source-root", dest="source_root", help="Root for relative file source refs")
     f.set_defaults(func=cmd_graph_fact)
 
-    f = fsub.add_parser("propose", help="Review-only extraction proposal from explicit source text")
+    f = fsub.add_parser("propose", help="Review-only extraction or guard proposal from explicit source text")
     f.add_argument("--text", help="Text to scan")
     f.add_argument("--file", help="File containing text to scan")
-    f.add_argument("--source-ref", dest="source_ref", action="append", required=True, help="Required source ref for every proposal")
+    f.add_argument("--source-ref", dest="source_ref", action="append", default=None, help="Required source ref for every proposal")
+    f.add_argument("--kind", choices=["correction", "constraint", "regression-risk"], help="Guard-pilot proposal kind")
+    f.add_argument("--target", help="Optional guarded target path or symbol for --kind proposals")
     f.add_argument("--max-proposals", dest="max_proposals", type=int, default=20, help="Max proposals to emit")
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("guard", help="Advisory fail-open guard lookup against graph fact JSONL fixtures")
+    f.add_argument("--facts", required=True, help="Graph fact JSONL fixture")
+    f.add_argument("--target", required=True, help="Target path or symbol")
+    f.add_argument("--intent", required=True, help="Edit/review intent")
+    f.add_argument("--stale-after-days", dest="stale_after_days", type=int, default=30)
+    f.set_defaults(func=cmd_graph_fact)
+
+    f = fsub.add_parser("guard-lint", help="Lint graph fact JSONL guard fixtures for active conflicts")
+    f.add_argument("--facts", required=True, help="Graph fact JSONL fixture")
+    f.add_argument("--stale-after-days", dest="stale_after_days", type=int, default=30)
     f.set_defaults(func=cmd_graph_fact)
 
     f = fsub.add_parser("measure-extraction", help="Measure review-only extractor precision/recall on JSONL fixtures")
@@ -20919,6 +21173,14 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--repo", required=True, help="Repository root to scan")
     g.add_argument("--out", required=True, help="Output portable code graph JSON path")
     g.set_defaults(func=cmd_graph_code_extract)
+
+    g = gsub.add_parser("render", help="Render derived review-only graph artifacts")
+    rsub = g.add_subparsers(dest="graph_render_cmd", required=True)
+    r = rsub.add_parser("topology", help="Render generated topology summary, Mermaid graph, module map, and drift report")
+    r.add_argument("--repo", required=True, help="Repository root used to resolve source links")
+    r.add_argument("--graph", required=True, help="Portable code graph JSON path")
+    r.add_argument("--out", required=True, help="Generated output directory")
+    r.set_defaults(func=cmd_graph_render_topology)
 
     g = gsub.add_parser("topology-diff", help="Compare extracted seed topology with curated topology (suggest-only)")
     g.add_argument("--seed", required=True, help="Extracted topology seed file (.json/.yaml)")

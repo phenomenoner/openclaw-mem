@@ -1,0 +1,12 @@
+{
+  "drift": {
+    "added": [
+      "file.pkg/other.py",
+      "file.pkg/resolver.py"
+    ],
+    "changed": [],
+    "removed": [],
+    "status": "first_render"
+  },
+  "kind": "openclaw-mem.graph.render-topology.v0"
+}

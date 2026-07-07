@@ -88,6 +88,10 @@ Expected:
 - AI compression (`summarize`) — requires an API key
 - Graph query plane (`graph topology-refresh`, `graph query ...`, `graph health`, drift/provenance checks) — shipped foundation; deeper integrations still evolving
 - Graph semantic match v0 (`graph match "<idea/query>"`) — shipped local-first idea → project slice with explanation paths; deeper typed graph automation still evolving
+- Graph-assisted search first slice (`search --graph --graph-path <graph.json>`) — shipped opt-in; default off, fail-open to lexical-only, deterministic blended ranking with `rank_components` trace
+- Graph-aware pack ranking (`pack --graph-aware`) — shipped opt-in trace lane; default off, fail-open, zero-write
+- Topology writer (`graph render topology`) — shipped generated review surface (Markdown summary + Mermaid view + drift report); generated docs are review-only, not source of truth
+- Graph fact guard pilot (`graph fact propose|guard`) — shipped advisory-only pre-edit guard; proposals require source refs, stale/superseded facts are excluded from current guard truth
 - Recommendation-only optimization observers (`optimize review`, `optimize consolidation-review`) — shipped in the current release scope; now include recent-use-aware decay protection plus bounded importance-drift spot checks while still proposing only and never mutating stored memories
 - Dual-language fields (`--text-en`, EN embedding table) — shipped, still evolving
 - Episodic event capture/ingest/query lane — shipped foundation; operator flows still evolving
@@ -98,6 +102,7 @@ Expected:
 - Auto-capture plugin (`extensions/openclaw-mem`) — captures tool results to JSONL
 - Backend-aware annotations (records backend + memory tool actions for observability)
 - Gateway-assisted semantic recall (Route A): `index` + `semantic` — depends on OpenClaw gateway + `memory_search`
+- Host bridge envelopes (`bridge status|recall|store`) — per-operation versioned JSON envelopes (`openclaw-mem-engine.bridge.<op>.v1`); recall is read-only, store performs a canonical write only with explicit operator approval
 
 ### Near-term roadmap — **ROADMAP**
 

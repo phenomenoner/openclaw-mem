@@ -1,0 +1,21 @@
+{
+  "kind": "openclaw-mem.graph.render-topology.v0",
+  "modules": [
+    {
+      "node_id": "file.pkg/other.py",
+      "node_type": "file",
+      "receipt_id": "r2",
+      "source_exists": true,
+      "source_path": "pkg/other.py",
+      "span": null
+    },
+    {
+      "node_id": "file.pkg/resolver.py",
+      "node_type": "file",
+      "receipt_id": "r1",
+      "source_exists": true,
+      "source_path": "pkg/resolver.py",
+      "span": null
+    }
+  ]
+}

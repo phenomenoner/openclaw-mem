@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add opt-in graph-assisted search: `search --graph --graph-path <graph.json>`
+  blends deterministic graph-neighborhood evidence into FTS results with
+  `rank_components` / `hybrid_score` trace fields
+  (`openclaw-mem.search.hybrid.v0`); default off and fail-open to lexical-only.
+- Add `graph render topology` to generate a reviewable Markdown/Mermaid topology
+  summary, source-linked module map, and drift report from an extracted code
+  graph (`openclaw-mem.graph.render-topology.v0`); generated output is marked
+  review-only and is never a source of truth.
+- Add opt-in graph-aware pack ranking: `pack --graph-aware
+  --graph-aware-path <graph.json>` with active/recent-file hints and a bounded
+  trace receipt (`openclaw-mem.pack.graph-aware.v0`); default off, fail-open,
+  and zero-write.
+- Add per-operation versioned bridge envelopes
+  (`openclaw-mem-engine.bridge.status|recall|store.v1`) with explicit
+  `ready` / `degraded` / `unavailable` / `policy_denied` / `error` status
+  coverage and policy fields on every response.
+- Add the advisory graph fact guard pilot: `graph fact propose --kind
+  correction|constraint|regression-risk`, `graph fact guard`, and guard lint
+  over source-linked JSONL fixtures; guard output is advisory-only and always
+  records `writes_performed=false`.
+
+### Safety
+
+- Keep bridge canonical writes governed: unapproved `bridge store` requests are
+  denied with `approval_required`; only explicit operator-approved requests
+  perform a canonical write, and forget operations remain unsupported.
+- Keep all new graph surfaces opt-in with byte-stable default-off behavior and
+  fail-open degradation receipts.
+
+### Verification
+
+- `uv run -- python -m unittest discover -s tests -p "test_*.py"`
+- `uv run python -m pytest tests\test_bridge_recall_v1.py tests\test_windows_console_wrapper_bridge.py -q`
+
 ## [1.9.32] - 2026-06-29
 
 ### Difference from 1.9.31

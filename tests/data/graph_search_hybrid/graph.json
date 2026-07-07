@@ -1,0 +1,26 @@
+{
+  "nodes": [
+    {
+      "id": "symbol.pkg/resolver.py:Resolver",
+      "metadata": {
+        "commit": "abc123",
+        "confidence": 1.0,
+        "freshness": "snapshot",
+        "name": "Resolver",
+        "qualname": "Resolver",
+        "receipt_id": "receipt:resolver",
+        "source_path": "pkg/resolver.py",
+        "span": {
+          "line_end": 5,
+          "line_start": 3
+        }
+      },
+      "tags": [
+        "code",
+        "python"
+      ],
+      "type": "symbol"
+    }
+  ],
+  "edges": []
+}
