@@ -27,5 +27,14 @@ jobs:
       - name: Pytest tests
         run: uv run --with pytest -- python -m pytest tests -q
 
+      - name: Skill card lint
+        run: uv run --locked -- openclaw-mem skill-curator lint --all --skill-root skills --json
+
+      - name: Historical database compatibility matrix
+        run: uv run --locked --with pytest -- python -m pytest tests/test_legacy_fixture_matrix.py -q
+
+      - name: Golden bilingual recall gate
+        run: uv run --locked --with pytest -- python -m pytest tests/test_golden_recall_gate.py -q
+
       - name: Build (packaging)
         run: uv run --with build -- python -m build
