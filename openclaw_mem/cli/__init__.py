@@ -41,16 +41,16 @@ from openclaw_mem import defaults
 from openclaw_mem import active_line_context
 from openclaw_mem import context_pack_v1
 from openclaw_mem import ingestion_review
-from openclaw_mem import gbrain_sidecar
+from openclaw_mem.labs import gbrain_sidecar
 from openclaw_mem import governed_release
-from openclaw_mem import goal_primitive
+from openclaw_mem.labs import goal_primitive
 from openclaw_mem import mem_system_status
 from openclaw_mem import mutation_framework
 from openclaw_mem import pack_artifacts
 from openclaw_mem import pack_trace_v1
-from openclaw_mem import self_model_sidecar
+from openclaw_mem.labs import self_model_sidecar
 from openclaw_mem import self_curator
-from openclaw_mem import self_improvement_surface
+from openclaw_mem.labs import self_improvement_surface
 from openclaw_mem import skill_capture
 from openclaw_mem import steward_review
 from openclaw_mem import symbolic_canvas
@@ -19772,6 +19772,22 @@ def cmd_codex_doctor(conn: sqlite3.Connection, args: argparse.Namespace) -> None
     _emit(out, getattr(args, "json", False))
 
 
+class _HelpAllAction(argparse.Action):
+    def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, **kwargs):
+        super().__init__(option_strings, dest, nargs=0, default=default, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        del namespace, values, option_string
+        subparsers = getattr(parser, "_openclaw_top_subparsers", None)
+        if subparsers is not None:
+            subparsers._choices_actions = list(
+                getattr(parser, "_openclaw_all_choice_actions", [])
+            )
+            subparsers.metavar = getattr(parser, "_openclaw_all_metavar", None)
+        parser.print_help()
+        parser.exit()
+
+
 def build_parser() -> argparse.ArgumentParser:
     epilog = (
         "Examples:\n"
@@ -19844,6 +19860,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", dest="db_global", default=None, help="SQLite DB path")
     p.add_argument("--json", dest="json_global", action="store_true", help="Structured JSON output")
     p.add_argument("--harness-home", dest="harness_home_global", default=None, help="Agent Harness home for explicit env/db bridge")
+    p.add_argument(
+        "--help-all",
+        action=_HelpAllAction,
+        help="Show stable and experimental command families",
+    )
     # Keep historical Namespace shape (`args.db` / `args.json` exist even when
     # omitted) while nested child parsers use SUPPRESS so they do not overwrite
     # parent-level values.
@@ -21889,6 +21910,17 @@ def build_parser() -> argparse.ArgumentParser:
     from openclaw_mem.cli.registry import register as register_command_modules
 
     register_command_modules(p)
+    hidden_commands = {"continuity", "self", "dream-lite", "gbrain-sidecar", "goal"}
+    all_choice_actions = list(sub._choices_actions)
+    sub._choices_actions = [
+        action for action in all_choice_actions if action.dest not in hidden_commands
+    ]
+    all_names = list(sub.choices)
+    visible_names = [name for name in all_names if name not in hidden_commands]
+    p._openclaw_top_subparsers = sub
+    p._openclaw_all_choice_actions = all_choice_actions
+    p._openclaw_all_metavar = "{" + ",".join(all_names) + "}"
+    sub.metavar = "{" + ",".join(visible_names) + "}"
     return p
 
 
