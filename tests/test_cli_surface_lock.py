@@ -34,6 +34,12 @@ capsule verify
 codex
 codex doctor
 codex install
+curate
+curate apply
+curate review
+curate rollback
+curate scan
+curate verify
 continuity
 continuity adjudication
 continuity attachment-map

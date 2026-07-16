@@ -68,6 +68,7 @@ from openclaw_mem.core.search import vector_search as core_vector_search
 from openclaw_mem.core.vector_index import create_vector_index
 from openclaw_mem.core.skill_lint import command_schema_from_parser, lint_skill_tree
 from openclaw_mem.core.recall import recall as core_recall
+from openclaw_mem.core.curation import rollback_optimize_assist
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -5909,6 +5910,257 @@ def cmd_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     except ValueError as exc:
         _emit({"error": str(exc), "hint": "provide a non-empty query and a supported --mode"}, True)
         raise SystemExit(2) from exc
+    _emit(receipt, bool(getattr(args, "json", False)))
+
+
+def _invoke_cli_json(conn: sqlite3.Connection, argv: List[str]) -> Dict[str, Any]:
+    """Invoke an existing CLI handler in-process and preserve its JSON receipt."""
+
+    nested = build_parser().parse_args(["--json", *argv])
+    nested.json = True
+    output = io.StringIO()
+    exit_code = 0
+    with redirect_stdout(output):
+        try:
+            nested.func(conn, nested)
+        except SystemExit as exc:
+            exit_code = int(exc.code) if isinstance(exc.code, int) else 1
+    raw = output.getvalue().strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {
+            "kind": "openclaw-mem.curate.inner-error.v1",
+            "ok": False,
+            "command": argv,
+            "exit_code": exit_code,
+            "error": "inner command did not emit one JSON object",
+            "output": raw,
+        }
+    if not isinstance(payload, dict):
+        payload = {"value": payload}
+    if exit_code:
+        payload = dict(payload)
+        payload.setdefault("ok", False)
+        payload["exit_code"] = exit_code
+    return payload
+
+
+def _curate_inner_ok(payload: Any) -> bool:
+    if isinstance(payload, list):
+        return all(_curate_inner_ok(item) for item in payload)
+    if not isinstance(payload, Mapping):
+        return False
+    if payload.get("exit_code"):
+        return False
+    if "ok" in payload and payload.get("ok") is False:
+        return False
+    if payload.get("error") and not payload.get("kind", "").endswith("review.v0"):
+        return False
+    return True
+
+
+def _curate_writes(payload: Any) -> bool:
+    if isinstance(payload, list):
+        return any(_curate_writes(item) for item in payload)
+    if not isinstance(payload, Mapping):
+        return False
+    value = payload.get("writes_performed")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value > 0
+    policy = payload.get("policy")
+    if isinstance(policy, Mapping):
+        writes = policy.get("writes_performed")
+        if isinstance(writes, (int, float)):
+            return writes > 0
+    return any(_curate_writes(value) for value in payload.values() if isinstance(value, (Mapping, list)))
+
+
+def _curate_unsupported(verb: str, target: str, supported: Iterable[str]) -> Dict[str, Any]:
+    allowed = sorted(set(supported))
+    return {
+        "kind": "openclaw-mem.curate.unsupported.v1",
+        "ok": False,
+        "error": f"curate {verb} does not support target {target}",
+        "hint": f"supported targets for {verb}: {', '.join(allowed)}",
+    }
+
+
+def _curate_add_option(argv: List[str], flag: str, value: Any) -> None:
+    if value is not None and str(value).strip():
+        argv.extend([flag, str(value)])
+
+
+def cmd_curate(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Consolidated governance surface over the existing reviewed engines."""
+
+    verb = str(getattr(args, "curate_cmd", "") or "")
+    target = str(getattr(args, "target", "") or "")
+    inner: Any
+
+    if verb == "scan":
+        if target == "memory":
+            inner = []
+            for command in ("review", "evolution-review"):
+                argv = ["optimize", command]
+                _curate_add_option(argv, "--limit", getattr(args, "limit", None))
+                _curate_add_option(argv, "--scope", getattr(args, "scope", None))
+                _curate_add_option(argv, "--top", getattr(args, "top", None))
+                inner.append({"source": f"optimize {command}", "receipt": _invoke_cli_json(conn, argv)})
+        elif target == "episodes":
+            argv = ["optimize", "consolidation-review"]
+            _curate_add_option(argv, "--limit", getattr(args, "limit", None))
+            _curate_add_option(argv, "--scope", getattr(args, "scope", None))
+            _curate_add_option(argv, "--top", getattr(args, "top", None))
+            inner = _invoke_cli_json(conn, argv)
+        elif target == "skills":
+            argv = ["skill-curator", "review", "--no-write"]
+            for root in getattr(args, "skill_roots", None) or []:
+                argv.extend(["--skill-root", str(root)])
+            _curate_add_option(argv, "--limit", getattr(args, "limit", None))
+            inner = _invoke_cli_json(conn, argv)
+        elif target == "facts":
+            inner = []
+            for command in ("lint", "stale"):
+                argv = ["graph", "fact", command]
+                _curate_add_option(argv, "--source-root", getattr(args, "source_root", None))
+                inner.append({"source": f"graph fact {command}", "receipt": _invoke_cli_json(conn, argv)})
+        else:
+            inner = _curate_unsupported(verb, target, ("memory", "episodes", "skills", "facts"))
+    elif verb == "review":
+        if target != "memory":
+            inner = _curate_unsupported(verb, target, ("memory",))
+        else:
+            argv = ["optimize", "governor-review"]
+            _curate_add_option(argv, "--from-file", getattr(args, "from_file", None))
+            _curate_add_option(argv, "--governor", getattr(args, "governor", None))
+            for flag, attr in (
+                ("--approve-refresh", "approve_refresh"),
+                ("--approve-importance", "approve_importance"),
+                ("--approve-stale", "approve_stale"),
+                ("--approve-soft-archive", "approve_soft_archive"),
+            ):
+                if bool(getattr(args, attr, False)):
+                    argv.append(flag)
+            inner = _invoke_cli_json(conn, argv)
+    elif verb == "apply":
+        if target == "memory":
+            argv = ["optimize", "assist-apply"]
+            for flag, attr in (
+                ("--from-file", "from_file"),
+                ("--operator", "operator"),
+                ("--lane", "lane"),
+                ("--run-dir", "run_dir"),
+                ("--max-rows-per-run", "max_rows_per_run"),
+                ("--max-rows-per-24h", "max_rows_per_24h"),
+                ("--max-importance-adjustments-per-run", "max_importance_adjustments_per_run"),
+                ("--max-importance-adjustments-per-24h", "max_importance_adjustments_per_24h"),
+            ):
+                _curate_add_option(argv, flag, getattr(args, attr, None))
+            if bool(getattr(args, "dry_run", False)):
+                argv.append("--dry-run")
+            inner = _invoke_cli_json(conn, argv)
+        elif target == "skills":
+            plan = getattr(args, "plan", None)
+            mutations_file = getattr(args, "mutations_file", None)
+            if mutations_file:
+                plan_out = getattr(args, "plan_out", None)
+                if not plan_out:
+                    inner = {
+                        "kind": "openclaw-mem.curate.skills-plan.error.v1",
+                        "ok": False,
+                        "error": "--plan-out is required with --mutations-file",
+                        "hint": "choose an explicit checkpointed plan path",
+                    }
+                else:
+                    plan_argv = ["self-curator", "plan", "--mutations-file", str(mutations_file), "--out", str(plan_out)]
+                    _curate_add_option(plan_argv, "--workspace-root", getattr(args, "workspace_root", None))
+                    planned = _invoke_cli_json(conn, plan_argv)
+                    plan = str(plan_out)
+                    if _curate_inner_ok(planned):
+                        apply_argv = ["self-curator", "apply", "--plan", plan]
+                        for flag, attr in (
+                            ("--workspace-root", "workspace_root"),
+                            ("--checkpoint-root", "checkpoint_root"),
+                            ("--receipt-root", "receipt_root"),
+                            ("--run-id", "run_id"),
+                        ):
+                            _curate_add_option(apply_argv, flag, getattr(args, attr, None))
+                        inner = {"plan": planned, "apply": _invoke_cli_json(conn, apply_argv)}
+                    else:
+                        inner = {"plan": planned, "apply": None}
+            elif plan:
+                argv = ["self-curator", "apply", "--plan", str(plan)]
+                for flag, attr in (
+                    ("--workspace-root", "workspace_root"),
+                    ("--checkpoint-root", "checkpoint_root"),
+                    ("--receipt-root", "receipt_root"),
+                    ("--run-id", "run_id"),
+                ):
+                    _curate_add_option(argv, flag, getattr(args, attr, None))
+                inner = _invoke_cli_json(conn, argv)
+            else:
+                inner = {
+                    "kind": "openclaw-mem.curate.skills-apply.error.v1",
+                    "ok": False,
+                    "error": "skills apply requires --plan or --mutations-file with --plan-out",
+                    "hint": "apply only an explicit self-curator whitelist plan",
+                }
+        else:
+            inner = _curate_unsupported(verb, target, ("memory", "skills"))
+    elif verb == "verify":
+        if target == "skills":
+            if not getattr(args, "receipt", None):
+                inner = {
+                    "kind": "openclaw-mem.curate.skills-verify.error.v1",
+                    "ok": False,
+                    "error": "skills verify requires --receipt",
+                    "hint": "pass the self-curator apply-receipt.json path",
+                }
+            else:
+                inner = _invoke_cli_json(conn, ["self-curator", "verify", "--receipt", str(args.receipt)])
+        elif target in {"memory", "episodes", "facts"}:
+            argv = ["optimize", "verifier-bundle"]
+            _curate_add_option(argv, "--run-dir", getattr(args, "run_dir", None))
+            _curate_add_option(argv, "--window-hours", getattr(args, "window_hours", None))
+            _curate_add_option(argv, "--top", getattr(args, "top", None))
+            inner = _invoke_cli_json(conn, argv)
+        else:
+            inner = _curate_unsupported(verb, target, ("memory", "episodes", "skills", "facts"))
+    elif verb == "rollback":
+        if target == "memory":
+            inner = rollback_optimize_assist(
+                conn,
+                str(getattr(args, "receipt", "") or ""),
+                actor=str(getattr(args, "actor", "operator") or "operator"),
+            )
+        elif target == "skills":
+            if not getattr(args, "receipt", None):
+                inner = {
+                    "kind": "openclaw-mem.curate.skills-rollback.error.v1",
+                    "ok": False,
+                    "error": "skills rollback requires --receipt",
+                    "hint": "pass the self-curator apply-receipt.json path",
+                }
+            else:
+                argv = ["self-curator", "rollback", "--receipt", str(args.receipt)]
+                _curate_add_option(argv, "--out-root", getattr(args, "out_root", None))
+                inner = _invoke_cli_json(conn, argv)
+        else:
+            inner = _curate_unsupported(verb, target, ("memory", "skills"))
+    else:
+        inner = _curate_unsupported(verb or "unknown", target, ())
+
+    receipt = {
+        "kind": f"openclaw-mem.curate.{verb}.v1",
+        "verb": verb,
+        "target": target,
+        "ok": _curate_inner_ok(inner),
+        "writes_performed": _curate_writes(inner),
+        "inner": inner,
+    }
     _emit(receipt, bool(getattr(args, "json", False)))
 
 
@@ -20519,6 +20771,69 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--graph-stale-after-days", type=int, default=30)
     sp.set_defaults(func=cmd_recall)
 
+    sp = sub.add_parser("curate", help="Unified governed scan, review, apply, verify, and rollback surface")
+    add_common(sp)
+    csub = sp.add_subparsers(dest="curate_cmd", required=True)
+
+    c = csub.add_parser("scan", help="Scan one governed target without applying mutations")
+    add_common(c)
+    c.add_argument("--target", required=True, choices=["memory", "episodes", "skills", "facts"])
+    c.add_argument("--limit", type=int, default=None, help="Optional scan row/candidate limit")
+    c.add_argument("--scope", default=None, help="Optional normalized scope filter")
+    c.add_argument("--top", type=int, default=None, help="Optional maximum candidates per section")
+    c.add_argument("--skill-root", action="append", dest="skill_roots", default=None, help="Skill root; repeatable")
+    c.add_argument("--source-root", dest="source_root", default=None, help="Root for relative graph fact sources")
+    c.set_defaults(func=cmd_curate)
+
+    c = csub.add_parser("review", help="Apply explicit governor judgment to a recommendation packet")
+    add_common(c)
+    c.add_argument("--target", required=True, choices=["memory", "episodes", "skills", "facts"])
+    c.add_argument("--from-file", dest="from_file", default=None, help="Recommendation packet JSON path (default: stdin)")
+    c.add_argument("--governor", default="governor", help="Governor label recorded in the inner receipt")
+    c.add_argument("--approve-refresh", dest="approve_refresh", action="store_true")
+    c.add_argument("--approve-importance", dest="approve_importance", action="store_true")
+    c.add_argument("--approve-stale", dest="approve_stale", action="store_true")
+    c.add_argument("--approve-soft-archive", dest="approve_soft_archive", action="store_true")
+    c.set_defaults(func=cmd_curate)
+
+    c = csub.add_parser("apply", help="Apply a governor-approved memory packet or explicit skill whitelist plan")
+    add_common(c)
+    c.add_argument("--target", required=True, choices=["memory", "episodes", "skills", "facts"])
+    c.add_argument("--from-file", dest="from_file", default=None, help="Governor packet for memory apply (default: stdin)")
+    c.add_argument("--operator", default="operator")
+    c.add_argument("--lane", default="observations.assist")
+    c.add_argument("--run-dir", dest="run_dir", default=DEFAULT_OPTIMIZE_ASSIST_RUN_DIR)
+    c.add_argument("--max-rows-per-run", dest="max_rows_per_run", type=int, default=5)
+    c.add_argument("--max-rows-per-24h", dest="max_rows_per_24h", type=int, default=20)
+    c.add_argument("--max-importance-adjustments-per-run", dest="max_importance_adjustments_per_run", type=int, default=3)
+    c.add_argument("--max-importance-adjustments-per-24h", dest="max_importance_adjustments_per_24h", type=int, default=10)
+    c.add_argument("--dry-run", action="store_true")
+    c.add_argument("--mutations-file", dest="mutations_file", help="Explicit self-curator skill mutations JSON")
+    c.add_argument("--plan", help="Existing self-curator skill apply plan")
+    c.add_argument("--plan-out", dest="plan_out", help="Plan output path used with --mutations-file")
+    c.add_argument("--workspace-root", dest="workspace_root", default=".")
+    c.add_argument("--checkpoint-root", dest="checkpoint_root", default=".state/self-curator/checkpoints")
+    c.add_argument("--receipt-root", dest="receipt_root", default=".state/self-curator/apply-runs")
+    c.add_argument("--run-id", dest="run_id")
+    c.set_defaults(func=cmd_curate)
+
+    c = csub.add_parser("verify", help="Verify optimize-assist receipts or a self-curator apply receipt")
+    add_common(c)
+    c.add_argument("--target", required=True, choices=["memory", "episodes", "skills", "facts"])
+    c.add_argument("--receipt", help="Self-curator apply receipt for skills verification")
+    c.add_argument("--run-dir", dest="run_dir", default=DEFAULT_OPTIMIZE_ASSIST_RUN_DIR)
+    c.add_argument("--window-hours", dest="window_hours", type=int, default=24)
+    c.add_argument("--top", type=int, default=20)
+    c.set_defaults(func=cmd_curate)
+
+    c = csub.add_parser("rollback", help="Atomically restore a memory assist receipt or self-curator apply receipt")
+    add_common(c)
+    c.add_argument("--target", required=True, choices=["memory", "episodes", "skills", "facts"])
+    c.add_argument("--receipt", help="Rollback/apply receipt path")
+    c.add_argument("--actor", default="operator", help="Actor recorded in memory rollback output")
+    c.add_argument("--out-root", dest="out_root", help="Optional self-curator rollback receipt output root")
+    c.set_defaults(func=cmd_curate)
+
     sp = sub.add_parser("docs", help="Docs memory (operator-authored markdown ingest/search)")
     add_common(sp)
     dsub = sp.add_subparsers(dest="docs_cmd", required=True)
@@ -21958,6 +22273,93 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+_DEPRECATED_COMMANDS: Dict[Tuple[str, ...], str] = {
+    ("optimize", "review"): "curate scan --target memory",
+    ("optimize", "evolution-review"): "curate scan --target memory",
+    ("optimize", "consolidation-review"): "curate scan --target episodes",
+    ("optimize", "governor-review"): "curate review --target memory",
+    ("optimize", "assist-apply"): "curate apply --target memory",
+    ("optimize", "verifier-bundle"): "curate verify --target memory",
+    ("skill-curator", "review"): "curate scan --target skills",
+    ("self-curator", "skill-review"): "curate scan --target skills",
+    ("self-curator", "plan"): "curate apply --target skills",
+    ("self-curator", "apply"): "curate apply --target skills",
+    ("self-curator", "verify"): "curate verify --target skills",
+    ("self-curator", "rollback"): "curate rollback --target skills",
+    ("graph", "fact", "lint"): "curate scan --target facts",
+    ("graph", "fact", "stale"): "curate scan --target facts",
+}
+
+
+def _command_path(args: argparse.Namespace) -> Tuple[str, ...]:
+    cmd = str(getattr(args, "cmd", "") or "")
+    if cmd == "optimize":
+        return (cmd, str(getattr(args, "optimize_cmd", "") or ""))
+    if cmd == "skill-curator":
+        return (cmd, str(getattr(args, "skill_curator_cmd", "") or ""))
+    if cmd == "self-curator":
+        return (cmd, str(getattr(args, "self_curator_cmd", "") or ""))
+    if cmd == "graph" and getattr(args, "graph_cmd", None) == "fact":
+        return (cmd, "fact", str(getattr(args, "graph_fact_cmd", "") or ""))
+    return (cmd,)
+
+
+def _run_handler_with_deprecation(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    replacement = _DEPRECATED_COMMANDS.get(_command_path(args))
+    if replacement is None:
+        args.func(conn, args)
+        return
+
+    deprecated = {"use": replacement, "since": "2.0.0", "removal": None}
+    if not bool(getattr(args, "json", False)):
+        print(
+            f"deprecated: use `openclaw-mem {replacement}`; removal is not scheduled",
+            file=sys.stderr,
+        )
+        args.func(conn, args)
+        return
+
+    output = io.StringIO()
+    raised: Optional[SystemExit] = None
+    with redirect_stdout(output):
+        try:
+            args.func(conn, args)
+        except SystemExit as exc:
+            raised = exc
+    raw = output.getvalue()
+    stripped = raw.rstrip()
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        sys.stdout.write(raw)
+        print(
+            f"deprecated: use `openclaw-mem {replacement}`; JSON receipt could not be augmented",
+            file=sys.stderr,
+        )
+    else:
+        if isinstance(payload, dict):
+            end = len(raw.rstrip()) - 1
+            if end >= 0 and raw[end] == "}":
+                prefix = raw[:end]
+                comma = "" if prefix.rstrip().endswith("{") else ","
+                encoded = json.dumps(deprecated, ensure_ascii=False, separators=(",", ":"))
+                sys.stdout.write(f'{prefix}{comma}\n  "deprecated": {encoded}{raw[end:]}')
+            else:
+                sys.stdout.write(raw)
+                print(
+                    f"deprecated: use `openclaw-mem {replacement}`; JSON receipt had no object terminator",
+                    file=sys.stderr,
+                )
+        else:
+            sys.stdout.write(raw)
+            print(
+                f"deprecated: use `openclaw-mem {replacement}`; non-object JSON receipt could not be augmented",
+                file=sys.stderr,
+            )
+    if raised is not None:
+        raise raised
+
+
 def main() -> None:
     args = build_parser().parse_args()
     bridge_receipt = _apply_harness_env_bridge(args)
@@ -21981,7 +22383,7 @@ def main() -> None:
         args.json = bool(getattr(args, "json", False) or getattr(args, "json_global", False))
         conn = sqlite3.connect(":memory:")
         try:
-            args.func(conn, args)
+            _run_handler_with_deprecation(conn, args)
         finally:
             conn.close()
         return
@@ -21993,7 +22395,7 @@ def main() -> None:
     args.db_preexisted = True if str(args.db) == ":memory:" else Path(str(args.db)).expanduser().exists()
 
     conn = _connect(args.db)
-    args.func(conn, args)
+    _run_handler_with_deprecation(conn, args)
 
 
 if __name__ == "__main__":
