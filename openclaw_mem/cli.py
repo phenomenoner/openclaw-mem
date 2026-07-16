@@ -18651,7 +18651,7 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
     if not follow:
         started = time.monotonic()
         try:
-            cycle = _episodes_extract_sessions_once(
+            cycle = core_episodes.extract_sessions_once(
                 sessions_root=sessions_root,
                 spool_path=spool_path,
                 state_path=state_path,
@@ -18717,7 +18717,7 @@ def cmd_episodes_extract_sessions(_conn: sqlite3.Connection, args: argparse.Name
                 stop_reason = "max_duration"
                 break
 
-            cycle = _episodes_extract_sessions_once(
+            cycle = core_episodes.extract_sessions_once(
                 sessions_root=sessions_root,
                 spool_path=spool_path,
                 state_path=state_path,
@@ -19122,7 +19122,7 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
 
     if not follow:
         try:
-            out = _episodes_ingest_once(
+            out = core_episodes.ingest_once(
                 conn,
                 source_path=source_path,
                 state_path=state_path,
@@ -19289,7 +19289,7 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
                 break
 
             cycle_activity = False
-            cycle = _episodes_ingest_once(
+            cycle = core_episodes.ingest_once(
                 conn,
                 source_path=source_path,
                 state_path=state_path,

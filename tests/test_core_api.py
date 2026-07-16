@@ -10,8 +10,10 @@ from openclaw_mem.core.episodes import (
     append_event,
     append_session_store_receipt,
     embed_events,
+    extract_sessions_once,
     query as query_episodes,
     gc_events,
+    ingest_once,
     redact_events,
     replay as replay_episodes,
     search_events,
@@ -430,6 +432,57 @@ def test_core_episodes_redact_and_gc_mutations_have_post_state_evidence(capsys) 
             raw_policy=["tool.result=0", "ops.observation=forever"],
         )
         assert gc_receipt["deleted_by_type"]["tool.result"] == 1
+        assert conn.execute("SELECT COUNT(*) FROM episodic_events").fetchone()[0] == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+    finally:
+        conn.close()
+
+
+def test_core_session_extract_to_spool_ingest_is_idempotent(tmp_path: Path, capsys) -> None:
+    sessions_root = tmp_path / "sessions"
+    sessions_root.mkdir()
+    source = sessions_root / "session-1.jsonl"
+    source.write_text(
+        '{"sessionKey":"session-1","agentId":"main","message":{"role":"user","content":"[SCOPE:project:io] durable hello"},"ts_ms":1234}\n',
+        encoding="utf-8",
+    )
+    spool = tmp_path / "episodes.jsonl"
+    extract_state = tmp_path / "extract-state.json"
+    ingest_state = tmp_path / "ingest-state.json"
+    conn = connect(":memory:")
+    try:
+        extracted = extract_sessions_once(
+            sessions_root=sessions_root,
+            spool_path=spool,
+            state_path=extract_state,
+            summary_max=220,
+            payload_cap=4096,
+        )
+        assert extracted["emitted"] == 1
+        first = ingest_once(
+            conn,
+            source_path=spool,
+            state_path=ingest_state,
+            payload_cap=8192,
+            conversation_payload_cap=4096,
+            refs_cap=4096,
+            truncate_after=False,
+            rotate_after=False,
+        )
+        assert first is not None and first["inserted"] == 1
+        second = ingest_once(
+            conn,
+            source_path=spool,
+            state_path=ingest_state,
+            payload_cap=8192,
+            conversation_payload_cap=4096,
+            refs_cap=4096,
+            truncate_after=False,
+            rotate_after=False,
+        )
+        assert second is not None and second["inserted"] == 0
         assert conn.execute("SELECT COUNT(*) FROM episodic_events").fetchone()[0] == 1
         captured = capsys.readouterr()
         assert captured.out == ""

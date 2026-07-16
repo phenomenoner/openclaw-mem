@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shlex
 import sqlite3
+import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -35,8 +38,14 @@ EPISODIC_ALLOWED_TYPES = {
 }
 EPISODIC_MAX_QUERY_LIMIT = 500
 EPISODIC_SCHEMA_VERSION = "openclaw-mem.episodic.v0"
+EPISODIC_INGEST_STATE_SCHEMA = "openclaw-mem.episodes.ingest.state.v0"
+EPISODIC_EXTRACT_STATE_SCHEMA = "openclaw-mem.episodes.extract.state.v0"
+EPISODIC_SPOOL_SCHEMA = "openclaw-mem.episodes.spool.v0"
 EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES = 8 * 1024
+EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES = 4 * 1024
 EPISODIC_DEFAULT_REFS_CAP_BYTES = 4 * 1024
+EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES = 8 * 1024
+EPISODIC_FOLLOW_ROTATE_LOCK_SUFFIX = ".lock"
 EPISODIC_SEARCH_TEXT_MAX_CHARS = 2400
 EPISODIC_REDACT_PLACEHOLDER = "[REDACTED]"
 EPISODIC_DEFAULT_RETENTION_DAYS: Dict[str, Optional[int]] = {
@@ -1024,6 +1033,733 @@ def gc_events(
         "deleted_total": deleted_total,
         "deleted_by_type": deleted_by_type,
         "policy_days": {key: policy.get(key) for key in sorted(EPISODIC_ALLOWED_TYPES)},
+    }
+
+
+_EPISODIC_FORBIDDEN_PAYLOAD_KEYS = {
+    "stdout",
+    "stderr",
+    "raw_stdout",
+    "raw_stderr",
+    "command_output",
+    "tool_output",
+}
+
+
+def _redact_pii_lite(text: str) -> str:
+    result = str(text or "")
+    for pattern, replacement in EPISODIC_PII_LITE_PATTERNS:
+        result = pattern.sub(replacement, result)
+    return result
+
+
+def _split_scope_prefixed_text(raw: Any) -> Tuple[Optional[str], str]:
+    text = _sanitize_str_surrogates(str(raw or "")).strip()
+    if not text:
+        return None, ""
+    match = re.match(r"^\s*\[\s*SCOPE\s*:\s*([^\]]+)\]\s*(.*)$", text, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None, text
+    return normalize_scope_token(match.group(1)), _sanitize_str_surrogates(match.group(2) or "").strip()
+
+
+def _sanitize_episodic_payload(
+    value: Any,
+    *,
+    depth: int = 0,
+    max_depth: int = 5,
+    max_items: int = 48,
+    max_string_chars: int = EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES,
+) -> Any:
+    if depth > max_depth:
+        return "[TRUNCATED_DEPTH]"
+    if isinstance(value, str):
+        compact = _sanitize_str_surrogates(value)
+        if _looks_like_secret(compact):
+            return "[REDACTED_SECRET]"
+        compact = _redact_pii_lite(compact)
+        string_cap = max(160, int(max_string_chars or EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES))
+        return compact[:string_cap] + "…" if len(compact) > string_cap else compact
+    if isinstance(value, dict):
+        result: Dict[str, Any] = {}
+        redacted_output_fields = 0
+        for index, (key, item) in enumerate(value.items()):
+            if index >= max_items:
+                result["_truncated_items"] = True
+                break
+            normalized_key = _sanitize_str_surrogates(str(key))
+            if normalized_key.strip().lower() in _EPISODIC_FORBIDDEN_PAYLOAD_KEYS:
+                redacted_output_fields += 1
+                continue
+            result[normalized_key] = _sanitize_episodic_payload(
+                item,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_string_chars=max_string_chars,
+            )
+        if redacted_output_fields:
+            result["_redacted_output_fields"] = redacted_output_fields
+        return result
+    if isinstance(value, list):
+        return [
+            _sanitize_episodic_payload(
+                item,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_string_chars=max_string_chars,
+            )
+            for item in value[:max_items]
+        ]
+    return value
+
+
+def _bounded_json(
+    value: Any,
+    *,
+    cap_bytes: int,
+    label: str,
+    max_string_chars: int = EPISODIC_DEFAULT_CONVERSATION_PAYLOAD_CAP_BYTES,
+) -> Tuple[Optional[str], int, bool]:
+    if value is None:
+        return None, 0, False
+    sanitized = _sanitize_jsonable_surrogates(
+        _sanitize_episodic_payload(value, max_string_chars=max_string_chars)
+    )
+    serialized = _json_compact_dumps(sanitized)
+    size = len(serialized.encode("utf-8"))
+    if size <= cap_bytes:
+        return serialized, size, False
+    original_size = size
+    preview = serialized[: min(256, max(32, cap_bytes // 2))]
+    serialized = _json_compact_dumps(
+        {"_truncated": True, "reason": f"{label}_cap", "original_bytes": original_size, "preview": preview}
+    )
+    size = len(serialized.encode("utf-8"))
+    if size > cap_bytes:
+        serialized = _json_compact_dumps(
+            {"_truncated": True, "reason": f"{label}_cap", "original_bytes": original_size}
+        )
+        size = len(serialized.encode("utf-8"))
+    return serialized, size, True
+
+
+def _normalize_spool_event(
+    value: Dict[str, Any],
+    *,
+    fallback_event_id: str,
+    payload_cap: int,
+    conversation_payload_cap: int,
+    refs_cap: int,
+) -> Dict[str, Any]:
+    event_id = str(value.get("event_id") or "").strip() or fallback_event_id
+    parsed_ts_ms = parse_ts_ms(value.get("ts_ms"))
+    session_id = _sanitize_str_surrogates(str(value.get("session_id") or "").strip())
+    agent_id = _sanitize_str_surrogates(str(value.get("agent_id") or "").strip())
+    event_type = normalize_type(value.get("type"))
+    summary_raw = _sanitize_str_surrogates(str(value.get("summary") or "").strip())
+    scope_from_summary, summary_body = _split_scope_prefixed_text(summary_raw)
+    scope = normalize_scope(normalize_scope_token(value.get("scope")) or scope_from_summary or "global")
+    summary = _redact_pii_lite(summary_body or summary_raw)
+    if _looks_like_secret(summary):
+        summary = "[REDACTED_SECRET]"
+    if not session_id:
+        raise ValueError("session_id is required")
+    if not agent_id:
+        raise ValueError("agent_id is required")
+    if not summary:
+        raise ValueError("summary is required")
+
+    generic_cap = min(max(256, int(payload_cap)), EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES)
+    conversation_cap = min(max(256, int(conversation_payload_cap)), EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES)
+    effective_cap = min(generic_cap, conversation_cap) if event_type.startswith("conversation.") else generic_cap
+    payload_serialized, payload_size, payload_truncated = _bounded_json(
+        value.get("payload"), cap_bytes=effective_cap, label="payload", max_string_chars=effective_cap
+    )
+    refs_serialized, refs_size, refs_truncated = _bounded_json(
+        value.get("refs"), cap_bytes=max(128, int(refs_cap)), label="refs", max_string_chars=max(256, int(refs_cap))
+    )
+    redacted_late = bool(value.get("redacted"))
+    for fragment in (payload_serialized, refs_serialized):
+        if fragment and (_looks_like_secret(fragment) or _contains_pii_lite(fragment)):
+            payload_serialized = refs_serialized = None
+            payload_size = refs_size = 0
+            redacted_late = True
+            break
+    if not redacted_late and event_type.startswith("conversation."):
+        raw_payload = value.get("payload")
+        if isinstance(raw_payload, dict):
+            payload_probe = _sanitize_str_surrogates(str(raw_payload.get("text") or ""))
+        elif isinstance(raw_payload, str):
+            payload_probe = _sanitize_str_surrogates(raw_payload)
+        else:
+            payload_probe = payload_serialized or ""
+        if _looks_like_tool_output(f"{summary}\n{payload_probe}".strip()):
+            payload_serialized = None
+            payload_size = 0
+            redacted_late = True
+    return {
+        "event_id": event_id,
+        "ts_ms": parsed_ts_ms,
+        "scope": scope,
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "type": event_type,
+        "summary": summary,
+        "payload_json": payload_serialized,
+        "payload_bytes": payload_size,
+        "payload_truncated": payload_truncated,
+        "refs_json": refs_serialized,
+        "refs_bytes": refs_size,
+        "refs_truncated": refs_truncated,
+        "redacted": redacted_late,
+    }
+
+
+def _read_json_file(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"invalid state file JSON: {path}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"state file must be an object: {path}")
+    return value
+
+
+def _write_json_file_atomic(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_name = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=str(path.parent))
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+
+
+def _state_int(raw: Any) -> Optional[int]:
+    try:
+        return None if raw is None else int(raw)
+    except Exception:
+        return None
+
+
+def ingest_once(
+    conn: sqlite3.Connection,
+    *,
+    source_path: Path,
+    state_path: Path,
+    payload_cap: int,
+    conversation_payload_cap: int,
+    refs_cap: int,
+    truncate_after: bool,
+    rotate_after: bool,
+    allow_missing_source: bool = False,
+) -> Optional[Dict[str, Any]]:
+    if not source_path.exists() or not source_path.is_file():
+        if allow_missing_source:
+            return None
+        raise FileNotFoundError(f"source file not found: {source_path}")
+    try:
+        source_stat = source_path.stat()
+    except FileNotFoundError:
+        if allow_missing_source:
+            return None
+        raise FileNotFoundError(f"source file not found: {source_path}")
+    except Exception as exc:
+        raise RuntimeError(f"failed to stat source file: {source_path}: {str(exc)}") from exc
+
+    state = _read_json_file(state_path)
+    previous_offset = max(0, _state_int(state.get("offset")) or 0)
+    previous_dev = _state_int(state.get("dev"))
+    previous_inode = _state_int(state.get("inode"))
+    previous_size = _state_int(state.get("size"))
+    current_dev = int(source_stat.st_dev)
+    current_inode = int(source_stat.st_ino)
+    current_size = int(source_stat.st_size)
+    offset_recovery = None
+    if previous_dev is not None and previous_inode is not None and (previous_dev != current_dev or previous_inode != current_inode):
+        offset_recovery = "reset_to_zero_source_replaced"
+        previous_offset = 0
+    elif previous_size is not None and previous_size > current_size or previous_offset > current_size:
+        offset_recovery = "reset_to_zero_source_shrunk"
+        previous_offset = 0
+    try:
+        with source_path.open("rb") as stream:
+            stream.seek(previous_offset)
+            blob = stream.read(max(0, current_size - previous_offset))
+    except FileNotFoundError:
+        if allow_missing_source:
+            return None
+        raise FileNotFoundError(f"source file not found: {source_path}")
+
+    last_newline = blob.rfind(b"\n")
+    if last_newline < 0:
+        processed_blob = b""
+        next_offset = previous_offset
+        trailing_partial_bytes = len(blob)
+    else:
+        processed_blob = blob[: last_newline + 1]
+        trailing_partial_bytes = len(blob) - len(processed_blob)
+        next_offset = previous_offset + len(processed_blob)
+
+    counters = {
+        "total": 0,
+        "blank": 0,
+        "invalid_json": 0,
+        "invalid_event": 0,
+        "duplicates": 0,
+    }
+    inserted = payload_truncated_count = refs_truncated_count = late_redacted_count = 0
+    errors_sample: List[str] = []
+    cursor = previous_offset
+    created_at = utcnow_iso()
+    for raw_line in processed_blob.splitlines(keepends=True):
+        line_start = cursor
+        cursor += len(raw_line)
+        line = raw_line.rstrip(b"\r\n")
+        if not line.strip():
+            counters["blank"] += 1
+            continue
+        counters["total"] += 1
+        try:
+            line_obj = json.loads(line.decode("utf-8"))
+            if not isinstance(line_obj, dict):
+                raise ValueError("line is not a JSON object")
+        except Exception:
+            counters["invalid_json"] += 1
+            if len(errors_sample) < 5:
+                errors_sample.append(f"line@{line_start}: invalid_json")
+            continue
+        try:
+            fallback_event_id = f"ep-{hashlib.sha256(f'{line_start}:'.encode('utf-8') + line).hexdigest()[:32]}"
+            event = _normalize_spool_event(
+                line_obj,
+                fallback_event_id=fallback_event_id,
+                payload_cap=payload_cap,
+                conversation_payload_cap=conversation_payload_cap,
+                refs_cap=refs_cap,
+            )
+        except ValueError as exc:
+            counters["invalid_event"] += 1
+            if len(errors_sample) < 5:
+                errors_sample.append(f"line@{line_start}: {str(exc)}")
+            continue
+        try:
+            conn.execute(
+                """
+                INSERT INTO episodic_events (
+                    event_id, ts_ms, scope, session_id, agent_id, type, summary,
+                    payload_json, refs_json, redacted, schema_version, created_at, search_text
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event["event_id"], event["ts_ms"], event["scope"], event["session_id"], event["agent_id"],
+                    event["type"], event["summary"], event["payload_json"], event["refs_json"],
+                    1 if event.get("redacted") else 0, EPISODIC_SCHEMA_VERSION, created_at,
+                    build_search_text(summary=str(event.get("summary") or ""), payload_json=event.get("payload_json"), refs_json=event.get("refs_json")),
+                ),
+            )
+            inserted += 1
+            payload_truncated_count += int(bool(event.get("payload_truncated")))
+            refs_truncated_count += int(bool(event.get("refs_truncated")))
+            late_redacted_count += int(bool(event.get("redacted")))
+        except sqlite3.IntegrityError:
+            counters["duplicates"] += 1
+    conn.commit()
+
+    maintenance: Dict[str, Any] = {
+        "requested": "truncate" if truncate_after else "rotate" if rotate_after else "none",
+        "applied": "none",
+        "reason": None,
+        "rotated_to": None,
+    }
+    if truncate_after or rotate_after:
+        if next_offset != current_size:
+            maintenance["reason"] = "pending_partial_line"
+        else:
+            try:
+                latest_stat = source_path.stat()
+            except FileNotFoundError:
+                latest_stat = None
+            if latest_stat is None or int(latest_stat.st_size) != current_size or int(latest_stat.st_ino) != current_inode:
+                maintenance["reason"] = "source_changed_since_snapshot"
+            elif truncate_after:
+                source_path.parent.mkdir(parents=True, exist_ok=True)
+                source_path.write_text("", encoding="utf-8")
+                maintenance["applied"] = "truncated"
+                next_offset = 0
+            else:
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                rotated_path = source_path.with_name(f"{source_path.name}.{stamp}.ingested")
+                suffix = 1
+                while rotated_path.exists():
+                    suffix += 1
+                    rotated_path = source_path.with_name(f"{source_path.name}.{stamp}.ingested.{suffix}")
+                source_path.rename(rotated_path)
+                source_path.touch()
+                maintenance.update({"applied": "rotated", "rotated_to": str(rotated_path)})
+                next_offset = 0
+
+    try:
+        final_stat = source_path.stat()
+    except FileNotFoundError:
+        if not allow_missing_source:
+            raise
+        final_stat = source_stat
+    _write_json_file_atomic(
+        state_path,
+        {
+            "schema": EPISODIC_INGEST_STATE_SCHEMA,
+            "file": str(source_path),
+            "offset": int(next_offset),
+            "dev": int(final_stat.st_dev),
+            "inode": int(final_stat.st_ino),
+            "size": int(final_stat.st_size),
+            "updated_at": utcnow_iso(),
+        },
+    )
+    return {
+        "kind": "openclaw-mem.episodes.ingest.v0",
+        "ts": utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "source": {
+            "file": str(source_path),
+            "state": str(state_path),
+            "start_offset": previous_offset,
+            "next_offset": int(next_offset),
+            "snapshot_size": current_size,
+            "offset_recovery": offset_recovery,
+            "trailing_partial_bytes": trailing_partial_bytes,
+            "processed_sha256": hashlib.sha256(processed_blob).hexdigest() if processed_blob else None,
+            "spool_schema": EPISODIC_SPOOL_SCHEMA,
+        },
+        "lines": counters,
+        "inserted": inserted,
+        "bounded": {
+            "payload_cap_bytes": payload_cap,
+            "conversation_payload_cap_bytes": conversation_payload_cap,
+            "payload_hard_cap_bytes": EPISODIC_INGEST_HARD_PAYLOAD_CAP_BYTES,
+            "refs_cap_bytes": refs_cap,
+            "payload_truncated": payload_truncated_count,
+            "refs_truncated": refs_truncated_count,
+            "redacted_late": late_redacted_count,
+        },
+        "maintenance": maintenance,
+        "errors_sample": errors_sample,
+    }
+
+
+def _lock_path(target: Path) -> Path:
+    return target.with_name(target.name + EPISODIC_FOLLOW_ROTATE_LOCK_SUFFIX)
+
+
+@contextmanager
+def file_lock(lock_path: Path, *, exclusive: bool, timeout_s: float = 5.0):
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    stream = lock_path.open("a", encoding="utf-8")
+    locked = False
+    try:
+        try:
+            import fcntl  # type: ignore
+        except ModuleNotFoundError:
+            fcntl = None  # type: ignore
+        if fcntl is not None:
+            flags = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            if timeout_s <= 0:
+                fcntl.flock(stream.fileno(), flags)
+                locked = True
+            else:
+                deadline = time.monotonic() + float(timeout_s)
+                while True:
+                    try:
+                        fcntl.flock(stream.fileno(), flags | fcntl.LOCK_NB)
+                        locked = True
+                        break
+                    except BlockingIOError:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(f"timed out acquiring lock: {lock_path}")
+                        time.sleep(0.05)
+        else:
+            import msvcrt
+
+            stream.seek(0, os.SEEK_END)
+            if stream.tell() == 0:
+                stream.write("0")
+                stream.flush()
+            stream.seek(0)
+            deadline = None if timeout_s <= 0 else time.monotonic() + float(timeout_s)
+            while True:
+                try:
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    locked = True
+                    break
+                except OSError:
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise TimeoutError(f"timed out acquiring lock: {lock_path}")
+                    time.sleep(0.05)
+        yield stream
+    finally:
+        if locked:
+            try:
+                if "fcntl" in locals() and fcntl is not None:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+                else:
+                    import msvcrt
+
+                    stream.seek(0)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            except Exception:
+                pass
+        stream.close()
+
+
+def _extract_text_blocks(content: Any) -> List[str]:
+    result: List[str] = []
+    if isinstance(content, str):
+        text = _sanitize_str_surrogates(content).strip()
+        return [text] if text else []
+    if not isinstance(content, list):
+        return result
+    for block in content:
+        if not isinstance(block, dict) or str(block.get("type") or "").strip().lower() != "text":
+            continue
+        text = _sanitize_str_surrogates(str(block.get("text") or "")).strip()
+        if text:
+            result.append(text)
+    return result
+
+
+def _extract_role_text_from_session_line(value: Dict[str, Any]) -> Tuple[Optional[str], str]:
+    candidates: List[Dict[str, Any]] = []
+    if isinstance(value.get("message"), dict):
+        candidates.append(value["message"])
+    candidates.append(value)
+    for candidate in candidates:
+        role = str(candidate.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        texts = _extract_text_blocks(candidate.get("content"))
+        if not texts and isinstance(candidate.get("text"), str):
+            text = _sanitize_str_surrogates(str(candidate.get("text") or "")).strip()
+            if text:
+                texts = [text]
+        merged = "\n".join(text for text in texts if text.strip()).strip()
+        if merged:
+            return role, merged
+    return None, ""
+
+
+_CONVERSATION_BLOCK_PATTERNS = (
+    re.compile(r"<relevant-memories>[\s\S]*?</relevant-memories>", re.IGNORECASE),
+    re.compile(r"<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>", re.IGNORECASE),
+    re.compile(r"<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>[\s\S]*?<<<END_UNTRUSTED_CHILD_RESULT>>>", re.IGNORECASE),
+    re.compile(r"^\s*(Conversation info|Sender|Replied message|System \(untrusted\)|\[Subagent Context\]).*?\n```json\s*[\s\S]*?```", re.IGNORECASE | re.MULTILINE),
+)
+_CONVERSATION_LINE_PATTERNS = (
+    re.compile(r"^\s*(Conversation info|Sender|Replied message|System \(untrusted\)|\[Subagent Context\]).*$", re.IGNORECASE),
+    re.compile(r"^\s*memory-policy:\s*untrusted_reference_only.*$", re.IGNORECASE),
+    re.compile(r"^\s*\d+\.\s*\[[^\]]+\|[^\]]+\]\s*route-hint:\s*transcript recall.*$", re.IGNORECASE),
+)
+_CONVERSATION_CONTROL_PATTERNS = (
+    re.compile(r"<\|im_start\|>|<\|im_end\|>", re.IGNORECASE),
+    re.compile(r"\[/?INST\]", re.IGNORECASE),
+    re.compile(r"<<<BEGIN_[A-Z0-9_]+>>>|<<<END_[A-Z0-9_]+>>>", re.IGNORECASE),
+)
+
+
+def _sanitize_conversation_text(text: str, *, role: str) -> Optional[str]:
+    cleaned = _sanitize_str_surrogates(text or "").strip()
+    if not cleaned or role == "assistant" and cleaned == "NO_REPLY":
+        return None
+    for pattern in _CONVERSATION_BLOCK_PATTERNS:
+        cleaned = pattern.sub("\n", cleaned)
+    cleaned = "\n".join(
+        line for line in cleaned.splitlines()
+        if not any(pattern.search(line) for pattern in _CONVERSATION_LINE_PATTERNS)
+    )
+    for pattern in _CONVERSATION_CONTROL_PATTERNS:
+        cleaned = pattern.sub(" ", cleaned)
+    cleaned = "\n".join(
+        line for line in cleaned.splitlines()
+        if line.strip() not in {"NO_REPLY", "AUDIO_AS_VOICE"} and not line.strip().startswith("MEDIA:")
+    )
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned or None
+
+
+def _is_ignored_session_extract_path(path: Path) -> bool:
+    name = path.name
+    return (
+        name == "sessions.json"
+        or name.startswith("sessions.json.bak.")
+        or ".checkpoint." in name
+        or ".bak." in name
+        or name.endswith(".bak")
+    )
+
+
+def extract_sessions_once(
+    *,
+    sessions_root: Path,
+    spool_path: Path,
+    state_path: Path,
+    summary_max: int,
+    payload_cap: int,
+) -> Dict[str, Any]:
+    state = _read_json_file(state_path)
+    files_state = state.get("files") if isinstance(state.get("files"), dict) else {}
+    candidates = sorted((path for path in sessions_root.rglob("*.jsonl") if path.is_file()), key=str)
+    files = [path for path in candidates if not _is_ignored_session_extract_path(path)]
+    ignored_files = len(candidates) - len(files)
+    spool_path.parent.mkdir(parents=True, exist_ok=True)
+    new_files_state: Dict[str, Any] = dict(files_state)
+    counts = {
+        "files_seen": 0,
+        "files_with_updates": 0,
+        "lines_total": 0,
+        "invalid_json": 0,
+        "unsupported_rows": 0,
+        "emitted": 0,
+        "payload_redacted": 0,
+        "payload_truncated": 0,
+        "sanitized_dropped": 0,
+        "trailing_partial_bytes": 0,
+        "ignored_files": int(ignored_files),
+    }
+    errors_sample: List[str] = []
+    with file_lock(_lock_path(spool_path), exclusive=True, timeout_s=30), spool_path.open("a", encoding="utf-8") as spool_stream:
+        for source_path in files:
+            counts["files_seen"] += 1
+            key = str(source_path)
+            try:
+                stat = source_path.stat()
+            except OSError:
+                counts["ignored_files"] += 1
+                if len(errors_sample) < 5:
+                    errors_sample.append(f"{key}:vanished")
+                continue
+            file_state = files_state.get(key) if isinstance(files_state.get(key), dict) else {}
+            previous_offset = max(0, int(file_state.get("offset") or 0))
+            previous_inode = int(file_state.get("inode") or 0)
+            if previous_inode and previous_inode != int(stat.st_ino) or previous_offset > int(stat.st_size):
+                previous_offset = 0
+            with source_path.open("rb") as source_stream:
+                source_stream.seek(previous_offset)
+                blob = source_stream.read(max(0, int(stat.st_size) - previous_offset))
+            if not blob:
+                new_files_state[key] = {"offset": previous_offset, "inode": int(stat.st_ino), "size": int(stat.st_size), "updated_at": utcnow_iso()}
+                continue
+            last_newline = blob.rfind(b"\n")
+            if last_newline < 0:
+                processed_blob, next_offset = b"", previous_offset
+                counts["trailing_partial_bytes"] += len(blob)
+            else:
+                processed_blob = blob[: last_newline + 1]
+                next_offset = previous_offset + len(processed_blob)
+                counts["trailing_partial_bytes"] += len(blob) - len(processed_blob)
+            if not processed_blob:
+                new_files_state[key] = {"offset": next_offset, "inode": int(stat.st_ino), "size": int(stat.st_size), "updated_at": utcnow_iso()}
+                continue
+            counts["files_with_updates"] += 1
+            cursor = previous_offset
+            for raw_line in processed_blob.splitlines(keepends=True):
+                line_start = cursor
+                cursor += len(raw_line)
+                line = raw_line.rstrip(b"\r\n")
+                if not line.strip():
+                    continue
+                counts["lines_total"] += 1
+                try:
+                    value = json.loads(line.decode("utf-8"))
+                    if not isinstance(value, dict):
+                        raise ValueError("json_not_object")
+                except Exception:
+                    counts["invalid_json"] += 1
+                    if len(errors_sample) < 5:
+                        errors_sample.append(f"{source_path}:{line_start}:invalid_json")
+                    continue
+                role, text = _extract_role_text_from_session_line(value)
+                if role not in {"user", "assistant"} or not text:
+                    counts["unsupported_rows"] += 1
+                    continue
+                scope_from_tag, stripped = _split_scope_prefixed_text(text)
+                scope = normalize_scope(scope_from_tag or "global")
+                sanitized_text = _sanitize_conversation_text(stripped or text, role=role)
+                if not sanitized_text:
+                    counts["sanitized_dropped"] += 1
+                    continue
+                clean_text = _redact_pii_lite(sanitized_text)
+                secret_like = _looks_like_secret(clean_text)
+                tool_dump_like = _looks_like_tool_output(clean_text)
+                event_type = "conversation.user" if role == "user" else "conversation.assistant"
+                summary_text = clean_text
+                payload_obj = None
+                event_redacted = False
+                payload_was_truncated = False
+                if secret_like:
+                    summary_text, event_redacted = "[REDACTED_SECRET]", True
+                elif tool_dump_like:
+                    summary_text, event_redacted = "[REDACTED_TOOL_DUMP]", True
+                else:
+                    payload_json, _payload_bytes, payload_was_truncated = _bounded_json(
+                        {"text": clean_text}, cap_bytes=payload_cap, label="payload", max_string_chars=payload_cap
+                    )
+                    payload_obj = json.loads(payload_json) if payload_json else None
+                counts["payload_truncated"] += int(payload_was_truncated)
+                short = summary_text.replace("\n", " ").strip()
+                if len(short) > summary_max:
+                    short = short[:summary_max] + "…"
+                summary = f"{event_type}: {short}" if short else event_type
+                raw_ts = value.get("ts_ms") or value.get("timestamp_ms") or value.get("tsMs") or value.get("timestamp") or value.get("ts")
+                try:
+                    parsed_ts_ms = parse_ts_ms(raw_ts)
+                except Exception:
+                    try:
+                        parsed_ts_ms = int(datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00")).timestamp() * 1000)
+                    except Exception:
+                        parsed_ts_ms = int(time.time() * 1000)
+                event_id = f"ep-{hashlib.sha256(f'{key}:{line_start}:{event_type}:{clean_text}'.encode('utf-8')).hexdigest()[:32]}"
+                counts["payload_redacted"] += int(event_redacted)
+                spool_event = {
+                    "schema": EPISODIC_SPOOL_SCHEMA,
+                    "event_id": event_id,
+                    "ts_ms": parsed_ts_ms,
+                    "scope": scope,
+                    "session_id": _sanitize_str_surrogates(str(value.get("sessionKey") or value.get("session_id") or value.get("session") or source_path.stem)),
+                    "agent_id": _sanitize_str_surrogates(str(value.get("agentId") or value.get("agent_id") or "main")),
+                    "type": event_type,
+                    "summary": summary,
+                    "payload": payload_obj,
+                    "redacted": event_redacted,
+                    "refs": {"source": "session_jsonl_tail", "path": key, "offset": int(line_start)},
+                }
+                spool_stream.write(json.dumps(spool_event, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n")
+                counts["emitted"] += 1
+            new_files_state[key] = {"offset": int(next_offset), "inode": int(stat.st_ino), "size": int(stat.st_size), "updated_at": utcnow_iso()}
+
+    _write_json_file_atomic(
+        state_path,
+        {"schema": EPISODIC_EXTRACT_STATE_SCHEMA, "sessions_root": str(sessions_root), "files": new_files_state, "updated_at": utcnow_iso()},
+    )
+    return {
+        "source": {"sessions_root": str(sessions_root), "state": str(state_path), "spool": str(spool_path)},
+        **counts,
+        "payload_cap_bytes": payload_cap,
+        "errors_sample": errors_sample,
     }
 
 
