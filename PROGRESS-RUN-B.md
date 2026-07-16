@@ -28,4 +28,5 @@ Run A baseline; no new skip was introduced.
 | --- | --- | --- | --- |
 | T00 | done | `1377f32` | Created Run B branch, audited every prerequisite with zero deviations, and recorded the fresh full-suite baseline. |
 | T01 | done | `0382d8d` | Added the unified fail-open `recall` entrypoint across lexical/vector/hybrid/graph lanes, including scope filters, routing receipts, and output-free core coverage. |
-| T02 | done | pending commit | Added `curate scan/review/apply/verify/rollback`, additive alias deprecation receipts, all 20 verb-target smoke cases, full soft-archive e2e, and atomic drift-guarded memory rollback. Related regression slice: 206 passed plus 13 subtests. |
+| T02 | done | `c378782` | Added `curate scan/review/apply/verify/rollback`, additive alias deprecation receipts, all 20 verb-target smoke cases, full soft-archive e2e, and atomic drift-guarded memory rollback. Related regression slice: 206 passed plus 13 subtests. |
+| T03 | done | pending commit | Added `sync status/run/init` wrappers for LanceDB, service readiness stores, and Qdrant probes with honest unsupported-operation receipts and shared alias deprecations. CLI convergence regression: 255 passed plus 26 subtests. |

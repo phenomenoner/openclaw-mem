@@ -5918,6 +5918,7 @@ def _invoke_cli_json(conn: sqlite3.Connection, argv: List[str]) -> Dict[str, Any
 
     nested = build_parser().parse_args(["--json", *argv])
     nested.json = True
+    nested.db = getattr(nested, "db", None) or getattr(nested, "db_global", None) or os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB)
     output = io.StringIO()
     exit_code = 0
     with redirect_stdout(output):
@@ -5970,6 +5971,13 @@ def _curate_writes(payload: Any) -> bool:
         return value
     if isinstance(value, (int, float)):
         return value > 0
+    camel_value = payload.get("writesPerformed")
+    if isinstance(camel_value, bool):
+        return camel_value
+    if isinstance(camel_value, (int, float)):
+        return camel_value > 0
+    if payload.get("mutated") is True:
+        return True
     policy = payload.get("policy")
     if isinstance(policy, Mapping):
         writes = policy.get("writes_performed")
@@ -6157,6 +6165,114 @@ def cmd_curate(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "kind": f"openclaw-mem.curate.{verb}.v1",
         "verb": verb,
         "target": target,
+        "ok": _curate_inner_ok(inner),
+        "writes_performed": _curate_writes(inner),
+        "inner": inner,
+    }
+    _emit(receipt, bool(getattr(args, "json", False)))
+
+
+def _sync_global_args(args: argparse.Namespace) -> List[str]:
+    argv: List[str] = []
+    _curate_add_option(argv, "--db", getattr(args, "db", None))
+    harness_home = getattr(args, "harness_home", None) or getattr(args, "harness_home_global", None)
+    _curate_add_option(argv, "--harness-home", harness_home)
+    return argv
+
+
+def _sync_lancedb_args(args: argparse.Namespace, *, dry_run: bool) -> List[str]:
+    argv = [*_sync_global_args(args), "writeback-lancedb"]
+    for flag, attr in (
+        ("--lancedb", "lancedb"),
+        ("--table", "table"),
+        ("--limit", "limit"),
+        ("--batch", "batch"),
+        ("--force-fields", "force_fields"),
+    ):
+        _curate_add_option(argv, flag, getattr(args, attr, None))
+    if bool(getattr(args, "force", False)):
+        argv.append("--force")
+    if dry_run:
+        argv.append("--dry-run")
+    return argv
+
+
+def _sync_service_args(conn: sqlite3.Connection, args: argparse.Namespace, command: str) -> List[Dict[str, Any]]:
+    global_args = _sync_global_args(args)
+    return [
+        {
+            "source": f"{family} {command}",
+            "receipt": _invoke_cli_json(conn, [*global_args, family, command]),
+        }
+        for family in ("service-store", "writeback-store")
+    ]
+
+
+def cmd_sync(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Consolidate outbound backend readiness and writeback entrypoints."""
+
+    verb = str(getattr(args, "sync_cmd", "") or "")
+    backend = str(getattr(args, "backend", "") or "")
+    inner: Any
+    if backend == "lancedb":
+        if verb in {"status", "run"}:
+            if not getattr(args, "lancedb", None) or not getattr(args, "table", None):
+                inner = {
+                    "kind": "openclaw-mem.sync.lancedb.arguments.v1",
+                    "ok": False,
+                    "error": "lancedb status/run requires --lancedb and --table",
+                    "hint": "status performs the existing writeback-lancedb dry-run; run performs bounded writeback",
+                }
+            else:
+                inner = _invoke_cli_json(conn, _sync_lancedb_args(args, dry_run=verb == "status"))
+        else:
+            inner = {
+                "kind": "openclaw-mem.sync.lancedb.init.v1",
+                "ok": False,
+                "error": "LanceDB initialization is not owned by openclaw-mem",
+                "hint": "create the LanceDB table in the owning engine, then use sync status --backend lancedb",
+            }
+    elif backend == "service":
+        if verb in {"status", "init"}:
+            if not (getattr(args, "harness_home", None) or getattr(args, "harness_home_global", None)):
+                inner = {
+                    "kind": "openclaw-mem.sync.service.arguments.v1",
+                    "ok": False,
+                    "error": "service status/init requires --harness-home",
+                    "hint": "pass the Agent Harness home containing memory/ and state/memory/",
+                }
+            else:
+                inner = _sync_service_args(conn, args, verb)
+        else:
+            inner = {
+                "kind": "openclaw-mem.sync.service.run.v1",
+                "ok": False,
+                "error": "service-store and writeback-store are readiness files, not a writeback runner",
+                "hint": "use sync init/status --backend service; the owning harness runs service writeback",
+            }
+    elif backend == "qdrant":
+        probe = _invoke_cli_json(conn, [*_sync_global_args(args), "qdrant", "status"])
+        if verb == "status":
+            inner = probe
+        else:
+            inner = {
+                "kind": f"openclaw-mem.sync.qdrant.{verb}.v1",
+                "ok": False,
+                "error": f"qdrant {verb} is not available in the current probe-only integration",
+                "hint": "use sync status --backend qdrant; native initialization/writeback remains separately gated",
+                "probe": probe,
+            }
+    else:
+        inner = {
+            "kind": "openclaw-mem.sync.backend.error.v1",
+            "ok": False,
+            "error": f"unsupported sync backend: {backend}",
+        }
+
+    receipt = {
+        "kind": f"openclaw-mem.sync.{verb}.v1",
+        "verb": verb,
+        "backend": backend,
         "ok": _curate_inner_ok(inner),
         "writes_performed": _curate_writes(inner),
         "inner": inner,
@@ -20834,6 +20950,30 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--out-root", dest="out_root", help="Optional self-curator rollback receipt output root")
     c.set_defaults(func=cmd_curate)
 
+    sp = sub.add_parser("sync", help="Unified outbound backend readiness and bounded writeback surface")
+    add_common(sp)
+    ysub = sp.add_subparsers(dest="sync_cmd", required=True)
+
+    def add_sync_options(parser: argparse.ArgumentParser) -> None:
+        add_common(parser)
+        parser.add_argument("--backend", required=True, choices=["lancedb", "service", "qdrant"])
+        parser.add_argument("--lancedb", help="LanceDB directory for lancedb status/run")
+        parser.add_argument("--table", help="LanceDB table for lancedb status/run")
+        parser.add_argument("--limit", type=int, default=50, help="Maximum SQLite rows inspected")
+        parser.add_argument("--batch", type=int, default=25, help="LanceDB writeback batch size")
+        parser.add_argument("--force", action="store_true", help="Allow explicit bounded LanceDB field overwrite")
+        parser.add_argument("--force-fields", dest="force_fields", default=None, help="Comma-separated overwrite field allowlist")
+
+    y = ysub.add_parser("status", help="Probe backend readiness without writes")
+    add_sync_options(y)
+    y.set_defaults(func=cmd_sync)
+    y = ysub.add_parser("run", help="Run a supported bounded outbound writeback")
+    add_sync_options(y)
+    y.set_defaults(func=cmd_sync)
+    y = ysub.add_parser("init", help="Initialize supported readiness files")
+    add_sync_options(y)
+    y.set_defaults(func=cmd_sync)
+
     sp = sub.add_parser("docs", help="Docs memory (operator-authored markdown ingest/search)")
     add_common(sp)
     dsub = sp.add_subparsers(dest="docs_cmd", required=True)
@@ -22288,6 +22428,12 @@ _DEPRECATED_COMMANDS: Dict[Tuple[str, ...], str] = {
     ("self-curator", "rollback"): "curate rollback --target skills",
     ("graph", "fact", "lint"): "curate scan --target facts",
     ("graph", "fact", "stale"): "curate scan --target facts",
+    ("writeback-lancedb",): "sync run --backend lancedb",
+    ("service-store", "status"): "sync status --backend service",
+    ("service-store", "init"): "sync init --backend service",
+    ("writeback-store", "status"): "sync status --backend service",
+    ("writeback-store", "init"): "sync init --backend service",
+    ("qdrant", "status"): "sync status --backend qdrant",
 }
 
 
@@ -22301,6 +22447,12 @@ def _command_path(args: argparse.Namespace) -> Tuple[str, ...]:
         return (cmd, str(getattr(args, "self_curator_cmd", "") or ""))
     if cmd == "graph" and getattr(args, "graph_cmd", None) == "fact":
         return (cmd, "fact", str(getattr(args, "graph_fact_cmd", "") or ""))
+    if cmd == "service-store":
+        return (cmd, str(getattr(args, "service_store_cmd", "") or ""))
+    if cmd == "writeback-store":
+        return (cmd, str(getattr(args, "writeback_store_cmd", "") or ""))
+    if cmd == "qdrant":
+        return (cmd, str(getattr(args, "qdrant_cmd", "") or ""))
     return (cmd,)
 
 
@@ -22375,7 +22527,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "harness", "codex", "symbolic-canvas", "service-store", "writeback-store", "pack-artifacts-observe"} or dream_lite_no_db or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "harness", "codex", "symbolic-canvas", "service-store", "writeback-store", "pack-artifacts-observe"} or dream_lite_no_db or (cmd == "sync" and getattr(args, "backend", None) == "service") or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

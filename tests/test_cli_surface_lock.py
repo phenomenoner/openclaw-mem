@@ -269,6 +269,10 @@ store
 summarize
 surface
 surface validate
+sync
+sync init
+sync run
+sync status
 symbolic-canvas
 symbolic-canvas build
 timeline
