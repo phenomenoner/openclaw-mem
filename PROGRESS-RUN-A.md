@@ -7,4 +7,4 @@
 | T04 | done | HEAD-on-commit | Added migration registry, stamped connect fast-path, and future-version rejection; full suite 852 passed, 3 skipped, 87 subtests in 367.37s with prior cp950 warnings eliminated. |
 | T05 | done | HEAD-on-commit | Moved qdrant-edge-py to `qdrant` extra while retaining it in dev; missing-extra status/error contracts covered; 6 focused plus 5 qdrant tests passed. |
 | T06 | done | HEAD-on-commit | Added additive pack trace timings for candidates/trust_policy/graph/budget/render plus total_ms; golden/contracts 11 passed, 10 subtests. |
-| T07 | done | HEAD-on-commit | Added fixed-seed offline 10k perf suite and baseline: ingest 5653.719 rows/s; search P50/P95 31.323/54.326 ms; vsearch P95 175.598 ms; pack P95 38.328 ms. |
+| T07 | done | HEAD-on-commit | Added fixed-seed offline 10k perf suite and baseline: ingest 5653.719 rows/s; search P50/P95 31.323/54.326 ms; vsearch P95 175.598 ms; pack P95 38.328 ms. Batch 1 gate: 855 passed, 3 skipped, 87 subtests in 369.40s after repairing three finite timing mocks. |

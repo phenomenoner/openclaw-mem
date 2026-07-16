@@ -1,4 +1,5 @@
 import io
+import itertools
 import json
 import os
 import sqlite3
@@ -5968,7 +5969,10 @@ class TestCliM0(unittest.TestCase):
             "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
         ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload), patch(
             "openclaw_mem.cli._pack_graph_stage1_keywords", return_value={"hit": True, "categories": ["D"], "matched_keywords": ["latest"]}
-        ), patch("openclaw_mem.cli.time.perf_counter", side_effect=[100.0, 100.010, 100.030, 100.050]):
+        ), patch(
+            "openclaw_mem.cli.time.perf_counter",
+            side_effect=itertools.chain([100.0, 100.010, 100.030, 100.050], itertools.repeat(100.050)),
+        ):
             with redirect_stdout(buf):
                 args.func(conn, args)
 
@@ -6018,7 +6022,10 @@ class TestCliM0(unittest.TestCase):
             "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
         ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload), patch(
             "openclaw_mem.cli._pack_graph_stage1_keywords", return_value={"hit": True, "categories": ["D"], "matched_keywords": ["latest"]}
-        ), patch("openclaw_mem.cli.time.perf_counter", side_effect=[200.0, 200.010, 200.040, 200.080]):
+        ), patch(
+            "openclaw_mem.cli.time.perf_counter",
+            side_effect=itertools.chain([200.0, 200.010, 200.040, 200.080], itertools.repeat(200.080)),
+        ):
             with redirect_stdout(buf):
                 args.func(conn, args)
 
@@ -6068,7 +6075,10 @@ class TestCliM0(unittest.TestCase):
             "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
         ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload), patch(
             "openclaw_mem.cli._pack_graph_stage1_keywords", return_value={"hit": True, "categories": ["D"], "matched_keywords": ["latest"]}
-        ), patch("openclaw_mem.cli.time.perf_counter", side_effect=[300.0, 300.010, 300.040, 300.080]):
+        ), patch(
+            "openclaw_mem.cli.time.perf_counter",
+            side_effect=itertools.chain([300.0, 300.010, 300.040, 300.080], itertools.repeat(300.080)),
+        ):
             with redirect_stdout(buf):
                 args.func(conn, args)
 
