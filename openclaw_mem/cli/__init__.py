@@ -59,6 +59,7 @@ from openclaw_mem import codex_install
 from openclaw_mem import project_resolver
 from openclaw_mem.core import episodes as core_episodes
 from openclaw_mem.core import config as core_config
+from openclaw_mem.core import harness_install as core_harness_install
 from openclaw_mem.core.embeddings import (
     EmbeddingProviderError,
     MissingEmbeddingCredentials,
@@ -20273,6 +20274,33 @@ def cmd_codex_doctor(conn: sqlite3.Connection, args: argparse.Namespace) -> None
     _emit(out, getattr(args, "json", False))
 
 
+def cmd_install(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        receipt = core_harness_install.install(
+            str(args.harness),
+            root=getattr(args, "root", None),
+            config_path=getattr(args, "config_path", None),
+            skills_dir=getattr(args, "skills_dir", None),
+            mode=str(getattr(args, "mode", "read")),
+            scope=getattr(args, "scope", None),
+            agent_id=str(getattr(args, "agent_id", "codex-windows")),
+            gateway_url=getattr(args, "gateway_url", None),
+            allow_non_local=bool(getattr(args, "allow_non_local_gateway_url", False)),
+            dry_run=bool(getattr(args, "dry_run", False)),
+            run_verify=bool(getattr(args, "verify", False)),
+        )
+    except ValueError as exc:
+        _emit_error(
+            str(exc),
+            "correct the harness config or run `openclaw-mem install --help`",
+            2,
+            as_json=bool(getattr(args, "json", False)),
+        )
+    _emit(receipt, bool(getattr(args, "json", False)))
+    if not receipt.get("ok", False):
+        raise SystemExit(1)
+
+
 class _HelpAllAction(argparse.Action):
     def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, **kwargs):
         super().__init__(option_strings, dest, nargs=0, default=default, **kwargs)
@@ -20464,6 +20492,21 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("backend", help="Inspect active OpenClaw memory backend + fallback posture")
     add_common(sp)
     sp.set_defaults(func=cmd_backend)
+
+    sp = sub.add_parser("install", help="Install openclaw-mem into an AI harness")
+    add_common(sp)
+    sp.add_argument("--harness", required=True, choices=sorted(core_harness_install.HARNESS_NAMES))
+    sp.add_argument("--root", default=None, help="Harness root; Codex defaults to CODEX_HOME or ~/.codex")
+    sp.add_argument("--config-path", default=None, help="Override the harness config/instruction path")
+    sp.add_argument("--skills-dir", default=None, help="Optional skills root (generic uses .openclaw-mem/skills by default)")
+    sp.add_argument("--mode", choices=sorted(harness_install.MODES), default="read")
+    sp.add_argument("--scope", default=configured_scope)
+    sp.add_argument("--agent-id", default="codex-windows")
+    sp.add_argument("--gateway-url", default=None, help="Gateway URL to mention; tokens are never written")
+    sp.add_argument("--allow-non-local-gateway-url", action="store_true")
+    sp.add_argument("--dry-run", action="store_true", help="Emit the plan without writing")
+    sp.add_argument("--verify", action="store_true", help="Verify immediately after apply")
+    sp.set_defaults(func=cmd_install)
 
     sp = sub.add_parser("harness", help="Install/verify persistent memory cards for external AI harnesses")
     add_common(sp)
@@ -22659,7 +22702,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "harness", "codex", "symbolic-canvas", "service-store", "writeback-store", "pack-artifacts-observe"} or dream_lite_no_db or (cmd == "sync" and getattr(args, "backend", None) == "service") or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "install", "harness", "codex", "symbolic-canvas", "service-store", "writeback-store", "pack-artifacts-observe"} or dream_lite_no_db or (cmd == "sync" and getattr(args, "backend", None) == "service") or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

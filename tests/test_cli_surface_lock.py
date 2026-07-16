@@ -183,6 +183,7 @@ ingest
 ingest-review
 ingest-review source
 init
+install
 mem-system
 mem-system status
 mem-system verify
