@@ -9,7 +9,9 @@ description = "Local-first AI agent memory governance: Store / Pack / Observe wi
 requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }
-dependencies = []
+dependencies = [
+  "tomli>=2.0; python_version < '3.11'",
+]
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "License :: OSI Approved :: Apache Software License",

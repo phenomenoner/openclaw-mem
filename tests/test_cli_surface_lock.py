@@ -182,6 +182,7 @@ index
 ingest
 ingest-review
 ingest-review source
+init
 mem-system
 mem-system status
 mem-system verify

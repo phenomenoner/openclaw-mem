@@ -973,6 +973,9 @@ wheels = [
 name = "openclaw-context-pack"
 version = "1.9.32"
 source = { editable = "." }
+dependencies = [
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+]
 
 [package.optional-dependencies]
 docs = [
@@ -1001,6 +1004,7 @@ requires-dist = [
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
     { name = "qdrant-edge-py", marker = "extra == 'qdrant'", specifier = "==0.6.1" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
 ]
 provides-extras = ["qdrant", "embed", "docs"]
 

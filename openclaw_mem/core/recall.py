@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from openclaw_mem import defaults
-from openclaw_mem.core.embeddings import EmbeddingProvider, create_embedding_provider, get_api_key
+from openclaw_mem.core.embeddings import (
+    EmbeddingProvider,
+    create_embedding_provider,
+    embedding_provider_name,
+    get_api_key,
+)
 from openclaw_mem.core.search import hybrid_search_with_receipt, lexical_search_with_receipt, vector_search
 from openclaw_mem.graph.search_adapter import blend_lexical_graph, graph_search_candidates
 from openclaw_mem.scope import normalize_scope_token
@@ -102,7 +106,7 @@ def recall(
     bounded_limit = max(1, int(limit))
     models = _stored_embedding_models(conn)
     has_vectors = bool(models)
-    provider_hint = str(os.getenv("OPENCLAW_MEM_EMBED_PROVIDER") or "").strip().lower()
+    provider_hint = embedding_provider_name()
     provider_configured = provider_hint == "local" or bool(get_api_key())
     selected = (
         "hybrid"

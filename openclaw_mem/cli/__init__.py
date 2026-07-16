@@ -58,6 +58,7 @@ from openclaw_mem import harness as harness_install
 from openclaw_mem import codex_install
 from openclaw_mem import project_resolver
 from openclaw_mem.core import episodes as core_episodes
+from openclaw_mem.core import config as core_config
 from openclaw_mem.core.embeddings import (
     EmbeddingProviderError,
     MissingEmbeddingCredentials,
@@ -1720,6 +1721,73 @@ def cmd_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "runtime": _build_runtime_health(cfg, args),
     }
     _emit(data, args.json)
+
+
+def _capability_available(module: str) -> bool:
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
+
+def _git_scope_available() -> bool:
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=Path.cwd(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
+
+
+def cmd_init(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    """Stamp the DB and fill a conservative user config."""
+
+    resolved = core_config.resolve_config()
+    values = {
+        "db_path": str(args.db),
+        "default_scope": resolved["default_scope"],
+        "vector_backend": resolved["vector_backend"],
+        "embed_provider": resolved["embed_provider"],
+        "pack": {"budget_tokens": int(resolved["pack"]["budget_tokens"])},
+        "scoring": {"profile": resolved["scoring"]["profile"]},
+    }
+    try:
+        config_receipt = core_config.ensure_config(values)
+    except core_config.ConfigError as exc:
+        _emit(
+            {
+                "kind": "openclaw-mem.init.v1",
+                "ok": False,
+                "error": str(exc),
+                "hint": "repair the TOML syntax or move the config aside, then retry init",
+            },
+            bool(args.json),
+        )
+        raise SystemExit(2) from exc
+
+    receipt = {
+        "kind": "openclaw-mem.init.v1",
+        "ok": True,
+        "db": str(args.db),
+        "config_path": config_receipt["path"],
+        "capabilities": {
+            "numpy": _capability_available("numpy"),
+            "sqlite_vec": _capability_available("sqlite_vec"),
+            "fastembed": _capability_available("fastembed"),
+            "api_key": bool(_get_api_key()),
+            "trigram_migrated": _table_exists(conn, "observations_fts_tri"),
+            "git_scope": _git_scope_available(),
+        },
+        "config_changed": bool(config_receipt["changed"]),
+        "config_added": config_receipt["added"],
+    }
+    _emit(receipt, bool(args.json))
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
@@ -5918,7 +5986,11 @@ def _invoke_cli_json(conn: sqlite3.Connection, argv: List[str]) -> Dict[str, Any
 
     nested = build_parser().parse_args(["--json", *argv])
     nested.json = True
-    nested.db = getattr(nested, "db", None) or getattr(nested, "db_global", None) or os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB)
+    nested.db = (
+        getattr(nested, "db", None)
+        or getattr(nested, "db_global", None)
+        or core_config.resolve_config()["db_path"]
+    )
     output = io.StringIO()
     exit_code = 0
     with redirect_stdout(output):
@@ -13666,6 +13738,7 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         memory_dir=memory_dir,
         embedding_provider=provider,
         embedding_skip_reason=provider_error,
+        scope=getattr(args, "scope", None),
     )
     for warning in warnings:
         print(f"Warning: {warning}", file=sys.stderr)
@@ -20172,6 +20245,10 @@ class _HelpAllAction(argparse.Action):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    resolved_config = core_config.resolve_config()
+    configured_scope = str(resolved_config["default_scope"] or "") or None
+    configured_vector_backend = str(resolved_config["vector_backend"])
+    configured_pack_budget = int(resolved_config["pack"]["budget_tokens"])
     epilog = (
         "Examples:\n"
         "  # Observation store\n"
@@ -20277,6 +20354,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("status", help="Show compact store/runtime status")
     add_common(sp)
     sp.set_defaults(func=cmd_status)
+
+    sp = sub.add_parser("init", help="Initialize the database and user config")
+    add_common(sp)
+    sp.set_defaults(func=cmd_init)
 
     sp = sub.add_parser("doctor", help="Run compact operator health checks")
     add_common(sp)
@@ -20883,10 +20964,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("query", help="Recall query text")
     sp.add_argument("--mode", choices=["auto", "lexical", "vector", "hybrid", "graph"], default="auto")
     sp.add_argument("--limit", type=int, default=20)
-    sp.add_argument("--scope", help="Optional exact memory scope")
+    sp.add_argument("--scope", default=configured_scope, help="Optional exact memory scope")
     sp.add_argument("--model", help="Embedding model; defaults to the dominant stored model")
     sp.add_argument("--base-url", default=defaults.openai_base_url(), help="Embedding API base URL")
-    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default="auto")
+    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default=configured_vector_backend)
     sp.add_argument("--graph-path", help="Portable graph JSON used by graph mode")
     sp.add_argument("--graph-readiness-state", help="Optional graph readiness JSON state")
     sp.add_argument("--graph-stale-after-days", type=int, default=30)
@@ -21096,7 +21177,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--limit", type=int, default=20)
     sp.add_argument("--query-vector-json", help="Provide query vector as JSON array (testing/offline)")
     sp.add_argument("--query-vector-file", help="Provide query vector from JSON file (testing/offline)")
-    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default="auto")
+    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default=configured_vector_backend)
     sp.set_defaults(func=cmd_vsearch)
 
     sp = sub.add_parser("hybrid", help="Hybrid search (Vector + FTS) using RRF")
@@ -21135,7 +21216,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--rerank-api-key", help="Reranker API key (or env: JINA_API_KEY/COHERE_API_KEY)")
     sp.add_argument("--rerank-base-url", help="Optional reranker endpoint override")
     sp.add_argument("--rerank-timeout-sec", type=int, default=15, help="Reranker HTTP timeout in seconds")
-    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default="auto")
+    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default=configured_vector_backend)
     sp.set_defaults(func=cmd_hybrid)
 
     sp = sub.add_parser("pack", help="Build a compact, cited bundle from hybrid retrieval")
@@ -21150,9 +21231,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("--query", required=True, help="Pack query text")
     sp.add_argument("--query-en", help="Optional English query for bilingual retrieval")
-    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default="auto")
+    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default=configured_vector_backend)
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
-    sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
+    sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=configured_pack_budget, help="Token budget for bundle text")
     sp.add_argument("--tail-text", action="append", default=None, help="Protected recent-tail line to append at assembly time (repeatable)")
     sp.add_argument("--tail-file", help="Optional file containing protected tail lines (plain text or JSON list)")
     sp.add_argument("--tail-max-items", type=int, default=4, help="Max protected tail lines to consider (default: 4)")
@@ -21949,6 +22030,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("text", help="Memory content")
     sp.add_argument("--text-en", help="Optional English translation/summary")
     sp.add_argument("--lang", help="Original text language code (e.g., ko, ja, es)")
+    sp.add_argument("--scope", default=configured_scope, help="Optional memory scope")
     sp.add_argument("--category", default="fact", choices=["fact", "preference", "decision", "entity", "task", "other"])
     sp.add_argument("--importance", type=float, default=0.7)
     sp.add_argument(
@@ -22545,7 +22627,7 @@ def main() -> None:
         return
 
     # Merge global flags (before subcommand) + per-command flags (after subcommand)
-    base_db = os.environ.get("OPENCLAW_MEM_DB", DEFAULT_DB)
+    base_db = core_config.resolve_config()["db_path"]
     args.db = getattr(args, "db", None) or getattr(args, "db_global", None) or base_db
     args.json = bool(getattr(args, "json", False) or getattr(args, "json_global", False))
     args.db_preexisted = True if str(args.db) == ":memory:" else Path(str(args.db)).expanduser().exists()

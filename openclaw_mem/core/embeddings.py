@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol
 
 from openclaw_mem import defaults
+from openclaw_mem.core.config import resolve_config
 
 EMBED_PROVIDER_ENV = "OPENCLAW_MEM_EMBED_PROVIDER"
 LOCAL_FASTEMBED_MODEL = "BAAI/bge-small-en-v1.5"
@@ -115,7 +116,8 @@ class LocalFastEmbedProvider:
 
 
 def embedding_provider_name(explicit: Optional[str] = None) -> str:
-    value = str(explicit or os.getenv(EMBED_PROVIDER_ENV) or "openai").strip().lower()
+    configured = resolve_config().get("embed_provider", "openai")
+    value = str(explicit or os.getenv(EMBED_PROVIDER_ENV) or configured).strip().lower()
     if value not in {"openai", "local"}:
         raise EmbeddingProviderError(
             f"unsupported embedding provider {value!r}; expected openai or local"

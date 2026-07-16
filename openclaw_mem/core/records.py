@@ -220,6 +220,7 @@ def store_memory(
     embedding_client_factory: Callable[..., Any] | None = None,
     embedding_provider: Any | None = None,
     embedding_skip_reason: str | None = None,
+    scope: str | None = None,
 ) -> tuple[Dict[str, Any], List[str]]:
     """Store one memory and return a receipt plus non-fatal warnings.
 
@@ -241,6 +242,9 @@ def store_memory(
         rationale="Provided via openclaw-mem store --importance.",
         version=1,
     )
+    detail: Dict[str, Any] = {"importance": importance_obj}
+    if str(scope or "").strip():
+        detail["scope"] = str(scope).strip()
     rowid = _insert_observation(
         conn,
         {
@@ -249,7 +253,7 @@ def store_memory(
             "summary_en": normalized_text_en,
             "lang": normalized_lang,
             "tool_name": "memory_store",
-            "detail": {"importance": importance_obj},
+            "detail": detail,
         },
     )
 
@@ -305,7 +309,7 @@ def store_memory(
         except Exception as exc:
             markdown_write_status = f"failed:{exc}"
 
-    return {
+    receipt = {
         "ok": True,
         "id": rowid,
         "file": markdown_path,
@@ -314,7 +318,10 @@ def store_memory(
         "embedded": embedded,
         "embedding_model": model if embedded else None,
         "embedding_provider": getattr(client, "provider_name", None) if embedded else None,
-    }, warnings
+    }
+    if str(scope or "").strip():
+        receipt["scope"] = str(scope).strip()
+    return receipt, warnings
 
 
 def _iter_jsonl(fp: Iterable[str]) -> Iterable[Dict[str, Any]]:
