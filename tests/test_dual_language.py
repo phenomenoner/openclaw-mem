@@ -149,6 +149,21 @@ def test_fallback_quality_threshold_is_observable(
         conn.close()
 
 
+def test_ascii_fallback_requires_all_terms_and_does_not_widen_existing_hits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENCLAW_MEM_FTS_FALLBACK_BM25_THRESHOLD", "100")
+    conn = _connect(":memory:")
+    try:
+        expected_id = _store(conn, "legacy anchor memory")
+        _store(conn, "舊版錨點記憶", summary_en="legacy translated memory")
+        receipt = lexical_search_with_receipt(conn, "legacy anchor", limit=50)
+        assert receipt["fallback_triggered"] is True
+        assert [item["id"] for item in receipt["results"]] == [expected_id]
+    finally:
+        conn.close()
+
+
 def test_profile_exposes_bilingual_coverage(capsys: pytest.CaptureFixture[str]) -> None:
     conn = _connect(":memory:")
     try:

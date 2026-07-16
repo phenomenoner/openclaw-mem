@@ -101,15 +101,37 @@ def _like_fallback(
     if not cjk_terms and not ascii_terms:
         return []
     predicates: List[tuple[str, str]] = []
+    cjk_where: List[str] = []
+    cjk_values: List[str] = []
     for term in cjk_terms:
-        predicates.append(("o.summary LIKE ?", f"%{term}%"))
+        value = f"%{term}%"
+        predicates.append(("o.summary LIKE ?", value))
+        cjk_where.append("o.summary LIKE ?")
+        cjk_values.append(value)
+    ascii_where: List[str] = []
+    ascii_values: List[str] = []
     for term in ascii_terms:
         value = f"%{term}%"
         predicates.append(("o.summary LIKE ?", value))
         predicates.append(("COALESCE(o.summary_en, '') LIKE ?", value))
+        ascii_where.append(
+            "(o.summary LIKE ? OR COALESCE(o.summary_en, '') LIKE ?)"
+        )
+        ascii_values.extend((value, value))
     score_expr = " + ".join(f"CASE WHEN {expr} THEN 1 ELSE 0 END" for expr, _ in predicates)
-    where_expr = " OR ".join(expr for expr, _ in predicates)
-    values = [value for _, value in predicates]
+    score_values = [value for _, value in predicates]
+    where_parts: List[str] = []
+    where_values: List[str] = []
+    if cjk_where:
+        where_parts.append("(" + " OR ".join(cjk_where) + ")")
+        where_values.extend(cjk_values)
+    if ascii_where:
+        # Avoid widening an English multi-token query to rows matching only a
+        # common token. Mixed queries may still recover translated rows via
+        # their complete ASCII subquery.
+        where_parts.append("(" + " AND ".join(ascii_where) + ")")
+        where_values.extend(ascii_values)
+    where_expr = " OR ".join(where_parts)
     rows = conn.execute(
         f"""
         SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
@@ -120,7 +142,7 @@ def _like_fallback(
         ORDER BY score ASC, o.id DESC
         LIMIT ?
         """,
-        [*values, *values, int(limit)],
+        [*score_values, *where_values, int(limit)],
     ).fetchall()
     normalized_scope = normalize_scope_token(scope)
     if not normalized_scope:
