@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, Iterable, List, Protocol
 
 from openclaw_mem.core.db import _sanitize_jsonable_surrogates, _sanitize_str_surrogates
 
-_IMPORTANCE_LABEL_KEYS = ("critical", "high", "medium", "low", "trivial")
+_IMPORTANCE_LABEL_KEYS = ("must_remember", "nice_to_have", "ignore", "unknown")
 
 
 @dataclass

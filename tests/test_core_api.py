@@ -75,11 +75,10 @@ def test_core_ingest_returns_cli_compatible_receipt() -> None:
             "skipped_disabled": 2,
             "scorer_errors": 0,
             "label_counts": {
-                "critical": 0,
-                "high": 0,
-                "medium": 0,
-                "low": 0,
-                "trivial": 0,
+                "must_remember": 0,
+                "nice_to_have": 0,
+                "ignore": 0,
+                "unknown": 0,
             },
         }
     finally:
