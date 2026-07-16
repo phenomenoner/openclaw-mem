@@ -105,7 +105,7 @@ class TestJsonContracts(unittest.TestCase):
         )
         self._assert_exact_keys(
             out,
-            {"bundle_text", "items", "citations", "trace", "context_pack"},
+            {"bundle_text", "items", "citations", "trace", "context_pack", "vector_backend"},
             "pack",
         )
 
@@ -412,7 +412,7 @@ class TestJsonContracts(unittest.TestCase):
             "--budget-tokens",
             "200",
         )
-        self._assert_exact_keys(out, {"bundle_text", "items", "citations", "context_pack", "trace"}, "pack")
+        self._assert_exact_keys(out, {"bundle_text", "items", "citations", "context_pack", "trace", "vector_backend"}, "pack")
 
         context_pack = out["context_pack"]
         self.assertEqual(context_pack["schema"], "openclaw-mem.context-pack.v1")
@@ -624,7 +624,7 @@ class TestJsonContracts(unittest.TestCase):
 
         self._assert_exact_keys(
             out,
-            {"bundle_text", "items", "citations", "context_pack", "trace", "trust_policy", "policy_surface"},
+            {"bundle_text", "items", "citations", "context_pack", "trace", "trust_policy", "policy_surface", "vector_backend"},
             "pack.trust_policy",
         )
 

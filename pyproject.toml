@@ -31,6 +31,7 @@ docs = [
 [dependency-groups]
 # Keep the default contributor verification lane reproducible with `uv run pytest`.
 dev = [
+  "numpy>=2.0",
   "pytest>=8.0",
   "qdrant-edge-py==0.6.1",
 ]

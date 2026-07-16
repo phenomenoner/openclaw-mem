@@ -60,6 +60,7 @@ from openclaw_mem import project_resolver
 from openclaw_mem.core import episodes as core_episodes
 from openclaw_mem.core.search import lexical_search as core_lexical_search
 from openclaw_mem.core.search import vector_search as core_vector_search
+from openclaw_mem.core.vector_index import create_vector_index
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -7361,7 +7362,13 @@ def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
         query_vec = client.embed([args.query], model=model)[0]
 
-    out = core_vector_search(conn, query_vec, model=model, limit=limit)
+    out = core_vector_search(
+        conn,
+        query_vec,
+        model=model,
+        limit=limit,
+        vector_backend=str(getattr(args, "vector_backend", "auto") or "auto"),
+    )
     _emit(out, args.json)
 
 
@@ -7461,6 +7468,10 @@ def _hybrid_retrieve(
     k = int(getattr(args, "k", 60))
     query = (getattr(args, "query", None) or "").strip()
     query_en = (getattr(args, "query_en", None) or "").strip() or None
+    vector_index = create_vector_index(
+        str(getattr(args, "vector_backend", "auto") or "auto")
+    )
+    actual_vector_backend = vector_index.name
 
     rerank_provider = str(getattr(args, "rerank_provider", "none") or "none").lower()
     rerank_enabled = rerank_provider != "none"
@@ -7533,37 +7544,30 @@ def _hybrid_retrieve(
             raise RuntimeError(str(e)) from e
 
         if need_vec:
-            query_dim = len(query_vec)
-            vec_rows = conn.execute(
-                "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ? AND dim = ?",
-                (model, query_dim),
-            ).fetchall()
-            vec_ranked = rank_cosine(
-                query_vec=query_vec,
-                items=((int(r[0]), r[1], float(r[2])) for r in vec_rows),
+            vec_ranked = vector_index.search(
+                conn,
+                query_vec,
+                model=model,
                 limit=candidate_limit,
             )
             vec_ids = [rid for rid, _ in vec_ranked]
 
         if query_en_vec is not None and need_vec_en:
-            query_en_dim = len(query_en_vec)
-            vec_en_rows = conn.execute(
-                "SELECT observation_id, vector, norm FROM observation_embeddings_en WHERE model = ? AND dim = ?",
-                (model, query_en_dim),
-            ).fetchall()
-            # Backward-compatible fallback when dedicated EN table is not populated.
-            search_rows = vec_en_rows
-            if not search_rows and not vec_en_exists:
-                search_rows = conn.execute(
-                    "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ? AND dim = ?",
-                    (model, query_en_dim),
-                ).fetchall()
-
-            vec_en_ranked = rank_cosine(
-                query_vec=query_en_vec,
-                items=((int(r[0]), r[1], float(r[2])) for r in search_rows),
+            vec_en_ranked = vector_index.search(
+                conn,
+                query_en_vec,
+                model=model,
                 limit=candidate_limit,
+                table="observation_embeddings_en",
             )
+            # Backward-compatible fallback when dedicated EN table is not populated.
+            if not vec_en_ranked and not vec_en_exists:
+                vec_en_ranked = vector_index.search(
+                    conn,
+                    query_en_vec,
+                    model=model,
+                    limit=candidate_limit,
+                )
             vec_en_ids = [rid for rid, _ in vec_en_ranked]
     else:
         if not api_key and (need_vec or need_vec_en):
@@ -7655,6 +7659,7 @@ def _hybrid_retrieve(
             "rerank_provider": rerank_provider,
             "rerank_enabled": rerank_enabled,
             "candidate_limit": candidate_limit,
+            "vector_backend": actual_vector_backend,
         }
 
     rrf_scores = {rid: score for rid, score in rrf_ranking}
@@ -7734,6 +7739,7 @@ def _hybrid_retrieve(
         "rerank_provider": rerank_provider,
         "rerank_enabled": rerank_enabled,
         "candidate_limit": candidate_limit,
+        "vector_backend": actual_vector_backend,
     }
 
 
@@ -7843,6 +7849,7 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
         record_ref = _graph_record_ref(rid)
         r["rrf_score"] = float(state["rrf_scores"].get(rid, 0.0))
+        r["vector_backend"] = state.get("vector_backend", "python")
         r["match"] = []
         if rid in state["fts_ids"]:
             r["match"].append("text")
@@ -9879,6 +9886,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         rerank_api_key=None,
         rerank_base_url=None,
         rerank_timeout_sec=15,
+        vector_backend=str(getattr(args, "vector_backend", "auto") or "auto"),
     )
 
     candidates_started = time.perf_counter()
@@ -10173,6 +10181,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "items": selected_items,
         "citations": citations,
         "context_pack": context_pack_v1.to_dict(context_pack),
+        "vector_backend": state.get("vector_backend", "python"),
     }
 
     gbrain_consult = _pack_gbrain_consult_optional(args, query)
@@ -20410,6 +20419,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--limit", type=int, default=20)
     sp.add_argument("--query-vector-json", help="Provide query vector as JSON array (testing/offline)")
     sp.add_argument("--query-vector-file", help="Provide query vector from JSON file (testing/offline)")
+    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default="auto")
     sp.set_defaults(func=cmd_vsearch)
 
     sp = sub.add_parser("hybrid", help="Hybrid search (Vector + FTS) using RRF")
@@ -20448,6 +20458,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--rerank-api-key", help="Reranker API key (or env: JINA_API_KEY/COHERE_API_KEY)")
     sp.add_argument("--rerank-base-url", help="Optional reranker endpoint override")
     sp.add_argument("--rerank-timeout-sec", type=int, default=15, help="Reranker HTTP timeout in seconds")
+    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default="auto")
     sp.set_defaults(func=cmd_hybrid)
 
     sp = sub.add_parser("pack", help="Build a compact, cited bundle from hybrid retrieval")
@@ -20462,6 +20473,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("--query", required=True, help="Pack query text")
     sp.add_argument("--query-en", help="Optional English query for bilingual retrieval")
+    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default="auto")
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=1200, help="Token budget for bundle text (default: 1200)")
     sp.add_argument("--tail-text", action="append", default=None, help="Protected recent-tail line to append at assembly time (repeatable)")

@@ -11,6 +11,7 @@ from openclaw_mem import defaults
 from openclaw_mem import context_pack_v1
 from openclaw_mem.core.embeddings import OpenAIEmbeddingsClient, get_api_key
 from openclaw_mem.core.search import hybrid_search, lexical_search, vector_search
+from openclaw_mem.core.vector_index import create_vector_index
 
 
 def _utcnow_iso() -> str:
@@ -48,6 +49,7 @@ def build_pack(
     query_en: Optional[str] = None,
     model: Optional[str] = None,
     base_url: Optional[str] = None,
+    vector_backend: str = "auto",
 ) -> Dict[str, Any]:
     query_text = str(query or "").strip()
     if not query_text:
@@ -64,6 +66,7 @@ def build_pack(
     model_name = str(model or defaults.embed_model())
     vector_ids: List[int] = []
     vector_en_ids: List[int] = []
+    actual_vector_backend = create_vector_index(vector_backend).name
     has_vectors = conn.execute(
         "SELECT 1 FROM observation_embeddings WHERE model = ? LIMIT 1", (model_name,)
     ).fetchone() is not None
@@ -74,7 +77,13 @@ def build_pack(
             vectors = OpenAIEmbeddingsClient(api_key, base_url).embed(inputs, model=model_name)
             vector_ids = [
                 int(item["id"])
-                for item in vector_search(conn, vectors[0], model=model_name, limit=candidate_limit)
+                for item in vector_search(
+                    conn,
+                    vectors[0],
+                    model=model_name,
+                    limit=candidate_limit,
+                    vector_backend=actual_vector_backend,
+                )
             ]
             if query_en and len(vectors) > 1:
                 english_rows = vector_search(
@@ -83,9 +92,16 @@ def build_pack(
                     model=model_name,
                     limit=candidate_limit,
                     table="observation_embeddings_en",
+                    vector_backend=actual_vector_backend,
                 )
                 if not english_rows:
-                    english_rows = vector_search(conn, vectors[1], model=model_name, limit=candidate_limit)
+                    english_rows = vector_search(
+                        conn,
+                        vectors[1],
+                        model=model_name,
+                        limit=candidate_limit,
+                        vector_backend=actual_vector_backend,
+                    )
                 vector_en_ids = [int(item["id"]) for item in english_rows]
             candidates = hybrid_search(
                 conn,
@@ -201,4 +217,5 @@ def build_pack(
             "maxItems": bounded_limit,
             "includedItems": len(selected_items),
         },
+        "vector_backend": actual_vector_backend,
     }

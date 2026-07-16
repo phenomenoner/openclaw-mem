@@ -27,7 +27,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from openclaw_mem.cli import _connect, _insert_observation  # noqa: E402
-from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine  # noqa: E402
+from openclaw_mem.core.vector_index import NumpyIndex, PurePythonIndex  # noqa: E402
+from openclaw_mem.vector import l2_norm, pack_f32  # noqa: E402
 
 
 KIND = "openclaw-mem.perf.report.v1"
@@ -144,22 +145,37 @@ def run_suite(rows: int, vector_dim: int) -> dict[str, Any]:
                     """,
                     (observation_id, vector_dim, pack_f32(vector), l2_norm(vector)),
                 )
-        vector_items = conn.execute(
-            "SELECT observation_id, vector, norm FROM observation_embeddings "
-            "WHERE model = 'perf-fake-v1' AND dim = ?",
-            (vector_dim,),
-        ).fetchall()
         query_vectors = [
             [vector_rng.uniform(-1.0, 1.0) for _ in range(vector_dim)] for _ in range(20)
         ]
-        vector_values = _latencies_ms(
+        python_index = PurePythonIndex()
+        python_vector_values = _latencies_ms(
             20,
-            lambda index: rank_cosine(
-                query_vec=query_vectors[index],
-                items=((int(row[0]), row[1], float(row[2])) for row in vector_items),
+            lambda index: python_index.search(
+                conn,
+                query_vectors[index],
+                model="perf-fake-v1",
                 limit=20,
             ),
         )
+        numpy_vector_values: list[float] = []
+        try:
+            numpy_index = NumpyIndex()
+        except RuntimeError:
+            numpy_index = None
+        if numpy_index is not None:
+            numpy_index.search(
+                conn, query_vectors[0], model="perf-fake-v1", limit=20
+            )
+            numpy_vector_values = _latencies_ms(
+                20,
+                lambda index: numpy_index.search(
+                    conn,
+                    query_vectors[index],
+                    model="perf-fake-v1",
+                    limit=20,
+                ),
+            )
 
         def build_pack(index: int) -> str:
             hits = _fts_rows(conn, query_terms[index % len(query_terms)], limit=12)
@@ -198,7 +214,24 @@ def run_suite(rows: int, vector_dim: int) -> dict[str, Any]:
                 "p50_ms": round(_percentile(search_values, 0.50), 3),
                 "p95_ms": round(_percentile(search_values, 0.95), 3),
             },
-            "vsearch": {"p95_ms": round(_percentile(vector_values, 0.95), 3)},
+            "vsearch": {
+                "p95_ms": round(_percentile(python_vector_values, 0.95), 3),
+                "python_p95_ms": round(_percentile(python_vector_values, 0.95), 3),
+                "numpy_p95_ms": (
+                    round(_percentile(numpy_vector_values, 0.95), 3)
+                    if numpy_vector_values
+                    else None
+                ),
+                "numpy_speedup": (
+                    round(
+                        _percentile(python_vector_values, 0.95)
+                        / max(_percentile(numpy_vector_values, 0.95), 1e-9),
+                        3,
+                    )
+                    if numpy_vector_values
+                    else None
+                ),
+            },
             "pack": {"p95_ms": round(_percentile(pack_values, 0.95), 3)},
             "connect": connect_metrics,
         },
@@ -211,6 +244,7 @@ def run_suite(rows: int, vector_dim: int) -> dict[str, Any]:
             "Fixed-seed synthetic data; no network or embedding API calls.",
             "Timing values are observational baselines and are not CI thresholds.",
             "Pack timing covers deterministic lexical retrieval and compact rendering.",
+            "Vector timing compares the exact Python and NumPy VectorIndex backends after NumPy cache warmup.",
         ],
     }
 

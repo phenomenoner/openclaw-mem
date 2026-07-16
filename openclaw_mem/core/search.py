@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from openclaw_mem.scope import normalize_scope_token
-from openclaw_mem.vector import rank_cosine, rank_rrf
+from openclaw_mem.core.vector_index import create_vector_index
+from openclaw_mem.vector import rank_rrf
 
 
 def _parse_detail(raw: Any) -> Dict[str, Any]:
@@ -177,17 +178,17 @@ def vector_search(
     model: str,
     limit: int = 20,
     table: str = "observation_embeddings",
+    vector_backend: str = "auto",
 ) -> List[Dict[str, Any]]:
     if table not in {"observation_embeddings", "observation_embeddings_en"}:
         raise ValueError("unsupported embeddings table")
-    rows = conn.execute(
-        f"SELECT observation_id, vector, norm FROM {table} WHERE model = ? AND dim = ?",
-        (model, len(query_vector)),
-    ).fetchall()
-    ranked = rank_cosine(
-        query_vec=query_vector,
-        items=((int(row[0]), row[1], float(row[2])) for row in rows),
+    index = create_vector_index(vector_backend)
+    ranked = index.search(
+        conn,
+        query_vector,
+        model=model,
         limit=max(1, int(limit)),
+        table=table,
     )
     if not ranked:
         return []
@@ -202,6 +203,7 @@ def vector_search(
         item = observation_map.get(row_id)
         if item:
             item["score"] = float(score)
+            item["vector_backend"] = index.name
             result.append(item)
     return result
 
