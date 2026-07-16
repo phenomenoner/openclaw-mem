@@ -66,4 +66,10 @@ def test_db_info_reports_migration_application(tmp_path: Path, capsys) -> None:
             "cost": "expensive",
             "applied": True,
         },
+        {
+            "id": 3,
+            "description": "build CJK trigram FTS index",
+            "cost": "expensive",
+            "applied": True,
+        },
     ]

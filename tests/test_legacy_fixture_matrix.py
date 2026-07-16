@@ -77,7 +77,7 @@ def test_legacy_fixture_read_query_migrate_and_rollback_matrix(
 
     plan = migrate_database(db, dry_run=True)
     assert plan["from_version"] == 0
-    assert [step["id"] for step in plan["steps"]] == [1, 2]
+    assert [step["id"] for step in plan["steps"]] == [1, 2, 3]
     assert _sha256(db) == pristine_hash
 
     receipt_path = tmp_path / f"{tag}-migration.json"
@@ -86,7 +86,7 @@ def test_legacy_fixture_read_query_migrate_and_rollback_matrix(
     migrated = sqlite3.connect(db)
     migrated.row_factory = sqlite3.Row
     try:
-        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert migrated.execute("PRAGMA user_version").fetchone()[0] == 3
         assert migrated.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 16
         assert migrated.execute("SELECT COUNT(*) FROM episodic_events").fetchone()[0] == 4
         _assert_golden(migrated, golden_queries)

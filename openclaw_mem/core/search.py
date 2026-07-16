@@ -109,6 +109,26 @@ def _cjk_fallback(
     return result[: int(limit)]
 
 
+def _trigram_rows(
+    conn: sqlite3.Connection, query: str, limit: int
+) -> List[sqlite3.Row]:
+    phrase = '"' + str(query).replace('"', '""') + '"'
+    return conn.execute(
+        """
+        SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
+               snippet(observations_fts_tri, 0, '[', ']', '…', 12) AS snippet,
+               snippet(observations_fts_tri, 1, '[', ']', '…', 12) AS snippet_en,
+               bm25(observations_fts_tri) AS score, o.detail_json
+        FROM observations_fts_tri
+        JOIN observations o ON o.id = observations_fts_tri.rowid
+        WHERE observations_fts_tri MATCH ?
+        ORDER BY score ASC, o.id DESC
+        LIMIT ?
+        """,
+        (phrase, int(limit)),
+    ).fetchall()
+
+
 def lexical_search(
     conn: sqlite3.Connection,
     query: str,
@@ -135,23 +155,66 @@ def lexical_search(
     def run_fts(value: str) -> List[sqlite3.Row]:
         return conn.execute(sql, (value, bounded_limit)).fetchall()
 
-    try:
-        rows = run_fts(query_text)
-    except sqlite3.OperationalError:
-        sanitized = " ".join(re.sub(r"[^\w\s]", " ", query_text, flags=re.UNICODE).split())
+    cjk_runs = re.findall(r"[\u3400-\u9fff]+", query_text)
+    has_cjk = bool(cjk_runs)
+    has_ascii = bool(re.search(r"[A-Za-z0-9]", query_text))
+    trigram_exists = bool(
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observations_fts_tri'"
+        ).fetchone()
+    )
+    lanes_used: List[str] = []
+
+    if has_cjk and len(query_text) < 3:
+        rows = _cjk_fallback(conn, query_text, bounded_limit, scope=scope)
+        lanes_used = ["like"]
+    elif has_cjk and trigram_exists:
         try:
-            rows = run_fts(sanitized) if sanitized and sanitized != query_text else []
+            trigram_rows = _trigram_rows(conn, query_text, bounded_limit)
         except sqlite3.OperationalError:
-            rows = []
-    if not rows:
-        tokens = [token for token in re.sub(r"[^\w\s]", " ", query_text, flags=re.UNICODE).split() if token]
-        if len(tokens) > 1:
+            trigram_rows = []
+        if has_ascii:
+            ascii_terms = re.findall(r"[A-Za-z0-9_]+", query_text)
             try:
-                rows = run_fts(" OR ".join(tokens))
+                unicode_rows = run_fts(" OR ".join(ascii_terms)) if ascii_terms else []
+            except sqlite3.OperationalError:
+                unicode_rows = []
+            unicode_map = {int(row["id"]): row for row in unicode_rows}
+            trigram_map = {int(row["id"]): row for row in trigram_rows}
+            fused = rank_rrf(
+                [list(unicode_map), list(trigram_map)], limit=bounded_limit
+            )
+            rows = [
+                unicode_map.get(row_id) or trigram_map[row_id]
+                for row_id, _score in fused
+            ]
+            lanes_used = ["unicode61", "trigram"]
+        else:
+            rows = trigram_rows
+            lanes_used = ["trigram"]
+        if not rows:
+            rows = _cjk_fallback(conn, query_text, bounded_limit, scope=scope)
+            lanes_used.append("like")
+    else:
+        lanes_used = ["unicode61"]
+        try:
+            rows = run_fts(query_text)
+        except sqlite3.OperationalError:
+            sanitized = " ".join(re.sub(r"[^\w\s]", " ", query_text, flags=re.UNICODE).split())
+            try:
+                rows = run_fts(sanitized) if sanitized and sanitized != query_text else []
             except sqlite3.OperationalError:
                 rows = []
-    if not rows and _cjk_terms(query_text):
-        rows = _cjk_fallback(conn, query_text, bounded_limit, scope=scope)
+        if not rows:
+            tokens = [token for token in re.sub(r"[^\w\s]", " ", query_text, flags=re.UNICODE).split() if token]
+            if len(tokens) > 1:
+                try:
+                    rows = run_fts(" OR ".join(tokens))
+                except sqlite3.OperationalError:
+                    rows = []
+        if not rows and has_cjk:
+            rows = _cjk_fallback(conn, query_text, bounded_limit, scope=scope)
+            lanes_used.append("like")
 
     normalized_scope = normalize_scope_token(scope)
     detail_map = {int(row["id"]): _parse_detail(row["detail_json"]) for row in rows}
@@ -159,6 +222,7 @@ def lexical_search(
     result: List[Dict[str, Any]] = []
     for row in rows:
         item = dict(row)
+        item["lanes_used"] = list(lanes_used)
         detail = detail_map.get(int(item["id"]), {})
         item.pop("detail_json", None)
         if normalized_scope and normalize_scope_token(detail.get("scope")) != normalized_scope:

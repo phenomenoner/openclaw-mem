@@ -77,7 +77,7 @@ def test_connect_legacy_v1_is_compat_read_without_hidden_rebuild(tmp_path: Path)
     try:
         state = db_core.migration_state(conn)
         assert state["compat_mode"] is True
-        assert state["pending"] == [2]
+        assert state["pending"] == [2, 3]
         assert "db migrate" in state["hint"]
         assert conn.execute("SELECT summary FROM observations WHERE id = 1").fetchone()[0] == "舊庫記憶"
         assert lexical_search(conn, "舊庫", limit=5)[0]["id"] == 1
@@ -96,7 +96,7 @@ def test_migrate_dry_run_is_zero_write(tmp_path: Path) -> None:
 
     assert plan["kind"] == "openclaw-mem.db.migration.plan.v1"
     assert plan["from_version"] == 1
-    assert plan["to_version"] == 2
+    assert plan["to_version"] == 3
     assert plan["steps"][0]["cost"] == "expensive"
     assert not Path(plan["backup_path"]).exists()
     assert _sha256(path) == before
@@ -111,13 +111,13 @@ def test_migrate_preserves_rows_rebuilds_search_and_writes_receipt(tmp_path: Pat
 
     assert receipt["kind"] == "openclaw-mem.db.migration.receipt.v1"
     assert receipt["from_version"] == 1
-    assert receipt["to_version"] == 2
+    assert receipt["to_version"] == 3
     assert receipt["row_counts_before"] == receipt["row_counts_after"]
     assert receipt_path.exists()
     assert Path(receipt["backup_path"]).exists()
     conn = sqlite3.connect(path)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert "summary_en" in {
             row[1] for row in conn.execute("PRAGMA table_info(observations_fts)")
         }

@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 from openclaw_mem import __version__
 
-CURRENT_DB_VERSION = 2
+CURRENT_DB_VERSION = 3
 _PACK_LIFECYCLE_SHADOW_TABLE = "pack_lifecycle_shadow_log"
 _SURROGATE_MIN = 0xD800
 _SURROGATE_MAX = 0xDFFF
@@ -108,7 +108,9 @@ def _connect(db_path: str) -> sqlite3.Connection:
             ).fetchone() is not None
             _init_db(conn)
             if not had_user_schema:
-                _apply_fts_search_text_migration(conn)
+                for migration in MIGRATIONS:
+                    if migration.id > 1:
+                        migration.apply(conn)
                 conn.execute(f"PRAGMA user_version = {CURRENT_DB_VERSION}")
                 conn.commit()
             user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -550,6 +552,10 @@ def _apply_fts_search_text_migration(conn: sqlite3.Connection) -> None:
         "content='observations', content_rowid='id')"
     )
     conn.execute("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')")
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observations_fts_tri'"
+    ).fetchone():
+        conn.execute("INSERT INTO observations_fts_tri(observations_fts_tri) VALUES('rebuild')")
 
     for trigger in ("episodic_events_ai", "episodic_events_ad", "episodic_events_au"):
         conn.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')
@@ -580,12 +586,28 @@ def _apply_fts_search_text_migration(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
+def _apply_trigram_migration(conn: sqlite3.Connection) -> None:
+    """Create and fully populate the derived CJK trigram FTS lane."""
+
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts_tri USING fts5("
+        "summary, summary_en, content='observations', content_rowid='id', tokenize='trigram')"
+    )
+    conn.execute("INSERT INTO observations_fts_tri(observations_fts_tri) VALUES('rebuild')")
+
+
 MIGRATIONS: Tuple[Migration, ...] = (
     Migration(id=1, description="baseline schema", apply=_init_db, cost="cheap"),
     Migration(
         id=2,
         description="rebuild bilingual and episodic FTS indexes",
         apply=_apply_fts_search_text_migration,
+        cost="expensive",
+    ),
+    Migration(
+        id=3,
+        description="build CJK trigram FTS index",
+        apply=_apply_trigram_migration,
         cost="expensive",
     ),
 )

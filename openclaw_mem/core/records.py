@@ -553,4 +553,11 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summa
         "INSERT INTO observations_fts (rowid, summary, summary_en, tool_name, detail_json) VALUES (?, ?, ?, ?, ?)",
         (rowid, summary, summary_en, tool_name, detail_json),
     )
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observations_fts_tri'"
+    ).fetchone():
+        conn.execute(
+            "INSERT INTO observations_fts_tri (rowid, summary, summary_en) VALUES (?, ?, ?)",
+            (rowid, summary, summary_en),
+        )
     return int(rowid)

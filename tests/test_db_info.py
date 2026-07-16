@@ -30,7 +30,7 @@ def test_db_info_reports_empty_stamped_database(tmp_path: Path) -> None:
     finally:
         conn.close()
     assert payload["kind"] == "openclaw-mem.db.info.v1"
-    assert payload["user_version"] == 2
+    assert payload["user_version"] == 3
     assert payload["tables"]["observations"] == 0
     assert payload["fts_integrity"]["observations_fts"] is True
     assert payload["summary_en_coverage"] == {"present": 0, "total": 0, "ratio": 0.0}
@@ -76,5 +76,5 @@ def test_db_info_readonly_connection_does_not_change_file(tmp_path: Path) -> Non
             payload = _info(readonly, db)
         finally:
             readonly.close()
-    assert payload["user_version"] == 2
+    assert payload["user_version"] == 3
     assert _sha256(db) == before
