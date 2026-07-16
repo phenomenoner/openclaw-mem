@@ -1560,6 +1560,21 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summa
     return int(rowid)
 
 
+# Stable core owns these implementations. Keep the historical private names as
+# compatibility re-exports until the CLI package split in T11.
+from openclaw_mem.core.db import (  # noqa: E402
+    CURRENT_DB_VERSION as CURRENT_DB_VERSION,
+    MIGRATIONS as MIGRATIONS,
+    Migration as Migration,
+    _connect as _connect,
+    _enable_wal_best_effort as _enable_wal_best_effort,
+    _init_db as _init_db,
+    _sanitize_jsonable_surrogates as _sanitize_jsonable_surrogates,
+    _sanitize_str_surrogates as _sanitize_str_surrogates,
+)
+from openclaw_mem.core.records import _insert_observation as _insert_observation  # noqa: E402
+
+
 def _iter_jsonl(fp) -> Iterable[Dict[str, Any]]:
     for line in fp:
         line = line.strip()

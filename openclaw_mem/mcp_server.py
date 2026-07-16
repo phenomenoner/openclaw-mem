@@ -24,7 +24,9 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from openclaw_mem.cli import _connect, _insert_observation, cmd_pack
+from openclaw_mem.cli import cmd_pack
+from openclaw_mem.core.api import connect as _connect, store_observation as _insert_observation
+from openclaw_mem.core.db import DEFAULT_DB
 from openclaw_mem import context_pack_v1
 from openclaw_mem.channel_a import is_private_text
 
@@ -411,8 +413,6 @@ def main(argv: list[str] | None = None) -> None:
     if args.tool_descriptions:
         print(json.dumps(tool_manifest(), ensure_ascii=False, indent=2, sort_keys=True))
         return
-    from openclaw_mem.cli import DEFAULT_DB
-
     serve(args.db or DEFAULT_DB)
 
 
