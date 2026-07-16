@@ -12,6 +12,8 @@ Goal: make upgrades **observable, rollbackable, and non-destructive**.
 
 - **Observation JSONL**: append-only capture log (from OpenClaw plugin) used as ingest source.
 - **SQLite DB**: openclaw-mem ledger (FTS + optional embeddings).
+- **Migration receipt**: hash-bound record of the source DB, backup, schema
+  transition, invariants, and rollback inputs.
 - **Triage state**: a small JSON file to dedupe alerts.
 
 ---
@@ -24,9 +26,48 @@ Think of each node as a “system test point”.
 **What must remain true:**
 - `detail_json.importance` is **fill-missing only** (never overwrite existing values).
 - Legacy `detail_json.importance` numeric values remain readable.
-- No mandatory DB migrations / schema rewrites.
+- Read-only commands do not migrate or create `-wal` / `-shm` sidecars.
+- An expensive schema rewrite runs only through explicit `db migrate`; dry-run
+  is zero-write, the write path creates a backup, and rollback requires the
+  matching receipt.
 
 **Why:** if this breaks, upgrades risk corrupting operator state.
+
+### Node 0a — Inspect, preview, migrate, and retain rollback proof
+
+Run this node before starting a newer writer against an existing DB. Replace the
+paths with operator-controlled locations; do not commit the DB, backup, or
+receipt because metadata can still be sensitive.
+
+```bash
+DB=/path/to/openclaw-mem.sqlite
+RECEIPT=/safe/operator/path/openclaw-mem-migration.json
+
+openclaw-mem db info --db "$DB" --json
+openclaw-mem db migrate --db "$DB" --dry-run --json
+openclaw-mem db migrate --db "$DB" --receipt-out "$RECEIPT" --json
+openclaw-mem db info --db "$DB" --json
+openclaw-mem doctor --db "$DB" --json
+```
+
+Hard gates after migration:
+
+- `db info` reports the current supported schema and no future-version error.
+- Source row-count invariants in the migration receipt pass.
+- The receipt and its referenced backup exist outside the repository.
+- `doctor` has no fatal DB or embedding-integrity error; warn-only missing
+  optional embeddings are acceptable when that lane is unused.
+- A representative search and pack smoke returns the expected known records.
+
+If post-migration validation fails, stop writers and use the exact receipt:
+
+```bash
+openclaw-mem db rollback --db "$DB" --receipt "$RECEIPT" --json
+openclaw-mem db info --db "$DB" --json
+```
+
+Rollback preserves the displaced migrated DB with a `.rolledback` suffix. Do
+not delete either copy until the operator has revalidated retrieval.
 
 ---
 
@@ -84,7 +125,8 @@ Think of each node as a “system test point”.
 ## Upgrade gates (when it’s “safe to upgrade”)
 
 - **MVP gate (safe-ish):** Node 0 + 1 + 2 + 3
-  - Meaning: you won’t go blind (capture/ingest/triage still work) and data won’t get rewritten.
+  - Meaning: the schema transition is backed up and verified, and capture,
+    ingest, and triage still work without silent rewriting.
 
 - **Ops gate (safe to operate):** MVP gate + Node 5
   - Meaning: your day-to-day workflows won’t break or spam.
@@ -152,7 +194,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --db ~/.openclaw/memory/
 
 Prefer these aggregated artifacts after an upgrade:
 
-1) **DB status JSON** (counts + min/max timestamps)
+1) **DB info + migration receipt** (schema, aggregate counts, backup/hash proof)
 2) **Harvest summary JSON** (inserted/ingested counts + archive path)
 3) **Triage JSON** (`needs_attention`, `found_new`, etc.)
 4) **Label distribution** (aggregate counts only; no raw text)

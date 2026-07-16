@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add governed SQLite schema inspection, migration, rollback, FTS rebuild, and
+  language backfill through `db info|migrate|rollback|reindex|backfill`.
+- Add exact optional NumPy vector search and a local FastEmbed provider
+  (`openclaw-context-pack[embed]`) while retaining the API provider as default.
+- Add deterministic bilingual language routing, CJK trigram retrieval, mixed
+  lexical fusion, retrieval KPI receipts, and a balanced golden recall gate.
+- Add embedding integrity diagnostics to `db info` and warn-level `doctor`
+  output, including orphan/model/dimension outlier counts.
+- Add ring-tiered memory/governance/labs skill cards and read-only
+  `skill-curator lint` validation against the live CLI command tree.
 - Add opt-in graph-assisted search: `search --graph --graph-path <graph.json>`
   blends deterministic graph-neighborhood evidence into FTS results with
   `rank_components` / `hybrid_score` trace fields
@@ -30,6 +40,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over source-linked JSONL fixtures; guard output is advisory-only and always
   records `writes_performed=false`.
 
+### Changed
+
+- Move stable DB, records, episodic, search, pack, embedding, privacy, and
+  vector-index behavior behind output-free core APIs; keep CLI and MCP
+  compatibility adapters at their existing public import paths.
+- Move experimental continuity, self, Dream Lite, GBrain, and goal modules into
+  `openclaw_mem.labs`; legacy imports remain available with deprecation warnings
+  and labs commands remain callable through `--help-all`.
+- Make Qdrant and FastEmbed explicit optional extras so the default install
+  stays local SQLite-only and does not pull either vector runtime.
+
+### Fixed
+
+- Preserve exact multi-token ASCII retrieval when bilingual fallback activates;
+  fallback now requires every ASCII term and cannot widen an established match.
+- Decode subprocess text explicitly as UTF-8 across supported Windows paths,
+  removing locale-dependent cp950 failures.
+- Preserve historical v1.9.26 and v1.9.31 database readability, row counts, and
+  rollback invariants through generated compatibility fixtures.
+
 ### Safety
 
 - Keep bridge canonical writes governed: unapproved `bridge store` requests are
@@ -47,6 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verification
 
+- `openclaw-mem skill-curator lint --all --skill-root skills --json`
+- `python -m pytest tests/test_legacy_fixture_matrix.py tests/test_golden_recall_gate.py -q`
+- Run A full gate: `931 passed, 3 skipped, 87 subtests passed`.
 - `uv run -- python -m unittest discover -s tests -p "test_*.py"`
 - `uv run python -m pytest tests\test_bridge_recall_v1.py tests\test_windows_console_wrapper_bridge.py -q`
 - `uv run --with pytest -- python -m pytest tests -q`
