@@ -108,6 +108,7 @@ class TestJsonContracts(unittest.TestCase):
             {
                 "bundle_text", "items", "citations", "trace", "context_pack", "vector_backend",
                 "query_lang", "lane_hits", "fallback_triggered", "cross_lang_recovered",
+                "vector_backend_selection",
             },
             "pack",
         )
@@ -436,6 +437,7 @@ class TestJsonContracts(unittest.TestCase):
                 "lane_hits",
                 "fallback_triggered",
                 "cross_lang_recovered",
+                "vector_backend_selection",
             },
             "pack",
         )
@@ -658,7 +660,7 @@ class TestJsonContracts(unittest.TestCase):
             {
                 "bundle_text", "items", "citations", "context_pack", "trace", "trust_policy",
                 "policy_surface", "vector_backend", "query_lang", "lane_hits",
-                "fallback_triggered", "cross_lang_recovered",
+                "fallback_triggered", "cross_lang_recovered", "vector_backend_selection",
             },
             "pack.trust_policy",
         )

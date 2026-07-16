@@ -67,7 +67,11 @@ from openclaw_mem.core.embeddings import (
 )
 from openclaw_mem.core.search import lexical_search_with_receipt as core_lexical_search_with_receipt
 from openclaw_mem.core.search import vector_search as core_vector_search
-from openclaw_mem.core.vector_index import create_vector_index
+from openclaw_mem.core.vector_index import (
+    create_vector_index,
+    rebuild_sqlite_vec_indexes,
+    sqlite_vec_index_status,
+)
 from openclaw_mem.core.skill_lint import command_schema_from_parser, lint_skill_tree
 from openclaw_mem.core.recall import recall as core_recall
 from openclaw_mem.core.curation import rollback_optimize_assist
@@ -1896,6 +1900,7 @@ def _embedding_integrity(conn: sqlite3.Connection) -> Dict[str, Any]:
 
 
 def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    vec_index_status = sqlite_vec_index_status(conn)
     table_names = [
         str(row[0])
         for row in conn.execute(
@@ -1982,6 +1987,7 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "fts_integrity": fts_integrity,
             "embeddings": {
                 **embedding_tables,
+                "sqlite_vec": vec_index_status,
                 "orphan_count": embedding_integrity["orphan_count"],
                 "model_outlier_count": embedding_integrity["model_outlier_count"],
                 "dim_outlier_count": embedding_integrity["dim_outlier_count"],
@@ -2030,20 +2036,28 @@ def cmd_db_backfill(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 
 def cmd_db_reindex(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    if not bool(getattr(args, "fts", False)):
-        raise ValueError("db reindex requires --fts")
+    rebuild_fts = bool(getattr(args, "fts", False))
+    rebuild_vec = bool(getattr(args, "vec", False))
+    if not rebuild_fts and not rebuild_vec:
+        raise ValueError("db reindex requires --fts and/or --vec")
     before = _database_table_counts(conn)
-    _apply_fts_search_text_migration(conn)
+    vec_receipt = None
+    if rebuild_fts:
+        _apply_fts_search_text_migration(conn)
+    if rebuild_vec:
+        vec_receipt = rebuild_sqlite_vec_indexes(conn)
     conn.commit()
     after = _database_table_counts(conn)
     if before != after:
-        raise RuntimeError("FTS reindex changed source-table row counts")
+        raise RuntimeError("database reindex changed source-table row counts")
     _emit(
         {
             "kind": "openclaw-mem.db.reindex.receipt.v1",
-            "backend": "fts5",
+            "backend": "fts5+sqlite-vec" if rebuild_fts and rebuild_vec else "fts5" if rebuild_fts else "sqlite-vec",
+            "backends": [name for name, enabled in (("fts5", rebuild_fts), ("sqlite-vec", rebuild_vec)) if enabled],
             "row_counts_before": before,
             "row_counts_after": after,
+            "sqlite_vec": vec_receipt,
         },
         args.json,
     )
@@ -8261,6 +8275,8 @@ def _hybrid_retrieve(
         if not api_key and (need_vec or need_vec_en):
             print("Warning: No API key, skipping vector retrieval", file=sys.stderr)
 
+    actual_vector_backend = vector_index.name
+
     lexical_receipt = core_lexical_search_with_receipt(
         conn,
         query,
@@ -8274,6 +8290,9 @@ def _hybrid_retrieve(
         "vector": len(vec_ids),
         "vector_en": len(vec_en_ids),
     }
+    retrieval_receipt["vector_backend_selection"] = dict(
+        getattr(vector_index, "receipt", {"requested": actual_vector_backend, "selected": actual_vector_backend})
+    )
 
     ranked_lists = [fts_ids, vec_ids]
     if vec_en_ids:
@@ -20475,6 +20494,7 @@ def build_parser() -> argparse.ArgumentParser:
     db_reindex = db_sub.add_parser("reindex", help="Explicitly rebuild derived database indexes")
     add_common(db_reindex)
     db_reindex.add_argument("--fts", action="store_true", help="Rebuild FTS5 indexes and episodic search text")
+    db_reindex.add_argument("--vec", action="store_true", help="Rebuild persisted sqlite-vec indexes from embeddings")
     db_reindex.set_defaults(func=cmd_db_reindex)
 
     sp = sub.add_parser("service-store", help="Inspect or initialize harness service-store readiness file")
@@ -21071,7 +21091,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--scope", default=configured_scope, help="Optional exact memory scope")
     sp.add_argument("--model", help="Embedding model; defaults to the dominant stored model")
     sp.add_argument("--base-url", default=defaults.openai_base_url(), help="Embedding API base URL")
-    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default=configured_vector_backend)
+    sp.add_argument("--vector-backend", choices=["auto", "sqlite-vec", "python", "numpy"], default=configured_vector_backend)
     sp.add_argument("--graph-path", help="Portable graph JSON used by graph mode")
     sp.add_argument("--graph-readiness-state", help="Optional graph readiness JSON state")
     sp.add_argument("--graph-stale-after-days", type=int, default=30)
@@ -21281,7 +21301,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--limit", type=int, default=20)
     sp.add_argument("--query-vector-json", help="Provide query vector as JSON array (testing/offline)")
     sp.add_argument("--query-vector-file", help="Provide query vector from JSON file (testing/offline)")
-    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default=configured_vector_backend)
+    sp.add_argument("--vector-backend", choices=["auto", "sqlite-vec", "python", "numpy"], default=configured_vector_backend)
     sp.set_defaults(func=cmd_vsearch)
 
     sp = sub.add_parser("hybrid", help="Hybrid search (Vector + FTS) using RRF")
@@ -21320,7 +21340,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--rerank-api-key", help="Reranker API key (or env: JINA_API_KEY/COHERE_API_KEY)")
     sp.add_argument("--rerank-base-url", help="Optional reranker endpoint override")
     sp.add_argument("--rerank-timeout-sec", type=int, default=15, help="Reranker HTTP timeout in seconds")
-    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default=configured_vector_backend)
+    sp.add_argument("--vector-backend", choices=["auto", "sqlite-vec", "python", "numpy"], default=configured_vector_backend)
     sp.set_defaults(func=cmd_hybrid)
 
     sp = sub.add_parser("pack", help="Build a compact, cited bundle from hybrid retrieval")
@@ -21335,7 +21355,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("--query", required=True, help="Pack query text")
     sp.add_argument("--query-en", help="Optional English query for bilingual retrieval")
-    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default=configured_vector_backend)
+    sp.add_argument("--vector-backend", choices=["auto", "sqlite-vec", "python", "numpy"], default=configured_vector_backend)
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=configured_pack_budget, help="Token budget for bundle text")
     sp.add_argument("--tail-text", action="append", default=None, help="Protected recent-tail line to append at assembly time (repeatable)")

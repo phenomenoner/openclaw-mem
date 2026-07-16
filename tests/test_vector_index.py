@@ -110,10 +110,12 @@ def test_numpy_cache_invalidates_when_embedding_rowcount_changes() -> None:
 
 def test_auto_backend_falls_back_to_python_when_numpy_is_unavailable(monkeypatch) -> None:
     monkeypatch.setattr(
+        "openclaw_mem.core.vector_index._load_sqlite_vec", lambda: None
+    )
+    monkeypatch.setattr(
         "openclaw_mem.core.vector_index._load_numpy", lambda: None
     )
     index = create_vector_index("auto")
-    assert isinstance(index, PurePythonIndex)
     assert index.name == "python"
 
 

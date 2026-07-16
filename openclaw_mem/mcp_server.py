@@ -111,7 +111,7 @@ TOOLS: tuple[ToolDef, ...] = (
                 "baseUrl": {"type": "string"},
                 "vectorBackend": {
                     "type": "string",
-                    "enum": ["auto", "python", "numpy"],
+                    "enum": ["auto", "sqlite-vec", "python", "numpy"],
                     "default": "auto",
                 },
                 "graphPath": {"type": "string"},

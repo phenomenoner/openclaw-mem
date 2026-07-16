@@ -66,7 +66,8 @@ def build_pack(
     model_name = str(model or defaults.embed_model())
     vector_ids: List[int] = []
     vector_en_ids: List[int] = []
-    actual_vector_backend = create_vector_index(vector_backend).name
+    requested_vector_backend = str(vector_backend or "auto")
+    actual_vector_backend = create_vector_index(requested_vector_backend).name
     has_vectors = conn.execute(
         "SELECT 1 FROM observation_embeddings WHERE model = ? LIMIT 1", (model_name,)
     ).fetchone() is not None
@@ -75,16 +76,16 @@ def build_pack(
         try:
             inputs = [query_text] + ([query_en] if query_en else [])
             vectors = OpenAIEmbeddingsClient(api_key, base_url).embed(inputs, model=model_name)
-            vector_ids = [
-                int(item["id"])
-                for item in vector_search(
-                    conn,
-                    vectors[0],
-                    model=model_name,
-                    limit=candidate_limit,
-                    vector_backend=actual_vector_backend,
-                )
-            ]
+            vector_rows = vector_search(
+                conn,
+                vectors[0],
+                model=model_name,
+                limit=candidate_limit,
+                vector_backend=requested_vector_backend,
+            )
+            if vector_rows:
+                actual_vector_backend = str(vector_rows[0].get("vector_backend") or actual_vector_backend)
+            vector_ids = [int(item["id"]) for item in vector_rows]
             if query_en and len(vectors) > 1:
                 english_rows = vector_search(
                     conn,
@@ -92,7 +93,7 @@ def build_pack(
                     model=model_name,
                     limit=candidate_limit,
                     table="observation_embeddings_en",
-                    vector_backend=actual_vector_backend,
+                    vector_backend=requested_vector_backend,
                 )
                 if not english_rows:
                     english_rows = vector_search(
@@ -100,7 +101,7 @@ def build_pack(
                         vectors[1],
                         model=model_name,
                         limit=candidate_limit,
-                        vector_backend=actual_vector_backend,
+                        vector_backend=requested_vector_backend,
                     )
                 vector_en_ids = [int(item["id"]) for item in english_rows]
             candidates = hybrid_search(
