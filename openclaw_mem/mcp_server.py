@@ -22,10 +22,12 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from openclaw_mem.core.api import connect as _connect, pack as _pack, store_observation as _insert_observation
+from openclaw_mem.core.api import connect as _connect, store_observation as _insert_observation
 from openclaw_mem.core.db import DEFAULT_DB
-from openclaw_mem import context_pack_v1
 from openclaw_mem.core.privacy import is_private_text
+from openclaw_mem.core.recall import recall as core_recall
+from openclaw_mem.graph.code_extract import query_impact as query_code_impact
+from openclaw_mem.graph.query import query_downstream, query_subgraph, query_upstream
 
 
 SCHEMA = "openclaw-mem.mcp.tools.v1"
@@ -88,6 +90,87 @@ TOOLS: tuple[ToolDef, ...] = (
                 "budgetTokens": {"type": "integer", "minimum": 64, "maximum": 8000, "default": 1200},
             },
             "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    ToolDef(
+        name="mem_recall",
+        description="Recall memories through the shared lexical, vector, hybrid, or graph router.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto", "lexical", "vector", "hybrid", "graph"],
+                    "default": "auto",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+                "scope": {"type": "string"},
+                "model": {"type": "string"},
+                "baseUrl": {"type": "string"},
+                "vectorBackend": {
+                    "type": "string",
+                    "enum": ["auto", "python", "numpy"],
+                    "default": "auto",
+                },
+                "graphPath": {"type": "string"},
+                "graphReadinessState": {"type": "string"},
+                "graphStaleAfterDays": {"type": "integer", "minimum": 0, "default": 30},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    ToolDef(
+        name="graph_neighbors",
+        description="Read immediate upstream, downstream, or bidirectional neighbors from the graph store.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "dbPath": {"type": "string"},
+                "nodeId": {"type": "string"},
+                "direction": {
+                    "type": "string",
+                    "enum": ["upstream", "downstream", "both"],
+                    "default": "both",
+                },
+            },
+            "required": ["nodeId"],
+            "additionalProperties": False,
+        },
+    ),
+    ToolDef(
+        name="graph_path",
+        description="Read a bounded multi-hop subgraph around one node from the graph store.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "dbPath": {"type": "string"},
+                "nodeId": {"type": "string"},
+                "hops": {"type": "integer", "minimum": 0, "maximum": 6, "default": 2},
+                "direction": {
+                    "type": "string",
+                    "enum": ["upstream", "downstream", "both"],
+                    "default": "both",
+                },
+                "maxNodes": {"type": "integer", "minimum": 1, "maximum": 500, "default": 40},
+                "maxEdges": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 80},
+            },
+            "required": ["nodeId"],
+            "additionalProperties": False,
+        },
+    ),
+    ToolDef(
+        name="graph_impact",
+        description="Read the bounded code-graph impact neighborhood for one repository-relative file path.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "graphPath": {"type": "string"},
+                "path": {"type": "string"},
+            },
+            "required": ["graphPath", "path"],
             "additionalProperties": False,
         },
     ),
@@ -306,15 +389,103 @@ def mem_pack(conn: sqlite3.Connection, args: dict[str, Any]) -> dict[str, Any]:
     query = str(args.get("query") or "").strip()
     if not query:
         raise ValueError("query is required")
-    payload = _pack(
+    # The CLI handler owns the full pack policy (trust, graph, trace, tails,
+    # budget accounting).  Invoke that handler in-process so MCP cannot drift
+    # into a second implementation of the product contract.
+    from openclaw_mem.cli import _invoke_cli_json
+
+    return _invoke_cli_json(
+        conn,
+        [
+            "pack",
+            "--query",
+            query,
+            "--limit",
+            str(max(1, min(30, int(args.get("limit") or 8)))),
+            "--budget-tokens",
+            str(max(64, min(8000, int(args.get("budgetTokens") or 1200)))),
+        ],
+    )
+
+
+def mem_recall(conn: sqlite3.Connection, args: dict[str, Any]) -> dict[str, Any]:
+    query = str(args.get("query") or "").strip()
+    if not query:
+        raise ValueError("query is required")
+    return core_recall(
         conn,
         query,
-        limit=max(1, min(30, int(args.get("limit") or 8))),
-        budget_tokens=max(64, min(8000, int(args.get("budgetTokens") or 1200))),
+        mode=str(args.get("mode") or "auto"),
+        limit=max(1, min(100, int(args.get("limit") or 20))),
+        scope=str(args["scope"]) if args.get("scope") is not None else None,
+        model=str(args["model"]) if args.get("model") is not None else None,
+        base_url=str(args["baseUrl"]) if args.get("baseUrl") is not None else None,
+        vector_backend=str(args.get("vectorBackend") or "auto"),
+        graph_path=str(args["graphPath"]) if args.get("graphPath") is not None else None,
+        graph_readiness_state=(
+            str(args["graphReadinessState"])
+            if args.get("graphReadinessState") is not None
+            else None
+        ),
+        graph_stale_after_days=max(0, int(args.get("graphStaleAfterDays") or 30)),
     )
-    if payload.get("context_pack", {}).get("schema") != context_pack_v1.CONTEXT_PACK_V1_SCHEMA:
-        raise RuntimeError("unexpected ContextPack schema")
-    return {"ok": True, "context_pack": payload.get("context_pack"), "budget": payload.get("budget")}
+
+
+def _graph_db_path(conn: sqlite3.Connection, args: dict[str, Any]) -> str:
+    explicit = str(args.get("dbPath") or "").strip()
+    if explicit:
+        return explicit
+    row = conn.execute("PRAGMA database_list").fetchone()
+    inferred = str(row[2] if row is not None and len(row) > 2 else "").strip()
+    if not inferred:
+        raise ValueError("dbPath is required when the MCP database is in-memory")
+    return inferred
+
+
+def graph_neighbors(conn: sqlite3.Connection, args: dict[str, Any]) -> dict[str, Any]:
+    db_path = _graph_db_path(conn, args)
+    node_id = str(args.get("nodeId") or "").strip()
+    if not node_id:
+        raise ValueError("nodeId is required")
+    direction = str(args.get("direction") or "both").strip().lower()
+    if direction == "upstream":
+        return query_upstream(db_path=db_path, node_id=node_id)
+    if direction == "downstream":
+        return query_downstream(db_path=db_path, node_id=node_id)
+    if direction != "both":
+        raise ValueError("direction must be one of: upstream, downstream, both")
+    upstream = query_upstream(db_path=db_path, node_id=node_id)
+    downstream = query_downstream(db_path=db_path, node_id=node_id)
+    return {
+        "ok": True,
+        "query": "neighbors",
+        "node_id": node_id,
+        "direction": "both",
+        "count": int(upstream["count"]) + int(downstream["count"]),
+        "upstream": upstream,
+        "downstream": downstream,
+    }
+
+
+def graph_path(conn: sqlite3.Connection, args: dict[str, Any]) -> dict[str, Any]:
+    return query_subgraph(
+        db_path=_graph_db_path(conn, args),
+        node_id=str(args.get("nodeId") or ""),
+        hops=int(args.get("hops") if args.get("hops") is not None else 2),
+        direction=str(args.get("direction") or "both"),
+        max_nodes=int(args.get("maxNodes") if args.get("maxNodes") is not None else 40),
+        max_edges=int(args.get("maxEdges") if args.get("maxEdges") is not None else 80),
+    )
+
+
+def graph_impact(_conn: sqlite3.Connection, args: dict[str, Any]) -> dict[str, Any]:
+    graph_path_value = str(args.get("graphPath") or "").strip()
+    path = str(args.get("path") or "").strip()
+    if not graph_path_value:
+        raise ValueError("graphPath is required")
+    if not path:
+        raise ValueError("path is required")
+    return query_code_impact(graph_path=graph_path_value, path=path)
 
 
 TOOL_HANDLERS: dict[str, Callable[[sqlite3.Connection, dict[str, Any]], dict[str, Any]]] = {
@@ -322,6 +493,10 @@ TOOL_HANDLERS: dict[str, Callable[[sqlite3.Connection, dict[str, Any]], dict[str
     "mem_timeline": mem_timeline,
     "mem_get": mem_get,
     "mem_pack": mem_pack,
+    "mem_recall": mem_recall,
+    "graph_neighbors": graph_neighbors,
+    "graph_path": graph_path,
+    "graph_impact": graph_impact,
     "mem_store": mem_store,
     "mem_status": mem_status,
     "mem_trust_inspect": mem_trust_inspect,
@@ -370,8 +545,26 @@ def handle_jsonrpc(conn: sqlite3.Connection, request: dict[str, Any]) -> dict[st
         else:
             return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"method not found: {method}"}}
         return {"jsonrpc": "2.0", "id": rid, "result": result}
+    except ValueError as exc:
+        return {
+            "jsonrpc": "2.0",
+            "id": rid,
+            "error": {
+                "code": -32602,
+                "message": str(exc),
+                "data": {"hint": "check the tool input schema and required arguments"},
+            },
+        }
     except Exception as exc:
-        return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32000, "message": str(exc)}}
+        return {
+            "jsonrpc": "2.0",
+            "id": rid,
+            "error": {
+                "code": -32000,
+                "message": str(exc),
+                "data": {"hint": "run openclaw-mem doctor --json and verify local paths"},
+            },
+        }
 
 
 def serve(db_path: str) -> None:
