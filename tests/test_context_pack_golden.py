@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import itertools
 import json
 import unittest
 from contextlib import ExitStack
@@ -103,7 +104,13 @@ class TestContextPackGoldenHarness(unittest.TestCase):
         if "graph_pack_error" in row:
             patchers.append(patch("openclaw_mem.cli._graph_pack_payload", side_effect=RuntimeError(str(row["graph_pack_error"]))))
         if "perf_counter" in row:
-            patchers.append(patch("openclaw_mem.cli.time.perf_counter", side_effect=list(row["perf_counter"])))
+            clock_values = list(row["perf_counter"])
+            patchers.append(
+                patch(
+                    "openclaw_mem.cli.time.perf_counter",
+                    side_effect=itertools.chain(clock_values, itertools.repeat(clock_values[-1])),
+                )
+            )
 
         try:
             buf = io.StringIO()

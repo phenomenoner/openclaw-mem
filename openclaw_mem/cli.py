@@ -9868,9 +9868,12 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     nice_cap = 100
 
     started = time.perf_counter()
+    stage_timing_ms: Dict[str, float] = {}
 
+    stage_started = time.perf_counter()
     graph_state = _pack_graph_preflight_optional(conn, query=query, args=args)
     graph_aware_pack = _pack_graph_aware_optional(query=query, args=args)
+    stage_timing_ms["graph"] = round((time.perf_counter() - stage_started) * 1000, 3)
 
     retrieval_args = argparse.Namespace(
         query=query,
@@ -9887,6 +9890,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         rerank_timeout_sec=15,
     )
 
+    candidates_started = time.perf_counter()
     try:
         state = _hybrid_retrieve(
             conn,
@@ -9907,7 +9911,9 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         detail_map = {int(r["id"]): _pack_parse_detail_json(r["detail_json"]) for r in detail_rows}
 
     ordered_ids = _filter_superseded_ids(ordered_ids, detail_map)
+    candidates_elapsed_ms = (time.perf_counter() - candidates_started) * 1000
 
+    stage_started = time.perf_counter()
     trust_policy = _pack_trust_apply_policy(
         ordered_ids=ordered_ids,
         detail_map=detail_map,
@@ -9919,7 +9925,9 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         for item in list(trust_policy.get("decisions") or [])
         if str(item.get("recordRef") or "").strip()
     }
+    stage_timing_ms["trust_policy"] = round((time.perf_counter() - stage_started) * 1000, 3)
 
+    candidates_started = time.perf_counter()
     policy_candidate_limit = max(limit * 3, limit + 8)
     policy_candidate_ids, synthesis_pref = _hybrid_prefer_synthesis_cards(
         conn,
@@ -9930,7 +9938,10 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     )
     memory_candidates = _pack_build_memory_candidates(state, detail_map, policy_candidate_ids)
     memory_candidates.sort(key=_pack_policy_sort_key)
+    candidates_elapsed_ms += (time.perf_counter() - candidates_started) * 1000
+    stage_timing_ms["candidates"] = round(candidates_elapsed_ms, 3)
 
+    stage_started = time.perf_counter()
     try:
         tail_candidates = _pack_build_tail_candidates(args)
     except ValueError as e:
@@ -10163,7 +10174,9 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             ]
         ),
     )
+    stage_timing_ms["budget"] = round((time.perf_counter() - stage_started) * 1000, 3)
 
+    stage_started = time.perf_counter()
     payload: Dict[str, Any] = {
         "bundle_text": bundle_text,
         "items": selected_items,
@@ -10350,7 +10363,9 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             )
 
     if bool(args.trace):
-        duration_ms = int((time.perf_counter() - started) * 1000)
+        stage_timing_ms["render"] = round((time.perf_counter() - stage_started) * 1000, 3)
+        total_ms = round((time.perf_counter() - started) * 1000, 3)
+        duration_ms = int(total_ms)
         included_refs = [item["recordRef"] for item in selected_items]
         included_candidates = [c for c in candidate_trace if bool(getattr(c.decision, "included", False))]
         rationale_missing_count = sum(1 for c in included_candidates if not list(getattr(c.decision, "reason", []) or []))
@@ -10453,7 +10468,11 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                     allIncludedHaveCitations=all_included_have_citations,
                 ),
             ),
-            timing=pack_trace_v1.PackTraceV1Timing(durationMs=duration_ms),
+            timing=pack_trace_v1.PackTraceV1Timing(
+                durationMs=duration_ms,
+                stages=stage_timing_ms,
+                total_ms=total_ms,
+            ),
             extensions=trace_extensions,
         )
         payload["trace"] = pack_trace_v1.to_dict(trace)

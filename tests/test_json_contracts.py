@@ -526,7 +526,13 @@ class TestJsonContracts(unittest.TestCase):
             },
             "pack.trace.output.coverage",
         )
-        self._assert_exact_keys(trace["timing"], {"durationMs"}, "pack.trace.timing")
+        self._assert_exact_keys(trace["timing"], {"durationMs", "stages", "total_ms"}, "pack.trace.timing")
+        self.assertEqual(
+            set(trace["timing"]["stages"]),
+            {"candidates", "trust_policy", "graph", "budget", "render"},
+        )
+        self.assertTrue(all(value >= 0 for value in trace["timing"]["stages"].values()))
+        self.assertGreaterEqual(trace["timing"]["total_ms"], 0)
         self.assertIsInstance(trace["extensions"], dict)
 
         lifecycle = trace["extensions"].get("lifecycle_shadow")
