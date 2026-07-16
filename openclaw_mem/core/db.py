@@ -1,10 +1,12 @@
 """Stable SQLite storage primitives shared by CLI and integrations."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +14,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 from openclaw_mem import __version__
 
-CURRENT_DB_VERSION = 1
+CURRENT_DB_VERSION = 2
 _PACK_LIFECYCLE_SHADOW_TABLE = "pack_lifecycle_shadow_log"
 _SURROGATE_MIN = 0xD800
 _SURROGATE_MAX = 0xDFFF
@@ -87,9 +89,8 @@ def _connect(db_path: str) -> sqlite3.Connection:
     else:
         conn = sqlite3.connect(db_path, timeout=10.0)
     conn.row_factory = sqlite3.Row
-    _enable_wal_best_effort(conn)
+    user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
     if not skip_init:
-        user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
         if user_version > CURRENT_DB_VERSION:
             conn.close()
             raise RuntimeError(
@@ -97,8 +98,27 @@ def _connect(db_path: str) -> sqlite3.Connection:
                 f"{user_version} is newer than supported version {CURRENT_DB_VERSION}; "
                 "upgrade openclaw-mem or inspect it with a compatible read-only tool"
             )
+        if readonly_db:
+            conn.execute("PRAGMA busy_timeout=5000;")
+            return conn
         if user_version == 0:
+            had_user_schema = conn.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1"
+            ).fetchone() is not None
             _init_db(conn)
+            if not had_user_schema:
+                _apply_fts_search_text_migration(conn)
+                conn.execute(f"PRAGMA user_version = {CURRENT_DB_VERSION}")
+                conn.commit()
+            user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    # Opening a database with a pending expensive migration is deliberately a
+    # zero-write compatibility lane. Even switching journal mode would mutate
+    # the file, so WAL is enabled only once the database is current.
+    if user_version >= CURRENT_DB_VERSION:
+        _enable_wal_best_effort(conn)
+    else:
+        conn.execute("PRAGMA busy_timeout=5000;")
     return conn
 
 
@@ -133,24 +153,6 @@ def _init_db(conn: sqlite3.Connection) -> None:
         USING fts5(summary, summary_en, tool_name, detail_json, content='observations', content_rowid='id');
         """
     )
-
-    # If this DB already had an older FTS schema, rebuild once with summary_en included.
-    fts_cols = [r[1] for r in conn.execute("PRAGMA table_info(observations_fts)").fetchall()]
-    if "summary_en" not in fts_cols:
-        conn.execute("DROP TABLE IF EXISTS observations_fts")
-        conn.execute(
-            """
-            CREATE VIRTUAL TABLE observations_fts
-            USING fts5(summary, summary_en, tool_name, detail_json, content='observations', content_rowid='id');
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO observations_fts(rowid, summary, summary_en, tool_name, detail_json)
-            SELECT id, summary, summary_en, tool_name, detail_json
-            FROM observations;
-            """
-        )
 
     # Phase 3: vector embeddings (stored as float32 BLOB)
     conn.execute(
@@ -324,23 +326,6 @@ def _init_db(conn: sqlite3.Connection) -> None:
         """
     )
 
-    episodic_fts_cols = [r[1] for r in conn.execute("PRAGMA table_info(episodic_events_fts)").fetchall()]
-    if "search_text" not in episodic_fts_cols:
-        conn.execute("DROP TABLE IF EXISTS episodic_events_fts")
-        conn.execute(
-            """
-            CREATE VIRTUAL TABLE episodic_events_fts
-            USING fts5(summary, search_text, type, session_id, agent_id, content='episodic_events', content_rowid='id');
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO episodic_events_fts(rowid, summary, search_text, type, session_id, agent_id)
-            SELECT id, summary, search_text, type, session_id, agent_id
-            FROM episodic_events;
-            """
-        )
-
     conn.execute(
         """
         CREATE TRIGGER IF NOT EXISTS episodic_events_ai
@@ -375,32 +360,6 @@ def _init_db(conn: sqlite3.Connection) -> None:
         END;
         """
     )
-
-    for row in conn.execute(
-        "SELECT id, summary, payload_json, refs_json FROM episodic_events WHERE COALESCE(search_text, '') = ''"
-    ).fetchall():
-        conn.execute(
-            "UPDATE episodic_events SET search_text = ? WHERE id = ?",
-            (
-                _episodic_build_search_text(
-                    summary=str(row[1] or ""),
-                    payload_json=row[2],
-                    refs_json=row[3],
-                ),
-                int(row[0]),
-            ),
-        )
-
-    try:
-        fts_any = conn.execute("SELECT rowid FROM episodic_events_fts LIMIT 1").fetchone()
-    except sqlite3.OperationalError:
-        fts_any = True  # fail-open
-
-    if not fts_any:
-        total_row = conn.execute("SELECT COUNT(*) FROM episodic_events").fetchone()
-        total = int(total_row[0] or 0) if total_row else 0
-        if total > 0:
-            conn.execute("INSERT INTO episodic_events_fts(episodic_events_fts) VALUES('rebuild')")
 
     conn.execute(
         """
@@ -561,6 +520,240 @@ def _episodic_build_search_text(*, summary: str, payload_json: Any, refs_json: A
     return out
 
 
+def _apply_fts_search_text_migration(conn: sqlite3.Connection) -> None:
+    """Rebuild derived FTS generations and backfill episodic search text."""
+
+    episodic_cols = {row[1] for row in conn.execute("PRAGMA table_info(episodic_events)")}
+    if "search_text" not in episodic_cols:
+        conn.execute(
+            "ALTER TABLE episodic_events ADD COLUMN search_text TEXT NOT NULL DEFAULT ''"
+        )
+
+    for row in conn.execute(
+        "SELECT id, summary, payload_json, refs_json FROM episodic_events "
+        "WHERE COALESCE(search_text, '') = '' ORDER BY id"
+    ).fetchall():
+        conn.execute(
+            "UPDATE episodic_events SET search_text = ? WHERE id = ?",
+            (
+                _episodic_build_search_text(
+                    summary=str(row[1] or ""), payload_json=row[2], refs_json=row[3]
+                ),
+                int(row[0]),
+            ),
+        )
+
+    conn.execute("DROP TABLE IF EXISTS observations_fts")
+    conn.execute(
+        "CREATE VIRTUAL TABLE observations_fts USING fts5("
+        "summary, summary_en, tool_name, detail_json, "
+        "content='observations', content_rowid='id')"
+    )
+    conn.execute("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')")
+
+    for trigger in ("episodic_events_ai", "episodic_events_ad", "episodic_events_au"):
+        conn.execute(f'DROP TRIGGER IF EXISTS "{trigger}"')
+    conn.execute("DROP TABLE IF EXISTS episodic_events_fts")
+    conn.execute(
+        "CREATE VIRTUAL TABLE episodic_events_fts USING fts5("
+        "summary, search_text, type, session_id, agent_id, "
+        "content='episodic_events', content_rowid='id')"
+    )
+    conn.execute("INSERT INTO episodic_events_fts(episodic_events_fts) VALUES('rebuild')")
+    trigger_statements = (
+        """CREATE TRIGGER episodic_events_ai AFTER INSERT ON episodic_events BEGIN
+          INSERT INTO episodic_events_fts(rowid, summary, search_text, type, session_id, agent_id)
+          VALUES (new.id, new.summary, new.search_text, new.type, new.session_id, new.agent_id);
+        END""",
+        """CREATE TRIGGER episodic_events_ad AFTER DELETE ON episodic_events BEGIN
+          INSERT INTO episodic_events_fts(episodic_events_fts, rowid, summary, search_text, type, session_id, agent_id)
+          VALUES ('delete', old.id, old.summary, old.search_text, old.type, old.session_id, old.agent_id);
+        END""",
+        """CREATE TRIGGER episodic_events_au AFTER UPDATE ON episodic_events BEGIN
+          INSERT INTO episodic_events_fts(episodic_events_fts, rowid, summary, search_text, type, session_id, agent_id)
+          VALUES ('delete', old.id, old.summary, old.search_text, old.type, old.session_id, old.agent_id);
+          INSERT INTO episodic_events_fts(rowid, summary, search_text, type, session_id, agent_id)
+          VALUES (new.id, new.summary, new.search_text, new.type, new.session_id, new.agent_id);
+        END""",
+    )
+    for statement in trigger_statements:
+        conn.execute(statement)
+
+
 MIGRATIONS: Tuple[Migration, ...] = (
     Migration(id=1, description="baseline schema", apply=_init_db, cost="cheap"),
+    Migration(
+        id=2,
+        description="rebuild bilingual and episodic FTS indexes",
+        apply=_apply_fts_search_text_migration,
+        cost="expensive",
+    ),
 )
+
+
+def migration_state(conn: sqlite3.Connection) -> Dict[str, Any]:
+    version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    pending = [migration.id for migration in MIGRATIONS if migration.id > version]
+    expensive = [
+        migration.id
+        for migration in MIGRATIONS
+        if migration.id > version and migration.cost == "expensive"
+    ]
+    return {
+        "current_version": version,
+        "target_version": CURRENT_DB_VERSION,
+        "compat_mode": bool(expensive),
+        "pending": pending,
+        "pending_expensive": expensive,
+        "hint": "run `openclaw-mem db migrate`" if expensive else None,
+    }
+
+
+def _database_row_counts(conn: sqlite3.Connection) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for table in ("observations", "episodic_events", "docs_chunks"):
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+        ).fetchone():
+            counts[table] = int(conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
+    return counts
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def migrate_database(
+    db_path: str | Path,
+    *,
+    dry_run: bool = False,
+    receipt_path: str | Path | None = None,
+) -> Dict[str, Any]:
+    path = Path(db_path).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"database not found: {path}")
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        from_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        if from_version > CURRENT_DB_VERSION:
+            raise RuntimeError(
+                f"database version {from_version} is newer than supported {CURRENT_DB_VERSION}"
+            )
+        steps = [migration for migration in MIGRATIONS if migration.id > from_version]
+        backup = Path(f"{path}.pre-v{CURRENT_DB_VERSION}.backup.sqlite")
+        plan: Dict[str, Any] = {
+            "kind": "openclaw-mem.db.migration.plan.v1",
+            "db_path": str(path),
+            "from_version": from_version,
+            "to_version": CURRENT_DB_VERSION,
+            "steps": [
+                {"id": item.id, "description": item.description, "cost": item.cost}
+                for item in steps
+            ],
+            "backup_path": str(backup),
+            "dry_run": True,
+        }
+        if dry_run or not steps:
+            return plan
+        if backup.exists():
+            raise FileExistsError(f"migration backup already exists: {backup}")
+
+        started = time.perf_counter()
+        conn.execute("VACUUM INTO ?", (str(backup),))
+        backup_sha256 = _file_sha256(backup)
+        before = _database_row_counts(conn)
+        applied: List[Dict[str, Any]] = []
+        try:
+            for migration in steps:
+                migration.apply(conn)
+                conn.execute(f"PRAGMA user_version = {migration.id}")
+                applied.append(
+                    {
+                        "id": migration.id,
+                        "description": migration.description,
+                        "cost": migration.cost,
+                    }
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        after = _database_row_counts(conn)
+        if before != after:
+            raise RuntimeError(
+                f"migration row-count invariant failed: before={before!r}, after={after!r}"
+            )
+        receipt = {
+            "kind": "openclaw-mem.db.migration.receipt.v1",
+            "db_path": str(path),
+            "from_version": from_version,
+            "to_version": CURRENT_DB_VERSION,
+            "steps": applied,
+            "row_counts_before": before,
+            "row_counts_after": after,
+            "backup_path": str(backup),
+            "backup_sha256": backup_sha256,
+            "migrated_sha256": _file_sha256(path),
+            "duration_ms": round((time.perf_counter() - started) * 1000.0, 3),
+        }
+    finally:
+        conn.close()
+
+    output = (
+        Path(receipt_path).expanduser().resolve()
+        if receipt_path is not None
+        else Path(f"{path}.migration-v{CURRENT_DB_VERSION}.receipt.json")
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    receipt["receipt_path"] = str(output)
+    output.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return receipt
+
+
+def rollback_database(
+    db_path: str | Path, receipt_path: str | Path
+) -> Dict[str, Any]:
+    path = Path(db_path).expanduser().resolve()
+    receipt_file = Path(receipt_path).expanduser().resolve()
+    payload = json.loads(receipt_file.read_text(encoding="utf-8"))
+    if payload.get("kind") != "openclaw-mem.db.migration.receipt.v1":
+        raise ValueError("invalid migration receipt kind")
+    if Path(str(payload.get("db_path") or "")).expanduser().resolve() != path:
+        raise ValueError("migration receipt database path does not match --db")
+    backup = Path(str(payload.get("backup_path") or "")).expanduser().resolve()
+    expected_backup = Path(
+        f"{path}.pre-v{int(payload.get('to_version') or 0)}.backup.sqlite"
+    ).resolve()
+    if backup != expected_backup:
+        raise ValueError("migration receipt backup path is not the governed database backup")
+    if not backup.exists() or not backup.is_file():
+        raise FileNotFoundError(f"migration backup not found: {backup}")
+    expected_hash = str(payload.get("backup_sha256") or "")
+    actual_hash = _file_sha256(backup)
+    if not expected_hash or actual_hash != expected_hash:
+        raise RuntimeError("migration backup hash mismatch; rollback denied")
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"database not found: {path}")
+
+    rolled_back = Path(f"{path}.rolledback")
+    if rolled_back.exists():
+        raise FileExistsError(f"rolled-back database copy already exists: {rolled_back}")
+    os.replace(path, rolled_back)
+    try:
+        os.replace(backup, path)
+    except Exception:
+        os.replace(rolled_back, path)
+        raise
+    return {
+        "kind": "openclaw-mem.db.rollback.receipt.v1",
+        "db_path": str(path),
+        "restored_version": int(payload["from_version"]),
+        "rolled_back_path": str(rolled_back),
+        "restored_sha256": _file_sha256(path),
+        "source_receipt": str(receipt_file),
+    }

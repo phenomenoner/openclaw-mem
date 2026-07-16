@@ -1572,8 +1572,13 @@ from openclaw_mem.core.db import (  # noqa: E402
     _connect as _connect,
     _enable_wal_best_effort as _enable_wal_best_effort,
     _init_db as _init_db,
+    _apply_fts_search_text_migration as _apply_fts_search_text_migration,
+    _database_row_counts as _database_table_counts,
     _sanitize_jsonable_surrogates as _sanitize_jsonable_surrogates,
     _sanitize_str_surrogates as _sanitize_str_surrogates,
+    migrate_database as _migrate_database,
+    migration_state as _migration_state,
+    rollback_database as _rollback_database,
 )
 from openclaw_mem.core.records import (  # noqa: E402
     HarvestError as HarvestError,
@@ -1792,6 +1797,7 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "ratio": (present / total) if total else 0.0,
         }
 
+    migration_status = _migration_state(conn)
     _emit(
         {
             "kind": "openclaw-mem.db.info.v1",
@@ -1812,6 +1818,45 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "qdrant": _qdrant_dependency_status(),
             "lang_distribution": lang_distribution,
             "summary_en_coverage": summary_en_coverage,
+            "compat_mode": migration_status["compat_mode"],
+            "pending_migrations": migration_status["pending"],
+            "migration_hint": migration_status["hint"],
+        },
+        args.json,
+    )
+
+
+def cmd_db_migrate(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    conn.close()
+    payload = _migrate_database(
+        args.db,
+        dry_run=bool(getattr(args, "dry_run", False)),
+        receipt_path=getattr(args, "receipt_out", None),
+    )
+    _emit(payload, args.json)
+
+
+def cmd_db_rollback(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    conn.close()
+    payload = _rollback_database(args.db, args.receipt)
+    _emit(payload, args.json)
+
+
+def cmd_db_reindex(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    if not bool(getattr(args, "fts", False)):
+        raise ValueError("db reindex requires --fts")
+    before = _database_table_counts(conn)
+    _apply_fts_search_text_migration(conn)
+    conn.commit()
+    after = _database_table_counts(conn)
+    if before != after:
+        raise RuntimeError("FTS reindex changed source-table row counts")
+    _emit(
+        {
+            "kind": "openclaw-mem.db.reindex.receipt.v1",
+            "backend": "fts5",
+            "row_counts_before": before,
+            "row_counts_after": after,
         },
         args.json,
     )
@@ -19663,6 +19708,19 @@ def build_parser() -> argparse.ArgumentParser:
     db_info = db_sub.add_parser("info", help="Show database generation and integrity metadata")
     add_common(db_info)
     db_info.set_defaults(func=cmd_db_info)
+    db_migrate = db_sub.add_parser("migrate", help="Plan or apply governed database migrations")
+    add_common(db_migrate)
+    db_migrate.add_argument("--dry-run", action="store_true", help="Show the migration plan without writing")
+    db_migrate.add_argument("--receipt-out", help="Write the migration receipt to this JSON path")
+    db_migrate.set_defaults(func=cmd_db_migrate)
+    db_rollback = db_sub.add_parser("rollback", help="Restore a migration backup from its receipt")
+    add_common(db_rollback)
+    db_rollback.add_argument("--receipt", required=True, help="Migration receipt JSON path")
+    db_rollback.set_defaults(func=cmd_db_rollback)
+    db_reindex = db_sub.add_parser("reindex", help="Explicitly rebuild derived database indexes")
+    add_common(db_reindex)
+    db_reindex.add_argument("--fts", action="store_true", help="Rebuild FTS5 indexes and episodic search text")
+    db_reindex.set_defaults(func=cmd_db_reindex)
 
     sp = sub.add_parser("service-store", help="Inspect or initialize harness service-store readiness file")
     add_common(sp)

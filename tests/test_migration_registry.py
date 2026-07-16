@@ -59,5 +59,11 @@ def test_db_info_reports_migration_application(tmp_path: Path, capsys) -> None:
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["migrations"] == [
-        {"id": 1, "description": "baseline schema", "cost": "cheap", "applied": True}
+        {"id": 1, "description": "baseline schema", "cost": "cheap", "applied": True},
+        {
+            "id": 2,
+            "description": "rebuild bilingual and episodic FTS indexes",
+            "cost": "expensive",
+            "applied": True,
+        },
     ]

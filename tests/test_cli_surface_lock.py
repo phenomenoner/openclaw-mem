@@ -62,6 +62,9 @@ continuity triggers
 continuity wording-lint
 db
 db info
+db migrate
+db reindex
+db rollback
 docs
 docs ingest
 docs search
