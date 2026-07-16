@@ -21,6 +21,46 @@ from typing import Any, Dict, Iterable, List, Optional
 HYBRID_SEARCH_KIND = "openclaw-mem.search.hybrid.v0"
 
 
+def blend_lexical_graph(
+    lexical_results: Iterable[Dict[str, Any]],
+    graph_results: Iterable[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Apply the public deterministic search/graph blend to two result lanes."""
+
+    results: List[Dict[str, Any]] = []
+    for rank, item in enumerate(lexical_results, start=1):
+        result = dict(item)
+        result["lane"] = "lexical"
+        lexical_component = 1.0 / float(rank + 1)
+        result["rank_components"] = {
+            "lexical": lexical_component,
+            "vector": 0.0,
+            "graph": 0.0,
+        }
+        result["hybrid_score"] = lexical_component
+        results.append(result)
+    for item in graph_results:
+        result = dict(item)
+        graph_component = float(result.get("score") or 0.0)
+        result["rank_components"] = {
+            "lexical": 0.0,
+            "vector": 0.0,
+            "graph": graph_component,
+        }
+        result["hybrid_score"] = graph_component
+        results.append(result)
+    results.sort(
+        key=lambda item: (
+            -float(item.get("hybrid_score") or 0.0),
+            str(item.get("lane") or ""),
+            str(item.get("source_path") or item.get("id") or item.get("node_id") or ""),
+        )
+    )
+    for rank, item in enumerate(results, start=1):
+        item["rank"] = rank
+    return results
+
+
 def _tokens(query: str) -> List[str]:
     raw = re.findall(r"[\w\u3400-\u9fff]+", query.lower(), flags=re.UNICODE)
     out: List[str] = []

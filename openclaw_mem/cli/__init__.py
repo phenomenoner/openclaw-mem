@@ -67,6 +67,7 @@ from openclaw_mem.core.search import lexical_search_with_receipt as core_lexical
 from openclaw_mem.core.search import vector_search as core_vector_search
 from openclaw_mem.core.vector_index import create_vector_index
 from openclaw_mem.core.skill_lint import command_schema_from_parser, lint_skill_tree
+from openclaw_mem.core.recall import recall as core_recall
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -100,7 +101,7 @@ from openclaw_mem.graph.code_extract import (
     query_impact as query_code_impact,
     query_symbol as query_code_symbol,
 )
-from openclaw_mem.graph.search_adapter import HYBRID_SEARCH_KIND, graph_search_candidates
+from openclaw_mem.graph.search_adapter import HYBRID_SEARCH_KIND, blend_lexical_graph, graph_search_candidates
 from openclaw_mem.graph.render_topology import render_topology
 from openclaw_mem.graph import fact_guard
 from openclaw_mem.graph.query import (
@@ -5890,6 +5891,27 @@ def _retrieval_kpi_fields(receipt: Dict[str, Any]) -> Dict[str, Any]:
     return {key: receipt[key] for key in _RETRIEVAL_KPI_FIELDS if key in receipt}
 
 
+def cmd_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        receipt = core_recall(
+            conn,
+            args.query,
+            mode=str(getattr(args, "mode", "auto")),
+            limit=int(getattr(args, "limit", 20)),
+            scope=getattr(args, "scope", None),
+            model=getattr(args, "model", None),
+            base_url=getattr(args, "base_url", None),
+            vector_backend=str(getattr(args, "vector_backend", "auto")),
+            graph_path=getattr(args, "graph_path", None),
+            graph_readiness_state=getattr(args, "graph_readiness_state", None),
+            graph_stale_after_days=int(getattr(args, "graph_stale_after_days", 30)),
+        )
+    except ValueError as exc:
+        _emit({"error": str(exc), "hint": "provide a non-empty query and a supported --mode"}, True)
+        raise SystemExit(2) from exc
+    _emit(receipt, bool(getattr(args, "json", False)))
+
+
 def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     q = args.query.strip()
     if not q:
@@ -5916,37 +5938,7 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             readiness_state_path=str(getattr(args, "graph_readiness_state", "") or "").strip() or None,
         )
         graph_hits = list(graph_payload.get("candidates") or [])
-        results: List[Dict[str, Any]] = []
-        for rank, item in enumerate(out, start=1):
-            result = dict(item)
-            result["lane"] = "lexical"
-            lexical_component = 1.0 / float(rank + 1)
-            result["rank_components"] = {
-                "lexical": lexical_component,
-                "vector": 0.0,
-                "graph": 0.0,
-            }
-            result["hybrid_score"] = lexical_component
-            results.append(result)
-        for rank, item in enumerate(graph_hits, start=1):
-            result = dict(item)
-            graph_component = float(result.get("score") or 0.0)
-            result["rank_components"] = {
-                "lexical": 0.0,
-                "vector": 0.0,
-                "graph": graph_component,
-            }
-            result["hybrid_score"] = graph_component
-            results.append(result)
-        results.sort(
-            key=lambda item: (
-                -float(item.get("hybrid_score") or 0.0),
-                str(item.get("lane") or ""),
-                str(item.get("source_path") or item.get("id") or item.get("node_id") or ""),
-            )
-        )
-        for rank, item in enumerate(results, start=1):
-            item["rank"] = rank
+        results = blend_lexical_graph(out, graph_hits)
         _emit(
             {
                 "kind": HYBRID_SEARCH_KIND,
@@ -20512,6 +20504,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exclude graph facts with ISO freshness older than this many days",
     )
     sp.set_defaults(func=cmd_search)
+
+    sp = sub.add_parser("recall", help="Unified fail-open retrieval across lexical, vector, hybrid, and graph lanes")
+    add_common(sp)
+    sp.add_argument("query", help="Recall query text")
+    sp.add_argument("--mode", choices=["auto", "lexical", "vector", "hybrid", "graph"], default="auto")
+    sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--scope", help="Optional exact memory scope")
+    sp.add_argument("--model", help="Embedding model; defaults to the dominant stored model")
+    sp.add_argument("--base-url", default=defaults.openai_base_url(), help="Embedding API base URL")
+    sp.add_argument("--vector-backend", choices=["auto", "python", "numpy"], default="auto")
+    sp.add_argument("--graph-path", help="Portable graph JSON used by graph mode")
+    sp.add_argument("--graph-readiness-state", help="Optional graph readiness JSON state")
+    sp.add_argument("--graph-stale-after-days", type=int, default=30)
+    sp.set_defaults(func=cmd_recall)
 
     sp = sub.add_parser("docs", help="Docs memory (operator-authored markdown ingest/search)")
     add_common(sp)

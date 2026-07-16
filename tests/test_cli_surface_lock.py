@@ -205,6 +205,7 @@ qdrant recall
 qdrant status
 route
 route auto
+recall
 routing
 routing eval
 routing resolve
