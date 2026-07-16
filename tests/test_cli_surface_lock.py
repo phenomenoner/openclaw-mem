@@ -253,6 +253,7 @@ service-store status
 skill-capture
 skill-capture propose
 skill-curator
+skill-curator lint
 skill-curator review
 status
 steward

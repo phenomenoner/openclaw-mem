@@ -22,7 +22,7 @@ metadata:
 
 ```bash
 openclaw-mem graph readiness --json
-openclaw-mem graph query <query> --json
+openclaw-mem graph query subgraph <node-id> --json
 openclaw-mem graph match <query> --json
 openclaw-mem route auto <query> --json
 openclaw-mem routing resolve <query> --workspace-root <workspace> --json

@@ -66,6 +66,7 @@ from openclaw_mem.core.embeddings import (
 from openclaw_mem.core.search import lexical_search_with_receipt as core_lexical_search_with_receipt
 from openclaw_mem.core.search import vector_search as core_vector_search
 from openclaw_mem.core.vector_index import create_vector_index
+from openclaw_mem.core.skill_lint import command_schema_from_parser, lint_skill_tree
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -11518,6 +11519,27 @@ def cmd_skill_curator_review(conn: sqlite3.Connection, args: argparse.Namespace)
     return cmd_self_curator_skill_review(conn, args)
 
 
+def cmd_skill_curator_lint(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    del conn
+    receipt = lint_skill_tree(
+        getattr(args, "skill_root", "skills"),
+        command_schema=command_schema_from_parser(build_parser()),
+        max_lines=int(getattr(args, "max_lines", 60)),
+    )
+    if bool(getattr(args, "json", False)):
+        print(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(
+            f"skill_lint ok={str(receipt['ok']).lower()} files={receipt['files_checked']} "
+            f"commands={receipt['commands_checked']} errors={receipt['error_count']} writes_performed=false"
+        )
+        for issue in receipt["issues"]:
+            location = f"{issue['path']}:{issue.get('line', 1)}"
+            print(f"{location}: {issue['code']}: {issue['detail']}")
+    if not receipt["ok"]:
+        raise SystemExit(1)
+
+
 def cmd_mem_system_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     payload = mem_system_status.build_status(
         workspace_root=getattr(args, "workspace_root", "."),
@@ -21579,6 +21601,12 @@ def build_parser() -> argparse.ArgumentParser:
     kr.add_argument("--no-write", action="store_true", help="Print review payload without writing review artifacts")
     kr.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Print review JSON")
     kr.set_defaults(func=cmd_skill_curator_review)
+    kl = ksub.add_parser("lint", help="Lint ring-tiered skill cards without writing files")
+    kl.add_argument("--skill-root", default="skills", help="Root containing recursive */SKILL.md cards")
+    kl.add_argument("--all", action="store_true", help="Explicitly lint every SKILL.md below the root")
+    kl.add_argument("--max-lines", type=int, default=60, help="Maximum lines allowed in each skill card")
+    kl.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Print deterministic lint receipt JSON")
+    kl.set_defaults(func=cmd_skill_curator_lint)
 
     sp = sub.add_parser("mem-system", help="Read-only Store/Pack/Observe/Review/Curate status")
     msub = sp.add_subparsers(dest="mem_system_cmd", required=True)
