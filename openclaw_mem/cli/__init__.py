@@ -6926,7 +6926,7 @@ def cmd_summarize(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Run AI compression on observations (requires compress_memory.py)."""
     try:
         # Import compress_memory module
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
         from compress_memory import OpenAIClient, compress_daily_note, CompressError
     except ImportError as e:
         _emit({"error": f"Failed to import compress_memory: {e}"}, args.json)
@@ -11981,7 +11981,7 @@ def cmd_qdrant_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
             vector = json.loads(vector_raw)
             if not isinstance(vector, list) or not all(isinstance(item, (int, float)) for item in vector):
                 raise ValueError("--vector must be a JSON array of numbers")
-            bridge = Path(__file__).resolve().parent.parent / "extensions" / "openclaw-mem-engine" / "scripts" / "qdrant_edge_query_bridge.py"
+            bridge = Path(__file__).resolve().parents[2] / "extensions" / "openclaw-mem-engine" / "scripts" / "qdrant_edge_query_bridge.py"
             request = {
                 "shardRoot": str(shard_root),
                 "vector": [float(item) for item in vector],
@@ -12894,7 +12894,7 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
         _emit({"error": "missing --table"}, args.json)
         sys.exit(1)
 
-    engine_path = Path(__file__).resolve().parents[1] / "extensions" / "openclaw-mem-engine"
+    engine_path = Path(__file__).resolve().parents[2] / "extensions" / "openclaw-mem-engine"
     if not engine_path.exists():
         _emit({"error": f"openclaw-mem-engine path not found: {engine_path}"}, args.json)
         sys.exit(1)
@@ -21648,6 +21648,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dry-run", action="store_true", help="Dry-run mode: show receipts without writing")
     sp.set_defaults(func=cmd_writeback_lancedb)
 
+    from openclaw_mem.cli.registry import register as register_command_modules
+
+    register_command_modules(p)
     return p
 
 
