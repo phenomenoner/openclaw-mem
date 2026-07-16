@@ -58,7 +58,7 @@ from openclaw_mem import harness as harness_install
 from openclaw_mem import codex_install
 from openclaw_mem import project_resolver
 from openclaw_mem.core import episodes as core_episodes
-from openclaw_mem.core.search import lexical_search as core_lexical_search
+from openclaw_mem.core.search import lexical_search_with_receipt as core_lexical_search_with_receipt
 from openclaw_mem.core.search import vector_search as core_vector_search
 from openclaw_mem.core.vector_index import create_vector_index
 from openclaw_mem.artifact_sidecar import (
@@ -5758,17 +5758,31 @@ def _search_prefer_synthesis_rows(
     return out
 
 
+_RETRIEVAL_KPI_FIELDS = (
+    "query_lang",
+    "lane_hits",
+    "fallback_triggered",
+    "cross_lang_recovered",
+)
+
+
+def _retrieval_kpi_fields(receipt: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: receipt[key] for key in _RETRIEVAL_KPI_FIELDS if key in receipt}
+
+
 def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     q = args.query.strip()
     if not q:
         _emit({"error": "empty query"}, True)
         sys.exit(2)
-    rows = core_lexical_search(
+    lexical_receipt = core_lexical_search_with_receipt(
         conn,
         q,
         limit=max(1, int(args.limit)),
         scope=getattr(args, "scope", None),
     )
+    rows = list(lexical_receipt.pop("results"))
+    kpi_fields = _retrieval_kpi_fields(lexical_receipt)
     out = _search_prefer_synthesis_rows(conn, rows=rows, limit=max(1, int(args.limit)))
 
     graph_enabled = bool(getattr(args, "graph", False) or str(getattr(args, "graph_path", "") or "").strip())
@@ -5833,12 +5847,13 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                     "dropped": graph_payload.get("dropped") or {},
                 },
                 "lexical": {"count": len(out)},
+                **kpi_fields,
             },
             args.json,
         )
         return
 
-    _emit(out, args.json)
+    _emit([{**item, **kpi_fields} for item in out], args.json)
 
 
 def _docs_collect_markdown_files(raw_paths: List[str]) -> Tuple[List[Path], List[str]]:
@@ -7606,73 +7621,19 @@ def _hybrid_retrieve(
         if not api_key and (need_vec or need_vec_en):
             print("Warning: No API key, skipping vector retrieval", file=sys.stderr)
 
-    fts_rows = []
-    try:
-        fts_rows = conn.execute(
-            """
-            SELECT rowid
-            FROM observations_fts
-            WHERE observations_fts MATCH ?
-            ORDER BY bm25(observations_fts) ASC
-            LIMIT ?;
-            """,
-            (query, candidate_limit),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        # FTS syntax can fail for edge-case query strings (hyphens/operators/punctuation).
-        # Prefer fail-open behavior:
-        # 1) retry once with a best-effort sanitized query
-        # 2) if it still fails, skip the FTS lane (instead of crashing)
-        sanitized = re.sub(r"[^\w\s]", " ", query, flags=re.UNICODE)
-        sanitized = " ".join(sanitized.split())
-        retry_query = sanitized if sanitized else query
-
-        if retry_query != query:
-            try:
-                fts_rows = conn.execute(
-                    """
-                    SELECT rowid
-                    FROM observations_fts
-                    WHERE observations_fts MATCH ?
-                    ORDER BY bm25(observations_fts) ASC
-                    LIMIT ?;
-                    """,
-                    (retry_query, candidate_limit),
-                ).fetchall()
-            except sqlite3.OperationalError:
-                print(
-                    f"[openclaw-mem] FTS query parse failed; skipping FTS lane (query={query!r}).",
-                    file=sys.stderr,
-                )
-        else:
-            print(
-                f"[openclaw-mem] FTS query parse failed; skipping FTS lane (query={query!r}).",
-                file=sys.stderr,
-            )
-    fts_ids = [int(r["rowid"]) for r in fts_rows]
-
-    # If the query is a multi-token natural-language string, FTS5 MATCH defaults
-    # to an implicit AND, which can easily yield zero hits. As a best-effort
-    # fallback (especially when vector search is unavailable), retry with an OR
-    # query to recover some signal.
-    if not fts_ids:
-        tokens = [t for t in re.sub(r"[^\w\s]", " ", query, flags=re.UNICODE).split() if t]
-        if len(tokens) > 1:
-            or_query = " OR ".join(tokens)
-            try:
-                fts_rows = conn.execute(
-                    """
-                    SELECT rowid
-                    FROM observations_fts
-                    WHERE observations_fts MATCH ?
-                    ORDER BY bm25(observations_fts) ASC
-                    LIMIT ?;
-                    """,
-                    (or_query, candidate_limit),
-                ).fetchall()
-                fts_ids = [int(r["rowid"]) for r in fts_rows]
-            except sqlite3.OperationalError:
-                pass
+    lexical_receipt = core_lexical_search_with_receipt(
+        conn,
+        query,
+        limit=candidate_limit,
+    )
+    lexical_rows = list(lexical_receipt.pop("results"))
+    fts_ids = [int(row["id"]) for row in lexical_rows]
+    retrieval_receipt = _retrieval_kpi_fields(lexical_receipt)
+    retrieval_receipt["lane_hits"] = {
+        **dict(retrieval_receipt.get("lane_hits") or {}),
+        "vector": len(vec_ids),
+        "vector_en": len(vec_en_ids),
+    }
 
     ranked_lists = [fts_ids, vec_ids]
     if vec_en_ids:
@@ -7693,6 +7654,7 @@ def _hybrid_retrieve(
             "rerank_enabled": rerank_enabled,
             "candidate_limit": candidate_limit,
             "vector_backend": actual_vector_backend,
+            "retrieval_receipt": retrieval_receipt,
         }
 
     rrf_scores = {rid: score for rid, score in rrf_ranking}
@@ -7773,6 +7735,7 @@ def _hybrid_retrieve(
         "rerank_enabled": rerank_enabled,
         "candidate_limit": candidate_limit,
         "vector_backend": actual_vector_backend,
+        "retrieval_receipt": retrieval_receipt,
     }
 
 
@@ -7914,6 +7877,7 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             if state["rerank_applied"]:
                 r["rank_stage"] = "rerank" if rid in state["rerank_scores"] else "rrf-fallback"
 
+        r.update(dict(state.get("retrieval_receipt") or {}))
         out.append(r)
 
     _emit(out, args.json)
@@ -10215,6 +10179,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "citations": citations,
         "context_pack": context_pack_v1.to_dict(context_pack),
         "vector_backend": state.get("vector_backend", "python"),
+        **dict(state.get("retrieval_receipt") or {}),
     }
 
     gbrain_consult = _pack_gbrain_consult_optional(args, query)

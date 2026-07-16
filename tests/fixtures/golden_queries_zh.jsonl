@@ -1,0 +1,30 @@
+{"category":"zh","key":"zh-01","query":"偏好","summary":"使用者偏好採用深色介面"}
+{"category":"zh","key":"zh-02","query":"記憶治理","summary":"記憶治理需要明確的權限邊界"}
+{"category":"zh","key":"zh-03","query":"回滾收據","summary":"回滾收據必須保留備份雜湊"}
+{"category":"zh","key":"zh-04","query":"本地優先","summary":"敏感資料遵循本地優先原則"}
+{"category":"zh","key":"zh-05","query":"向量索引","summary":"向量索引使用精確相似度排序"}
+{"category":"zh","key":"zh-06","query":"雙語檢索","summary":"雙語檢索融合原文與英文摘要"}
+{"category":"zh","key":"zh-07","query":"效能基線","summary":"效能基線記錄第九十五百分位延遲"}
+{"category":"zh","key":"zh-08","query":"資料遷移","summary":"資料遷移先建立可驗證備份"}
+{"category":"zh","key":"zh-09","query":"完整測試","summary":"完整測試涵蓋真實使用情境"}
+{"category":"zh","key":"zh-10","query":"離線模型","summary":"離線模型快取後不依賴網路"}
+{"category":"en","key":"en-01","query":"rollback receipt","summary":"rollback receipt preserves the governed backup hash"}
+{"category":"en","key":"en-02","query":"vector index","summary":"vector index returns exact cosine neighbors"}
+{"category":"en","key":"en-03","query":"local provider","summary":"local provider works without a remote api key"}
+{"category":"en","key":"en-04","query":"migration backup","summary":"migration backup is verified before restoration"}
+{"category":"en","key":"en-05","query":"golden recall","summary":"golden recall gates protect retrieval quality"}
+{"category":"en","key":"en-06","query":"memory governance","summary":"memory governance keeps mutations explicit"}
+{"category":"en","key":"en-07","query":"deterministic ranking","summary":"deterministic ranking resolves equal score ties"}
+{"category":"en","key":"en-08","query":"offline embedding","summary":"offline embedding reuses the cached model"}
+{"category":"en","key":"en-09","query":"integrity check","summary":"integrity check reports orphan vectors"}
+{"category":"en","key":"en-10","query":"performance baseline","summary":"performance baseline captures p95 latency"}
+{"category":"mixed","key":"mixed-01","query":"治理 mem","summary":"治理 mem 流程保留決策證據"}
+{"category":"mixed","key":"mixed-02","query":"使用mem做","summary":"使用mem做長期上下文保存"}
+{"category":"mixed","key":"mixed-03","query":"記憶 vec","summary":"記憶 vec 路徑採精確排序"}
+{"category":"mixed","key":"mixed-04","query":"回滾 api","summary":"回滾 api 先驗證收據"}
+{"category":"mixed","key":"mixed-05","query":"本地 sql","summary":"本地 sql 儲存保持可攜性"}
+{"category":"mixed","key":"mixed-06","query":"雙語 fts","summary":"雙語 fts 融合英文摘要"}
+{"category":"mixed","key":"mixed-07","query":"模型 bge","summary":"模型 bge 支援離線向量"}
+{"category":"mixed","key":"mixed-08","query":"資料 db","summary":"資料 db 遷移保持行數不變"}
+{"category":"mixed","key":"mixed-09","query":"效能 p95","summary":"效能 p95 必須低於預算"}
+{"category":"mixed","key":"mixed-10","query":"收據 rrf","summary":"收據 rrf 記錄各檢索通道"}

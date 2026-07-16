@@ -105,7 +105,10 @@ class TestJsonContracts(unittest.TestCase):
         )
         self._assert_exact_keys(
             out,
-            {"bundle_text", "items", "citations", "trace", "context_pack", "vector_backend"},
+            {
+                "bundle_text", "items", "citations", "trace", "context_pack", "vector_backend",
+                "query_lang", "lane_hits", "fallback_triggered", "cross_lang_recovered",
+            },
             "pack",
         )
 
@@ -420,7 +423,27 @@ class TestJsonContracts(unittest.TestCase):
             "--budget-tokens",
             "200",
         )
-        self._assert_exact_keys(out, {"bundle_text", "items", "citations", "context_pack", "trace", "vector_backend"}, "pack")
+        self._assert_exact_keys(
+            out,
+            {
+                "bundle_text",
+                "items",
+                "citations",
+                "context_pack",
+                "trace",
+                "vector_backend",
+                "query_lang",
+                "lane_hits",
+                "fallback_triggered",
+                "cross_lang_recovered",
+            },
+            "pack",
+        )
+        self._assert_exact_keys(
+            out["lane_hits"],
+            {"fts_original", "fts_en", "cjk_like", "trigram", "vector", "vector_en"},
+            "pack.lane_hits",
+        )
 
         context_pack = out["context_pack"]
         self.assertEqual(context_pack["schema"], "openclaw-mem.context-pack.v1")
@@ -632,7 +655,11 @@ class TestJsonContracts(unittest.TestCase):
 
         self._assert_exact_keys(
             out,
-            {"bundle_text", "items", "citations", "context_pack", "trace", "trust_policy", "policy_surface", "vector_backend"},
+            {
+                "bundle_text", "items", "citations", "context_pack", "trace", "trust_policy",
+                "policy_surface", "vector_backend", "query_lang", "lane_hits",
+                "fallback_triggered", "cross_lang_recovered",
+            },
             "pack.trust_policy",
         )
 

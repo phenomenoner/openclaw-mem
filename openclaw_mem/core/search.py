@@ -408,7 +408,7 @@ def vector_search(
     return result
 
 
-def hybrid_search(
+def _hybrid_search_impl(
     conn: sqlite3.Connection,
     query: str,
     *,
@@ -416,12 +416,15 @@ def hybrid_search(
     vector_ids: Optional[List[int]] = None,
     vector_en_ids: Optional[List[int]] = None,
     k: int = 60,
-) -> List[Dict[str, Any]]:
-    lexical = lexical_search(conn, query, limit=max(1, int(limit)) * 2)
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    lexical_receipt = lexical_search_with_receipt(
+        conn, query, limit=max(1, int(limit)) * 2
+    )
+    lexical = list(lexical_receipt.pop("results"))
     fts_ids = [int(item["id"]) for item in lexical]
     ranked = rank_rrf([fts_ids, vector_ids or [], vector_en_ids or []], k=max(1, int(k)), limit=max(1, int(limit)))
     if not ranked:
-        return []
+        return [], lexical_receipt
     lexical_map = {int(item["id"]): dict(item) for item in lexical}
     missing = [row_id for row_id, _ in ranked if row_id not in lexical_map]
     if missing:
@@ -446,4 +449,61 @@ def hybrid_search(
             if present
         ]
         result.append(item)
-    return result
+    selected_ids = {int(item["id"]) for item in result}
+    lane_hits = dict(lexical_receipt.get("lane_hits") or {})
+    lane_hits["vector"] = len(selected_ids.intersection(vector_ids or []))
+    lane_hits["vector_en"] = len(selected_ids.intersection(vector_en_ids or []))
+    receipt = {**lexical_receipt, "lane_hits": lane_hits, "result_count": len(result)}
+    for item in result:
+        item.update(
+            {
+                key: receipt[key]
+                for key in (
+                    "query_lang",
+                    "lane_hits",
+                    "fallback_triggered",
+                    "cross_lang_recovered",
+                )
+            }
+        )
+    return result, receipt
+
+
+def hybrid_search(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    limit: int = 20,
+    vector_ids: Optional[List[int]] = None,
+    vector_en_ids: Optional[List[int]] = None,
+    k: int = 60,
+) -> List[Dict[str, Any]]:
+    results, _receipt = _hybrid_search_impl(
+        conn,
+        query,
+        limit=limit,
+        vector_ids=vector_ids,
+        vector_en_ids=vector_en_ids,
+        k=k,
+    )
+    return results
+
+
+def hybrid_search_with_receipt(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    limit: int = 20,
+    vector_ids: Optional[List[int]] = None,
+    vector_en_ids: Optional[List[int]] = None,
+    k: int = 60,
+) -> Dict[str, Any]:
+    results, receipt = _hybrid_search_impl(
+        conn,
+        query,
+        limit=limit,
+        vector_ids=vector_ids,
+        vector_en_ids=vector_en_ids,
+        k=k,
+    )
+    return {**receipt, "results": results}

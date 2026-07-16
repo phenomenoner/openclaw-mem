@@ -61,6 +61,9 @@ class TestSearchHybridCli(unittest.TestCase):
         self.assertNotIn("lane", out[0])
         self.assertNotIn("rank", out[0])
         self.assertEqual(out[0]["summary"], "resolver lexical baseline")
+        self.assertTrue(
+            {"query_lang", "lane_hits", "fallback_triggered", "cross_lang_recovered"}.issubset(out[0])
+        )
 
     def test_graph_missing_fails_open_to_lexical_hybrid_contract(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -76,6 +79,9 @@ class TestSearchHybridCli(unittest.TestCase):
         self.assertEqual(out["graph"]["fallback_reason"], "graph_file_not_found")
         self.assertEqual(out["graph"]["count"], 0)
         self.assertEqual([r["lane"] for r in out["results"]], ["lexical"])
+        self.assertTrue(
+            {"query_lang", "lane_hits", "fallback_triggered", "cross_lang_recovered"}.issubset(out)
+        )
 
     def test_graph_hit_carries_provenance_fields(self) -> None:
         with tempfile.TemporaryDirectory() as td:
