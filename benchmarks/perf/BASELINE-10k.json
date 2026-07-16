@@ -1,0 +1,43 @@
+{
+  "kind": "openclaw-mem.perf.report.v1",
+  "schema_version": 1,
+  "dataset": {
+    "rows": 10000,
+    "seed": 20260716,
+    "vector_dim": 16,
+    "search_queries": 50,
+    "vector_queries": 20,
+    "pack_queries": 20
+  },
+  "metrics": {
+    "ingest": {
+      "elapsed_ms": 1768.747,
+      "rows_per_second": 5653.719
+    },
+    "search": {
+      "p50_ms": 31.323,
+      "p95_ms": 54.326
+    },
+    "vsearch": {
+      "p95_ms": 175.598
+    },
+    "pack": {
+      "p95_ms": 38.328
+    },
+    "connect": {
+      "legacy_first_connect_ms": 111.231,
+      "stamped_p50_ms": 5.752,
+      "stamped_p95_ms": 7.518
+    }
+  },
+  "environment": {
+    "python": "3.13.5",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "sqlite": "3.49.1"
+  },
+  "notes": [
+    "Fixed-seed synthetic data; no network or embedding API calls.",
+    "Timing values are observational baselines and are not CI thresholds.",
+    "Pack timing covers deterministic lexical retrieval and compact rendering."
+  ]
+}
