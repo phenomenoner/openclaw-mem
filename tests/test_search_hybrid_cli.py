@@ -135,7 +135,7 @@ class TestSearchHybridCli(unittest.TestCase):
                 cwd=Path(__file__).resolve().parents[1],
                 env=env,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
             self.assertEqual(ingest.returncode, 0, ingest.stderr)
             extract = subprocess.run(
@@ -156,7 +156,7 @@ class TestSearchHybridCli(unittest.TestCase):
                 cwd=Path(__file__).resolve().parents[1],
                 env=env,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
             self.assertEqual(extract.returncode, 0, extract.stderr)
             self.assertTrue(graph_path.is_file())
@@ -179,7 +179,7 @@ class TestSearchHybridCli(unittest.TestCase):
                 cwd=Path(__file__).resolve().parents[1],
                 env=env,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
             db_hash_after = hashlib.sha256(db_path.read_bytes()).hexdigest()
 

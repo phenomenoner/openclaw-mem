@@ -48,7 +48,7 @@ class TestHarvestRecoveryE2E(unittest.TestCase):
         result = subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             cwd=Path(__file__).resolve().parents[1],
         )
 

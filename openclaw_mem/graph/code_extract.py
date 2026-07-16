@@ -42,7 +42,7 @@ def _repo_commit(repo: Path) -> Optional[str]:
         out = subprocess.check_output(
             ["git", "-C", str(repo), "rev-parse", "HEAD"],
             stderr=subprocess.DEVNULL,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         ).strip()
     except Exception:
         return None
@@ -54,7 +54,7 @@ def _repo_commit_ts(repo: Path) -> Optional[str]:
         out = subprocess.check_output(
             ["git", "-C", str(repo), "log", "-1", "--format=%cI"],
             stderr=subprocess.DEVNULL,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         ).strip()
     except Exception:
         return None

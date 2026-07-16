@@ -302,7 +302,7 @@ def run_one_cycle(*, repo_root: str, run_dir: str, db: Optional[str] = None, sco
         cmd.extend(["--observations-file", observations_file])
     if episodes_file:
         cmd.extend(["--episodes-file", episodes_file])
-    proc = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"continuity auto-run exited {proc.returncode}")
     try:
@@ -312,7 +312,7 @@ def run_one_cycle(*, repo_root: str, run_dir: str, db: Optional[str] = None, sco
 
 
 def disable_cron_job(job_id: str, *, workdir: str) -> Dict[str, Any]:
-    proc = subprocess.run(["openclaw", "cron", "disable", job_id, "--json"], cwd=workdir, capture_output=True, text=True)
+    proc = subprocess.run(["openclaw", "cron", "disable", job_id, "--json"], cwd=workdir, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"openclaw cron disable exited {proc.returncode}")
     try:

@@ -7,7 +7,7 @@ def _run_cli(*args, input_obj=None, cwd=None):
     proc = subprocess.run(
         [sys.executable, "-m", "openclaw_mem", *args],
         input=json.dumps(input_obj) if input_obj is not None else None,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         cwd=cwd,
     )

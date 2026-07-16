@@ -91,7 +91,7 @@ def _run_json_command(cmd: List[str], *, stdin_text: Optional[str] = None) -> Di
     proc = subprocess.run(
         cmd,
         input=stdin_text,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=False,
     )
@@ -834,7 +834,7 @@ def _infer_sqlite_affinity(values: Sequence[Any]) -> str:
         if isinstance(value, float):
             has_real = True
             continue
-        has_text = True
+        has_text=True
 
     if has_blob:
         return "BLOB"

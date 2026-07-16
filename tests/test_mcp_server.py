@@ -61,7 +61,7 @@ def test_tool_descriptions_accept_json_flag():
     proc = subprocess.run(
         [sys.executable, "-m", "openclaw_mem.mcp_server", "--tool-descriptions", "--json"],
         check=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
     )
     payload = json.loads(proc.stdout)

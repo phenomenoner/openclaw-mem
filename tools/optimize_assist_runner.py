@@ -89,7 +89,7 @@ def _run(argv: list[str]) -> CommandResult:
         popen_argv,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         start_new_session=os.name != "nt",
     )
     try:

@@ -5654,7 +5654,7 @@ def _docs_git_root_subprocess(path: Path, cache: Dict[str, Optional[Path]], key:
     p = subprocess.run(
         ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     if p.returncode != 0:
         cache[key] = None
@@ -11840,7 +11840,7 @@ def cmd_qdrant_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
             proc = subprocess.run(
                 [sys.executable, str(bridge)],
                 input=json.dumps(request),
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
                 timeout=10,
             )
@@ -12979,7 +12979,7 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
             proc = subprocess.run(
                 ["node", script_file.name, payload_path],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 cwd=str(engine_path),
                 check=False,
             )
@@ -16744,7 +16744,7 @@ def _graph_capture_md_git_root(file_path: Path, cache: Dict[str, Optional[Path]]
     p = subprocess.run(
         ["git", "-C", str(file_path.parent), "rev-parse", "--show-toplevel"],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     if p.returncode != 0:
         cache[dir_key] = None
@@ -17012,7 +17012,7 @@ def _graph_capture_git_run_log(repo_path: Path, *, since_iso: str, max_commits: 
         "--name-only",
     ]
 
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if p.returncode != 0:
         raise RuntimeError((p.stderr or p.stdout or "git log failed").strip())
 
@@ -17055,7 +17055,7 @@ def _graph_capture_git_is_repo(path: Path) -> bool:
     p = subprocess.run(
         ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     return p.returncode == 0 and (p.stdout or "").strip() == "true"
 

@@ -120,7 +120,7 @@ class TestMemSystemStatus(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             payload = json.loads(proc.stdout)
@@ -175,7 +175,7 @@ class TestMemSystemStatus(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             payload = json.loads(proc.stdout)

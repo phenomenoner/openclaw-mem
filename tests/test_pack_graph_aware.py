@@ -135,7 +135,7 @@ class TestPackGraphAware(unittest.TestCase):
             [sys.executable, "scripts/graph_aware_pack_ab.py"],
             cwd=Path(__file__).resolve().parents[1],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         self.assertEqual(p.returncode, 0, p.stderr)
         receipt = json.loads(p.stdout)

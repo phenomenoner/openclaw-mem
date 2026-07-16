@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
 
     started = time.monotonic()
     try:
-        proc = subprocess.run(cmd, text=True, capture_output=True, timeout=args.wall_timeout, check=False)
+        proc = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace", capture_output=True, timeout=args.wall_timeout, check=False)
         duration_ms = int((time.monotonic() - started) * 1000)
         timed_out = False
     except subprocess.TimeoutExpired as exc:

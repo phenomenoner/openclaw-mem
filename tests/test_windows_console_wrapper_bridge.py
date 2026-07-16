@@ -17,7 +17,7 @@ def _run_console(*args: str, cwd: str) -> subprocess.CompletedProcess[str]:
         [_console_script(), *args],
         cwd=cwd,
         env=env,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=False,
     )

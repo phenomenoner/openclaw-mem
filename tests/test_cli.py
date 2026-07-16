@@ -3911,7 +3911,7 @@ class TestCliM0(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
                 env=env,
             )
@@ -3943,7 +3943,7 @@ class TestCliM0(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             out = json.loads(proc.stdout)
@@ -3969,7 +3969,7 @@ class TestCliM0(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             service_payload = json.loads(service_init.stdout)
@@ -3991,7 +3991,7 @@ class TestCliM0(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             writeback_payload = json.loads(writeback_status.stdout)
@@ -4011,7 +4011,7 @@ class TestCliM0(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             writeback_init_payload = json.loads(writeback_init.stdout)
@@ -4024,7 +4024,7 @@ class TestCliM0(unittest.TestCase):
             service = subprocess.run(
                 [sys.executable, "-m", "openclaw_mem", "--db", str(db), "service", "status", "--json"],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             service_payload = json.loads(service.stdout)
@@ -4036,7 +4036,7 @@ class TestCliM0(unittest.TestCase):
             lease = subprocess.run(
                 [sys.executable, "-m", "openclaw_mem", "--db", str(db), "service", "lease", "--owner", "agent-harness", "--ttl-ms", "60000", "--json"],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             lease_payload = json.loads(lease.stdout)
@@ -4046,7 +4046,7 @@ class TestCliM0(unittest.TestCase):
             qdrant = subprocess.run(
                 [sys.executable, "-m", "openclaw_mem", "--db", str(db), "qdrant", "status", "--json"],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             qdrant_payload = json.loads(qdrant.stdout)
@@ -4057,7 +4057,7 @@ class TestCliM0(unittest.TestCase):
             qdrant_recall = subprocess.run(
                 [sys.executable, "-m", "openclaw_mem", "--db", str(db), "qdrant", "recall", "--vector", "[0.1]", "--json"],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             qdrant_recall_payload = json.loads(qdrant_recall.stdout)

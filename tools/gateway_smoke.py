@@ -68,7 +68,7 @@ def main() -> int:
         [sys.executable, "-m", "openclaw_mem.gateway", "--host", "127.0.0.1", "--port", str(port), "--db", str(DB)],
         cwd=str(ROOT),
         env=env,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )

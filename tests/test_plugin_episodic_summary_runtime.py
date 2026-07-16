@@ -88,7 +88,7 @@ def test_plugin_tool_summary_behavioral_node_tests_pass():
     proc = subprocess.run(
         [node, "--test", str(NODE_BEHAVIOR_TEST)],
         cwd=NODE_BEHAVIOR_TEST.parent,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=False,
     )
@@ -107,7 +107,7 @@ def test_plugin_tool_result_persist_behavioral_node_tests_pass():
     proc = subprocess.run(
         [node, "--experimental-strip-types", "--test", str(NODE_PERSIST_E2E_TEST)],
         cwd=NODE_PERSIST_E2E_TEST.parent,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=False,
     )

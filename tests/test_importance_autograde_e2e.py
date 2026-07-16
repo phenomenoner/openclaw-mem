@@ -55,7 +55,7 @@ class TestImportanceAutogradeE2E(unittest.TestCase):
         if env:
             merged_env.update(env)
 
-        r = subprocess.run(cmd, capture_output=True, text=True, cwd=self.repo_root, env=merged_env)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=self.repo_root, env=merged_env)
         if r.returncode != 0:
             self.fail(f"CLI failed (code={r.returncode}):\nSTDERR:\n{r.stderr}\nSTDOUT:\n{r.stdout}")
 

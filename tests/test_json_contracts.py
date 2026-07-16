@@ -56,7 +56,7 @@ class TestJsonContracts(unittest.TestCase):
         return subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             cwd=self.repo_root,
             input=input_data,
             env=env_vars,

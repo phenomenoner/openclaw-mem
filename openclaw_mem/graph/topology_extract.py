@@ -42,7 +42,7 @@ def _run_git(repo_path: Path, args: List[str]) -> Optional[str]:
         out = subprocess.check_output(
             ["git", "-C", str(repo_path), *args],
             stderr=subprocess.DEVNULL,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         ).strip()
     except Exception:
         return None

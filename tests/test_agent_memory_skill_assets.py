@@ -17,7 +17,7 @@ class TestAgentMemorySkillAssets(unittest.TestCase):
             [sys.executable, str(SCRIPT), "--check"],
             cwd=REPO_ROOT,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)

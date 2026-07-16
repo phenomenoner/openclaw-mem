@@ -60,7 +60,7 @@ def _run_gbrain_call(
         completed = subprocess.run(
             command,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=max(0.1, timeout_ms / 1000.0),
             check=False,
         )
@@ -412,7 +412,7 @@ def smoke(
         completed = subprocess.run(
             command,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=max(0.1, timeout_ms / 1000.0),
             check=False,
         )

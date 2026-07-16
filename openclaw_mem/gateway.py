@@ -705,7 +705,7 @@ def _run_cli(config: GatewayConfig, argv: Iterable[str], *, stdin: Optional[str]
     proc = subprocess.run(
         cmd,
         input=stdin,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         timeout=config.cli_timeout_sec,
         env=env,
