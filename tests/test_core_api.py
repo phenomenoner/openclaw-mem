@@ -11,6 +11,8 @@ from openclaw_mem.core.episodes import (
     append_session_store_receipt,
     embed_events,
     query as query_episodes,
+    gc_events,
+    redact_events,
     replay as replay_episodes,
     search_events,
 )
@@ -385,6 +387,50 @@ def test_core_episodes_search_and_embed_use_real_db_seam_without_output(capsys) 
         )
         assert embedded["embedded"] == 1
         assert conn.execute("SELECT COUNT(*) FROM episodic_event_embeddings").fetchone()[0] == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+    finally:
+        conn.close()
+
+
+def test_core_episodes_redact_and_gc_mutations_have_post_state_evidence(capsys) -> None:
+    conn = connect(":memory:")
+    try:
+        for event_id, event_type, ts_ms in (
+            ("evt-redact", "ops.observation", 2_000),
+            ("evt-expired", "tool.result", 1_000),
+        ):
+            append_event(
+                conn,
+                event_type=event_type,
+                raw_scope="project:mutations",
+                session_id="session-mutations",
+                agent_id="main",
+                summary=event_id,
+                event_id=event_id,
+                ts_ms=ts_ms,
+                payload_json='{"value":"safe"}',
+                allow_tool_output=True,
+            )
+
+        redacted = redact_events(conn, event_id="evt-redact", replacement="placeholder")
+        assert redacted["redacted_count"] == 1
+        row = conn.execute(
+            "SELECT redacted, payload_json, search_text FROM episodic_events WHERE event_id = ?",
+            ("evt-redact",),
+        ).fetchone()
+        assert tuple(row) == (1, '"[REDACTED]"', "evt-redact")
+
+        gc_receipt = gc_events(
+            conn,
+            raw_scope="project:mutations",
+            global_scope=False,
+            now_ts_ms=100_000_000,
+            raw_policy=["tool.result=0", "ops.observation=forever"],
+        )
+        assert gc_receipt["deleted_by_type"]["tool.result"] == 1
+        assert conn.execute("SELECT COUNT(*) FROM episodic_events").fetchone()[0] == 1
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == ""

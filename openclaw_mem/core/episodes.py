@@ -38,6 +38,15 @@ EPISODIC_SCHEMA_VERSION = "openclaw-mem.episodic.v0"
 EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES = 8 * 1024
 EPISODIC_DEFAULT_REFS_CAP_BYTES = 4 * 1024
 EPISODIC_SEARCH_TEXT_MAX_CHARS = 2400
+EPISODIC_REDACT_PLACEHOLDER = "[REDACTED]"
+EPISODIC_DEFAULT_RETENTION_DAYS: Dict[str, Optional[int]] = {
+    "conversation.user": 60,
+    "conversation.assistant": 90,
+    "tool.call": 30,
+    "tool.result": 30,
+    "ops.decision": None,
+    "ops.alert": 90,
+}
 
 EPISODIC_SECRET_LIKE_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"-----BEGIN (?:RSA|EC|DSA|OPENSSH|PGP)?\s*PRIVATE KEY-----", re.IGNORECASE),
@@ -903,6 +912,118 @@ def embed_events(
         "embedded": len(embedded_ids),
         "ids": embedded_ids[:50],
         "per_scope": [{"scope": key, "count": int(value)} for key, value in sorted(per_scope.items())],
+    }
+
+
+def redact_events(
+    conn: sqlite3.Connection,
+    *,
+    event_id: Any = None,
+    session_id: Any = None,
+    raw_scope: Optional[str] = None,
+    global_scope: bool = False,
+    replacement: str = "placeholder",
+) -> Dict[str, Any]:
+    normalized_event_id = str(event_id or "").strip() or None
+    normalized_session_id = str(session_id or "").strip() or None
+    if bool(normalized_event_id) == bool(normalized_session_id):
+        raise ValueError("provide exactly one of --event-id or --session-id")
+    normalized_replacement = str(replacement or "placeholder").strip().lower()
+    if normalized_replacement not in {"null", "placeholder"}:
+        raise ValueError("replacement must be 'null' or 'placeholder'")
+    if normalized_replacement == "null":
+        payload_value = refs_value = None
+    else:
+        payload_value = refs_value = _json_compact_dumps(EPISODIC_REDACT_PLACEHOLDER)
+
+    scope: Optional[str]
+    if normalized_event_id:
+        cursor = conn.execute(
+            "UPDATE episodic_events SET payload_json = ?, refs_json = ?, redacted = 1, search_text = summary WHERE event_id = ?",
+            (payload_value, refs_value, normalized_event_id),
+        )
+        scope = None
+    else:
+        scope = resolve_query_scope(raw_scope, global_scope)
+        cursor = conn.execute(
+            "UPDATE episodic_events SET payload_json = ?, refs_json = ?, redacted = 1, search_text = summary WHERE session_id = ? AND scope = ?",
+            (payload_value, refs_value, normalized_session_id, scope),
+        )
+    conn.commit()
+    return {
+        "kind": "openclaw-mem.episodes.redact.v0",
+        "ts": utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "target": {"event_id": normalized_event_id, "session_id": normalized_session_id, "scope": scope},
+        "replacement": normalized_replacement,
+        "redacted_count": int(cursor.rowcount),
+    }
+
+
+def parse_retention_policy(raw: Optional[List[str]]) -> Dict[str, Optional[int]]:
+    policy = dict(EPISODIC_DEFAULT_RETENTION_DAYS)
+    if not raw:
+        return policy
+    for entry in raw:
+        text = str(entry or "").strip()
+        if not text:
+            continue
+        if "=" not in text:
+            raise ValueError(f"invalid --policy entry: {text}")
+        type_raw, days_raw = text.split("=", 1)
+        event_type = normalize_type(type_raw)
+        days_token = days_raw.strip().lower()
+        if days_token in {"forever", "inf", "infinite", "none"}:
+            policy[event_type] = None
+            continue
+        try:
+            days = int(days_token)
+        except Exception as exc:
+            raise ValueError(f"invalid retention days for {event_type}: {days_raw}") from exc
+        if days < 0:
+            raise ValueError(f"retention days must be >= 0 for {event_type}")
+        policy[event_type] = days
+    return policy
+
+
+def gc_events(
+    conn: sqlite3.Connection,
+    *,
+    raw_scope: Optional[str],
+    global_scope: bool,
+    now_ts_ms: Any = None,
+    raw_policy: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    scope = resolve_query_scope(raw_scope, global_scope)
+    parsed_now_ts_ms = parse_ts_ms(now_ts_ms)
+    policy = parse_retention_policy(raw_policy)
+    deleted_by_type: Dict[str, int] = {}
+    deleted_total = 0
+    for event_type in sorted(EPISODIC_ALLOWED_TYPES):
+        days = policy.get(event_type)
+        if days is None:
+            deleted_by_type[event_type] = 0
+            continue
+        cutoff = parsed_now_ts_ms - (int(days) * 24 * 60 * 60 * 1000)
+        cursor = conn.execute(
+            "DELETE FROM episodic_events WHERE scope = ? AND type = ? AND ts_ms < ?",
+            (scope, event_type, int(cutoff)),
+        )
+        deleted = int(cursor.rowcount)
+        deleted_by_type[event_type] = deleted
+        deleted_total += deleted
+    conn.commit()
+    return {
+        "kind": "openclaw-mem.episodes.gc.v0",
+        "ts": utcnow_iso(),
+        "version": {"openclaw_mem": __version__, "schema": "v0"},
+        "ok": True,
+        "scope": scope,
+        "now_ts_ms": parsed_now_ts_ms,
+        "deleted_total": deleted_total,
+        "deleted_by_type": deleted_by_type,
+        "policy_days": {key: policy.get(key) for key in sorted(EPISODIC_ALLOWED_TYPES)},
     }
 
 

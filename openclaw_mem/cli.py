@@ -19436,58 +19436,15 @@ def cmd_episodes_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> N
 
 
 def cmd_episodes_redact(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    event_id = str(getattr(args, "event_id", "") or "").strip() or None
-    session_id = str(getattr(args, "session_id", "") or "").strip() or None
-
-    if bool(event_id) == bool(session_id):
-        _emit(
-            {
-                "kind": "openclaw-mem.episodes.redact.v0",
-                "ok": False,
-                "error": "provide exactly one of --event-id or --session-id",
-            },
-            True,
-        )
-        sys.exit(2)
-
-    replacement = str(getattr(args, "replacement", "placeholder") or "placeholder").strip().lower()
-    if replacement not in {"null", "placeholder"}:
-        _emit(
-            {
-                "kind": "openclaw-mem.episodes.redact.v0",
-                "ok": False,
-                "error": "replacement must be 'null' or 'placeholder'",
-            },
-            True,
-        )
-        sys.exit(2)
-
-    payload_value: Optional[str]
-    refs_value: Optional[str]
-    if replacement == "null":
-        payload_value = None
-        refs_value = None
-    else:
-        redacted_value = _json_compact_dumps(EPISODIC_REDACT_PLACEHOLDER)
-        payload_value = redacted_value
-        refs_value = redacted_value
-
     try:
-        if event_id:
-            cur = conn.execute(
-                "UPDATE episodic_events SET payload_json = ?, refs_json = ?, redacted = 1, search_text = summary WHERE event_id = ?",
-                (payload_value, refs_value, event_id),
-            )
-            redacted_count = int(cur.rowcount)
-            scope = None
-        else:
-            scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
-            cur = conn.execute(
-                "UPDATE episodic_events SET payload_json = ?, refs_json = ?, redacted = 1, search_text = summary WHERE session_id = ? AND scope = ?",
-                (payload_value, refs_value, session_id, scope),
-            )
-            redacted_count = int(cur.rowcount)
-        conn.commit()
+        out = core_episodes.redact_events(
+            conn,
+            event_id=getattr(args, "event_id", None),
+            session_id=getattr(args, "session_id", None),
+            raw_scope=getattr(args, "scope", None),
+            global_scope=bool(getattr(args, "global_scope", False)),
+            replacement=getattr(args, "replacement", "placeholder"),
+        )
     except ValueError as e:
         _emit(
             {
@@ -19499,19 +19456,6 @@ def cmd_episodes_redact(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         )
         sys.exit(2)
 
-    out = {
-        "kind": "openclaw-mem.episodes.redact.v0",
-        "ts": _utcnow_iso(),
-        "version": {"openclaw_mem": __version__, "schema": "v0"},
-        "ok": True,
-        "target": {
-            "event_id": event_id,
-            "session_id": session_id,
-            "scope": scope,
-        },
-        "replacement": replacement,
-        "redacted_count": redacted_count,
-    }
     _emit(out, args.json)
 
 
@@ -19545,9 +19489,13 @@ def _parse_retention_policy(raw: Optional[List[str]]) -> Dict[str, Optional[int]
 
 def cmd_episodes_gc(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
-        scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
-        now_ts_ms = _parse_ts_ms(getattr(args, "now_ts_ms", None))
-        policy = _parse_retention_policy(getattr(args, "policy", None))
+        out = core_episodes.gc_events(
+            conn,
+            raw_scope=getattr(args, "scope", None),
+            global_scope=bool(getattr(args, "global_scope", False)),
+            now_ts_ms=getattr(args, "now_ts_ms", None),
+            raw_policy=getattr(args, "policy", None),
+        )
     except ValueError as e:
         _emit(
             {
@@ -19559,38 +19507,6 @@ def cmd_episodes_gc(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         )
         sys.exit(2)
 
-    deleted_by_type: Dict[str, int] = {}
-    deleted_total = 0
-
-    for event_type in sorted(EPISODIC_ALLOWED_TYPES):
-        days = policy.get(event_type)
-        if days is None:
-            deleted_by_type[event_type] = 0
-            continue
-
-        cutoff = now_ts_ms - (int(days) * 24 * 60 * 60 * 1000)
-        cur = conn.execute(
-            "DELETE FROM episodic_events WHERE scope = ? AND type = ? AND ts_ms < ?",
-            (scope, event_type, int(cutoff)),
-        )
-        deleted = int(cur.rowcount)
-        deleted_by_type[event_type] = deleted
-        deleted_total += deleted
-
-    conn.commit()
-
-    policy_days = {k: policy.get(k) for k in sorted(EPISODIC_ALLOWED_TYPES)}
-    out = {
-        "kind": "openclaw-mem.episodes.gc.v0",
-        "ts": _utcnow_iso(),
-        "version": {"openclaw_mem": __version__, "schema": "v0"},
-        "ok": True,
-        "scope": scope,
-        "now_ts_ms": now_ts_ms,
-        "deleted_total": deleted_total,
-        "deleted_by_type": deleted_by_type,
-        "policy_days": policy_days,
-    }
     _emit(out, args.json)
 
 
