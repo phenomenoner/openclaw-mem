@@ -63,6 +63,14 @@ nav:
       - Core vs Advanced Labs: core-vs-advanced-labs.md
       - 60-second reality proof: reality-check.md
       - Quickstart: quickstart.md
+      - Harness quickstarts:
+          - Claude Code: quickstart-claude-code.md
+          - Codex: quickstart-codex.md
+          - OpenClaw: quickstart-openclaw.md
+          - Generic: quickstart-generic.md
+          - Gemini CLI: quickstart-gemini.md
+          - Cursor: quickstart-cursor.md
+          - Windsurf: quickstart-windsurf.md
       - Choose an install path: install-modes.md
       - Automation status: automation-status.md
   - Why openclaw-mem still exists: why-openclaw-mem-still-exists.md

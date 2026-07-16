@@ -2051,6 +2051,17 @@ def cmd_db_reindex(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 
 def cmd_doctor(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    if getattr(args, "harness", None):
+        receipt = core_harness_install.doctor(
+            str(args.harness),
+            root=getattr(args, "root", None),
+            config_path=getattr(args, "config_path", None),
+            skills_dir=getattr(args, "skills_dir", None),
+        )
+        _emit(receipt, bool(getattr(args, "json", False)))
+        if receipt["status"] == "fail":
+            raise SystemExit(1)
+        return
     row = conn.execute("SELECT COUNT(*) AS n, MIN(ts) AS min_ts, MAX(ts) AS max_ts FROM observations").fetchone()
     cfg = _read_openclaw_config()
     backend = _build_backend_status(cfg)
@@ -20435,6 +20446,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("doctor", help="Run compact operator health checks")
     add_common(sp)
+    sp.add_argument("--harness", choices=sorted(core_harness_install.HARNESS_NAMES), help="Diagnose one harness install instead of the database")
+    sp.add_argument("--root", default=None, help="Harness root/home override")
+    sp.add_argument("--config-path", default=None, help="Override harness config path")
+    sp.add_argument("--skills-dir", default=None, help="Override installed skills root")
     sp.set_defaults(func=cmd_doctor)
 
     sp = sub.add_parser("db", help="Inspect and govern the SQLite database")
@@ -22702,7 +22717,7 @@ def main() -> None:
         or (dream_lite_cmd == "apply" and dream_lite_apply_cmd in {"plan", "verify"})
     )
     file_only_snapshot = cmd in {"continuity", "self"} and self_cmd in {"attachment-map", "threat-feed", "adjudication", "public-summary", "explain", "sensitivity", "triggers", "interventions", "wording-lint"} and bool(getattr(args, "snapshot", None))
-    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "install", "harness", "codex", "symbolic-canvas", "service-store", "writeback-store", "pack-artifacts-observe"} or dream_lite_no_db or (cmd == "sync" and getattr(args, "backend", None) == "service") or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
+    no_db_path = cmd in {"capsule", "self-curator", "skill-curator", "steward", "ingest-review", "active-line", "surface", "goal", "skill-capture", "mem-system", "mutation", "governed", "install", "harness", "codex", "symbolic-canvas", "service-store", "writeback-store", "pack-artifacts-observe"} or (cmd == "doctor" and bool(getattr(args, "harness", None))) or dream_lite_no_db or (cmd == "sync" and getattr(args, "backend", None) == "service") or (cmd == "optimize" and optimize_cmd in {"canary-advisory"}) or (cmd in {"continuity", "self"} and self_cmd in {"diff", "release", "release-history", "status", "enable", "disable", "patterns"}) or file_only_snapshot
 
     if no_db_path:
         # Some command families own their own file-only semantics.

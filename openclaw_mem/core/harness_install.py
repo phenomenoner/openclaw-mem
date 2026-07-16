@@ -25,8 +25,23 @@ from openclaw_mem.harness import (
 
 
 INSTALL_KIND = "openclaw-mem.harness-install.v1"
-HARNESS_NAMES = frozenset({"claude-code", "codex", "openclaw", "generic"})
+DOCTOR_KIND = "openclaw-mem.harness-doctor.v1"
+HARNESS_NAMES = frozenset(
+    {"claude-code", "codex", "openclaw", "generic", "gemini", "cursor", "windsurf"}
+)
 MCP_COMMAND = "openclaw-mem-mcp"
+
+# Current public conventions, verified 2026-07-17. All are overridable via
+# --config-path so a changed convention never requires guessing:
+# Gemini: https://google-gemini.github.io/gemini-cli/docs/get-started/configuration.html
+# Cursor: https://docs.cursor.com/context/model-context-protocol
+# Windsurf: https://docs.windsurf.com/windsurf/cascade/mcp
+JSON_CONFIG_PATHS = {
+    "claude-code": ".mcp.json",
+    "gemini": ".gemini/settings.json",
+    "cursor": ".cursor/mcp.json",
+    "windsurf": ".codeium/windsurf/mcp_config.json",
+}
 
 
 @dataclass(frozen=True)
@@ -51,6 +66,8 @@ def _root(root: str | Path | None, harness: str) -> Path:
         return Path(root).expanduser().resolve()
     if harness == "codex":
         return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser().resolve()
+    if harness in {"gemini", "windsurf"}:
+        return Path.home().resolve()
     return Path.cwd().resolve()
 
 
@@ -63,7 +80,10 @@ def _path(
         candidate = Path(config_path).expanduser()
         return candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
     return {
-        "claude-code": root / ".mcp.json",
+        "claude-code": root / JSON_CONFIG_PATHS["claude-code"],
+        "gemini": root / JSON_CONFIG_PATHS["gemini"],
+        "cursor": root / JSON_CONFIG_PATHS["cursor"],
+        "windsurf": root / JSON_CONFIG_PATHS["windsurf"],
         "codex": root / "AGENTS.md",
         "openclaw": root / ".openclaw-mem" / "agent-memory-card.md",
         "generic": None,
@@ -75,7 +95,7 @@ def _skills_path(
     root: Path,
     skills_dir: str | Path | None,
 ) -> Path | None:
-    if skills_dir is None and harness != "generic":
+    if skills_dir is None and harness not in {"generic", "gemini", "cursor", "windsurf"}:
         return None
     base = Path(skills_dir).expanduser() if skills_dir is not None else root / ".openclaw-mem" / "skills"
     if not base.is_absolute():
@@ -109,7 +129,7 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _claude_config(path: Path) -> str:
+def _mcp_json_config(path: Path) -> str:
     value = _load_json(path)
     servers = value.get("mcpServers")
     if servers is None:
@@ -185,8 +205,8 @@ def plan(
     files: list[PlannedFile] = []
     target = _path(normalized, base, config_path)
     if target is not None:
-        if normalized == "claude-code":
-            content = _claude_config(target)
+        if normalized in JSON_CONFIG_PATHS:
+            content = _mcp_json_config(target)
         else:
             content = _managed_card(
                 normalized,
@@ -293,7 +313,7 @@ def verify(
     checks: list[dict[str, Any]] = []
     if target is not None:
         installed = False
-        if target.exists() and normalized == "claude-code":
+        if target.exists() and normalized in JSON_CONFIG_PATHS:
             try:
                 entry = _load_json(target).get("mcpServers", {}).get("openclaw-mem", {})
                 installed = isinstance(entry, dict) and entry.get("command") == MCP_COMMAND
@@ -334,6 +354,62 @@ def detect(root: str | Path | None = None) -> dict[str, Any]:
             }
         )
     return {"kind": INSTALL_KIND, "ok": True, "phase": "detect", "targets": targets}
+
+
+def doctor(
+    harness: str,
+    *,
+    root: str | Path | None = None,
+    config_path: str | Path | None = None,
+    skills_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Diagnose config, MCP executable, and skill-card readiness."""
+
+    import shutil as _shutil
+
+    normalized = str(harness).strip().lower()
+    verification = verify(
+        normalized,
+        root=root,
+        config_path=config_path,
+        skills_dir=skills_dir,
+    )
+    checks = list(verification["checks"])
+    config_checks = [item for item in checks if item["name"] == "config"]
+    skill_checks = [item for item in checks if item["name"] == "skill"]
+    executable = _shutil.which(MCP_COMMAND)
+    checks.append(
+        {
+            "name": "executable",
+            "command": MCP_COMMAND,
+            "path": executable,
+            "ok": executable is not None,
+        }
+    )
+
+    config_ok = all(item["ok"] for item in config_checks) if config_checks else True
+    skill_ok = (
+        all(item["ok"] for item in skill_checks)
+        if skill_checks
+        else normalized in {"codex", "openclaw"}
+    )
+    executable_ok = executable is not None
+    if not config_ok:
+        status = "fail"
+    elif not executable_ok or not skill_ok:
+        status = "warn"
+    else:
+        status = "pass"
+    repair = f"openclaw-mem install --harness {normalized} --verify"
+    return {
+        "kind": DOCTOR_KIND,
+        "ok": status != "fail",
+        "harness": normalized,
+        "status": status,
+        "checks": checks,
+        "repair_command": None if status == "pass" else repair,
+        "hint": None if status == "pass" else f"run `{repair}` and ensure {MCP_COMMAND} is on PATH",
+    }
 
 
 def install(
