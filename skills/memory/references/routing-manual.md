@@ -18,7 +18,7 @@ Prefer a fresh synthesis card only when its receipt preserves `preferredCardRefs
 
 ## Governed maintenance
 
-Scout observation maintenance with `openclaw-mem optimize evolution-review --json`; keep judgment in `optimize governor-review`, and route approved mutation through `optimize assist-apply` with receipts and rollback. Do not collapse scout, governor, and writer roles.
+Scout observation maintenance with `openclaw-mem curate scan --target memory --json`; keep judgment in `curate review`, and route approved mutation through `curate apply` with receipts and rollback. Do not collapse scout, governor, and writer roles.
 
 Dream Lite apply is governed: `apply plan` and `apply verify` are dry-run gates; `apply run` is a narrow governor-approved refresh canary. `compile_new_card` and Director artifacts remain proposals or rehearsals, never hidden authority changes.
 

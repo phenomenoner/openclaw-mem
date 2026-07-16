@@ -20166,6 +20166,7 @@ class _HelpAllAction(argparse.Action):
                 getattr(parser, "_openclaw_all_choice_actions", [])
             )
             subparsers.metavar = getattr(parser, "_openclaw_all_metavar", None)
+        parser.epilog = getattr(parser, "_openclaw_all_epilog", parser.epilog)
         parser.print_help()
         parser.exit()
 
@@ -20231,10 +20232,14 @@ def build_parser() -> argparse.ArgumentParser:
         "  {\"ts\":\"2026-02-04T13:00:00Z\", \"kind\":\"tool\", \"tool_name\":\"cron.list\", \"summary\":\"cron list called\", \"detail\":{...}}\n"
     )
 
+    primary_epilog = (
+        "Primary workflow: recall existing context, store confirmed facts, curate lifecycle changes, sync outbound state, inspect graph evidence, and govern the db.\n"
+        "Run `openclaw-mem --help-all` to see every compatibility and advanced command."
+    )
     p = argparse.ArgumentParser(
         prog="openclaw-mem",
-        description="OpenClaw memory CLI (M0 prototype).",
-        epilog=epilog,
+        description="Local-first OpenClaw memory with governed retrieval, storage, curation, and synchronization.",
+        epilog=primary_epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -20950,7 +20955,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--out-root", dest="out_root", help="Optional self-curator rollback receipt output root")
     c.set_defaults(func=cmd_curate)
 
-    sp = sub.add_parser("sync", help="Unified outbound backend readiness and bounded writeback surface")
+    sp = sub.add_parser("sync", help="Unified outbound backend readiness and bounded synchronization surface")
     add_common(sp)
     ysub = sp.add_subparsers(dest="sync_cmd", required=True)
 
@@ -22399,16 +22404,15 @@ def build_parser() -> argparse.ArgumentParser:
     from openclaw_mem.cli.registry import register as register_command_modules
 
     register_command_modules(p)
-    hidden_commands = {"continuity", "self", "dream-lite", "gbrain-sidecar", "goal"}
     all_choice_actions = list(sub._choices_actions)
-    sub._choices_actions = [
-        action for action in all_choice_actions if action.dest not in hidden_commands
-    ]
     all_names = list(sub.choices)
-    visible_names = [name for name in all_names if name not in hidden_commands]
+    visible_names = ["recall", "store", "curate", "sync", "graph", "db"]
+    action_by_name = {action.dest: action for action in all_choice_actions}
+    sub._choices_actions = [action_by_name[name] for name in visible_names]
     p._openclaw_top_subparsers = sub
     p._openclaw_all_choice_actions = all_choice_actions
     p._openclaw_all_metavar = "{" + ",".join(all_names) + "}"
+    p._openclaw_all_epilog = epilog
     sub.metavar = "{" + ",".join(visible_names) + "}"
     return p
 

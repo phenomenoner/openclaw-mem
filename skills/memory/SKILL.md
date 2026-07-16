@@ -20,14 +20,16 @@ Do not use durable memory for raw logs, transcripts, code, speculative claims, o
 
 ## Decision table
 
-| Need | Lane | Action |
+The product-facing model has three verbs: recall, store, and curate.
+
+| Need | Verb | Action |
 | --- | --- | --- |
-| Canonical wording, contract, SOP | Docs (L2) | `memory_docs_search` |
-| Ownership, location, dependencies | Graph/topology (L3) | Read [routing manual](references/routing-manual.md) |
-| User preference or prior decision | Recall (L1) | `memory_recall` |
-| Bounded multi-source context | Pack | `openclaw-mem pack --query <query> --trace --json` |
-| New confirmed durable fact | Store (L1) | `memory_store` after confirmation |
-| Temporary or uncertain detail | Session | Do nothing |
+| Prior preference, decision, or evidence | Recall | `openclaw-mem recall <query> --mode auto --json` |
+| Canonical wording, ownership, or dependencies | Recall | Route to docs/graph using [routing manual](references/routing-manual.md) |
+| Bounded multi-source context | Recall | `openclaw-mem pack --query <query> --trace --json` |
+| New confirmed durable fact | Store | `openclaw-mem store <text> --json` after confirmation |
+| Lifecycle review, apply, verify, or rollback | Curate | Read the curate governance skill |
+| Temporary or uncertain detail | None | Keep it session-local |
 
 ## Iron rules
 
@@ -48,7 +50,9 @@ Do not use durable memory for raw logs, transcripts, code, speculative claims, o
 ## Verify
 
 ```bash
-openclaw-mem status --json
+openclaw-mem recall <query> --mode auto --json
+openclaw-mem store <text> --json
+openclaw-mem curate scan --target memory --json
 openclaw-mem pack --query <query> --trace --json
 openclaw-mem db info --json
 ```

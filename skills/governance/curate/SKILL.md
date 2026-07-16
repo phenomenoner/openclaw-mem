@@ -1,9 +1,8 @@
 ---
 name: openclaw-mem-curate
 description: >-
-  Govern low-risk observation and skill lifecycle maintenance. Use for
-  review, planning, policy checks, checkpointed apply, verification, reports,
-  and receipt-driven rollback.
+  Govern memory, episode, skill, and fact lifecycle maintenance through the
+  unified curate scan, review, apply, verify, and rollback verbs.
 metadata:
   ring: 1
   surface: [cli]
@@ -13,7 +12,7 @@ metadata:
 
 # Curate Governance
 
-Use the lifecycle: review → plan → policy → checkpoint → apply → verify → report → rollback if requested or verification fails.
+Use `scan → review → apply → verify → rollback` as the explicit governed loop. Every wrapper preserves the complete engine receipt in `inner`.
 
 ## Authority
 
@@ -23,22 +22,27 @@ Use the lifecycle: review → plan → policy → checkpoint → apply → verif
 - Do not merge scout, governor, and writer authority into one hidden step.
 - Run scheduled curation separately from heartbeat health checks.
 
-## Operate
+## Operate by verb
 
 ```bash
-openclaw-mem optimize evolution-review --json
-openclaw-mem optimize governor-review --json
-openclaw-mem self-curator skill-review --skill-root <workspace>/skills --json
-openclaw-mem self-curator controller --skill-root <workspace>/skills --workspace-root <workspace> --out-root <workspace>/.state/self-curator --mode dry_run --json
-openclaw-mem self-curator rollback --receipt <apply-receipt> --json
+openclaw-mem curate scan --target memory --json
+openclaw-mem curate scan --target episodes --json
+openclaw-mem curate scan --target skills --skill-root <workspace>/skills --json
+openclaw-mem curate scan --target facts --source-root <workspace> --json
+openclaw-mem curate review --target memory --from-file <recommendation.json> --json
+openclaw-mem curate apply --target memory --from-file <governor.json> --json
+openclaw-mem curate verify --target memory --run-dir <receipt-dir> --json
+openclaw-mem curate rollback --target memory --receipt <rollback.json> --json
 ```
 
-Current scheduled apply may append one bounded `Curator lifecycle` section or archive malformed/very-short skills under `skills/.archive/`. Broader lower-level operations are not automatically authorized.
+Skill mutation remains checkpointed and whitelist-only: pass an explicit self-curator plan to `curate apply --target skills --plan <plan.json>`. Unsupported verb-target pairs return stable zero-write receipts.
+
+See [legacy commands](references/legacy-commands.md) when maintaining older automation. Aliases remain callable and emit deprecation guidance; do not remove them during migration.
 
 ## Verify
 
 ```bash
-openclaw-mem self-curator skill-review --skill-root <workspace>/skills --no-write --json
+openclaw-mem curate scan --target skills --skill-root <workspace>/skills --json
 python -m pytest tests/test_self_curator.py -q
 git diff --check
 ```
