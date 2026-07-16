@@ -17558,85 +17558,29 @@ def cmd_graph_code_impact(conn: sqlite3.Connection, args: argparse.Namespace) ->
 
 def cmd_episodes_append(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
-        event_type = _normalize_episodic_type(getattr(args, "type", None))
-        scope = _normalize_episodic_scope(getattr(args, "scope", None))
-        ts_ms = _parse_ts_ms(getattr(args, "ts_ms", None))
-
-        session_id = str(getattr(args, "session_id", "") or "").strip()
-        agent_id = str(getattr(args, "agent_id", "") or "").strip()
-        summary = _sanitize_str_surrogates(str(getattr(args, "summary", "") or "").strip())
-        if not session_id:
-            raise ValueError("session_id is required")
-        if not agent_id:
-            raise ValueError("agent_id is required")
-        if not summary:
-            raise ValueError("summary is required")
-
-        payload_cap = int(getattr(args, "payload_cap_bytes", EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES))
-        refs_cap = int(getattr(args, "refs_cap_bytes", EPISODIC_DEFAULT_REFS_CAP_BYTES))
-        if payload_cap <= 0 or refs_cap <= 0:
-            raise ValueError("payload/refs caps must be > 0")
-
-        payload_obj, payload_serialized, payload_size = _parse_optional_json_arg(
-            getattr(args, "payload_json", None),
-            getattr(args, "payload_file", None),
-            "payload",
+        out = core_episodes.append_event(
+            conn,
+            event_type=getattr(args, "type", None),
+            raw_scope=getattr(args, "scope", None),
+            session_id=getattr(args, "session_id", ""),
+            agent_id=getattr(args, "agent_id", ""),
+            summary=getattr(args, "summary", ""),
+            event_id=getattr(args, "event_id", None),
+            ts_ms=getattr(args, "ts_ms", None),
+            payload_json=getattr(args, "payload_json", None),
+            payload_file=getattr(args, "payload_file", None),
+            refs_json=getattr(args, "refs_json", None),
+            refs_file=getattr(args, "refs_file", None),
+            payload_cap_bytes=int(getattr(args, "payload_cap_bytes", EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES)),
+            refs_cap_bytes=int(getattr(args, "refs_cap_bytes", EPISODIC_DEFAULT_REFS_CAP_BYTES)),
+            allow_tool_output=bool(getattr(args, "allow_tool_output", False)),
         )
-        refs_obj, refs_serialized, refs_size = _parse_optional_json_arg(
-            getattr(args, "refs_json", None),
-            getattr(args, "refs_file", None),
-            "refs",
-        )
-
-        if payload_size > payload_cap:
-            raise ValueError(f"payload exceeds cap ({payload_size} > {payload_cap} bytes)")
-        if refs_size > refs_cap:
-            raise ValueError(f"refs exceeds cap ({refs_size} > {refs_cap} bytes)")
-
-        _episodic_guard_text_fragments(
-            summary,
-            payload_serialized,
-            refs_serialized,
-            bool(getattr(args, "allow_tool_output", False)),
-        )
-
-        event_id_raw = str(getattr(args, "event_id", "") or "").strip()
-        event_id = event_id_raw or str(uuid.uuid4())
-
-        created_at = _utcnow_iso()
-        conn.execute(
-            """
-            INSERT INTO episodic_events (
-                event_id, ts_ms, scope, session_id, agent_id, type, summary,
-                payload_json, refs_json, redacted, schema_version, created_at, search_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-            """,
-            (
-                event_id,
-                ts_ms,
-                scope,
-                session_id,
-                agent_id,
-                event_type,
-                summary,
-                payload_serialized,
-                refs_serialized,
-                EPISODIC_SCHEMA_VERSION,
-                created_at,
-                _episodic_build_search_text(
-                    summary=summary,
-                    payload_json=payload_serialized,
-                    refs_json=refs_serialized,
-                ),
-            ),
-        )
-        conn.commit()
-    except sqlite3.IntegrityError as e:
+    except core_episodes.DuplicateEventError as e:
         _emit({
             "kind": "openclaw-mem.episodes.append.v0",
             "ok": False,
             "error": "event_id already exists",
-            "detail": str(e),
+            "detail": e.detail,
         }, True)
         sys.exit(1)
     except ValueError as e:
@@ -17647,31 +17591,6 @@ def cmd_episodes_append(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         }, True)
         sys.exit(2)
 
-    out = {
-        "kind": "openclaw-mem.episodes.append.v0",
-        "ts": _utcnow_iso(),
-        "version": {"openclaw_mem": __version__, "schema": "v0"},
-        "ok": True,
-        "event": {
-            "event_id": event_id,
-            "ts_ms": ts_ms,
-            "scope": scope,
-            "session_id": session_id,
-            "agent_id": agent_id,
-            "type": event_type,
-            "summary": summary,
-            "payload_bytes": payload_size,
-            "refs_bytes": refs_size,
-            "schema_version": EPISODIC_SCHEMA_VERSION,
-            "redacted": False,
-            "payload_present": payload_obj is not None,
-            "refs_present": refs_obj is not None,
-        },
-        "caps": {
-            "payload_cap_bytes": payload_cap,
-            "refs_cap_bytes": refs_cap,
-        },
-    }
     _emit(out, args.json)
 
 
@@ -17684,106 +17603,25 @@ def cmd_episodes_append_session_store_receipt(conn: sqlite3.Connection, args: ar
     """
 
     try:
-        scope = _normalize_episodic_scope(getattr(args, "scope", None) or "global")
-        ts_ms = _parse_ts_ms(getattr(args, "ts_ms", None))
-        agent_id = str(getattr(args, "agent_id", None) or "openclaw").strip() or "openclaw"
-        event_name = str(getattr(args, "event", None) or "session_store_rotated").strip()
-        if event_name not in {"session_store_rotated", "session_store_cleanup"}:
-            raise ValueError("--event must be session_store_rotated or session_store_cleanup")
-
-        store_path_raw = str(getattr(args, "store_path", None) or "").strip()
-        store_basename = _session_store_basename(store_path_raw)
-        size_bytes_raw = getattr(args, "size_bytes", None)
-        backup_count_raw = getattr(args, "backup_count", None)
-        size_bytes = int(size_bytes_raw) if size_bytes_raw is not None else None
-        backup_count = int(backup_count_raw) if backup_count_raw is not None else None
-        if size_bytes is not None and size_bytes < 0:
-            raise ValueError("--size-bytes must be >= 0")
-        if backup_count is not None and backup_count < 0:
-            raise ValueError("--backup-count must be >= 0")
-
-        payload_obj = {
-            "event": event_name,
-            "store_basename": store_basename,
-        }
-        if size_bytes is not None:
-            payload_obj["size_bytes"] = size_bytes
-        if backup_count is not None:
-            payload_obj["backup_count"] = backup_count
-
-        refs_obj = {"source": "openclaw_session_store_maintenance", "store_basename": store_basename}
-        payload_json, payload_bytes, _ = _episodic_bounded_json(
-            payload_obj,
-            cap_bytes=EPISODIC_DEFAULT_PAYLOAD_CAP_BYTES,
-            label="payload",
+        out = core_episodes.append_session_store_receipt(
+            conn,
+            raw_scope=getattr(args, "scope", None) or "global",
+            ts_ms=getattr(args, "ts_ms", None),
+            agent_id=getattr(args, "agent_id", None) or "openclaw",
+            event_name=getattr(args, "event", None) or "session_store_rotated",
+            store_path=getattr(args, "store_path", None),
+            size_bytes=getattr(args, "size_bytes", None),
+            backup_count=getattr(args, "backup_count", None),
+            event_id=getattr(args, "event_id", None),
         )
-        refs_json, refs_bytes, _ = _episodic_bounded_json(
-            refs_obj,
-            cap_bytes=EPISODIC_DEFAULT_REFS_CAP_BYTES,
-            label="refs",
-        )
-        summary_parts = [event_name, f"store={store_basename}"]
-        if size_bytes is not None:
-            summary_parts.append(f"size_bytes={size_bytes}")
-        if backup_count is not None:
-            summary_parts.append(f"backup_count={backup_count}")
-        summary = " ".join(summary_parts)
-
-        event_id_raw = str(getattr(args, "event_id", "") or "").strip()
-        event_id = event_id_raw or f"session-store-{hashlib.sha256(f'{scope}:{agent_id}:{event_name}:{store_basename}:{ts_ms}:{size_bytes}:{backup_count}'.encode('utf-8')).hexdigest()[:24]}"
-        created_at = _utcnow_iso()
-        conn.execute(
-            """
-            INSERT INTO episodic_events (
-                event_id, ts_ms, scope, session_id, agent_id, type, summary,
-                payload_json, refs_json, redacted, schema_version, created_at, search_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-            """,
-            (
-                event_id,
-                ts_ms,
-                scope,
-                "openclaw-session-store",
-                agent_id,
-                "ops.observation",
-                summary,
-                payload_json,
-                refs_json,
-                EPISODIC_SCHEMA_VERSION,
-                created_at,
-                _episodic_build_search_text(summary=summary, payload_json=payload_json, refs_json=refs_json),
-            ),
-        )
-        conn.commit()
-    except sqlite3.IntegrityError as e:
-        _emit({"kind": "openclaw-mem.episodes.append-session-store-receipt.v0", "ok": False, "error": "event_id already exists", "detail": str(e)}, True)
+    except core_episodes.DuplicateEventError as e:
+        _emit({"kind": "openclaw-mem.episodes.append-session-store-receipt.v0", "ok": False, "error": "event_id already exists", "detail": e.detail}, True)
         sys.exit(1)
     except ValueError as e:
         _emit({"kind": "openclaw-mem.episodes.append-session-store-receipt.v0", "ok": False, "error": str(e)}, True)
         sys.exit(2)
 
-    _emit(
-        {
-            "kind": "openclaw-mem.episodes.append-session-store-receipt.v0",
-            "ts": _utcnow_iso(),
-            "version": {"openclaw_mem": __version__, "schema": "v0"},
-            "ok": True,
-            "event": {
-                "event_id": event_id,
-                "ts_ms": ts_ms,
-                "scope": scope,
-                "session_id": "openclaw-session-store",
-                "agent_id": agent_id,
-                "type": "ops.observation",
-                "summary": summary,
-                "payload_bytes": payload_bytes,
-                "refs_bytes": refs_bytes,
-                "schema_version": EPISODIC_SCHEMA_VERSION,
-                "redacted": False,
-            },
-        },
-        args.json,
-    )
+    _emit(out, args.json)
 
 
 def _episodic_collect_search_fragments(value: Any, out: List[str], *, max_fragments: int = 48) -> None:

@@ -5,7 +5,13 @@ import sys
 from pathlib import Path
 
 from openclaw_mem.core.api import connect, pack, search, store_observation
-from openclaw_mem.core.episodes import query as query_episodes, replay as replay_episodes
+from openclaw_mem.core.episodes import (
+    DuplicateEventError,
+    append_event,
+    append_session_store_receipt,
+    query as query_episodes,
+    replay as replay_episodes,
+)
 from openclaw_mem.core.records import harvest_observations, ingest_observations, store_memory
 
 
@@ -241,5 +247,102 @@ def test_core_episodes_validation_happens_before_query() -> None:
             assert str(exc) == "scope is required (or pass --global)"
         else:
             raise AssertionError("missing scope should fail")
+    finally:
+        conn.close()
+
+
+def test_core_episodes_append_mutation_boundaries_are_output_free(capsys) -> None:
+    conn = connect(":memory:")
+    try:
+        receipt = append_event(
+            conn,
+            event_type="ops.observation",
+            raw_scope="project:core",
+            session_id="session-append",
+            agent_id="main",
+            summary="core append receipt",
+            event_id="evt-core-append",
+            ts_ms=1234,
+            payload_json='{"value":1}',
+            refs_json='{"source":"test"}',
+        )
+
+        assert receipt["ok"] is True
+        assert receipt["event"]["event_id"] == "evt-core-append"
+        readback = query_episodes(
+            conn,
+            raw_scope="project:core",
+            global_scope=False,
+            session_id="session-append",
+            include_payload=True,
+        )
+        assert readback["count"] == 1
+        assert readback["items"][0]["payload"] == {"value": 1}
+
+        try:
+            append_event(
+                conn,
+                event_type="ops.observation",
+                raw_scope="project:core",
+                session_id="session-append",
+                agent_id="main",
+                summary="duplicate",
+                event_id="evt-core-append",
+                ts_ms=1235,
+            )
+        except DuplicateEventError:
+            pass
+        else:
+            raise AssertionError("duplicate event_id must be rejected")
+        assert conn.execute("SELECT COUNT(*) FROM episodic_events").fetchone()[0] == 1
+
+        denied = (
+            {"summary": "api_key=super-secret-value", "payload_json": None},
+            {"summary": "mail me at person@example.com", "payload_json": None},
+            {"summary": "tool payload", "payload_json": '{"stdout":"raw output"}'},
+        )
+        for case in denied:
+            try:
+                append_event(
+                    conn,
+                    event_type="ops.observation",
+                    raw_scope="project:core",
+                    session_id="session-denied",
+                    agent_id="main",
+                    summary=case["summary"],
+                    payload_json=case["payload_json"],
+                )
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"unsafe append must be rejected: {case}")
+        assert conn.execute("SELECT COUNT(*) FROM episodic_events").fetchone()[0] == 1
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+    finally:
+        conn.close()
+
+
+def test_core_session_store_receipt_is_deterministic_and_output_free(capsys) -> None:
+    conn = connect(":memory:")
+    try:
+        receipt = append_session_store_receipt(
+            conn,
+            raw_scope="global",
+            ts_ms=1234,
+            store_path=r"C:\\state\\sessions.json",
+            size_bytes=42,
+            backup_count=2,
+        )
+        assert receipt["event"]["event_id"].startswith("session-store-")
+        assert receipt["event"]["summary"] == (
+            "session_store_rotated store=sessions.json size_bytes=42 backup_count=2"
+        )
+        assert conn.execute("SELECT COUNT(*) FROM episodic_events").fetchone()[0] == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
     finally:
         conn.close()
