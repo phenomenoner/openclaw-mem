@@ -38,6 +38,23 @@ def test_importing_core_db_does_not_import_cli_monolith() -> None:
     assert probe.returncode == 0, probe.stderr
 
 
+def test_importing_mcp_server_does_not_import_cli_monolith() -> None:
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import openclaw_mem.mcp_server; "
+            "raise SystemExit(1 if 'openclaw_mem.cli' in sys.modules else 0)",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stderr
+
+
 def test_stable_core_api_round_trip() -> None:
     conn = connect(":memory:")
     try:

@@ -58,6 +58,8 @@ from openclaw_mem import harness as harness_install
 from openclaw_mem import codex_install
 from openclaw_mem import project_resolver
 from openclaw_mem.core import episodes as core_episodes
+from openclaw_mem.core.search import lexical_search as core_lexical_search
+from openclaw_mem.core.search import vector_search as core_vector_search
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -5682,46 +5684,12 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if not q:
         _emit({"error": "empty query"}, True)
         sys.exit(2)
-
-    def run_fts(query: str):
-        return conn.execute(
-            """
-            SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
-                   snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
-                   snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
-                   bm25(observations_fts) AS score,
-                   o.detail_json AS detail_json
-            FROM observations_fts
-            JOIN observations o ON o.id = observations_fts.rowid
-            WHERE observations_fts MATCH ?
-            ORDER BY score ASC
-            LIMIT ?;
-            """,
-            (query, args.limit),
-        ).fetchall()
-
-    try:
-        rows = run_fts(q)
-    except sqlite3.OperationalError:
-        # FTS5 treats punctuation such as hyphens as query syntax. User-facing
-        # search should be literal-ish and fail open rather than crashing the
-        # gateway with cli_failed. Retry with punctuation normalized to spaces;
-        # if that also fails, return no FTS rows and let fallbacks run.
-        sanitized = re.sub(r"[^\w\s]", " ", q, flags=re.UNICODE)
-        sanitized = " ".join(sanitized.split())
-        if sanitized and sanitized != q:
-            try:
-                rows = run_fts(sanitized)
-            except sqlite3.OperationalError:
-                rows = []
-        else:
-            rows = []
-
-    # Fallback for CJK keyword queries when FTS5 tokenizer cannot split terms well.
-    if not rows and _has_cjk(q):
-        rows = _search_cjk_fallback(conn, q, args.limit)
-
-    rows = _filter_superseded_rows(rows)
+    rows = core_lexical_search(
+        conn,
+        q,
+        limit=max(1, int(args.limit)),
+        scope=getattr(args, "scope", None),
+    )
     out = _search_prefer_synthesis_rows(conn, rows=rows, limit=max(1, int(args.limit)))
 
     graph_enabled = bool(getattr(args, "graph", False) or str(getattr(args, "graph_path", "") or "").strip())
@@ -7348,36 +7316,7 @@ def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
         query_vec = client.embed([args.query], model=model)[0]
 
-    # Load embeddings
-    query_dim = len(query_vec)
-    items = conn.execute(
-        "SELECT observation_id, vector, norm FROM observation_embeddings WHERE model = ? AND dim = ?",
-        (model, query_dim),
-    ).fetchall()
-
-    ranked = rank_cosine(
-        query_vec=query_vec,
-        items=((int(r[0]), r[1], float(r[2])) for r in items),
-        limit=limit,
-    )
-
-    if not ranked:
-        _emit([], args.json)
-        return
-
-    ids = [rid for rid, _ in ranked]
-    q = f"SELECT id, ts, kind, tool_name, summary FROM observations WHERE id IN ({','.join(['?']*len(ids))})"
-    rows = conn.execute(q, ids).fetchall()
-    obs_map = {int(r["id"]): dict(r) for r in rows}
-
-    out = []
-    for rid, score in ranked:
-        r = obs_map.get(rid)
-        if not r:
-            continue
-        r["score"] = score
-        out.append(r)
-
+    out = core_vector_search(conn, query_vec, model=model, limit=limit)
     _emit(out, args.json)
 
 

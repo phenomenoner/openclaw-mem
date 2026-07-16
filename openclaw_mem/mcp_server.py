@@ -15,20 +15,17 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import io
 import json
 import sqlite3
 import sys
 import time
-from contextlib import redirect_stdout
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from openclaw_mem.cli import cmd_pack
-from openclaw_mem.core.api import connect as _connect, store_observation as _insert_observation
+from openclaw_mem.core.api import connect as _connect, pack as _pack, store_observation as _insert_observation
 from openclaw_mem.core.db import DEFAULT_DB
 from openclaw_mem import context_pack_v1
-from openclaw_mem.channel_a import is_private_text
+from openclaw_mem.core.privacy import is_private_text
 
 
 SCHEMA = "openclaw-mem.mcp.tools.v1"
@@ -309,19 +306,12 @@ def mem_pack(conn: sqlite3.Connection, args: dict[str, Any]) -> dict[str, Any]:
     query = str(args.get("query") or "").strip()
     if not query:
         raise ValueError("query is required")
-    ns = argparse.Namespace(
-        query=query,
-        query_en=None,
+    payload = _pack(
+        conn,
+        query,
         limit=max(1, min(30, int(args.get("limit") or 8))),
         budget_tokens=max(64, min(8000, int(args.get("budgetTokens") or 1200))),
-        trace=False,
-        json=True,
-        use_graph="off",
     )
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        cmd_pack(conn, ns)
-    payload = json.loads(buf.getvalue() or "{}")
     if payload.get("context_pack", {}).get("schema") != context_pack_v1.CONTEXT_PACK_V1_SCHEMA:
         raise RuntimeError("unexpected ContextPack schema")
     return {"ok": True, "context_pack": payload.get("context_pack"), "budget": payload.get("budget")}
