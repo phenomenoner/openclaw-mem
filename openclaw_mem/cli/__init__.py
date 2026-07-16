@@ -58,6 +58,11 @@ from openclaw_mem import harness as harness_install
 from openclaw_mem import codex_install
 from openclaw_mem import project_resolver
 from openclaw_mem.core import episodes as core_episodes
+from openclaw_mem.core.embeddings import (
+    EmbeddingProviderError,
+    MissingEmbeddingCredentials,
+    create_embedding_provider,
+)
 from openclaw_mem.core.search import lexical_search_with_receipt as core_lexical_search_with_receipt
 from openclaw_mem.core.search import vector_search as core_vector_search
 from openclaw_mem.core.vector_index import create_vector_index
@@ -7335,17 +7340,28 @@ def _embed_targets(field: str) -> List[Dict[str, str]]:
 def cmd_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Compute/store embeddings for observations."""
     api_key = _get_api_key()
-    if not api_key:
-        _emit({"error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json"}, args.json)
+    try:
+        client = create_embedding_provider(
+            api_key=api_key,
+            base_url=args.base_url,
+            model=args.model,
+            openai_client_factory=OpenAIEmbeddingsClient,
+        )
+    except EmbeddingProviderError as exc:
+        _emit(
+            {
+                "error": str(exc),
+                "provider": str(os.getenv("OPENCLAW_MEM_EMBED_PROVIDER") or "openai"),
+            },
+            args.json,
+        )
         sys.exit(1)
 
-    model = args.model
+    model = client.model_id
+    provider_name = client.provider_name
     limit = int(args.limit)
     batch = int(args.batch)
-    base_url = args.base_url
     field = getattr(args, "field", "original")
-
-    client = OpenAIEmbeddingsClient(api_key=api_key, base_url=base_url)
 
     per_field: Dict[str, Dict[str, Any]] = {}
     inserted_total = 0
@@ -7419,6 +7435,7 @@ def cmd_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(
         {
             "ok": True,
+            "provider": provider_name,
             "model": model,
             "field": field,
             "embedded": inserted_total,
@@ -7501,13 +7518,7 @@ def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Vector search over stored embeddings (cosine similarity)."""
     model = args.model
     limit = int(args.limit)
-
-    _warn_embedding_model_availability(
-        conn,
-        table="observation_embeddings",
-        requested_model=model,
-        label="original",
-    )
+    provider_name = "provided-vector"
 
     # Get query vector from file/json or via OpenAI API
     query_vec: Optional[List[float]] = None
@@ -7518,11 +7529,33 @@ def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         query_vec = json.loads(Path(args.query_vector_file).read_text(encoding="utf-8"))
     else:
         api_key = _get_api_key()
-        if not api_key:
-            _emit({"error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json (or provide --query-vector-json/--query-vector-file)"}, args.json)
+        try:
+            client = create_embedding_provider(
+                api_key=api_key,
+                base_url=args.base_url,
+                model=model,
+                openai_client_factory=OpenAIEmbeddingsClient,
+            )
+        except EmbeddingProviderError as exc:
+            _emit(
+                {
+                    "error": str(exc),
+                    "provider": str(os.getenv("OPENCLAW_MEM_EMBED_PROVIDER") or "openai"),
+                    "hint": "provide --query-vector-json/--query-vector-file to bypass embedding",
+                },
+                args.json,
+            )
             sys.exit(1)
-        client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
+        model = client.model_id
+        provider_name = client.provider_name
         query_vec = client.embed([args.query], model=model)[0]
+
+    _warn_embedding_model_availability(
+        conn,
+        table="observation_embeddings",
+        requested_model=model,
+        label="original",
+    )
 
     out = core_vector_search(
         conn,
@@ -7531,6 +7564,8 @@ def cmd_vsearch(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         limit=limit,
         vector_backend=str(getattr(args, "vector_backend", "auto") or "auto"),
     )
+    for item in out:
+        item["embedding_provider"] = provider_name
     _emit(out, args.json)
 
 
@@ -13209,6 +13244,21 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
 def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Proactive memory storage (SQLite + Vector + Markdown)."""
     api_key = _get_api_key()
+    provider = None
+    provider_error: Optional[str] = None
+    model = args.model
+    try:
+        provider = create_embedding_provider(
+            api_key=api_key,
+            base_url=args.base_url,
+            model=model,
+            openai_client_factory=OpenAIEmbeddingsClient,
+        )
+        model = provider.model_id
+    except MissingEmbeddingCredentials:
+        provider_error = "No API key, skipping embedding"
+    except EmbeddingProviderError as exc:
+        provider_error = f"Embedding provider unavailable: {exc}"
     memory_dir: Optional[Path] = None
     if not bool(getattr(args, "no_file_write", False)):
         notes_dir = getattr(args, "memory_notes_dir", None)
@@ -13228,11 +13278,12 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         importance=float(args.importance),
         text_en=getattr(args, "text_en", None),
         lang=getattr(args, "lang", None),
-        api_key=api_key,
+        api_key=None,
         base_url=args.base_url,
-        model=args.model,
+        model=model,
         memory_dir=memory_dir,
-        embedding_client_factory=OpenAIEmbeddingsClient,
+        embedding_provider=provider,
+        embedding_skip_reason=provider_error,
     )
     for warning in warnings:
         print(f"Warning: {warning}", file=sys.stderr)

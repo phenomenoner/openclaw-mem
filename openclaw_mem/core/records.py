@@ -218,6 +218,8 @@ def store_memory(
     model: str,
     memory_dir: Path | None = None,
     embedding_client_factory: Callable[..., Any] | None = None,
+    embedding_provider: Any | None = None,
+    embedding_skip_reason: str | None = None,
 ) -> tuple[Dict[str, Any], List[str]]:
     """Store one memory and return a receipt plus non-fatal warnings.
 
@@ -252,13 +254,19 @@ def store_memory(
     )
 
     warnings: List[str] = []
-    if api_key:
+    embedded = False
+    client = embedding_provider
+    if client is None and api_key:
+        if embedding_client_factory is None:
+            embedding_skip_reason = (
+                "Failed to embed memory: embedding client factory is required when api_key is set"
+            )
+        else:
+            client = embedding_client_factory(api_key=api_key, base_url=base_url)
+    if client is not None:
         try:
             from openclaw_mem.vector import l2_norm, pack_f32
 
-            if embedding_client_factory is None:
-                raise RuntimeError("embedding client factory is required when api_key is set")
-            client = embedding_client_factory(api_key=api_key, base_url=base_url)
             created_at = _utcnow_iso()
             vec = client.embed([normalized_text], model=model)[0]
             conn.execute(
@@ -275,10 +283,11 @@ def store_memory(
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     (rowid, model, len(vec_en), pack_f32(vec_en), l2_norm(vec_en), created_at),
                 )
+            embedded = True
         except Exception as exc:
             warnings.append(f"Failed to embed memory: {exc}")
     else:
-        warnings.append("No API key, skipping embedding")
+        warnings.append(embedding_skip_reason or "No API key, skipping embedding")
     conn.commit()
 
     markdown_path: str | None = None
@@ -302,7 +311,9 @@ def store_memory(
         "file": markdown_path,
         "markdownPath": markdown_path,
         "markdownWriteStatus": markdown_write_status,
-        "embedded": bool(api_key),
+        "embedded": embedded,
+        "embedding_model": model if embedded else None,
+        "embedding_provider": getattr(client, "provider_name", None) if embedded else None,
     }, warnings
 
 
