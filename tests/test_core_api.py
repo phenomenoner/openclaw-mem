@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import argparse
+import importlib
+import io
+import json
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from openclaw_mem.core.api import connect, pack, search, store_observation
@@ -67,6 +72,43 @@ def test_stable_core_api_round_trip() -> None:
         assert record_id == 1
         assert results[0]["summary"] == "alpha core memory"
         assert bundle["context_pack"]["schema"] == "openclaw-mem.context-pack.v1"
+    finally:
+        conn.close()
+
+
+def test_core_pack_context_contract_matches_cli_default_path(monkeypatch) -> None:
+    import openclaw_mem.cli as cli
+
+    core_pack = importlib.import_module("openclaw_mem.core.pack")
+    conn = connect(":memory:")
+    try:
+        store_observation(
+            conn,
+            {"kind": "preference", "summary": "CK prefers cited ContextPack fixtures.", "detail": {}},
+        )
+        conn.commit()
+        monkeypatch.setattr(cli, "_utcnow_iso", lambda: "FIXED")
+        monkeypatch.setattr(core_pack, "_utcnow_iso", lambda: "FIXED")
+        args = argparse.Namespace(
+            query="ContextPack fixtures",
+            query_en=None,
+            limit=5,
+            budget_tokens=300,
+            trace=False,
+            json=True,
+            use_graph="off",
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            cli.cmd_pack(conn, args)
+        cli_payload = json.loads(output.getvalue())
+        core_payload = core_pack.build_pack(
+            conn,
+            "ContextPack fixtures",
+            limit=5,
+            budget_tokens=300,
+        )
+        assert core_payload["context_pack"] == cli_payload["context_pack"]
     finally:
         conn.close()
 

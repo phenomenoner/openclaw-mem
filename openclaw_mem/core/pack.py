@@ -7,8 +7,10 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from openclaw_mem import defaults
 from openclaw_mem import context_pack_v1
-from openclaw_mem.core.search import lexical_search
+from openclaw_mem.core.embeddings import OpenAIEmbeddingsClient, get_api_key
+from openclaw_mem.core.search import hybrid_search, lexical_search, vector_search
 
 
 def _utcnow_iso() -> str:
@@ -43,19 +45,88 @@ def build_pack(
     limit: int = 8,
     budget_tokens: int = 1200,
     scope: Optional[str] = None,
+    query_en: Optional[str] = None,
+    model: Optional[str] = None,
+    base_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     query_text = str(query or "").strip()
     if not query_text:
         raise ValueError("empty query")
     bounded_limit = max(1, int(limit))
     bounded_budget = max(1, int(budget_tokens))
+    candidate_limit = max(bounded_limit * 3, bounded_limit + 8)
     candidates = lexical_search(
         conn,
         query_text,
-        limit=max(bounded_limit * 3, bounded_limit + 8),
+        limit=candidate_limit,
         scope=scope,
     )
+    model_name = str(model or defaults.embed_model())
+    vector_ids: List[int] = []
+    vector_en_ids: List[int] = []
+    has_vectors = conn.execute(
+        "SELECT 1 FROM observation_embeddings WHERE model = ? LIMIT 1", (model_name,)
+    ).fetchone() is not None
+    api_key = get_api_key()
+    if has_vectors and api_key:
+        try:
+            inputs = [query_text] + ([query_en] if query_en else [])
+            vectors = OpenAIEmbeddingsClient(api_key, base_url).embed(inputs, model=model_name)
+            vector_ids = [
+                int(item["id"])
+                for item in vector_search(conn, vectors[0], model=model_name, limit=candidate_limit)
+            ]
+            if query_en and len(vectors) > 1:
+                english_rows = vector_search(
+                    conn,
+                    vectors[1],
+                    model=model_name,
+                    limit=candidate_limit,
+                    table="observation_embeddings_en",
+                )
+                if not english_rows:
+                    english_rows = vector_search(conn, vectors[1], model=model_name, limit=candidate_limit)
+                vector_en_ids = [int(item["id"]) for item in english_rows]
+            candidates = hybrid_search(
+                conn,
+                query_text,
+                limit=candidate_limit,
+                vector_ids=vector_ids,
+                vector_en_ids=vector_en_ids,
+            )
+        except Exception:
+            # Embedding/network failures are fail-open to the lexical lane.
+            vector_ids = []
+            vector_en_ids = []
     detail_map = _metadata(conn, [int(item["id"]) for item in candidates])
+    importance_rank = {"must_remember": 0, "nice_to_have": 1, "ignore": 2, "unknown": 3}
+    trust_rank = {"trusted": 0, "verified": 0, "unknown": 1, "untrusted": 2, "quarantined": 3}
+
+    def candidate_text(item: Dict[str, Any], detail: Dict[str, Any]) -> str:
+        if str(detail.get("schema") or "") == "openclaw-mem.artifact.compaction-receipt.v1":
+            compact = detail.get("compact") if isinstance(detail.get("compact"), dict) else {}
+            compact_text = str(compact.get("text") or "").replace("\n", " ").strip()
+            if compact_text:
+                return compact_text
+        return str(item.get("summary_en") or item.get("summary") or "").replace("\n", " ").strip()
+
+    def importance_label(detail: Dict[str, Any]) -> str:
+        importance = detail.get("importance")
+        if isinstance(importance, dict):
+            label = str(importance.get("label") or "unknown").strip().lower().replace("-", "_").replace(" ", "_")
+        else:
+            label = str(detail.get("importance_label") or importance or "unknown").strip().lower()
+        return {"high": "must_remember", "medium": "nice_to_have", "low": "ignore"}.get(label, label)
+
+    candidates.sort(
+        key=lambda item: (
+            0 if item.get("tool_name") == "graph.synth-compile" else 1,
+            trust_rank.get(str(detail_map.get(int(item["id"]), {}).get("trust") or "unknown"), 99),
+            importance_rank.get(importance_label(detail_map.get(int(item["id"]), {})), 99),
+            -float(item.get("rrf_score") or 0.0),
+            -int(item.get("id") or 0),
+        )
+    )
     selected_items: List[Dict[str, Any]] = []
     citations: List[Dict[str, Any]] = []
     context_items: List[context_pack_v1.ContextPackV1Item] = []
@@ -63,19 +134,19 @@ def build_pack(
     for candidate in candidates:
         if len(selected_items) >= bounded_limit:
             break
-        text = str(candidate.get("summary") or "").strip()
+        row_id = int(candidate["id"])
+        detail = detail_map.get(row_id, {})
+        text = candidate_text(candidate, detail)
         if not text:
             continue
         token_estimate = _estimate_tokens(text)
         if used_tokens + token_estimate > bounded_budget:
             continue
-        row_id = int(candidate["id"])
         record_ref = f"obs:{row_id}"
-        detail = detail_map.get(row_id, {})
         trust = str(detail.get("trust") or detail.get("trust_tier") or "unknown")
         if bool(detail.get("quarantined") or detail.get("quarantine")):
             continue
-        importance = str(detail.get("importance_label") or detail.get("importance") or "unknown")
+        importance = importance_label(detail)
         used_tokens += token_estimate
         selected_items.append(
             {
