@@ -1572,7 +1572,12 @@ from openclaw_mem.core.db import (  # noqa: E402
     _sanitize_jsonable_surrogates as _sanitize_jsonable_surrogates,
     _sanitize_str_surrogates as _sanitize_str_surrogates,
 )
-from openclaw_mem.core.records import _insert_observation as _insert_observation  # noqa: E402
+from openclaw_mem.core.records import (  # noqa: E402
+    IngestRunSummary as IngestRunSummary,
+    _insert_observation as _insert_observation,
+    ingest_observations as _core_ingest_observations,
+    store_memory as _core_store_memory,
+)
 
 
 def _iter_jsonl(fp) -> Iterable[Dict[str, Any]]:
@@ -5511,36 +5516,20 @@ def cmd_optimize_policy_loop(conn: sqlite3.Connection, args: argparse.Namespace)
 
 
 def cmd_ingest(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    _apply_importance_scorer_override(args)
-
     if args.file:
         fp = open(args.file, "r", encoding="utf-8")
     else:
         fp = sys.stdin
-
-    summary = IngestRunSummary()
-
-    inserted: List[int] = []
-    for obs in _iter_jsonl(fp):
-        inserted.append(_insert_observation(conn, obs, summary))
-
-    conn.commit()
-    if args.file:
-        fp.close()
-
-    _emit(
-        {
-            "inserted": len(inserted),
-            "ids": inserted[:50],
-            "total_seen": summary.total_seen,
-            "graded_filled": summary.graded_filled,
-            "skipped_existing": summary.skipped_existing,
-            "skipped_disabled": summary.skipped_disabled,
-            "scorer_errors": summary.scorer_errors,
-            "label_counts": summary.normalized_label_counts(),
-        },
-        args.json,
-    )
+    try:
+        receipt = _core_ingest_observations(
+            conn,
+            _iter_jsonl(fp),
+            importance_scorer=getattr(args, "importance_scorer", None),
+        )
+    finally:
+        if args.file:
+            fp.close()
+    _emit(receipt, args.json)
 
 
 def _has_cjk(text: str) -> bool:
@@ -13265,76 +13254,8 @@ def cmd_writeback_lancedb(conn: sqlite3.Connection, args: argparse.Namespace) ->
 
 def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     """Proactive memory storage (SQLite + Vector + Markdown)."""
-    text = args.text.strip()
-    if not text:
-        _emit({"error": "empty text"}, args.json)
-        sys.exit(1)
-
-    text_en = (getattr(args, "text_en", None) or "").strip() or None
-    lang = (getattr(args, "lang", None) or "").strip() or None
-
-    from openclaw_mem.importance import make_importance
-
-    importance_obj = make_importance(
-        float(args.importance),
-        method="manual-via-cli",
-        rationale="Provided via openclaw-mem store --importance.",
-        version=1,
-    )
-
-    # 1. Insert into SQLite
-    obs = {
-        "kind": args.category,  # e.g., 'fact', 'preference'
-        "summary": text,
-        "summary_en": text_en,
-        "lang": lang,
-        "tool_name": "memory_store",
-        "detail": {"importance": importance_obj},
-    }
-    rowid = _insert_observation(conn, obs)
-
-    # 2. Embed and store vector
     api_key = _get_api_key()
-    if api_key:
-        try:
-            client = OpenAIEmbeddingsClient(api_key=api_key, base_url=args.base_url)
-            created_at = _utcnow_iso()
-
-            vec = client.embed([text], model=args.model)[0]
-            blob = pack_f32(vec)
-            norm = l2_norm(vec)
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO observation_embeddings
-                (observation_id, model, dim, vector, norm, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (rowid, args.model, len(vec), blob, norm, created_at),
-            )
-
-            if text_en:
-                vec_en = client.embed([text_en], model=args.model)[0]
-                blob_en = pack_f32(vec_en)
-                norm_en = l2_norm(vec_en)
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO observation_embeddings_en
-                    (observation_id, model, dim, vector, norm, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (rowid, args.model, len(vec_en), blob_en, norm_en, created_at),
-                )
-
-            conn.commit()
-        except Exception as e:
-            # Non-fatal: storage succeeded, vector failed
-            print(f"Warning: Failed to embed memory: {e}", file=sys.stderr)
-    else:
-        conn.commit()
-        print("Warning: No API key, skipping embedding", file=sys.stderr)
-
-    markdown_path: Optional[str] = None
-    markdown_write_status = "skipped:no_file_write"
+    memory_dir: Optional[Path] = None
     if not bool(getattr(args, "no_file_write", False)):
         notes_dir = getattr(args, "memory_notes_dir", None)
         if notes_dir:
@@ -13346,29 +13267,24 @@ def cmd_store(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 alt = Path(os.path.expanduser("~/.openclaw/memory"))
                 if alt.exists():
                     memory_dir = alt
-
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        md_file = memory_dir / f"{date_str}.md"
-        md_entry = f"- [{args.category.upper()}] {text} (importance: {importance_obj['score']:.2f}, {importance_obj['label']})\n"
-
-        try:
-            _atomic_append_file(md_file, md_entry)
-            markdown_path = str(md_file)
-            markdown_write_status = "written"
-        except Exception as e:
-            markdown_write_status = f"failed:{e}"
-
-    _emit(
-        {
-            "ok": True,
-            "id": rowid,
-            "file": markdown_path,
-            "markdownPath": markdown_path,
-            "markdownWriteStatus": markdown_write_status,
-            "embedded": bool(api_key),
-        },
-        args.json,
+    receipt, warnings = _core_store_memory(
+        conn,
+        text=args.text,
+        category=args.category,
+        importance=float(args.importance),
+        text_en=getattr(args, "text_en", None),
+        lang=getattr(args, "lang", None),
+        api_key=api_key,
+        base_url=args.base_url,
+        model=args.model,
+        memory_dir=memory_dir,
+        embedding_client_factory=OpenAIEmbeddingsClient,
     )
+    for warning in warnings:
+        print(f"Warning: {warning}", file=sys.stderr)
+    _emit(receipt, args.json)
+    if "error" in receipt:
+        sys.exit(1)
 
 
 def cmd_artifact_stash(_conn: sqlite3.Connection, args: argparse.Namespace) -> None:
