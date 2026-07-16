@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from openclaw_mem.core.api import connect, pack, search, store_observation
-from openclaw_mem.core.records import ingest_observations, store_memory
+from openclaw_mem.core.records import harvest_observations, ingest_observations, store_memory
 
 
 def test_importing_core_db_does_not_import_cli_monolith() -> None:
@@ -92,5 +92,83 @@ def test_core_store_returns_warnings_without_printing(tmp_path: Path, capsys) ->
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == ""
+    finally:
+        conn.close()
+
+
+def test_core_harvest_recovers_processing_file_without_output(tmp_path: Path, capsys) -> None:
+    conn = connect(":memory:")
+    source = tmp_path / "observations.jsonl"
+    processing = tmp_path / "observations.jsonl.20260717_010203.processing"
+    archive = tmp_path / "archive"
+    processing.write_text('{"kind":"fact","summary":"recovered"}\n', encoding="utf-8")
+    try:
+        receipt, warnings = harvest_observations(
+            conn,
+            source=source,
+            version="test",
+            archive_dir=archive,
+            update_index=False,
+        )
+
+        assert receipt["ok"] is True
+        assert receipt["ingested"] == 1
+        assert receipt["processed_files"] == 1
+        assert receipt["recovered"] is True
+        assert receipt["rotated"] is False
+        assert warnings == []
+        assert (archive / processing.name).exists()
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+    finally:
+        conn.close()
+
+
+def test_core_harvest_empty_source_receipt(tmp_path: Path) -> None:
+    conn = connect(":memory:")
+    try:
+        receipt, warnings = harvest_observations(
+            conn,
+            source=tmp_path / "missing.jsonl",
+            version="test",
+            update_index=False,
+        )
+
+        assert receipt["ok"] is True
+        assert receipt["processed_files"] == 0
+        assert receipt["ingested"] == 0
+        assert receipt["reason"] == "source empty/missing"
+        assert warnings == []
+    finally:
+        conn.close()
+
+
+def test_core_harvest_index_and_embedding_fail_open(tmp_path: Path) -> None:
+    conn = connect(":memory:")
+    source = tmp_path / "observations.jsonl"
+    source.write_text('{"kind":"fact","summary":"fail open"}\n', encoding="utf-8")
+
+    def fail_index(*_args) -> None:
+        raise RuntimeError("index unavailable")
+
+    try:
+        receipt, warnings = harvest_observations(
+            conn,
+            source=source,
+            version="test",
+            update_index=True,
+            index_path=tmp_path / "index.json",
+            build_index=fail_index,
+            embed=True,
+            api_key_provider=lambda: None,
+        )
+
+        assert receipt["ok"] is True
+        assert receipt["ingested"] == 1
+        assert receipt["embedded"] == 0
+        assert receipt["embed_error"] == "missing_api_key"
+        assert warnings == ["failed to update index: index unavailable"]
+        assert not source.exists()
     finally:
         conn.close()

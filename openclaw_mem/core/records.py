@@ -54,6 +54,14 @@ class IngestRunSummaryLike(Protocol):
     scorer_errors: int
     def bump_label(self, label: str) -> None: ...
 
+
+class HarvestError(RuntimeError):
+    """Harvest failure carrying the CLI-compatible error receipt."""
+
+    def __init__(self, receipt: Dict[str, Any]):
+        super().__init__(str(receipt.get("error") or "harvest failed"))
+        self.receipt = receipt
+
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -231,6 +239,187 @@ def store_memory(
         "markdownWriteStatus": markdown_write_status,
         "embedded": bool(api_key),
     }, warnings
+
+
+def _iter_jsonl(fp: Iterable[str]) -> Iterable[Dict[str, Any]]:
+    for line in fp:
+        stripped = line.strip()
+        if stripped:
+            yield json.loads(stripped)
+
+
+def harvest_observations(
+    conn: sqlite3.Connection,
+    *,
+    source: Path,
+    version: str,
+    importance_scorer: str | None = None,
+    archive_dir: Path | None = None,
+    update_index: bool = True,
+    index_path: Path | None = None,
+    index_limit: int = 5000,
+    build_index: Callable[[sqlite3.Connection, Path, int], Any] | None = None,
+    embed: bool = False,
+    api_key: str | None = None,
+    api_key_provider: Callable[[], str | None] | None = None,
+    base_url: str | None = None,
+    model: str = "text-embedding-3-small",
+    embed_limit: int = 1000,
+    embedding_client_factory: Callable[..., Any] | None = None,
+    warn_embedding_model_mismatch: Callable[..., Any] | None = None,
+) -> tuple[Dict[str, Any], List[str]]:
+    """Recover, ingest, optionally index/embed, and archive a harvest batch.
+
+    The function owns all state transitions but never prints or exits. Expected
+    operational failures are raised as :class:`HarvestError` receipts.
+    """
+
+    from openclaw_mem.vector import l2_norm, pack_f32
+
+    apply_importance_scorer_override(importance_scorer)
+    summary = IngestRunSummary()
+    warnings: List[str] = []
+    processing_files = sorted(source.parent.glob(f"{source.name}.*.processing"))
+    recovered = bool(processing_files)
+    rotated = False
+
+    if source.exists() and source.stat().st_size > 0:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        processing = source.with_suffix(f".jsonl.{stamp}.processing")
+        try:
+            source.rename(processing)
+        except OSError as exc:
+            raise HarvestError({"error": f"Failed to rotate log: {exc}"}) from exc
+        processing_files.append(processing)
+        processing_files.sort()
+        rotated = True
+
+    if not processing_files:
+        return {
+            "kind": "openclaw-mem.harvest.v0",
+            "ts": _utcnow_iso(),
+            "version": {"openclaw_mem": version, "schema": "v0"},
+            "ok": True,
+            "processed_files": 0,
+            "ingested": 0,
+            "reason": "source empty/missing",
+            "total_seen": summary.total_seen,
+            "graded_filled": summary.graded_filled,
+            "skipped_existing": summary.skipped_existing,
+            "skipped_disabled": summary.skipped_disabled,
+            "scorer_errors": summary.scorer_errors,
+            "label_counts": summary.normalized_label_counts(),
+        }, warnings
+
+    inserted_ids: List[int] = []
+    for processing in processing_files:
+        try:
+            with processing.open("r", encoding="utf-8") as fp:
+                for observation in _iter_jsonl(fp):
+                    inserted_ids.append(_insert_observation(conn, observation, summary))
+            conn.commit()
+        except Exception as exc:
+            raise HarvestError({"error": f"Ingest failed: {exc}", "file": str(processing)}) from exc
+
+    if update_index and build_index is not None and index_path is not None:
+        try:
+            build_index(conn, index_path, int(index_limit))
+        except Exception as exc:
+            warnings.append(f"failed to update index: {exc}")
+
+    embedded = 0
+    embed_error: str | None = None
+    if embed:
+        if api_key is None and api_key_provider is not None:
+            api_key = api_key_provider()
+        if not api_key:
+            embed_error = "missing_api_key"
+        else:
+            try:
+                if embedding_client_factory is None:
+                    raise RuntimeError("embedding client factory is required when api_key is set")
+                client = embedding_client_factory(api_key=api_key, base_url=base_url)
+                table = "observation_embeddings"
+                if warn_embedding_model_mismatch is not None:
+                    warn_embedding_model_mismatch(
+                        conn,
+                        table=table,
+                        requested_model=model,
+                        label="original",
+                    )
+                rows = conn.execute(
+                    """SELECT id, tool_name, summary AS text_value
+                       FROM observations
+                       WHERE id NOT IN (
+                           SELECT observation_id FROM observation_embeddings WHERE model = ?
+                       )
+                       AND trim(coalesce(summary, '')) <> ''
+                       ORDER BY id
+                       LIMIT ?""",
+                    (model, max(1, int(embed_limit))),
+                ).fetchall()
+                todo = [dict(row) for row in rows]
+                created_at = _utcnow_iso()
+                for offset in range(0, len(todo), 64):
+                    chunk = todo[offset : offset + 64]
+                    texts = [
+                        f"{(row.get('tool_name') or '').strip()}: {(row.get('text_value') or '').strip()}".strip(": ")
+                        for row in chunk
+                    ]
+                    vectors = client.embed(texts, model=model)
+                    for row, vector in zip(chunk, vectors):
+                        conn.execute(
+                            """INSERT OR REPLACE INTO observation_embeddings
+                               (observation_id, model, dim, vector, norm, created_at)
+                               VALUES (?, ?, ?, ?, ?, ?)""",
+                            (
+                                int(row["id"]),
+                                model,
+                                len(vector),
+                                pack_f32(vector),
+                                l2_norm(vector),
+                                created_at,
+                            ),
+                        )
+                        embedded += 1
+                    conn.commit()
+            except Exception as exc:
+                embed_error = str(exc)
+
+    try:
+        if archive_dir is not None:
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            for processing in processing_files:
+                processing.rename(archive_dir / processing.name)
+        else:
+            for processing in processing_files:
+                processing.unlink()
+    except Exception as exc:
+        raise HarvestError({"error": f"Failed to archive/delete processing files: {exc}"}) from exc
+
+    receipt: Dict[str, Any] = {
+        "kind": "openclaw-mem.harvest.v0",
+        "ts": _utcnow_iso(),
+        "version": {"openclaw_mem": version, "schema": "v0"},
+        "ok": True,
+        "ingested": len(inserted_ids),
+        "processed_files": len(processing_files),
+        "files": [path.name for path in processing_files[:20]],
+        "recovered": recovered,
+        "rotated": rotated,
+        "source": str(source),
+        "archive": str(archive_dir) if archive_dir is not None else "deleted",
+        "total_seen": summary.total_seen,
+        "graded_filled": summary.graded_filled,
+        "skipped_existing": summary.skipped_existing,
+        "skipped_disabled": summary.skipped_disabled,
+        "scorer_errors": summary.scorer_errors,
+        "label_counts": summary.normalized_label_counts(),
+        "embedded": embedded,
+    }
+    if embed_error:
+        receipt["embed_error"] = embed_error
+    return receipt, warnings
 
 
 def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summary: IngestRunSummaryLike | None = None) -> int:
