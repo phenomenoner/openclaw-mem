@@ -1724,6 +1724,103 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     )
 
 
+def _embedding_integrity(conn: sqlite3.Connection) -> Dict[str, Any]:
+    tables: Dict[str, Dict[str, Any]] = {}
+    for table in ("observation_embeddings", "observation_embeddings_en"):
+        empty = {
+            "count": 0,
+            "orphan_count": 0,
+            "dominant_model": None,
+            "dominant_dim": None,
+            "model_outlier_count": 0,
+            "dim_outlier_count": 0,
+            "model_dim_outlier_count": 0,
+        }
+        if not _table_exists(conn, table):
+            tables[table] = empty
+            continue
+        count = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+        dominant_model_row = conn.execute(
+            f"SELECT model, COUNT(*) AS n FROM {table} "
+            "GROUP BY model ORDER BY n DESC, model ASC LIMIT 1"
+        ).fetchone()
+        dominant_dim_row = conn.execute(
+            f"SELECT dim, COUNT(*) AS n FROM {table} "
+            "GROUP BY dim ORDER BY n DESC, dim ASC LIMIT 1"
+        ).fetchone()
+        dominant_model = dominant_model_row[0] if dominant_model_row else None
+        dominant_dim = int(dominant_dim_row[0]) if dominant_dim_row else None
+        model_outliers = 0
+        dim_outliers = 0
+        combined_outliers = 0
+        if count and dominant_model is not None and dominant_dim is not None:
+            model_outliers = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE model <> ?",
+                    (dominant_model,),
+                ).fetchone()[0]
+            )
+            dim_outliers = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE dim <> ?",
+                    (dominant_dim,),
+                ).fetchone()[0]
+            )
+            combined_outliers = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE model <> ? OR dim <> ?",
+                    (dominant_model, dominant_dim),
+                ).fetchone()[0]
+            )
+        orphan_count = 0
+        if _table_exists(conn, "observations"):
+            orphan_count = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {table} e LEFT JOIN observations o "
+                    "ON o.id = e.observation_id WHERE o.id IS NULL"
+                ).fetchone()[0]
+            )
+        tables[table] = {
+            "count": count,
+            "orphan_count": orphan_count,
+            "dominant_model": dominant_model,
+            "dominant_dim": dominant_dim,
+            "model_outlier_count": model_outliers,
+            "dim_outlier_count": dim_outliers,
+            "model_dim_outlier_count": combined_outliers,
+        }
+
+    english_missing_original_count = 0
+    if _table_exists(conn, "observation_embeddings_en") and _table_exists(
+        conn, "observation_embeddings"
+    ):
+        english_missing_original_count = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM observation_embeddings_en en "
+                "LEFT JOIN observation_embeddings original "
+                "ON original.observation_id = en.observation_id "
+                "WHERE original.observation_id IS NULL"
+            ).fetchone()[0]
+        )
+    orphan_count = sum(item["orphan_count"] for item in tables.values())
+    model_outlier_count = sum(item["model_outlier_count"] for item in tables.values())
+    dim_outlier_count = sum(item["dim_outlier_count"] for item in tables.values())
+    model_dim_outlier_count = sum(
+        item["model_dim_outlier_count"] for item in tables.values()
+    )
+    return {
+        "ok": not any(
+            (orphan_count, model_dim_outlier_count, english_missing_original_count)
+        ),
+        "orphan_count": orphan_count,
+        "model_outlier_count": model_outlier_count,
+        "dim_outlier_count": dim_outlier_count,
+        "model_dim_outlier_count": model_dim_outlier_count,
+        "english_missing_original_count": english_missing_original_count,
+        "tables": tables,
+    }
+
+
 def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     table_names = [
         str(row[0])
@@ -1770,14 +1867,7 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             ],
         }
 
-    orphan_count = 0
-    if _table_exists(conn, "observation_embeddings") and _table_exists(conn, "observations"):
-        orphan_count = int(
-            conn.execute(
-                "SELECT COUNT(*) FROM observation_embeddings e "
-                "LEFT JOIN observations o ON o.id = e.observation_id WHERE o.id IS NULL"
-            ).fetchone()[0]
-        )
+    embedding_integrity = _embedding_integrity(conn)
 
     lang_distribution: Dict[str, int] = {}
     summary_en_coverage = {"present": 0, "total": 0, "ratio": 0.0}
@@ -1816,7 +1906,17 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             ],
             "tables": tables,
             "fts_integrity": fts_integrity,
-            "embeddings": {**embedding_tables, "orphan_count": orphan_count},
+            "embeddings": {
+                **embedding_tables,
+                "orphan_count": embedding_integrity["orphan_count"],
+                "model_outlier_count": embedding_integrity["model_outlier_count"],
+                "dim_outlier_count": embedding_integrity["dim_outlier_count"],
+                "model_dim_outlier_count": embedding_integrity["model_dim_outlier_count"],
+                "english_missing_original_count": embedding_integrity[
+                    "english_missing_original_count"
+                ],
+                "integrity": embedding_integrity,
+            },
             "qdrant": _qdrant_dependency_status(),
             "lang_distribution": lang_distribution,
             "summary_en_coverage": summary_en_coverage,
@@ -1958,6 +2058,20 @@ def cmd_doctor(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "warn" if count == 0 else "info",
         "Observations are present in the local DB." if count > 0 else "No observations found yet; first proof/ingest may still be pending.",
         {"count": count, "min_ts": row["min_ts"], "max_ts": row["max_ts"]},
+    )
+
+    embedding_integrity = _embedding_integrity(conn)
+    embedding_ok = bool(embedding_integrity["ok"])
+    add_check(
+        "embeddings.integrity",
+        embedding_ok,
+        "info" if embedding_ok else "warn",
+        (
+            "Embedding rows match their dominant model/dimension and ownership contracts."
+            if embedding_ok
+            else "Embedding integrity anomalies found; inspect db info before relying on vector recall."
+        ),
+        {"integrity": embedding_integrity},
     )
 
     errors = sum(1 for item in checks if item["severity"] == "error" and not item["ok"])
