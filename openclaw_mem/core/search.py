@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from openclaw_mem.scope import normalize_scope_token
+from openclaw_mem.core.records import detect_lang
 from openclaw_mem.core.vector_index import create_vector_index
 from openclaw_mem.vector import rank_rrf
 
@@ -74,19 +76,40 @@ def _cjk_terms(query: str, max_terms: int = 16) -> List[str]:
     return result
 
 
-def _cjk_fallback(
+def _ascii_terms(query: str, max_terms: int = 16) -> List[str]:
+    result: List[str] = []
+    seen = set()
+    for term in re.findall(r"[A-Za-z0-9_]+", query or ""):
+        normalized = term.casefold()
+        if normalized not in seen:
+            seen.add(normalized)
+            result.append(term)
+        if len(result) >= max_terms:
+            break
+    return result
+
+
+def _like_fallback(
     conn: sqlite3.Connection,
     query: str,
     limit: int,
     *,
     scope: Optional[str] = None,
 ) -> List[sqlite3.Row]:
-    terms = _cjk_terms(query)
-    if not terms:
+    cjk_terms = _cjk_terms(query)
+    ascii_terms = _ascii_terms(query)
+    if not cjk_terms and not ascii_terms:
         return []
-    values = [f"%{term}%" for term in terms]
-    score_expr = " + ".join("CASE WHEN o.summary LIKE ? THEN 1 ELSE 0 END" for _ in values)
-    where_expr = " OR ".join("o.summary LIKE ?" for _ in values)
+    predicates: List[tuple[str, str]] = []
+    for term in cjk_terms:
+        predicates.append(("o.summary LIKE ?", f"%{term}%"))
+    for term in ascii_terms:
+        value = f"%{term}%"
+        predicates.append(("o.summary LIKE ?", value))
+        predicates.append(("COALESCE(o.summary_en, '') LIKE ?", value))
+    score_expr = " + ".join(f"CASE WHEN {expr} THEN 1 ELSE 0 END" for expr, _ in predicates)
+    where_expr = " OR ".join(expr for expr, _ in predicates)
+    values = [value for _, value in predicates]
     rows = conn.execute(
         f"""
         SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
@@ -109,6 +132,10 @@ def _cjk_fallback(
     return result[: int(limit)]
 
 
+# Compatibility name retained for callers that exercised the former private helper.
+_cjk_fallback = _like_fallback
+
+
 def _trigram_rows(
     conn: sqlite3.Connection, query: str, limit: int
 ) -> List[sqlite3.Row]:
@@ -129,13 +156,56 @@ def _trigram_rows(
     ).fetchall()
 
 
-def lexical_search(
+def _fallback_threshold() -> float:
+    raw = os.environ.get("OPENCLAW_MEM_FTS_FALLBACK_BM25_THRESHOLD", "0.25")
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return 0.25
+
+
+def _should_run_fallback(rows: List[sqlite3.Row], limit: int) -> bool:
+    if len(rows) >= limit:
+        return False
+    if not rows:
+        return True
+    try:
+        top_score = abs(float(rows[0]["score"]))
+    except (KeyError, TypeError, ValueError):
+        return True
+    return top_score < _fallback_threshold()
+
+
+def _fuse_rows(
+    lane_rows: Dict[str, List[sqlite3.Row]], limit: int
+) -> List[sqlite3.Row]:
+    populated = [(name, rows) for name, rows in lane_rows.items() if rows]
+    if not populated:
+        return []
+    if len(populated) == 1:
+        return populated[0][1][:limit]
+    row_maps = [{int(row["id"]): row for row in rows} for _, rows in populated]
+    fused = rank_rrf([list(row_map) for row_map in row_maps], limit=limit)
+    return [
+        next(row_map[row_id] for row_map in row_maps if row_id in row_map)
+        for row_id, _score in fused
+    ]
+
+
+def _mixed_fts_query(query: str, ascii_terms: List[str]) -> str:
+    phrase = '"' + query.replace('"', '""') + '"'
+    if not ascii_terms:
+        return phrase
+    return f"({phrase}) OR (" + " OR ".join(ascii_terms) + ")"
+
+
+def _lexical_search_impl(
     conn: sqlite3.Connection,
     query: str,
     *,
     limit: int = 20,
     scope: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     query_text = str(query or "").strip()
     if not query_text:
         raise ValueError("empty query")
@@ -163,40 +233,36 @@ def lexical_search(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observations_fts_tri'"
         ).fetchone()
     )
-    lanes_used: List[str] = []
+    lane_rows: Dict[str, List[sqlite3.Row]] = {}
+    attempted_lanes: List[str] = []
+    fallback_triggered = False
+    ascii_terms = _ascii_terms(query_text)
 
     if has_cjk and len(query_text) < 3:
-        rows = _cjk_fallback(conn, query_text, bounded_limit, scope=scope)
-        lanes_used = ["like"]
+        attempted_lanes.append("cjk_like")
+        lane_rows["cjk_like"] = _like_fallback(
+            conn, query_text, bounded_limit, scope=scope
+        )
+        fallback_triggered = True
     elif has_cjk and trigram_exists:
+        attempted_lanes.append("trigram")
         try:
             trigram_rows = _trigram_rows(conn, query_text, bounded_limit)
         except sqlite3.OperationalError:
             trigram_rows = []
+        lane_rows["trigram"] = trigram_rows
         if has_ascii:
-            ascii_terms = re.findall(r"[A-Za-z0-9_]+", query_text)
+            attempted_lanes.append("fts_original")
             try:
-                unicode_rows = run_fts(" OR ".join(ascii_terms)) if ascii_terms else []
+                unicode_rows = run_fts(_mixed_fts_query(query_text, ascii_terms))
             except sqlite3.OperationalError:
-                unicode_rows = []
-            unicode_map = {int(row["id"]): row for row in unicode_rows}
-            trigram_map = {int(row["id"]): row for row in trigram_rows}
-            fused = rank_rrf(
-                [list(unicode_map), list(trigram_map)], limit=bounded_limit
-            )
-            rows = [
-                unicode_map.get(row_id) or trigram_map[row_id]
-                for row_id, _score in fused
-            ]
-            lanes_used = ["unicode61", "trigram"]
-        else:
-            rows = trigram_rows
-            lanes_used = ["trigram"]
-        if not rows:
-            rows = _cjk_fallback(conn, query_text, bounded_limit, scope=scope)
-            lanes_used.append("like")
+                try:
+                    unicode_rows = run_fts(" OR ".join(ascii_terms)) if ascii_terms else []
+                except sqlite3.OperationalError:
+                    unicode_rows = []
+            lane_rows["fts_original"] = unicode_rows
     else:
-        lanes_used = ["unicode61"]
+        attempted_lanes.append("fts_original")
         try:
             rows = run_fts(query_text)
         except sqlite3.OperationalError:
@@ -212,14 +278,27 @@ def lexical_search(
                     rows = run_fts(" OR ".join(tokens))
                 except sqlite3.OperationalError:
                     rows = []
-        if not rows and has_cjk:
-            rows = _cjk_fallback(conn, query_text, bounded_limit, scope=scope)
-            lanes_used.append("like")
+        lane_rows["fts_original"] = rows
+
+    rows = _fuse_rows(lane_rows, bounded_limit)
+    if "cjk_like" not in attempted_lanes and _should_run_fallback(rows, bounded_limit):
+        fallback_triggered = True
+        attempted_lanes.append("cjk_like")
+        lane_rows["cjk_like"] = _like_fallback(
+            conn, query_text, bounded_limit, scope=scope
+        )
+        rows = _fuse_rows(lane_rows, bounded_limit)
 
     normalized_scope = normalize_scope_token(scope)
     detail_map = {int(row["id"]): _parse_detail(row["detail_json"]) for row in rows}
     superseded = _superseded_ids(detail_map)
     result: List[Dict[str, Any]] = []
+    legacy_lane_names = {
+        "fts_original": "unicode61",
+        "trigram": "trigram",
+        "cjk_like": "like",
+    }
+    lanes_used = [legacy_lane_names[name] for name in attempted_lanes]
     for row in rows:
         item = dict(row)
         item["lanes_used"] = list(lanes_used)
@@ -232,7 +311,64 @@ def lexical_search(
         result.append(item)
         if len(result) >= bounded_limit:
             break
-    return result
+
+    result_ids = {int(item["id"]) for item in result}
+    lane_hits = {
+        "fts_original": len(
+            result_ids.intersection(int(row["id"]) for row in lane_rows.get("fts_original", []))
+        ),
+        "fts_en": 0,
+        "cjk_like": len(
+            result_ids.intersection(int(row["id"]) for row in lane_rows.get("cjk_like", []))
+        ),
+        "trigram": len(
+            result_ids.intersection(int(row["id"]) for row in lane_rows.get("trigram", []))
+        ),
+        "vector": 0,
+        "vector_en": 0,
+    }
+    fts_ids = {int(row["id"]) for row in lane_rows.get("fts_original", [])}
+    cross_lang_recovered = 0
+    for item in result:
+        summary = str(item.get("summary") or "").casefold()
+        summary_en = str(item.get("summary_en") or "").casefold()
+        en_hit = bool(ascii_terms) and any(term.casefold() in summary_en for term in ascii_terms)
+        original_hit = any(term.casefold() in summary for term in ascii_terms)
+        if int(item["id"]) in fts_ids and en_hit:
+            lane_hits["fts_en"] += 1
+        if detect_lang(query_text) in {"zh", "mixed"} and en_hit and not original_hit:
+            cross_lang_recovered += 1
+    receipt = {
+        "kind": "openclaw-mem.search.receipt.v1",
+        "query_lang": detect_lang(query_text),
+        "lane_hits": lane_hits,
+        "fallback_triggered": fallback_triggered,
+        "cross_lang_recovered": cross_lang_recovered,
+        "result_count": len(result),
+    }
+    return result, receipt
+
+
+def lexical_search(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    limit: int = 20,
+    scope: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    results, _receipt = _lexical_search_impl(conn, query, limit=limit, scope=scope)
+    return results
+
+
+def lexical_search_with_receipt(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    limit: int = 20,
+    scope: Optional[str] = None,
+) -> Dict[str, Any]:
+    results, receipt = _lexical_search_impl(conn, query, limit=limit, scope=scope)
+    return {**receipt, "results": results}
 
 
 def vector_search(

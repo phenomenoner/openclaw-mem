@@ -1585,6 +1585,7 @@ from openclaw_mem.core.records import (  # noqa: E402
     HarvestError as HarvestError,
     IngestRunSummary as IngestRunSummary,
     _insert_observation as _insert_observation,
+    backfill_lang as _backfill_lang,
     harvest_observations as _core_harvest_observations,
     ingest_observations as _core_ingest_observations,
     store_memory as _core_store_memory,
@@ -1843,6 +1844,17 @@ def cmd_db_rollback(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(payload, args.json)
 
 
+def cmd_db_backfill(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    if not bool(getattr(args, "lang", False)):
+        raise ValueError("db backfill requires --lang")
+    payload = _backfill_lang(
+        conn,
+        batch_size=int(getattr(args, "batch_size", 500) or 500),
+    )
+    conn.commit()
+    _emit(payload, args.json)
+
+
 def cmd_db_reindex(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     if not bool(getattr(args, "fts", False)):
         raise ValueError("db reindex requires --fts")
@@ -2072,6 +2084,25 @@ def cmd_profile(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
     scored_count = int(label_counts["must_remember"] + label_counts["nice_to_have"] + label_counts["ignore"])
     total_count = int(row["n"] or 0)
+    lang_distribution = {
+        str(r["lang"]): int(r["n"])
+        for r in conn.execute(
+            "SELECT COALESCE(NULLIF(lang, ''), 'unknown') AS lang, COUNT(*) AS n "
+            "FROM observations GROUP BY 1 ORDER BY 1"
+        ).fetchall()
+    }
+    coverage = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "SUM(CASE WHEN COALESCE(summary_en, '') <> '' THEN 1 ELSE 0 END) AS present "
+        "FROM observations"
+    ).fetchone()
+    coverage_total = int(coverage["total"] or 0)
+    coverage_present = int(coverage["present"] or 0)
+    summary_en_coverage = {
+        "present": coverage_present,
+        "total": coverage_total,
+        "ratio": (coverage_present / coverage_total) if coverage_total else 0.0,
+    }
 
     data = {
         "kind": "openclaw-mem.profile.v0",
@@ -2101,6 +2132,8 @@ def cmd_profile(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 "models": [{"model": r["model"], "count": int(r["n"])} for r in emb_en_models],
             },
         },
+        "lang_distribution": lang_distribution,
+        "summary_en_coverage": summary_en_coverage,
         "recent": [dict(r) for r in recent_rows],
     }
 
@@ -19726,6 +19759,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(db_rollback)
     db_rollback.add_argument("--receipt", required=True, help="Migration receipt JSON path")
     db_rollback.set_defaults(func=cmd_db_rollback)
+    db_backfill = db_sub.add_parser("backfill", help="Backfill deterministic derived observation fields")
+    add_common(db_backfill)
+    db_backfill.add_argument("--lang", action="store_true", required=True, help="Fill only missing language labels")
+    db_backfill.add_argument("--batch-size", type=int, default=500, help="Rows per deterministic batch")
+    db_backfill.set_defaults(func=cmd_db_backfill)
     db_reindex = db_sub.add_parser("reindex", help="Explicitly rebuild derived database indexes")
     add_common(db_reindex)
     db_reindex.add_argument("--fts", action="store_true", help="Rebuild FTS5 indexes and episodic search text")

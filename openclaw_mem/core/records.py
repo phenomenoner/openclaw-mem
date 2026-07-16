@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -15,6 +16,70 @@ from typing import Any, Callable, Dict, Iterable, List, Protocol
 from openclaw_mem.core.db import _sanitize_jsonable_surrogates, _sanitize_str_surrogates
 
 _IMPORTANCE_LABEL_KEYS = ("must_remember", "nice_to_have", "ignore", "unknown")
+
+CJK_MIXED_RATIO = 0.30
+CJK_ZH_RATIO = 0.70
+_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+_ASCII_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
+
+
+def detect_lang(text: Any) -> str:
+    """Classify text deterministically without models or network access."""
+
+    value = str(text or "")
+    cjk_count = len(_CJK_RE.findall(value))
+    ascii_count = sum(1 for char in value if char.isascii() and char.isalnum())
+    denominator = cjk_count + ascii_count
+    cjk_ratio = (cjk_count / denominator) if denominator else 0.0
+    if cjk_ratio > CJK_ZH_RATIO:
+        return "zh"
+    if cjk_ratio > CJK_MIXED_RATIO and _ASCII_WORD_RE.search(value):
+        return "mixed"
+    return "en"
+
+
+def backfill_lang(conn: sqlite3.Connection, *, batch_size: int = 500) -> Dict[str, Any]:
+    """Fill only missing language labels and return an idempotent receipt."""
+
+    bounded_batch = max(1, min(10_000, int(batch_size)))
+    eligible = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM observations WHERE COALESCE(TRIM(lang), '') = ''"
+        ).fetchone()[0]
+    )
+    counts = {"zh": 0, "en": 0, "mixed": 0}
+    updated = 0
+    batches = 0
+    while True:
+        rows = conn.execute(
+            "SELECT id, summary FROM observations "
+            "WHERE COALESCE(TRIM(lang), '') = '' ORDER BY id LIMIT ?",
+            (bounded_batch,),
+        ).fetchall()
+        if not rows:
+            break
+        updates = []
+        for row in rows:
+            label = detect_lang(row["summary"])
+            counts[label] += 1
+            updates.append((label, int(row["id"])))
+        conn.executemany(
+            "UPDATE observations SET lang = ? "
+            "WHERE id = ? AND COALESCE(TRIM(lang), '') = ''",
+            updates,
+        )
+        updated += len(updates)
+        batches += 1
+    return {
+        "kind": "openclaw-mem.db.backfill.lang.v1",
+        "field": "lang",
+        "eligible": eligible,
+        "updated": updated,
+        "counts": counts,
+        "batches": batches,
+        "batch_size": bounded_batch,
+        "idempotent": updated == 0,
+    }
 
 
 @dataclass
@@ -436,6 +501,8 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summa
 
     lang = obs.get("lang")
     lang = _sanitize_str_surrogates(str(lang)) if lang is not None else None
+    if not (lang or "").strip():
+        lang = detect_lang(summary)
 
     tool_name = obs.get("tool_name") or obs.get("tool")
     tool_name = _sanitize_str_surrogates(str(tool_name)) if tool_name is not None else None

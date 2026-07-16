@@ -61,6 +61,7 @@ continuity threat-feed
 continuity triggers
 continuity wording-lint
 db
+db backfill
 db info
 db migrate
 db reindex

@@ -366,6 +366,8 @@ class TestJsonContracts(unittest.TestCase):
                 "observations",
                 "importance",
                 "embeddings",
+                "lang_distribution",
+                "summary_en_coverage",
                 "recent",
             },
             "profile",
@@ -383,6 +385,12 @@ class TestJsonContracts(unittest.TestCase):
         self._assert_exact_keys(out["embeddings"], {"original", "english"}, "profile.embeddings")
         self._assert_exact_keys(out["embeddings"]["original"], {"count", "models"}, "profile.embeddings.original")
         self._assert_exact_keys(out["embeddings"]["english"], {"count", "models"}, "profile.embeddings.english")
+        self.assertIsInstance(out["lang_distribution"], dict)
+        self._assert_exact_keys(
+            out["summary_en_coverage"],
+            {"present", "total", "ratio"},
+            "profile.summary_en_coverage",
+        )
 
     def test_pack_trace_json_contract_v1(self):
         self._write_source_observation(
