@@ -30,6 +30,7 @@ import unicodedata
 import urllib.error
 import urllib.request
 import uuid
+from collections import OrderedDict
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -9963,7 +9964,55 @@ def _pack_graph_apply_provenance_policy(
     return _pack_graph_finalize_provenance_policy(out)
 
 
+_PACK_GRAPH_SCOPE_CACHE: "OrderedDict[tuple[str, int, int, int, int], tuple[str, ...]]" = OrderedDict()
+_PACK_GRAPH_SCOPE_CACHE_MAX = 8
+
+
+def _pack_graph_scope_revision(conn: sqlite3.Connection) -> int:
+    try:
+        conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS openclaw_pack_scope_revision "
+            "(id INTEGER PRIMARY KEY CHECK (id = 1), revision INTEGER NOT NULL)"
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO temp.openclaw_pack_scope_revision(id, revision) VALUES (1, 0)"
+        )
+        for action in ("INSERT", "UPDATE", "DELETE"):
+            conn.execute(
+                f"CREATE TEMP TRIGGER IF NOT EXISTS openclaw_pack_scope_{action.lower()} "
+                f"AFTER {action} ON main.observations BEGIN "
+                "UPDATE openclaw_pack_scope_revision SET revision = revision + 1 WHERE id = 1; END"
+            )
+        return int(
+            conn.execute(
+                "SELECT revision FROM temp.openclaw_pack_scope_revision WHERE id = 1"
+            ).fetchone()[0]
+        )
+    except sqlite3.OperationalError:
+        # Conservative fallback for SQLite builds that disallow TEMP triggers.
+        return int(conn.total_changes)
+
+
+def _pack_graph_scope_cache_key(
+    conn: sqlite3.Connection, *, limit: int
+) -> tuple[str, int, int, int, int]:
+    db_rows = conn.execute("PRAGMA database_list").fetchall()
+    db_path = next(
+        (str(row[2] or "") for row in db_rows if str(row[1] or "") == "main"),
+        "",
+    )
+    data_version = int(conn.execute("PRAGMA data_version").fetchone()[0])
+    revision = _pack_graph_scope_revision(conn)
+    return (db_path, id(conn), revision, data_version, int(limit))
+
+
 def _pack_graph_known_scopes(conn: sqlite3.Connection, *, limit: int = 256) -> List[str]:
+    bounded_limit = int(max(1, limit))
+    cache_key = _pack_graph_scope_cache_key(conn, limit=bounded_limit)
+    cached = _PACK_GRAPH_SCOPE_CACHE.get(cache_key)
+    if cached is not None:
+        _PACK_GRAPH_SCOPE_CACHE.move_to_end(cache_key)
+        return list(cached)
     rows = conn.execute(
         """
         SELECT DISTINCT json_extract(detail_json, '$.scope') AS scope
@@ -9972,7 +10021,7 @@ def _pack_graph_known_scopes(conn: sqlite3.Connection, *, limit: int = 256) -> L
         ORDER BY scope
         LIMIT ?
         """,
-        (int(max(1, limit)),),
+        (bounded_limit,),
     ).fetchall()
     scopes: List[str] = []
     seen = set()
@@ -9982,6 +10031,10 @@ def _pack_graph_known_scopes(conn: sqlite3.Connection, *, limit: int = 256) -> L
         if norm and norm not in seen:
             seen.add(norm)
             scopes.append(norm)
+    _PACK_GRAPH_SCOPE_CACHE[cache_key] = tuple(scopes)
+    _PACK_GRAPH_SCOPE_CACHE.move_to_end(cache_key)
+    while len(_PACK_GRAPH_SCOPE_CACHE) > _PACK_GRAPH_SCOPE_CACHE_MAX:
+        _PACK_GRAPH_SCOPE_CACHE.popitem(last=False)
     return scopes
 
 
@@ -14195,12 +14248,12 @@ def _graph_search_rows(
             SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
                    snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
                    snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
-                   bm25(observations_fts) AS score,
+                   observations_fts.rank AS score,
                    o.detail_json AS detail_json
             FROM observations_fts
             JOIN observations o ON o.id = observations_fts.rowid
             WHERE observations_fts MATCH ?
-            ORDER BY score ASC
+            ORDER BY observations_fts.rank ASC
             LIMIT ?;
             """,
             (match_q, int(fetch_n)),

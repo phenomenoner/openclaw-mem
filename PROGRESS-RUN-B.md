@@ -36,4 +36,25 @@ Run A baseline; no new skip was introduced.
 | T07 | done | `9896917` | Added unified `install --harness` orchestration and core detect/plan/apply/verify phases for claude-code, codex, openclaw, and generic. Writes are atomic, changed existing targets are timestamp-backed-up, JSON/managed-card unrelated content is preserved, dry-run is zero-write, and optional apply-time verify is supported. Adapter/legacy/CLI slice: 94 passed; direct CLI dry-run/apply/verify smoke passed. |
 | T08 | done | `8c48f06` | Completed the installer matrix with Gemini CLI, Cursor, and Windsurf JSON adapters using current official paths plus `--config-path` overrides. Added `doctor --harness` pass/warn/fail diagnostics, executable/skill/config checks, repair commands, and seven ≤5-step quickstarts. Harness/CLI regression: 252 passed plus 26 subtests; focused final slice: 89 passed; direct missing-install doctor exit-1 smoke and strict MkDocs build passed. |
 | T09 | done | `c981460` | Added read-only MCP `mem_recall`, `graph_neighbors`, `graph_path`, and `graph_impact` tools. `mem_recall` shares the core router; `mem_pack` invokes the full CLI policy handler in-process to prevent contract drift. Added JSON-RPC invalid-parameter/error hints, deep CLI/MCP equivalence coverage after transport/timing normalization, graph wrapper tests, and an updated tool-description hash golden. Focused slice: 51 passed; compileall and direct manifest smoke passed. Batch 2 full suite: 1052 passed, 3 skipped, 5 expected warnings, 87 subtests in 259.71 seconds. |
-| T10 | done | pending commit | Added the optional `vec` dependency and locked sqlite-vec 0.1.9. Persisted per-model/per-dimension cosine vec0 tables now carry source row-count/max-id freshness metadata; `auto` selects fresh sqlite-vec then NumPy then Python without creating indexes, and emits actionable fallback receipts. Added `db reindex --vec`, sqlite-vec index details in `db info`, MCP/CLI backend selection, readonly zero-write checks, and top-10 equivalence to NumPy within 1e-5. Integrated regression slice: 118 passed; output-free core/vector slice: 39 passed; `uv lock --check`, compileall, and direct CLI help smoke passed. |
+| T10 | done | `f87d85f` | Added the optional `vec` dependency and locked sqlite-vec 0.1.9. Persisted per-model/per-dimension cosine vec0 tables now carry source row-count/max-id freshness metadata; `auto` selects fresh sqlite-vec then NumPy then Python without creating indexes, and emits actionable fallback receipts. Added `db reindex --vec`, sqlite-vec index details in `db info`, MCP/CLI backend selection, readonly zero-write checks, and top-10 equivalence to NumPy within 1e-5. Integrated regression slice: 118 passed; output-free core/vector slice: 39 passed; `uv lock --check`, compileall, and direct CLI help smoke passed. |
+| T11 | done | pending commit | Extended the deterministic perf suite with sqlite-vec, end-to-end recall, and graph-auto pack lanes; added fixed 10k/100k reports, file-backed 20% regression gates with a published 1.3x tolerance band, and a scheduled 100k CI job. Product hot paths now use bounded FTS candidate scoring, O(1) sqlite-vec invalidation triggers, connection-local read tuning, and a bounded graph-scope cache with local/external write invalidation. Threshold/YAML/compile checks passed. Batch 3 full suite: 1061 passed, 3 skipped, 5 expected warnings, 87 subtests in 309.64 seconds. |
+
+## T11 100k SLO evidence
+
+Formal fixed-seed results are stored in `benchmarks/perf/RUN-B-numbers.json`;
+the corresponding nightly limits are in `benchmarks/perf/RUN-B-thresholds.json`.
+The broad single-token `search` lane remains a pressure diagnostic and is not
+substituted for the documented recall SLO.
+
+| 100k metric | target | actual p95 | result |
+| --- | ---: | ---: | --- |
+| stamped connect | < 30 ms | 4.102 ms | pass |
+| recall lexical, deterministic three-token product queries | < 50 ms | 25.559 ms | pass |
+| recall hybrid, sqlite-vec selected by auto | < 200 ms | 80.250 ms | pass |
+| pack, graph auto | < 300 ms | 224.493 ms | pass |
+| vsearch, sqlite-vec | < 30 ms | 21.889 ms | pass |
+
+The 10k tier also passed every corresponding absolute SLO. The graph-auto pack
+lane includes one cold scope discovery followed by correctly invalidated hot
+reads; the report's p95 therefore represents the persistent CLI/MCP handler
+path while retaining the cold-start sample in the distribution.

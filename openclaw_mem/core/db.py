@@ -19,6 +19,8 @@ _PACK_LIFECYCLE_SHADOW_TABLE = "pack_lifecycle_shadow_log"
 _SURROGATE_MIN = 0xD800
 _SURROGATE_MAX = 0xDFFF
 EPISODIC_SEARCH_TEXT_MAX_CHARS = 2400
+_SQLITE_CACHE_KIB = 64 * 1024
+_SQLITE_MMAP_BYTES = 256 * 1024 * 1024
 
 
 def _resolve_state_dir() -> str:
@@ -60,6 +62,17 @@ def _enable_wal_best_effort(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA busy_timeout=5000;")
 
 
+def _tune_read_performance(conn: sqlite3.Connection) -> None:
+    """Apply connection-local read tuning without changing the database file."""
+
+    conn.execute(f"PRAGMA cache_size=-{_SQLITE_CACHE_KIB};")
+    try:
+        conn.execute(f"PRAGMA mmap_size={_SQLITE_MMAP_BYTES};")
+    except sqlite3.OperationalError:
+        # Some VFS/sandbox combinations do not expose memory-mapped I/O.
+        pass
+
+
 @dataclass(frozen=True)
 class Migration:
     id: int
@@ -89,6 +102,7 @@ def _connect(db_path: str) -> sqlite3.Connection:
     else:
         conn = sqlite3.connect(db_path, timeout=10.0)
     conn.row_factory = sqlite3.Row
+    _tune_read_performance(conn)
     user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
     if not skip_init:
         if user_version > CURRENT_DB_VERSION:

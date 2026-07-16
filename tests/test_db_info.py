@@ -36,6 +36,16 @@ def test_db_info_reports_empty_stamped_database(tmp_path: Path) -> None:
     assert payload["summary_en_coverage"] == {"present": 0, "total": 0, "ratio": 0.0}
 
 
+def test_connect_applies_connection_local_read_tuning(tmp_path: Path) -> None:
+    db = tmp_path / "tuned.sqlite"
+    conn = _connect(str(db))
+    try:
+        assert int(conn.execute("PRAGMA cache_size").fetchone()[0]) == -(64 * 1024)
+        assert int(conn.execute("PRAGMA mmap_size").fetchone()[0]) == 256 * 1024 * 1024
+    finally:
+        conn.close()
+
+
 def test_db_info_reports_rows_language_and_embedding_distribution(tmp_path: Path) -> None:
     db = tmp_path / "populated.sqlite"
     conn = _connect(str(db))

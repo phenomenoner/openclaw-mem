@@ -7,7 +7,7 @@ import os
 import re
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from openclaw_mem.scope import normalize_scope_token
 from openclaw_mem.core.records import detect_lang
@@ -199,8 +199,8 @@ def _should_run_fallback(rows: List[sqlite3.Row], limit: int) -> bool:
 
 
 def _fuse_rows(
-    lane_rows: Dict[str, List[sqlite3.Row]], limit: int
-) -> List[sqlite3.Row]:
+    lane_rows: Dict[str, List[Mapping[str, Any]]], limit: int
+) -> List[Mapping[str, Any]]:
     populated = [(name, rows) for name, rows in lane_rows.items() if rows]
     if not populated:
         return []
@@ -232,20 +232,36 @@ def _lexical_search_impl(
     if not query_text:
         raise ValueError("empty query")
     bounded_limit = max(1, int(limit))
-    sql = """
-        SELECT o.id, o.ts, o.kind, o.tool_name, o.summary, o.summary_en, o.lang,
-               snippet(observations_fts, 0, '[', ']', '…', 12) AS snippet,
-               snippet(observations_fts, 1, '[', ']', '…', 12) AS snippet_en,
-               bm25(observations_fts) AS score, o.detail_json
-        FROM observations_fts
-        JOIN observations o ON o.id = observations_fts.rowid
-        WHERE observations_fts MATCH ?
-        ORDER BY score ASC
-        LIMIT ?
-    """
-
-    def run_fts(value: str) -> List[sqlite3.Row]:
-        return conn.execute(sql, (value, bounded_limit)).fetchall()
+    def run_fts(value: str) -> List[Mapping[str, Any]]:
+        candidate_cap = max(512, bounded_limit * 32)
+        candidates = conn.execute(
+            "SELECT rowid AS id, rank AS score FROM observations_fts "
+            "WHERE observations_fts MATCH ? LIMIT ?",
+            (value, candidate_cap),
+        ).fetchall()
+        ranked = sorted(
+            candidates,
+            key=lambda row: (float(row["score"]), int(row["id"])),
+        )[:bounded_limit]
+        if not ranked:
+            return []
+        ranked_ids = [int(row["id"]) for row in ranked]
+        placeholders = ",".join("?" for _ in ranked_ids)
+        content_rows = conn.execute(
+            "SELECT id, ts, kind, tool_name, summary, summary_en, lang, detail_json "
+            f"FROM observations WHERE id IN ({placeholders})",
+            ranked_ids,
+        ).fetchall()
+        content = {int(row["id"]): dict(row) for row in content_rows}
+        results: List[Mapping[str, Any]] = []
+        for ranked_row in ranked:
+            row_id = int(ranked_row["id"])
+            item = dict(content[row_id])
+            item["snippet"] = item.get("summary")
+            item["snippet_en"] = item.get("summary_en")
+            item["score"] = float(ranked_row["score"])
+            results.append(item)
+        return results
 
     cjk_runs = re.findall(r"[\u3400-\u9fff]+", query_text)
     has_cjk = bool(cjk_runs)
@@ -255,7 +271,7 @@ def _lexical_search_impl(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observations_fts_tri'"
         ).fetchone()
     )
-    lane_rows: Dict[str, List[sqlite3.Row]] = {}
+    lane_rows: Dict[str, List[Mapping[str, Any]]] = {}
     attempted_lanes: List[str] = []
     fallback_triggered = False
     ascii_terms = _ascii_terms(query_text)

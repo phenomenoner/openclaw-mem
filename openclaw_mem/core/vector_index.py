@@ -18,6 +18,7 @@ from openclaw_mem.vector import l2_norm, pack_f32, rank_cosine
 SUPPORTED_TABLES = {"observation_embeddings", "observation_embeddings_en"}
 _CACHE_MAX_ENTRIES = 8
 SQLITE_VEC_META_TABLE = "openclaw_vec_indexes"
+_SQLITE_VEC_SOURCE_TABLES = tuple(sorted(SUPPORTED_TABLES))
 
 
 class VectorIndex(Protocol):
@@ -102,6 +103,11 @@ def _enable_sqlite_vec(conn: sqlite3.Connection, module: Any | None = None) -> A
             "install openclaw-context-pack[vec] or choose numpy/python"
         )
     try:
+        conn.execute("SELECT vec_version()").fetchone()
+        return sqlite_vec
+    except sqlite3.DatabaseError:
+        pass
+    try:
         conn.enable_load_extension(True)
         sqlite_vec.load(conn)
     except (AttributeError, sqlite3.Error, OSError) as exc:
@@ -156,10 +162,29 @@ def _create_meta_table(conn: sqlite3.Connection) -> None:
             source_max_id INTEGER NOT NULL,
             rebuilt_at TEXT NOT NULL,
             sqlite_vec_version TEXT NOT NULL,
+            stale INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY(source_table, model, dim)
         )
         """
     )
+    columns = {
+        str(row[1]) for row in conn.execute(f"PRAGMA table_info({SQLITE_VEC_META_TABLE})")
+    }
+    if "stale" not in columns:
+        conn.execute(
+            f"ALTER TABLE {SQLITE_VEC_META_TABLE} "
+            "ADD COLUMN stale INTEGER NOT NULL DEFAULT 1"
+        )
+    for source in _SQLITE_VEC_SOURCE_TABLES:
+        if not _table_exists(conn, source):
+            continue
+        for action in ("INSERT", "UPDATE", "DELETE"):
+            trigger = f"openclaw_vec_invalidate_{source}_{action.lower()}"
+            conn.execute(
+                f'CREATE TRIGGER IF NOT EXISTS "{trigger}" AFTER {action} ON "{source}" '
+                f"BEGIN UPDATE {SQLITE_VEC_META_TABLE} SET stale = 1 "
+                f"WHERE source_table = '{source}'; END"
+            )
 
 
 def sqlite_vec_index_status(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -177,9 +202,15 @@ def sqlite_vec_index_status(conn: sqlite3.Connection) -> dict[str, Any]:
 
     metadata: dict[tuple[str, str, int], sqlite3.Row | tuple[Any, ...]] = {}
     if _table_exists(conn, SQLITE_VEC_META_TABLE):
+        meta_columns = {
+            str(row[1])
+            for row in conn.execute(f"PRAGMA table_info({SQLITE_VEC_META_TABLE})")
+        }
+        stale_expr = "stale" if "stale" in meta_columns else "1 AS stale"
         for row in conn.execute(
             f"SELECT source_table, model, dim, vec_table, source_row_count, "
-            f"source_max_id, rebuilt_at, sqlite_vec_version FROM {SQLITE_VEC_META_TABLE}"
+            f"source_max_id, rebuilt_at, sqlite_vec_version, {stale_expr} "
+            f"FROM {SQLITE_VEC_META_TABLE}"
         ).fetchall():
             metadata[(str(row[0]), str(row[1]), int(row[2]))] = row
 
@@ -216,13 +247,14 @@ def sqlite_vec_index_status(conn: sqlite3.Connection) -> dict[str, Any]:
             and indexed_rows == current_count
             and int(meta[4]) == current_count
             and int(meta[5]) == current_max_id
+            and not bool(meta[8])
         )
         reason = None
         if not present:
             reason = "missing_index"
         elif indexed_rows is None:
             reason = "extension_unavailable"
-        elif not fresh:
+        elif bool(meta[8]) or not fresh:
             reason = "source_changed"
         indexes.append(
             {
@@ -286,12 +318,12 @@ def rebuild_sqlite_vec_indexes(conn: sqlite3.Connection) -> dict[str, Any]:
             )
             conn.execute(
                 f"INSERT INTO {SQLITE_VEC_META_TABLE}("
-                "source_table, model, dim, vec_table, source_row_count, source_max_id, rebuilt_at, sqlite_vec_version"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "source_table, model, dim, vec_table, source_row_count, source_max_id, rebuilt_at, sqlite_vec_version, stale"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) "
                 "ON CONFLICT(source_table, model, dim) DO UPDATE SET "
                 "vec_table=excluded.vec_table, source_row_count=excluded.source_row_count, "
                 "source_max_id=excluded.source_max_id, rebuilt_at=excluded.rebuilt_at, "
-                "sqlite_vec_version=excluded.sqlite_vec_version",
+                "sqlite_vec_version=excluded.sqlite_vec_version, stale=0",
                 (source, model, dim, vec_table, row_count, max_id, _utcnow_iso(), version),
             )
             rebuilt.append(
@@ -515,28 +547,27 @@ class SqliteVecIndex:
         if not query_norm or not math.isfinite(query_norm):
             return []
         _enable_sqlite_vec(conn, self._sqlite_vec)
-        source_count, source_max_id = _source_signature(
-            conn, table=table, model=model, dim=dim
-        )
-        if source_count == 0:
-            return []
         if not _table_exists(conn, SQLITE_VEC_META_TABLE):
             raise SqliteVecIndexStale("sqlite_vec_index_missing")
+        meta_columns = {
+            str(row[1])
+            for row in conn.execute(f"PRAGMA table_info({SQLITE_VEC_META_TABLE})")
+        }
+        if "stale" not in meta_columns:
+            raise SqliteVecIndexStale("sqlite_vec_index_stale")
         meta = conn.execute(
-            f"SELECT vec_table, source_row_count, source_max_id FROM {SQLITE_VEC_META_TABLE} "
+            f"SELECT vec_table, source_row_count, stale FROM {SQLITE_VEC_META_TABLE} "
             "WHERE source_table = ? AND model = ? AND dim = ?",
             (table, model, dim),
         ).fetchone()
         if meta is None or not _table_exists(conn, str(meta[0])):
             raise SqliteVecIndexStale("sqlite_vec_index_missing")
-        vec_table = str(meta[0])
-        indexed_rows = int(conn.execute(f'SELECT COUNT(*) FROM "{vec_table}"').fetchone()[0])
-        if (
-            int(meta[1]) != source_count
-            or int(meta[2]) != source_max_id
-            or indexed_rows != source_count
-        ):
+        if bool(meta[2]):
             raise SqliteVecIndexStale("sqlite_vec_index_stale")
+        vec_table = str(meta[0])
+        source_count = int(meta[1])
+        if source_count <= 0:
+            return []
         rows = conn.execute(
             f'SELECT observation_id, distance FROM "{vec_table}" '
             "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
