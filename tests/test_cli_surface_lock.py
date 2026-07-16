@@ -60,6 +60,8 @@ continuity status
 continuity threat-feed
 continuity triggers
 continuity wording-lint
+db
+db info
 docs
 docs ingest
 docs search

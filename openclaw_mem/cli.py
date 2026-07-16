@@ -1331,6 +1331,30 @@ def _init_db(conn: sqlite3.Connection) -> None:
         f"CREATE INDEX IF NOT EXISTS idx_{_PACK_LIFECYCLE_SHADOW_TABLE}_signature ON {_PACK_LIFECYCLE_SHADOW_TABLE}(selection_signature);"
     )
 
+    readonly_db = str(os.environ.get("OPENCLAW_MEM_READONLY_DB") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not readonly_db:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        stamp = {
+            "min_reader_version": "1",
+            "last_writer_version": __version__,
+            "last_writer_ts": _utcnow_iso(),
+        }
+        conn.executemany(
+            "INSERT INTO meta(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            stamp.items(),
+        )
+        user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        if user_version == 0:
+            conn.execute("PRAGMA user_version = 1")
+
     conn.commit()
 
 
@@ -1626,6 +1650,105 @@ def cmd_status(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "runtime": _build_runtime_health(cfg, args),
     }
     _emit(data, args.json)
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
+            (table,),
+        ).fetchone()
+        is not None
+    )
+
+
+def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    table_names = [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+    ]
+    tables: Dict[str, int] = {}
+    for table in table_names:
+        quoted = table.replace('"', '""')
+        try:
+            tables[table] = int(conn.execute(f'SELECT COUNT(*) FROM "{quoted}"').fetchone()[0])
+        except sqlite3.DatabaseError:
+            tables[table] = -1
+
+    fts_integrity: Dict[str, bool] = {}
+    for row in conn.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%fts5%' ORDER BY name"
+    ).fetchall():
+        table = str(row[0])
+        quoted = table.replace('"', '""')
+        try:
+            conn.execute(f'SELECT rowid FROM "{quoted}" LIMIT 1').fetchone()
+            fts_integrity[table] = True
+        except sqlite3.DatabaseError:
+            fts_integrity[table] = False
+
+    embedding_tables: Dict[str, Any] = {}
+    for table in ("observation_embeddings", "observation_embeddings_en"):
+        if not _table_exists(conn, table):
+            embedding_tables[table] = {"count": 0, "distributions": []}
+            continue
+        rows = conn.execute(
+            f"SELECT model, dim, COUNT(*) AS n FROM {table} "
+            "GROUP BY model, dim ORDER BY n DESC, model, dim"
+        ).fetchall()
+        embedding_tables[table] = {
+            "count": sum(int(row[2]) for row in rows),
+            "distributions": [
+                {"model": row[0], "dim": int(row[1]), "count": int(row[2])}
+                for row in rows
+            ],
+        }
+
+    orphan_count = 0
+    if _table_exists(conn, "observation_embeddings") and _table_exists(conn, "observations"):
+        orphan_count = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM observation_embeddings e "
+                "LEFT JOIN observations o ON o.id = e.observation_id WHERE o.id IS NULL"
+            ).fetchone()[0]
+        )
+
+    lang_distribution: Dict[str, int] = {}
+    summary_en_coverage = {"present": 0, "total": 0, "ratio": 0.0}
+    if _table_exists(conn, "observations"):
+        for row in conn.execute(
+            "SELECT COALESCE(NULLIF(lang, ''), 'unknown'), COUNT(*) "
+            "FROM observations GROUP BY 1 ORDER BY 1"
+        ).fetchall():
+            lang_distribution[str(row[0])] = int(row[1])
+        coverage = conn.execute(
+            "SELECT COUNT(*), SUM(CASE WHEN COALESCE(summary_en, '') <> '' THEN 1 ELSE 0 END) "
+            "FROM observations"
+        ).fetchone()
+        total = int(coverage[0] or 0)
+        present = int(coverage[1] or 0)
+        summary_en_coverage = {
+            "present": present,
+            "total": total,
+            "ratio": (present / total) if total else 0.0,
+        }
+
+    _emit(
+        {
+            "kind": "openclaw-mem.db.info.v1",
+            "user_version": int(conn.execute("PRAGMA user_version").fetchone()[0]),
+            "tables": tables,
+            "fts_integrity": fts_integrity,
+            "embeddings": {**embedding_tables, "orphan_count": orphan_count},
+            "lang_distribution": lang_distribution,
+            "summary_en_coverage": summary_en_coverage,
+        },
+        args.json,
+    )
 
 
 
@@ -20166,6 +20289,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("doctor", help="Run compact operator health checks")
     add_common(sp)
     sp.set_defaults(func=cmd_doctor)
+
+    sp = sub.add_parser("db", help="Inspect and govern the SQLite database")
+    add_common(sp)
+    db_sub = sp.add_subparsers(dest="db_cmd", required=True)
+    db_info = db_sub.add_parser("info", help="Show database generation and integrity metadata")
+    add_common(db_info)
+    db_info.set_defaults(func=cmd_db_info)
 
     sp = sub.add_parser("service-store", help="Inspect or initialize harness service-store readiness file")
     add_common(sp)
