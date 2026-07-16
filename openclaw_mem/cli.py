@@ -1784,6 +1784,7 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "tables": tables,
             "fts_integrity": fts_integrity,
             "embeddings": {**embedding_tables, "orphan_count": orphan_count},
+            "qdrant": _qdrant_dependency_status(),
             "lang_distribution": lang_distribution,
             "summary_en_coverage": summary_en_coverage,
         },
@@ -11915,6 +11916,10 @@ def _qdrant_mode(db_path: Path) -> str:
     return "snapshot-preserved" if (db_path.expanduser().parent / "qdrant-edge").exists() else "not-present"
 
 
+def _qdrant_dependency_status() -> str:
+    return "installed" if importlib.util.find_spec("qdrant_edge") is not None else "not_installed"
+
+
 def _qdrant_snapshot_probe(shard_root: Path) -> Dict[str, Any]:
     config_path = shard_root / "edge_config.json"
     config: Dict[str, Any] = {}
@@ -11938,6 +11943,9 @@ def _qdrant_snapshot_probe(shard_root: Path) -> Dict[str, Any]:
     }
     if not shard_root.exists():
         probe["probeError"] = "missing_shard"
+        return probe
+    if _qdrant_dependency_status() == "not_installed":
+        probe["probeError"] = "qdrant_extra_not_installed"
         return probe
 
     try:
@@ -11970,6 +11978,7 @@ def cmd_qdrant_status(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
             "schema": "openclaw-mem.qdrant.status.v0",
             "ok": True,
             "qdrantNativeRecall": _qdrant_mode(db_path),
+            "qdrant": _qdrant_dependency_status(),
             "path": str(shard_root),
             "collection": probe.get("collection"),
             "vectorDimension": probe.get("vectorDimension"),
@@ -11990,6 +11999,19 @@ def cmd_qdrant_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> Non
     vector_raw = str(getattr(args, "vector", "") or "").strip()
     shard_root = db_path.parent / "qdrant-edge"
     if vector_raw and shard_root.exists():
+        if _qdrant_dependency_status() == "not_installed":
+            _emit(
+                {
+                    "schema": "openclaw-mem.qdrant.recall.v0",
+                    "ok": False,
+                    "error": "qdrant_extra_not_installed",
+                    "hint": "pip install openclaw-context-pack[qdrant]",
+                    "hits": [],
+                    "writesPerformed": False,
+                },
+                getattr(args, "json", True),
+            )
+            return
         try:
             vector = json.loads(vector_raw)
             if not isinstance(vector, list) or not all(isinstance(item, (int, float)) for item in vector):

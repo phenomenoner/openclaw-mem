@@ -9,9 +9,7 @@ description = "Local-first AI agent memory governance: Store / Pack / Observe wi
 requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }
-dependencies = [
-  "qdrant-edge-py==0.6.1",
-]
+dependencies = []
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "License :: OSI Approved :: Apache Software License",
@@ -21,6 +19,9 @@ classifiers = [
 packages = ["openclaw_mem"]
 
 [project.optional-dependencies]
+qdrant = [
+  "qdrant-edge-py==0.6.1",
+]
 # Build the (free) GitHub Pages documentation site locally or in CI.
 docs = [
   "mkdocs>=1.6",
@@ -31,6 +32,7 @@ docs = [
 # Keep the default contributor verification lane reproducible with `uv run pytest`.
 dev = [
   "pytest>=8.0",
+  "qdrant-edge-py==0.6.1",
 ]
 
 [project.scripts]

@@ -374,31 +374,35 @@ wheels = [
 name = "openclaw-context-pack"
 version = "1.9.32"
 source = { editable = "." }
-dependencies = [
-    { name = "qdrant-edge-py" },
-]
 
 [package.optional-dependencies]
 docs = [
     { name = "mkdocs" },
     { name = "mkdocs-material" },
 ]
+qdrant = [
+    { name = "qdrant-edge-py" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "qdrant-edge-py" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
-    { name = "qdrant-edge-py", specifier = "==0.6.1" },
+    { name = "qdrant-edge-py", marker = "extra == 'qdrant'", specifier = "==0.6.1" },
 ]
-provides-extras = ["docs"]
+provides-extras = ["qdrant", "docs"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "qdrant-edge-py", specifier = "==0.6.1" },
+]
 
 [[package]]
 name = "packaging"

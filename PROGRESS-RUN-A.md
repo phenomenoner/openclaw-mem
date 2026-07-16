@@ -5,3 +5,4 @@
 | T02 | done | HEAD-on-commit | Added explicit UTF-8 replacement decoding to 67 subprocess text calls across product/tools/tests; AST guard 1 passed; focused slice 58 passed, 1 skipped. |
 | T03 | done | HEAD-on-commit | Added additive meta/user_version=1 stamp and `db info`; 58 DB/surface tests plus 149 CLI tests and 26 subtests passed. |
 | T04 | done | HEAD-on-commit | Added migration registry, stamped connect fast-path, and future-version rejection; full suite 852 passed, 3 skipped, 87 subtests in 367.37s with prior cp950 warnings eliminated. |
+| T05 | done | HEAD-on-commit | Moved qdrant-edge-py to `qdrant` extra while retaining it in dev; missing-extra status/error contracts covered; 6 focused plus 5 qdrant tests passed. |
