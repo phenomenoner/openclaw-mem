@@ -18158,127 +18158,48 @@ def cmd_episodes_query(conn: sqlite3.Connection, args: argparse.Namespace) -> No
 
 
 def cmd_episodes_embed(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    api_key = _get_api_key()
-    if not api_key:
-        _emit({"kind": "openclaw-mem.episodes.embed.v0", "ok": False, "error": "OPENAI_API_KEY not set and no key found in ~/.openclaw/openclaw.json"}, True)
-        sys.exit(1)
-
-    model = str(getattr(args, "model", defaults.embed_model()) or defaults.embed_model())
-    limit = max(1, int(getattr(args, "limit", 200) or 200))
-    batch = max(1, int(getattr(args, "batch", 32) or 32))
-    base_url = getattr(args, "base_url", defaults.openai_base_url())
-    raw_scope = str(getattr(args, "scope", "") or "").strip()
-    explicit_global = bool(getattr(args, "global_scope", False))
-
-    if explicit_global and raw_scope:
-        _emit({"kind": "openclaw-mem.episodes.embed.v0", "ok": False, "error": "--global cannot be combined with --scope"}, True)
-        sys.exit(2)
-
-    filters = []
-    params: List[Any] = []
-    if explicit_global:
-        filters.append("e.scope = ?")
-        params.append("global")
-    elif raw_scope:
-        filters.append("e.scope = ?")
-        params.append(_normalize_episodic_scope(raw_scope))
-
-    where_sql = f"WHERE {' AND '.join(filters)}" if filters else ""
-    rows = conn.execute(
-        f"""
-        SELECT e.id, e.scope, e.search_text, emb.search_text_hash
-        FROM episodic_events e
-        LEFT JOIN episodic_event_embeddings emb
-          ON emb.event_row_id = e.id AND emb.model = ?
-        {where_sql}
-        ORDER BY e.id ASC
-        """,
-        [model, *params],
-    ).fetchall()
-
-    todo: List[Dict[str, Any]] = []
-    for row in rows:
-        text_value = str(row["search_text"] or "").strip()
-        if not text_value:
-            continue
-        text_hash = _episodic_search_text_hash(text_value)
-        if str(row["search_text_hash"] or "") == text_hash:
-            continue
-        todo.append(
-            {
-                "id": int(row["id"]),
-                "scope": str(row["scope"] or ""),
-                "text": text_value,
-                "search_text_hash": text_hash,
-            }
+    try:
+        payload = core_episodes.embed_events(
+            conn,
+            api_key=_get_api_key(),
+            client_factory=lambda api_key, base_url: OpenAIEmbeddingsClient(api_key=api_key, base_url=base_url),
+            model=getattr(args, "model", defaults.embed_model()),
+            limit=int(getattr(args, "limit", 200) or 200),
+            batch=int(getattr(args, "batch", 32) or 32),
+            base_url=getattr(args, "base_url", defaults.openai_base_url()),
+            raw_scope=getattr(args, "scope", None),
+            global_scope=bool(getattr(args, "global_scope", False)),
         )
-        if len(todo) >= limit:
-            break
-
-    client = OpenAIEmbeddingsClient(api_key=api_key, base_url=base_url)
-    now = _utcnow_iso()
-    embedded_ids: List[int] = []
-    per_scope: Dict[str, int] = {}
-
-    for i in range(0, len(todo), batch):
-        chunk = todo[i : i + batch]
-        vecs = client.embed([str(it["text"]) for it in chunk], model=model)
-        for item, vec in zip(chunk, vecs):
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO episodic_event_embeddings
-                (event_row_id, model, dim, vector, norm, search_text_hash, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    int(item["id"]),
-                    model,
-                    len(vec),
-                    pack_f32(vec),
-                    l2_norm(vec),
-                    str(item["search_text_hash"]),
-                    now,
-                ),
-            )
-            embedded_ids.append(int(item["id"]))
-            scope_key = str(item["scope"] or "")
-            per_scope[scope_key] = int(per_scope.get(scope_key, 0)) + 1
-        conn.commit()
-
-    payload = {
-        "kind": "openclaw-mem.episodes.embed.v0",
-        "ts": _utcnow_iso(),
-        "version": {"openclaw_mem": __version__, "schema": "v0"},
-        "ok": True,
-        "model": model,
-        "scope_filter": "global" if explicit_global else (raw_scope or None),
-        "limit": limit,
-        "batch": batch,
-        "embedded": len(embedded_ids),
-        "ids": embedded_ids[:50],
-        "per_scope": [{"scope": k, "count": int(v)} for k, v in sorted(per_scope.items())],
-    }
+    except core_episodes.MissingApiKeyError as e:
+        _emit({"kind": "openclaw-mem.episodes.embed.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(1)
+    except ValueError as e:
+        _emit({"kind": "openclaw-mem.episodes.embed.v0", "ok": False, "error": str(e)}, True)
+        sys.exit(2)
     _emit(payload, bool(args.json))
 
 
 
 def cmd_episodes_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
-        scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
-        query = str(getattr(args, "query", "") or "").strip()
-        if not query:
-            raise ValueError("query is required")
-        limit = max(1, min(EPISODIC_MAX_QUERY_LIMIT, int(getattr(args, "limit", 5) or 5)))
-        per_session_limit = max(1, min(20, int(getattr(args, "per_session_limit", 3) or 3)))
-        search_limit = max(1, min(500, int(getattr(args, "search_limit", 40) or 40)))
-        include_payload = bool(getattr(args, "include_payload", False))
-        mode = str(getattr(args, "mode", "lexical") or "lexical").strip().lower()
-        if mode not in {"lexical", "hybrid", "vector"}:
-            raise ValueError("mode must be one of: lexical, hybrid, vector")
-        query_en = str(getattr(args, "query_en", "") or "").strip() or None
-        trace = bool(getattr(args, "trace", False))
-        model = str(getattr(args, "model", defaults.embed_model()) or defaults.embed_model())
-        rrf_k = max(1, int(getattr(args, "k", 60) or 60))
+        payload = core_episodes.search_events(
+            conn,
+            raw_scope=getattr(args, "scope", None),
+            global_scope=bool(getattr(args, "global_scope", False)),
+            query=getattr(args, "query", ""),
+            limit=int(getattr(args, "limit", 5) or 5),
+            per_session_limit=int(getattr(args, "per_session_limit", 3) or 3),
+            search_limit=int(getattr(args, "search_limit", 40) or 40),
+            include_payload=bool(getattr(args, "include_payload", False)),
+            mode=getattr(args, "mode", "lexical"),
+            query_en=getattr(args, "query_en", None),
+            trace=bool(getattr(args, "trace", False)),
+            model=getattr(args, "model", defaults.embed_model()),
+            k=int(getattr(args, "k", 60) or 60),
+            base_url=getattr(args, "base_url", defaults.openai_base_url()),
+            api_key_provider=_get_api_key,
+            client_factory=lambda api_key, base_url: OpenAIEmbeddingsClient(api_key=api_key, base_url=base_url),
+        )
     except ValueError as e:
         _emit(
             {
@@ -18290,21 +18211,6 @@ def cmd_episodes_search(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         )
         sys.exit(2)
 
-    payload = _episodes_search_payload(
-        conn,
-        scope=scope,
-        query=query,
-        limit=limit,
-        per_session_limit=per_session_limit,
-        search_limit=search_limit,
-        include_payload=include_payload,
-        mode=mode,
-        query_en=query_en,
-        trace=trace,
-        model=model,
-        k=rrf_k,
-        base_url=getattr(args, "base_url", defaults.openai_base_url()),
-    )
     _emit(payload, args.json)
 
 

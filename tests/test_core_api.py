@@ -9,8 +9,10 @@ from openclaw_mem.core.episodes import (
     DuplicateEventError,
     append_event,
     append_session_store_receipt,
+    embed_events,
     query as query_episodes,
     replay as replay_episodes,
+    search_events,
 )
 from openclaw_mem.core.records import harvest_observations, ingest_observations, store_memory
 
@@ -341,6 +343,48 @@ def test_core_session_store_receipt_is_deterministic_and_output_free(capsys) -> 
             "session_store_rotated store=sessions.json size_bytes=42 backup_count=2"
         )
         assert conn.execute("SELECT COUNT(*) FROM episodic_events").fetchone()[0] == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+    finally:
+        conn.close()
+
+
+def test_core_episodes_search_and_embed_use_real_db_seam_without_output(capsys) -> None:
+    conn = connect(":memory:")
+    try:
+        append_event(
+            conn,
+            event_type="ops.observation",
+            raw_scope="project:search",
+            session_id="session-search",
+            agent_id="main",
+            summary="semantic lighthouse",
+            event_id="evt-core-search",
+            ts_ms=1234,
+        )
+        lexical = search_events(
+            conn,
+            raw_scope="project:search",
+            global_scope=False,
+            query="lighthouse",
+        )
+        assert lexical["result"]["sessions"][0]["session_id"] == "session-search"
+
+        class FakeClient:
+            def embed(self, texts, model):
+                assert model == "test-model"
+                return [[1.0, 0.0] for _ in texts]
+
+        embedded = embed_events(
+            conn,
+            api_key="test-key",
+            client_factory=lambda _api_key, _base_url: FakeClient(),
+            model="test-model",
+            raw_scope="project:search",
+        )
+        assert embedded["embedded"] == 1
+        assert conn.execute("SELECT COUNT(*) FROM episodic_event_embeddings").fetchone()[0] == 1
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == ""
