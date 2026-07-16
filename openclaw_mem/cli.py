@@ -34,7 +34,7 @@ from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Dict, Any, List, Mapping, Optional, Set, Tuple
+from typing import Iterable, Callable, Dict, Any, List, Mapping, Optional, Set, Tuple
 
 from openclaw_mem import __version__
 from openclaw_mem import defaults
@@ -964,6 +964,17 @@ def _enable_wal_best_effort(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA busy_timeout=5000;")
 
 
+CURRENT_DB_VERSION = 1
+
+
+@dataclass(frozen=True)
+class Migration:
+    id: int
+    description: str
+    apply: Callable[[sqlite3.Connection], None]
+    cost: str
+
+
 def _connect(db_path: str) -> sqlite3.Connection:
     # Allow in-memory DB and relative paths without a directory component.
     # (Useful for unit tests and quick experiments.)
@@ -987,7 +998,16 @@ def _connect(db_path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     _enable_wal_best_effort(conn)
     if not skip_init:
-        _init_db(conn)
+        user_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        if user_version > CURRENT_DB_VERSION:
+            conn.close()
+            raise RuntimeError(
+                "db_version_unsupported: database user_version "
+                f"{user_version} is newer than supported version {CURRENT_DB_VERSION}; "
+                "upgrade openclaw-mem or inspect it with a compatible read-only tool"
+            )
+        if user_version == 0:
+            _init_db(conn)
     return conn
 
 
@@ -1356,6 +1376,16 @@ def _init_db(conn: sqlite3.Connection) -> None:
             conn.execute("PRAGMA user_version = 1")
 
     conn.commit()
+
+
+MIGRATIONS: Tuple[Migration, ...] = (
+    Migration(
+        id=1,
+        description="baseline schema",
+        apply=_init_db,
+        cost="cheap",
+    ),
+)
 
 
 _SURROGATE_MIN = 0xD800
@@ -1741,6 +1771,16 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         {
             "kind": "openclaw-mem.db.info.v1",
             "user_version": int(conn.execute("PRAGMA user_version").fetchone()[0]),
+            "migrations": [
+                {
+                    "id": migration.id,
+                    "description": migration.description,
+                    "cost": migration.cost,
+                    "applied": int(conn.execute("PRAGMA user_version").fetchone()[0])
+                    >= migration.id,
+                }
+                for migration in MIGRATIONS
+            ],
             "tables": tables,
             "fts_integrity": fts_integrity,
             "embeddings": {**embedding_tables, "orphan_count": orphan_count},
