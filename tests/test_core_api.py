@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from openclaw_mem.core.api import connect, pack, search, store_observation
+from openclaw_mem.core.episodes import query as query_episodes, replay as replay_episodes
 from openclaw_mem.core.records import harvest_observations, ingest_observations, store_memory
 
 
@@ -170,5 +171,75 @@ def test_core_harvest_index_and_embedding_fail_open(tmp_path: Path) -> None:
         assert receipt["embed_error"] == "missing_api_key"
         assert warnings == ["failed to update index: index unavailable"]
         assert not source.exists()
+    finally:
+        conn.close()
+
+
+def test_core_episodes_query_and_replay_are_output_free(capsys) -> None:
+    conn = connect(":memory:")
+    conn.execute(
+        """
+        INSERT INTO episodic_events (
+            event_id, ts_ms, scope, session_id, agent_id, type, summary,
+            payload_json, refs_json, redacted, schema_version, created_at, search_text
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        """,
+        (
+            "evt-core-1",
+            1234,
+            "project:core",
+            "session-1",
+            "main",
+            "ops.observation",
+            "core episode",
+            '{"value":1}',
+            '{"source":"test"}',
+            "openclaw-mem.episodic.v0",
+            "2026-07-17T00:00:00+00:00",
+            "core episode",
+        ),
+    )
+    conn.commit()
+    try:
+        query_receipt = query_episodes(
+            conn,
+            raw_scope="project:core",
+            global_scope=False,
+            raw_types=["ops.observation"],
+            include_payload=True,
+        )
+        replay_receipt = replay_episodes(
+            conn,
+            raw_scope="project:core",
+            global_scope=False,
+            session_id="session-1",
+        )
+
+        assert query_receipt["count"] == 1
+        assert query_receipt["items"][0]["payload"] == {"value": 1}
+        assert replay_receipt["count"] == 1
+        assert replay_receipt["items"][0]["refs"] == {"source": "test"}
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+    finally:
+        conn.close()
+
+
+def test_core_episodes_validation_happens_before_query() -> None:
+    conn = connect(":memory:")
+    try:
+        try:
+            query_episodes(
+                conn,
+                raw_scope=None,
+                global_scope=False,
+                from_ts_ms=20,
+                to_ts_ms=10,
+            )
+        except ValueError as exc:
+            assert str(exc) == "scope is required (or pass --global)"
+        else:
+            raise AssertionError("missing scope should fail")
     finally:
         conn.close()

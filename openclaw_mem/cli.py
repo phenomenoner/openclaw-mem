@@ -57,6 +57,7 @@ from openclaw_mem import symbolic_canvas
 from openclaw_mem import harness as harness_install
 from openclaw_mem import codex_install
 from openclaw_mem import project_resolver
+from openclaw_mem.core import episodes as core_episodes
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -18291,61 +18292,19 @@ def _episodes_search_payload(
     return payload
 
 
-def _episodes_query_rows(
-    conn: sqlite3.Connection,
-    *,
-    scope: str,
-    session_id: Optional[str],
-    from_ts_ms: Optional[int],
-    to_ts_ms: Optional[int],
-    types_filter: Optional[List[str]],
-    limit: int,
-) -> List[sqlite3.Row]:
-    clauses = ["scope = ?"]
-    params: List[Any] = [scope]
-
-    if session_id:
-        clauses.append("session_id = ?")
-        params.append(session_id)
-    if from_ts_ms is not None:
-        clauses.append("ts_ms >= ?")
-        params.append(int(from_ts_ms))
-    if to_ts_ms is not None:
-        clauses.append("ts_ms <= ?")
-        params.append(int(to_ts_ms))
-    if types_filter:
-        placeholders = ",".join(["?"] * len(types_filter))
-        clauses.append(f"type IN ({placeholders})")
-        params.extend(types_filter)
-
-    sql = (
-        "SELECT id, event_id, ts_ms, scope, session_id, agent_id, type, summary, payload_json, refs_json, redacted, schema_version, created_at "
-        "FROM episodic_events "
-        f"WHERE {' AND '.join(clauses)} "
-        "ORDER BY ts_ms ASC, id ASC "
-        "LIMIT ?"
-    )
-    params.append(int(limit))
-    return conn.execute(sql, params).fetchall()
-
-
 def cmd_episodes_query(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
-        scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
-        session_id = str(getattr(args, "session_id", "") or "").strip() or None
-        from_ts_ms = None
-        to_ts_ms = None
-        if getattr(args, "from_ts_ms", None) is not None:
-            from_ts_ms = _parse_ts_ms(getattr(args, "from_ts_ms"))
-        if getattr(args, "to_ts_ms", None) is not None:
-            to_ts_ms = _parse_ts_ms(getattr(args, "to_ts_ms"))
-        if from_ts_ms is not None and to_ts_ms is not None and from_ts_ms > to_ts_ms:
-            raise ValueError("from_ts_ms cannot be greater than to_ts_ms")
-
-        types_filter = _normalize_types_filter(getattr(args, "types", None))
-        limit = int(getattr(args, "limit", 50))
-        limit = max(1, min(EPISODIC_MAX_QUERY_LIMIT, limit))
-        include_payload = bool(getattr(args, "include_payload", False))
+        out = core_episodes.query(
+            conn,
+            raw_scope=getattr(args, "scope", None),
+            global_scope=bool(getattr(args, "global_scope", False)),
+            session_id=getattr(args, "session_id", None),
+            from_ts_ms=getattr(args, "from_ts_ms", None),
+            to_ts_ms=getattr(args, "to_ts_ms", None),
+            raw_types=getattr(args, "types", None),
+            limit=int(getattr(args, "limit", 50)),
+            include_payload=bool(getattr(args, "include_payload", False)),
+        )
     except ValueError as e:
         _emit(
             {
@@ -18357,34 +18316,6 @@ def cmd_episodes_query(conn: sqlite3.Connection, args: argparse.Namespace) -> No
         )
         sys.exit(2)
 
-    rows = _episodes_query_rows(
-        conn,
-        scope=scope,
-        session_id=session_id,
-        from_ts_ms=from_ts_ms,
-        to_ts_ms=to_ts_ms,
-        types_filter=types_filter,
-        limit=limit,
-    )
-
-    items = [_episodes_row_to_item(r, include_payload=include_payload) for r in rows]
-    out = {
-        "kind": "openclaw-mem.episodes.query.v0",
-        "ts": _utcnow_iso(),
-        "version": {"openclaw_mem": __version__, "schema": "v0"},
-        "ok": True,
-        "scope": scope,
-        "filters": {
-            "session_id": session_id,
-            "from_ts_ms": from_ts_ms,
-            "to_ts_ms": to_ts_ms,
-            "types": types_filter or [],
-            "limit": limit,
-            "include_payload": include_payload,
-        },
-        "count": len(items),
-        "items": items,
-    }
     _emit(out, args.json)
 
 
@@ -18541,14 +18472,14 @@ def cmd_episodes_search(conn: sqlite3.Connection, args: argparse.Namespace) -> N
 
 def cmd_episodes_replay(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
-        scope = _resolve_query_scope(getattr(args, "scope", None), bool(getattr(args, "global_scope", False)))
-        session_id = str(getattr(args, "session_id", "") or "").strip()
-        if not session_id:
-            raise ValueError("session_id is required")
-
-        limit = int(getattr(args, "limit", 200))
-        limit = max(1, min(EPISODIC_MAX_QUERY_LIMIT, limit))
-        include_payload = bool(getattr(args, "include_payload", False))
+        out = core_episodes.replay(
+            conn,
+            raw_scope=getattr(args, "scope", None),
+            global_scope=bool(getattr(args, "global_scope", False)),
+            session_id=getattr(args, "session_id", ""),
+            limit=int(getattr(args, "limit", 200)),
+            include_payload=bool(getattr(args, "include_payload", False)),
+        )
     except ValueError as e:
         _emit(
             {
@@ -18560,29 +18491,6 @@ def cmd_episodes_replay(conn: sqlite3.Connection, args: argparse.Namespace) -> N
         )
         sys.exit(2)
 
-    rows = _episodes_query_rows(
-        conn,
-        scope=scope,
-        session_id=session_id,
-        from_ts_ms=None,
-        to_ts_ms=None,
-        types_filter=None,
-        limit=limit,
-    )
-    items = [_episodes_row_to_item(r, include_payload=include_payload) for r in rows]
-
-    out = {
-        "kind": "openclaw-mem.episodes.replay.v0",
-        "ts": _utcnow_iso(),
-        "version": {"openclaw_mem": __version__, "schema": "v0"},
-        "ok": True,
-        "scope": scope,
-        "session_id": session_id,
-        "count": len(items),
-        "limit": limit,
-        "include_payload": include_payload,
-        "items": items,
-    }
     _emit(out, args.json)
 
 
