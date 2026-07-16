@@ -1760,16 +1760,13 @@ def cmd_init(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
         config_receipt = core_config.ensure_config(values)
     except core_config.ConfigError as exc:
-        _emit(
-            {
-                "kind": "openclaw-mem.init.v1",
-                "ok": False,
-                "error": str(exc),
-                "hint": "repair the TOML syntax or move the config aside, then retry init",
-            },
-            bool(args.json),
+        _emit_error(
+            str(exc),
+            "repair the TOML syntax or move the config aside, then retry init",
+            2,
+            as_json=bool(args.json),
+            kind="openclaw-mem.init.v1",
         )
-        raise SystemExit(2) from exc
 
     receipt = {
         "kind": "openclaw-mem.init.v1",
@@ -5976,8 +5973,12 @@ def cmd_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             graph_stale_after_days=int(getattr(args, "graph_stale_after_days", 30)),
         )
     except ValueError as exc:
-        _emit({"error": str(exc), "hint": "provide a non-empty query and a supported --mode"}, True)
-        raise SystemExit(2) from exc
+        _emit_error(
+            str(exc),
+            "provide a non-empty query and a supported --mode",
+            2,
+            as_json=True,
+        )
     _emit(receipt, bool(getattr(args, "json", False)))
 
 
@@ -6355,8 +6356,12 @@ def cmd_sync(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     q = args.query.strip()
     if not q:
-        _emit({"error": "empty query"}, True)
-        sys.exit(2)
+        _emit_error(
+            "empty query",
+            "pass a non-empty query, for example: openclaw-mem search \"gateway timeout\"",
+            2,
+            as_json=True,
+        )
     lexical_receipt = core_lexical_search_with_receipt(
         conn,
         q,
@@ -7076,7 +7081,27 @@ def cmd_timeline(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(out, args.json)
 
 
+_DEFAULT_ERROR_HINT = (
+    "run `openclaw-mem --help-all` for command syntax or see "
+    "docs/cli-exit-codes.md for recovery guidance"
+)
+
+
+def _with_error_hints(payload: Any) -> Any:
+    """Return a copy where every error receipt has an actionable hint."""
+
+    if isinstance(payload, list):
+        return [_with_error_hints(item) for item in payload]
+    if not isinstance(payload, dict):
+        return payload
+    normalized = {key: _with_error_hints(value) for key, value in payload.items()}
+    if normalized.get("error") is not None and not str(normalized.get("hint") or "").strip():
+        normalized["hint"] = _DEFAULT_ERROR_HINT
+    return normalized
+
+
 def _emit(payload: Any, as_json: bool) -> None:
+    payload = _with_error_hints(payload)
     if as_json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
@@ -7089,6 +7114,27 @@ def _emit(payload: Any, as_json: bool) -> None:
             print(f"{k}: {v}")
         return
     print(payload)
+
+
+def _emit_error(
+    message: str,
+    hint: str,
+    code: int,
+    *,
+    as_json: bool,
+    kind: str | None = None,
+    **extra: Any,
+) -> None:
+    """Emit the common error contract and terminate with a documented code."""
+
+    if code not in {1, 2, 3}:
+        raise ValueError(f"unsupported CLI error exit code: {code}")
+    receipt: Dict[str, Any] = {"ok": False, "error": str(message), "hint": str(hint)}
+    if kind:
+        receipt["kind"] = kind
+    receipt.update(extra)
+    _emit(receipt, as_json)
+    raise SystemExit(code)
 
 
 def _build_self_snapshot_from_args(conn: sqlite3.Connection, args: argparse.Namespace) -> Dict[str, Any]:
