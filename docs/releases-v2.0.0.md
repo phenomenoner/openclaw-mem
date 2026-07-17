@@ -2,10 +2,10 @@
 
 Release date: 2026-07-17
 
-v2.0.0 is the completed Run A/Run B upgrade: stable core APIs, governed
-database evolution, converged agent-facing commands, seven local harness
-installers, policy-shared MCP tools, exact local vector acceleration, and a
-full taxonomy/lifecycle/scoring/decay system.
+v2.0.0 is the v2 architecture and governance upgrade: stable core APIs,
+governed database evolution, converged agent-facing commands, seven local
+harness installers, policy-shared MCP tools, exact local vector acceleration,
+and a full taxonomy/lifecycle/scoring/decay system.
 
 ## Upgrade posture
 
@@ -104,9 +104,6 @@ uv sync --locked
   an isolated wheel installation
 - tag CI, main CI, GitHub Pages deployment, and trusted PyPI publication passed
 - public diff scan found no high-confidence secrets or private absolute paths
-
-The full task ledger, deviations, and Run C entry conditions are in
-`RUN-B-REPORT.md`.
 
 ## Still gated
 
