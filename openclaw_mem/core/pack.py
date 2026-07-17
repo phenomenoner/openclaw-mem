@@ -14,6 +14,7 @@ from openclaw_mem.core.search import hybrid_search, lexical_search, vector_searc
 from openclaw_mem.core.vector_index import create_vector_index
 from openclaw_mem.core.quotas import apply_soft_quotas, finalize_quota_hits
 from openclaw_mem.core.scoring import scoring_kwargs
+from openclaw_mem.core.use_decay import refresh_selected_records
 
 
 def _utcnow_iso() -> str:
@@ -63,6 +64,7 @@ def build_pack(
     scoring_recency_enabled: bool | None = None,
     scoring_use_enabled: bool | None = None,
     scoring_state_enabled: bool | None = None,
+    use_tracking: bool | None = None,
 ) -> Dict[str, Any]:
     query_text = str(query or "").strip()
     if not query_text:
@@ -327,4 +329,14 @@ def build_pack(
         payload["quota_hits"] = quota_hits
     if scoring_profile == "composite":
         payload["scoring_profile"] = "composite"
+    if use_tracking is None:
+        from openclaw_mem.core.config import resolve_config
+
+        use_tracking = bool(resolve_config()["use_tracking"]["enabled"])
+    payload["lifecycle_write"] = refresh_selected_records(
+        conn,
+        selected_refs=[item.get("recordRef") for item in selected_items],
+        ts=_utcnow_iso(),
+        enabled=use_tracking,
+    )
     return payload

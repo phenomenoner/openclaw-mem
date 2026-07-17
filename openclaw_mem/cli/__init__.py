@@ -81,6 +81,7 @@ from openclaw_mem.core.lifecycle import (
     LifecycleTransitionError,
     filter_retrieval_results as filter_lifecycle_results,
     is_soft_archived as lifecycle_is_soft_archived,
+    state_from_detail as lifecycle_state_from_detail,
     state_distribution as lifecycle_state_distribution,
     transition as transition_lifecycle,
 )
@@ -88,6 +89,7 @@ from openclaw_mem.core.curation import rollback_optimize_assist
 from openclaw_mem.core.taxonomy import CANONICAL_KINDS, backfill_kinds
 from openclaw_mem.core.quotas import apply_soft_quotas, finalize_quota_hits
 from openclaw_mem.core.scoring import score_results, scoring_kwargs
+from openclaw_mem.core.use_decay import priority_for, refresh_selected_records, use_tracking_enabled
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -1782,6 +1784,11 @@ def cmd_init(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "state": {"enabled": bool(resolved["scoring"]["state"]["enabled"])},
         },
         "taxonomy": {"enabled": bool(resolved["taxonomy"]["enabled"])},
+        "use_tracking": {"enabled": bool(resolved["use_tracking"]["enabled"])},
+        "decay": {
+            "p1_unused_days": int(resolved["decay"]["p1_unused_days"]),
+            "p2_unused_days": int(resolved["decay"]["p2_unused_days"]),
+        },
         "quota": {
             "enabled": bool(resolved["quota"]["enabled"]),
             "preference": {"min": int(resolved["quota"]["preference"]["min"])},
@@ -2883,7 +2890,7 @@ def _optimize_governor_review_item(
             decision = 'blocked_high_risk'
             risk_level = 'high'
             decision_reasons = ['soft_archive_patch_missing_set_archived_at']
-        elif archive_reason_code not in {'stale_low_importance', 'operator_override'}:
+        elif archive_reason_code not in {'stale_low_importance', 'use_decay', 'operator_override'}:
             decision = 'blocked_high_risk'
             risk_level = 'high'
             decision_reasons = ['invalid_soft_archive_reason_code']
@@ -3527,7 +3534,7 @@ def _optimize_assist_diff_summary(before_detail: Dict[str, Any], after_detail: D
     changes: List[Dict[str, Any]] = []
     before_lifecycle = before_detail.get('lifecycle') if isinstance(before_detail.get('lifecycle'), dict) else {}
     after_lifecycle = after_detail.get('lifecycle') if isinstance(after_detail.get('lifecycle'), dict) else {}
-    for key in ('stale_candidate', 'stale_reason_code', 'soft_archive_candidate', 'archived_at', 'archive_reason_code'):
+    for key in ('state', 'stale_candidate', 'stale_reason_code', 'soft_archive_candidate', 'archived_at', 'archive_reason_code'):
         if before_lifecycle.get(key) != after_lifecycle.get(key):
             changes.append({'path': f'/lifecycle/{key}', 'before': before_lifecycle.get(key), 'after': after_lifecycle.get(key)})
     before_importance = before_detail.get('importance') if isinstance(before_detail.get('importance'), dict) else {}
@@ -3592,7 +3599,7 @@ def _optimize_assist_apply_item(
         raise ValueError('missing_observation_id')
 
     row = conn.execute(
-        'SELECT detail_json FROM observations WHERE id = ?',
+        'SELECT kind, detail_json FROM observations WHERE id = ?',
         (obs_id,),
     ).fetchone()
     if row is None:
@@ -3648,10 +3655,23 @@ def _optimize_assist_apply_item(
             raise ValueError('invalid_soft_archive_patch')
         if lifecycle_patch.get('set_archived_at') is not True:
             raise ValueError('soft_archive_patch_missing_set_archived_at')
-        if archive_reason_code not in {'stale_low_importance', 'operator_override'}:
+        if archive_reason_code not in {'stale_low_importance', 'use_decay', 'operator_override'}:
             raise ValueError('invalid_soft_archive_reason_code')
 
         lifecycle_before = before_detail.get('lifecycle') if isinstance(before_detail.get('lifecycle'), dict) else {}
+        resolved_priority = priority_for(row['kind'], before_detail)
+        if resolved_priority == 'P0':
+            return {
+                'observation_id': obs_id,
+                'proposal_id': str(item.get('candidate_id') or ''),
+                'before_detail_json': before_detail,
+                'after_detail_json': before_detail,
+                'before_sha256': _json_sha256(before_detail),
+                'after_sha256': _json_sha256(before_detail),
+                'diff_summary': [],
+                'applied': False,
+                'skip_reason': 'priority_p0_protected',
+            }
         importance_label = label_from_score(parse_importance_score(before_detail.get('importance')))
         if importance_label == 'must_remember':
             return {
@@ -3696,6 +3716,51 @@ def _optimize_assist_apply_item(
                 'skip_reason': 'recent_use_conflict_protected',
             }
 
+        current_last_used = str(lifecycle_before.get('last_used_at') or '').strip() or None
+        evidence_last_used = str(evidence.get('last_used_at') or '').strip() or None
+        if current_last_used and current_last_used != evidence_last_used:
+            return {
+                'observation_id': obs_id,
+                'proposal_id': str(item.get('candidate_id') or ''),
+                'before_detail_json': before_detail,
+                'after_detail_json': before_detail,
+                'before_sha256': _json_sha256(before_detail),
+                'after_sha256': _json_sha256(before_detail),
+                'diff_summary': [],
+                'applied': False,
+                'skip_reason': 'last_used_at_changed_since_review',
+            }
+
+        transition_receipts: List[Dict[str, Any]] = []
+        current_state = lifecycle_state_from_detail(before_detail)
+        if current_state in {'active', 'consolidated'}:
+            transition_receipts.append(
+                transition_lifecycle(
+                    conn,
+                    obs_id,
+                    'stale',
+                    archive_reason_code,
+                    operator,
+                    at=applied_at,
+                )
+            )
+            current_state = 'stale'
+        if current_state != 'stale':
+            raise ValueError(f'use_decay_state_not_archivable:{current_state}')
+        transition_receipts.append(
+            transition_lifecycle(
+                conn,
+                obs_id,
+                'soft-archived',
+                archive_reason_code,
+                operator,
+                at=applied_at,
+            )
+        )
+        transitioned_row = conn.execute(
+            'SELECT detail_json FROM observations WHERE id = ?', (obs_id,)
+        ).fetchone()
+        after_detail = _pack_parse_detail_json(transitioned_row['detail_json'])
         lifecycle = after_detail.get('lifecycle') if isinstance(after_detail.get('lifecycle'), dict) else {}
         lifecycle['soft_archive_candidate'] = True
         lifecycle['archived_at'] = applied_at
@@ -3734,6 +3799,16 @@ def _optimize_assist_apply_item(
         'after_sha256': _json_sha256(after_detail),
         'diff_summary': _optimize_assist_diff_summary(before_detail, after_detail),
         'applied': True,
+        'lifecycle_transitions': transition_receipts if action == 'set_soft_archive_candidate' else [],
+        'archive_summary': (
+            {
+                'priority': priority_for(row['kind'], before_detail),
+                'kind': str(row['kind'] or 'note'),
+                'trust': str(before_detail.get('trust') or before_detail.get('trust_tier') or 'unknown'),
+            }
+            if action == 'set_soft_archive_candidate'
+            else None
+        ),
     }
 
 
@@ -3879,6 +3954,13 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
         'set_soft_archive_candidate': 0,
     }
     skipped_by_protection: List[Dict[str, Any]] = []
+    lifecycle_transition_receipts: List[Dict[str, Any]] = []
+    archived_counts: Dict[str, Any] = {
+        'total': 0,
+        'by_priority': {},
+        'by_kind': {},
+        'by_trust': {},
+    }
 
     if blocked_reasons:
         result = 'aborted'
@@ -3903,6 +3985,19 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
                         applied_rows += 1
                         if action_name in applied_action_counts:
                             applied_action_counts[action_name] += 1
+                        lifecycle_transition_receipts.extend(
+                            list(mutation.get('lifecycle_transitions') or [])
+                        )
+                        archive_summary = mutation.get('archive_summary')
+                        if isinstance(archive_summary, dict):
+                            archived_counts['total'] += 1
+                            for bucket, key in (
+                                ('by_priority', 'priority'),
+                                ('by_kind', 'kind'),
+                                ('by_trust', 'trust'),
+                            ):
+                                value = str(archive_summary.get(key) or 'unknown')
+                                archived_counts[bucket][value] = int(archived_counts[bucket].get(value) or 0) + 1
                         after_hashes[str(mutation['observation_id'])] = mutation['after_sha256']
                         diff_summary.extend(mutation['diff_summary'])
                         effect_receipts.append(
@@ -3987,6 +4082,8 @@ def cmd_optimize_assist_apply(conn: sqlite3.Connection, args: argparse.Namespace
         'blocked_by_caps': sorted(set(blocked_reasons)),
         'skipped_by_protection': skipped_by_protection,
         'applied_action_counts': applied_action_counts,
+        'archived_counts': archived_counts,
+        'lifecycle_transition_receipts': lifecycle_transition_receipts,
         'after_hashes': after_hashes,
         'rollback_ref': str(rollback_path),
         'diff_summary': diff_summary,
@@ -9710,19 +9807,9 @@ def _pack_lifecycle_shadow_mode(args: argparse.Namespace) -> str:
 
 
 def _pack_lifecycle_write_mode(args: argparse.Namespace) -> str:
-    mode_raw = str(getattr(args, "pack_lifecycle_write", "off") or "off").strip().lower()
-    return mode_raw if mode_raw in {"off", "on"} else "off"
-
-
-def _pack_lifecycle_obs_id_from_ref(ref: Any) -> Optional[int]:
-    token = str(ref or "").strip()
-    if not token.startswith("obs:"):
-        return None
-    raw = token.split(":", 1)[1].strip()
-    if not raw.isdigit():
-        return None
-    value = int(raw)
-    return value if value > 0 else None
+    fallback = "on" if use_tracking_enabled() else "off"
+    mode_raw = str(getattr(args, "pack_lifecycle_write", fallback) or fallback).strip().lower()
+    return mode_raw if mode_raw in {"off", "on"} else fallback
 
 
 def _pack_lifecycle_refresh_selected_records(
@@ -9731,76 +9818,7 @@ def _pack_lifecycle_refresh_selected_records(
     selected_refs: List[str],
     ts: str,
 ) -> Dict[str, Any]:
-    clipped_refs = _pack_lifecycle_clip_refs(selected_refs)
-    ref_to_id: Dict[str, int] = {}
-    skipped_refs: List[str] = []
-
-    for ref in clipped_refs:
-        obs_id = _pack_lifecycle_obs_id_from_ref(ref)
-        if obs_id is None:
-            skipped_refs.append(ref)
-            continue
-        ref_to_id.setdefault(ref, obs_id)
-
-    refreshed_refs: List[str] = []
-    missing_refs: List[str] = []
-    before_counts: Dict[str, int] = {}
-    after_counts: Dict[str, int] = {}
-
-    with conn:
-        for ref, obs_id in ref_to_id.items():
-            row = conn.execute("SELECT detail_json FROM observations WHERE id = ?", (obs_id,)).fetchone()
-            if row is None:
-                missing_refs.append(ref)
-                continue
-
-            detail = _pack_parse_detail_json(row["detail_json"])
-            lifecycle = detail.get("lifecycle") if isinstance(detail.get("lifecycle"), dict) else {}
-            lifecycle = dict(lifecycle or {})
-            before_count = max(0, _pack_graph_int(lifecycle.get("used_count"), 0))
-            after_count = before_count + 1
-            lifecycle["last_used_at"] = ts
-            lifecycle["used_count"] = after_count
-            detail["lifecycle"] = lifecycle
-
-            conn.execute(
-                "UPDATE observations SET detail_json = ? WHERE id = ?",
-                (json.dumps(detail, ensure_ascii=False, sort_keys=True), obs_id),
-            )
-            refreshed_refs.append(ref)
-            before_counts[ref] = before_count
-            after_counts[ref] = after_count
-
-    return {
-        "kind": "openclaw-mem.pack.lifecycle-write.v1",
-        "mode": "selected_pack_records_only",
-        "ts": ts,
-        "selection": {
-            "pack_selected_refs": clipped_refs,
-            "refreshed_record_refs": refreshed_refs,
-            "skipped_record_refs": skipped_refs,
-            "missing_record_refs": missing_refs,
-            "selection_signature": _pack_lifecycle_selection_signature(clipped_refs),
-        },
-        "mutation": {
-            "memory_mutation": "detail_json.lifecycle_refresh",
-            "writes_observations": len(refreshed_refs),
-            "writes_embeddings": 0,
-            "auto_archive_applied": 0,
-            "auto_mutation_applied": len(refreshed_refs),
-            "hard_delete_applied": 0,
-        },
-        "lifecycle": {
-            "last_used_at": ts,
-            "used_count_before": before_counts,
-            "used_count_after": after_counts,
-            "archived_at_preserved": True,
-        },
-        "storage": {
-            "field": "observations.detail_json.lifecycle",
-            "error_code": None,
-        },
-    }
+    return refresh_selected_records(conn, selected_refs=selected_refs, ts=ts)
 
 
 def _pack_lifecycle_clip_refs(raw: Any, *, max_refs: int = _PACK_LIFECYCLE_MAX_REFS) -> List[str]:
@@ -11414,6 +11432,10 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             extensions=trace_extensions,
         )
         payload["trace"] = pack_trace_v1.to_dict(trace)
+        if lifecycle_write_receipt is not None:
+            payload["trace"]["refreshed_refs"] = list(
+                (lifecycle_write_receipt.get("selection") or {}).get("refreshed_record_refs") or []
+            )
         if str(getattr(args, "scoring_profile", "relevance")) == "composite":
             score_by_ref = {
                 str(candidate.get("recordRef") or ""): dict(candidate.get("score_components") or {})
@@ -20657,6 +20679,7 @@ def build_parser() -> argparse.ArgumentParser:
     configured_pack_budget = int(resolved_config["pack"]["budget_tokens"])
     configured_quota = resolved_config["quota"]
     configured_scoring = scoring_kwargs(resolved_config)
+    configured_use_tracking = bool(resolved_config["use_tracking"]["enabled"])
     epilog = (
         "Examples:\n"
         "  # Observation store\n"
@@ -21743,8 +21766,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument(
         "--pack-lifecycle-write",
         choices=["off", "on"],
-        default="off",
-        help="Opt-in lifecycle writeback: refresh detail_json.lifecycle.last_used_at/used_count for records selected into the final pack (default: off).",
+        default="on" if configured_use_tracking else "off",
+        help="Citation-only use tracking for final packed observations (default: config use_tracking.enabled; env OPENCLAW_MEM_USE_TRACKING).",
     )
     sp.add_argument(
         "--pack-artifacts",

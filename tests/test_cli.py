@@ -5583,6 +5583,7 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         lifecycle_write = out["trace"]["extensions"]["lifecycle_write"]
         self.assertEqual(lifecycle_write["selection"]["refreshed_record_refs"], ["obs:1"])
+        self.assertEqual(out["trace"]["refreshed_refs"], ["obs:1"])
         self.assertEqual(lifecycle_write["mutation"]["writes_observations"], 1)
         self.assertEqual(lifecycle_write["mutation"]["hard_delete_applied"], 0)
 
@@ -5598,9 +5599,9 @@ class TestCliM0(unittest.TestCase):
         self.assertNotIn("last_used_at", detail2["lifecycle"])
         conn.close()
 
-    def test_pack_lifecycle_write_defaults_off(self):
+    def test_pack_lifecycle_write_defaults_on(self):
         args = build_parser().parse_args(["pack", "--query", "x", "--json"])
-        self.assertEqual(args.pack_lifecycle_write, "off")
+        self.assertEqual(args.pack_lifecycle_write, "on")
 
     def test_pack_lifecycle_write_failure_rolls_back_before_shadow_log_commit(self):
         conn = _connect(":memory:")
@@ -6408,6 +6409,8 @@ class TestCliM0(unittest.TestCase):
                 "output",
                 "timing",
                 "extensions",
+                "quota_hits",
+                "refreshed_refs",
             },
         )
 

@@ -22,6 +22,9 @@ _VOLATILE_KEYS = {
     "timing",
     "timingms",
     "timing_ms",
+    "last_used_at",
+    "used_count_before",
+    "used_count_after",
 }
 
 

@@ -99,6 +99,25 @@ def test_quota_config_nested_values_and_environment_priority(
     }
 
 
+def test_use_tracking_and_decay_config_environment_priority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_config_env(monkeypatch)
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[use_tracking]\nenabled = true\n"
+        "[decay]\np1_unused_days = 120\np2_unused_days = 45\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCLAW_MEM_USE_TRACKING", "0")
+    monkeypatch.setenv("OPENCLAW_MEM_DECAY_P2_UNUSED_DAYS", "35")
+
+    resolved = config.resolve_config(path)
+
+    assert resolved["use_tracking"]["enabled"] is False
+    assert resolved["decay"] == {"p1_unused_days": 120, "p2_unused_days": 35}
+
+
 def test_ensure_config_only_fills_missing_keys_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
@@ -123,6 +142,9 @@ def test_ensure_config_only_fills_missing_keys_and_is_idempotent(
         "scoring.recency.enabled",
         "scoring.use.enabled",
         "scoring.state.enabled",
+        "use_tracking.enabled",
+        "decay.p1_unused_days",
+        "decay.p2_unused_days",
         "taxonomy.enabled",
         "quota.enabled",
         "quota.preference.min",

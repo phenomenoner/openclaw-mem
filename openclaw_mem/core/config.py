@@ -36,6 +36,9 @@ _ENV_KEYS = {
     "scoring.recency.enabled": "OPENCLAW_MEM_SCORING_RECENCY_ENABLED",
     "scoring.use.enabled": "OPENCLAW_MEM_SCORING_USE_ENABLED",
     "scoring.state.enabled": "OPENCLAW_MEM_SCORING_STATE_ENABLED",
+    "use_tracking.enabled": "OPENCLAW_MEM_USE_TRACKING",
+    "decay.p1_unused_days": "OPENCLAW_MEM_DECAY_P1_UNUSED_DAYS",
+    "decay.p2_unused_days": "OPENCLAW_MEM_DECAY_P2_UNUSED_DAYS",
     "taxonomy.enabled": "OPENCLAW_MEM_TAXONOMY_ENABLED",
     "quota.enabled": "OPENCLAW_MEM_QUOTA_ENABLED",
     "quota.preference.min": "OPENCLAW_MEM_QUOTA_PREFERENCE_MIN",
@@ -73,6 +76,8 @@ def built_in_defaults() -> Dict[str, Any]:
             "state": {"enabled": True},
         },
         "taxonomy": {"enabled": True},
+        "use_tracking": {"enabled": True},
+        "decay": {"p1_unused_days": 90, "p2_unused_days": 30},
         "quota": {
             "enabled": True,
             "preference": {"min": 1},
@@ -134,6 +139,7 @@ def _coerce(dotted: str, value: Any, fallback: Any) -> Any:
         "scoring.recency.enabled",
         "scoring.use.enabled",
         "scoring.state.enabled",
+        "use_tracking.enabled",
     }:
         if isinstance(value, bool):
             return value
@@ -143,12 +149,18 @@ def _coerce(dotted: str, value: Any, fallback: Any) -> Any:
         if normalized in {"0", "false", "no", "off"}:
             return False
         return fallback
-    if dotted in {"quota.preference.min", "quota.decision.min"}:
+    if dotted in {
+        "quota.preference.min",
+        "quota.decision.min",
+        "decay.p1_unused_days",
+        "decay.p2_unused_days",
+    }:
         try:
             parsed = int(value)
         except (TypeError, ValueError):
             return fallback
-        return parsed if parsed >= 0 else fallback
+        minimum = 1 if dotted.startswith("decay.") else 0
+        return parsed if parsed >= minimum else fallback
     if dotted == "quota.event.max_ratio":
         try:
             parsed = float(value)
@@ -257,6 +269,9 @@ def ensure_config(
         ("scoring.recency", "enabled"),
         ("scoring.use", "enabled"),
         ("scoring.state", "enabled"),
+        ("use_tracking", "enabled"),
+        ("decay", "p1_unused_days"),
+        ("decay", "p2_unused_days"),
         ("taxonomy", "enabled"),
         ("quota", "enabled"),
         ("quota.preference", "min"),
