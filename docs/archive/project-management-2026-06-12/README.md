@@ -1,6 +1,11 @@
-# Project management control files
+# Archived 2026-06-12 project-management control files
 
-Status: active internal planning surface.
+Status: **ARCHIVED / SUPERSEDED by Run A and Run B on 2026-07-17**.
+
+These files are retained for development provenance only. They are not current
+instructions and are excluded from the public documentation site. Current
+product status is recorded in `RUN-A-REPORT.md` and `RUN-B-REPORT.md` at the
+repository root.
 
 This folder turns the 2026-06-12 integration optimization phase plan into file-driven project management for `openclaw-mem`.
 
@@ -14,7 +19,8 @@ Use these files as the working surface before changing product code:
 Rules:
 
 - Do not start implementation until the open confirmation gates in `next-step.md` are resolved or explicitly deferred.
-- Every implementation slice must create or update one receipt file under `docs/project-management/receipts/`.
+- Every implementation slice originally created or updated one receipt under
+  this archived folder's `receipts/` directory.
 - Keep product-facing docs clean. This folder is excluded from MkDocs public output by `mkdocs.yml`.
 
 Current recommendation:

@@ -18,10 +18,13 @@ If you are still deciding how to adopt it, read [Choose an install path](install
 python -m venv .venv
 . .venv/bin/activate
 pip install openclaw-context-pack
-openclaw-mem --db /tmp/openclaw-mem-quickstart.sqlite status --json
+openclaw-mem init --db /tmp/openclaw-mem-quickstart.sqlite --json
 ```
 
 The PyPI distribution is `openclaw-context-pack`; it installs the `openclaw_mem` Python package, the `openclaw-mem` console command, and the integration entrypoints `openclaw-mem-mcp`, `openclaw-mem-channel-a`, and `openclaw-mem-hooks`.
+
+Already have an older local agent installation? Follow the
+[v2 upgrade checklist](upgrade-checklist.md) before resuming writers.
 
 If you want to run the bundled synthetic fixture from this repository instead, clone the repo too:
 
@@ -100,7 +103,9 @@ openclaw-mem-mcp --tool-descriptions
 claude mcp add openclaw-mem -- openclaw-mem-mcp --db "$DB"
 ```
 
-The MCP server exposes `mem_search`, `mem_pack`, `mem_store`, `mem_status`, and related tools. See [MCP integration](mcp-integration.md).
+The MCP server exposes policy-shared `mem_recall`/`mem_pack`, governed store and
+status tools, and read-only graph neighbor/path/impact tools. See
+[MCP integration](mcp-integration.md).
 
 ### Route B: fail-open file pack
 

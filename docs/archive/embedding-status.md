@@ -18,7 +18,7 @@ The `openclaw-mem status --json` command should report:
 
 ```json
 {
-  "db": "/home/agent/.openclaw/memory/openclaw-mem.sqlite",
+  "db": "<state-root>/memory/openclaw-mem.sqlite",
   "count": 1234,
   "min_ts": "2026-02-01T00:00:00Z",
   "max_ts": "2026-02-05T19:00:00Z",

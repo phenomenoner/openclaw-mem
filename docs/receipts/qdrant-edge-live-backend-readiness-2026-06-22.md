@@ -22,10 +22,10 @@ stays the rollback path.
 ## Current Readback
 
 - Package: `qdrant-edge-py==0.6.1` locked in `pyproject.toml` and `uv.lock`.
-- Wrapper runtime: `openclaw-mem*.cmd` prefers
-  `D:\Warehouse\Rust-OpenClaw-Core\.tmp\openclaw-mem-work\.venv\Scripts\python.exe`.
+- Wrapper runtime: `openclaw-mem*.cmd` used the repo-local virtual environment
+  interpreter under `<openclaw-mem-repo>`.
 - Shard root:
-  `D:\Warehouse\Rust-OpenClaw-Core\.agent-harness\memory\qdrant-edge`
+  `<harness-home>/memory/qdrant-edge`
 - `openclaw-mem qdrant status` against the active DB reports:
   - `nativeRecallAvailable=true`
   - `vectorDimension=1536`
@@ -133,9 +133,9 @@ retrieval backend shape is:
       "shardRoot": "memory/qdrant-edge",
       "vectorName": "text",
       "fallbackBackend": "sqlite-vector+service-writeback",
-      "searchCommand": "D:\\Warehouse\\Rust-OpenClaw-Core\\.tmp\\openclaw-mem-work\\.venv\\Scripts\\python.exe",
+      "searchCommand": "<openclaw-mem-repo>\\.venv\\Scripts\\python.exe",
       "searchCommandArgs": [
-        "D:\\Warehouse\\Rust-OpenClaw-Core\\.tmp\\openclaw-mem-work\\extensions\\openclaw-mem-engine\\scripts\\qdrant_edge_query_bridge.py"
+        "<openclaw-mem-repo>\\extensions\\openclaw-mem-engine\\scripts\\qdrant_edge_query_bridge.py"
       ],
       "timeoutMs": 1500
     },

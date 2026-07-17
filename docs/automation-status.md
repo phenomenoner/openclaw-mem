@@ -64,10 +64,15 @@ Why not wired yet:
 - We want a clear promotion gate and a burn-in window.
 - We need confidence on determinism, privacy/redaction, and operator debuggability.
 
-Current pilot sequencing (2026-02):
-- **Pillar A (build now):** contract hardening + citation/rationale coverage + benchmark receipts.
-- **Pillar B (spec now):** learning-record lifecycle/bench specs only, no runtime rollout yet.
-- Any scheduler adjustments remain spec-only in this phase (no live cron mutations here).
+v2 status (2026-07):
+- ContextPack citations/rationale, lifecycle, quotas, composite scoring, use
+  tracking, and 10k/100k benchmark gates are shipped.
+- `pack` remains an operator/host integration choice; v2 does not silently wire
+  it into every live agent turn.
+- Use `install --harness` plus `doctor --harness` for supported local agents,
+  and promote any unattended hook only after its dry-run/readback gates pass.
+- Scheduler or live-owner changes remain separate operator state changes; a
+  repository release does not enable them.
 
 ### Promotion of compression output into durable memory
 - Not enabled.

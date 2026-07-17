@@ -11,10 +11,10 @@ Status: implementation complete locally, staged-only. Live cutover is intentiona
 ## Progress
 
 - Branch: `codex/openclaw-mem-pack-ccr`
-- Workspace: `D:\Warehouse\Rust-OpenClaw-Core\.tmp\openclaw-mem-work`
+- Workspace: `<openclaw-mem-worktree>`
 - Harness spike archived for later reference:
-  - `D:\Warehouse\Rust-OpenClaw-Core\.tmp\openclaw-mem-pack-harness-spike.patch`
-  - `D:\Warehouse\Rust-OpenClaw-Core\.tmp\openclaw-mem-pack-harness-spike-files\`
+  - `<operator-archive>/openclaw-mem-pack-harness-spike.patch`
+  - `<operator-archive>/openclaw-mem-pack-harness-spike-files/`
 - Phase 0-2 core artifact module: implemented in `openclaw_mem/pack_artifacts.py` with tests in `tests/test_pack_artifacts.py`.
   - RED: `uv run -- python -m unittest tests.test_pack_artifacts -q` failed with `ModuleNotFoundError: No module named 'openclaw_mem.pack_artifacts'`.
   - GREEN: `uv run -- python -m unittest tests.test_pack_artifacts -q` passed, 14 tests after spec-review and code-review fixes for disabled pass-through, complete marker escaping, duplicate byte accounting, canary observe status, no store-before-safe-pack, non-shrinking rejection, and malformed observe receipt numbers.

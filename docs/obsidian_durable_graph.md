@@ -38,8 +38,8 @@ Lines look like:
 Run:
 
 ```bash
-cd /home/agent/.openclaw/workspace/openclaw-mem
-uv run --python 3.13 -- python scripts/durable_structure.py --workspace /home/agent/.openclaw/workspace
+cd <openclaw-mem-repo>
+uv run --python 3.13 -- python scripts/durable_structure.py --workspace <workspace-root>
 ```
 
 This generates:

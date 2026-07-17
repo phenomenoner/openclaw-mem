@@ -41,9 +41,9 @@ openclaw-mem ...
 ## Step 2: Quick test
 
 ```bash
-uv run --python 3.13 --frozen -- python -m openclaw_mem --json status
+uv run --python 3.13 --frozen -- python -m openclaw_mem init --json
 uv run --python 3.13 --frozen -- python -m openclaw_mem --json doctor
-uv run --python 3.13 --frozen -- python -m openclaw_mem --json backend
+uv run --python 3.13 --frozen -- python -m openclaw_mem db info --json
 ```
 
 What this proves:
@@ -96,7 +96,15 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem ingest --file ./sample.j
 
 ---
 
-## Step 4: Progressive recall (search → timeline → get)
+## Step 4: Primary recall, with legacy drill-down available
+
+Use the v2 primary entrypoint first:
+
+```bash
+uv run --python 3.13 --frozen -- python -m openclaw_mem recall "OpenClaw" --mode auto --json
+```
+
+The compatibility drill-down commands remain available through `--help-all`:
 
 ```bash
 uv run --python 3.13 --frozen -- python -m openclaw_mem search "OpenClaw" --limit 10 --json
@@ -104,8 +112,9 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem timeline 2 --window 2 --
 uv run --python 3.13 --frozen -- python -m openclaw_mem get 1 --json
 ```
 
-This is the product in miniature:
-- **search** finds candidate memory
+The compatibility drill-down is useful when debugging a result:
+- **recall** routes the normal agent query and reports its selected/fallback lane
+- **search** finds lexical candidate memory
 - **timeline** scopes it to the right slice of history
 - **get** lets you inspect the concrete memory instead of trusting a vague summary
 

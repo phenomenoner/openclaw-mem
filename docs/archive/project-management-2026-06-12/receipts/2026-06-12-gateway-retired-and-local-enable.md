@@ -22,19 +22,19 @@ The gateway code remains in the repository for compatibility and future deprecat
 
 ## Rollback
 
-- Restore `C:\Users\user\.codex\bin\openclaw-mem.cmd` from the timestamped `.bak-*` backup.
+- Restore the harness-local `openclaw-mem` wrapper from the timestamped `.bak-*` backup.
 - Remove the new wrapper files for `openclaw-mem-mcp.cmd`, `openclaw-mem-channel-a.cmd`, and `openclaw-mem-hooks.cmd` if needed.
 
 ## Verification
 
-- Wrapper backup: `C:\Users\user\.codex\bin\openclaw-mem.cmd.bak-20260612-134228`
-- Active wrapper source: `D:\Warehouse\Research\Claude_Discuss\OpenClaw-mem\repo-work`
+- Wrapper backup: `<codex-home>/bin/openclaw-mem.cmd.bak-20260612-134228`
+- Active wrapper source: `<openclaw-mem-repo>`
 - Active import version: `openclaw_mem.__version__ == 1.9.27`
 - Real harness memory DB smoke:
-  - `openclaw-mem --db D:\Warehouse\Rust-OpenClaw-Core\.agent-harness\memory\openclaw-mem.sqlite status --json`
+  - `openclaw-mem --db <harness-home>/memory/openclaw-mem.sqlite status --json`
   - result: version `1.9.27`, count `63744`
 - MCP wrapper smoke:
-  - `openclaw-mem-mcp --db D:\Warehouse\Rust-OpenClaw-Core\.agent-harness\memory\openclaw-mem.sqlite --tool-descriptions`
+  - `openclaw-mem-mcp --db <harness-home>/memory/openclaw-mem.sqlite --tool-descriptions`
   - result: schema `openclaw-mem.mcp.tools.v1`
 - Channel A wrapper smoke:
   - temp DB + fixture ingest wrote `openclaw-mem.context-pack.v1`

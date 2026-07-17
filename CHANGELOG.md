@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-17
+
 ### Added
 
 - Add the primary `recall`, `curate`, and `sync` command families. `recall`
@@ -62,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   correction|constraint|regression-risk`, `graph fact guard`, and guard lint
   over source-linked JSONL fixtures; guard output is advisory-only and always
   records `writes_performed=false`.
+- Add a rollback-first guide for upgrading an existing local agent, including
+  package/source channels, governed DB migration, seven harness adapters,
+  MCP/read-write smoke gates, and rollback.
 
 ### Changed
 
@@ -82,6 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and labs commands remain callable through `--help-all`.
 - Make Qdrant and FastEmbed explicit optional extras so the default install
   stays local SQLite-only and does not pull either vector runtime.
+- Classify public documentation by lifecycle: current guides stay searchable;
+  receipts, internal specs, adoption research, and completed control packets
+  remain in Git but are excluded from the public site. Legacy gateway guides
+  now live under Archive navigation without breaking their stable URLs.
 
 ### Fixed
 
@@ -93,6 +102,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removing locale-dependent cp950 failures.
 - Preserve historical v1.9.26 and v1.9.31 database readability, row counts, and
   rollback invariants through generated compatibility fixtures.
+- Avoid a 100k-row graph-scope rescan after citation use tracking: observation
+  UPDATE invalidation now fires only when the stored scope changes. Insert,
+  delete, and true scope changes still invalidate correctly.
 
 ### Safety
 
@@ -114,6 +126,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `openclaw-mem skill-curator lint --all --skill-root skills --json`
 - `python -m pytest tests/test_legacy_fixture_matrix.py tests/test_golden_recall_gate.py -q`
 - Run A full gate: `931 passed, 3 skipped, 87 subtests passed`.
+- Run B final full gate: `1171 passed, 3 skipped, 87 subtests passed`.
+- v2.0.0 release full gate: `1175 passed, 3 skipped, 5 expected
+  compatibility warnings, 87 subtests passed`.
+- 50-case composite gate: Recall@5 held at `1.000`; MRR improved from `0.740`
+  to `0.990`.
+- Final 10k and 100k absolute SLO receipts passed; 100k graph-auto pack p95 was
+  `62.160 ms` against the `<300 ms` target.
 - `uv run -- python -m unittest discover -s tests -p "test_*.py"`
 - `uv run python -m pytest tests\test_bridge_recall_v1.py tests\test_windows_console_wrapper_bridge.py -q`
 - `uv run --with pytest -- python -m pytest tests -q`

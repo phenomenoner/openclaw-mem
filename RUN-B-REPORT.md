@@ -150,7 +150,7 @@ These are master-plan gates, not incomplete Run B work:
 | Graph-first `mem_explore` and unified explore semantics | Run C E13-8 after unified graph schema/build. |
 | Five-pass consolidate, promotion, dissent, and translation-quality workflow | Run C E12-5 through E12-8. |
 | Qdrant L3 promotion and public LongMemEval/LoCoMo claims | Require later live-backend and external-dataset evidence. |
-| v2.0.0 release, tag, PyPI publication, docs deployment, and live cutover | Run D/release authorization and rollback proof. |
+| PyPI publication, docs deployment, and live cutover | Separate release/operator authorization and rollback proof; the repository v2.0.0 tag and GitHub Release are handled after this report. |
 
 ## Recommended Run C starting point
 

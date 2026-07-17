@@ -4,11 +4,11 @@ Purpose: keep `openclaw-mem` development driven by explicit files instead of cha
 
 ## Session loop
 
-1. Read `docs/project-management/next-step.md`.
+1. Read `docs/archive/project-management-2026-06-12/next-step.md`.
 2. Read only the backlog items referenced by `currentFocus`.
 3. If the next task has an unresolved `confirmationGate`, stop and ask CK.
 4. If the next task is clear, implement the smallest rollbackable slice.
-5. Add or update a receipt under `docs/project-management/receipts/YYYY-MM-DD-<slug>.md`.
+5. Add or update a receipt under this archived folder's `receipts/` directory.
 6. Update `next-step.md` and `progress-checklist.html` with:
    - completed item ids
    - exact receipt paths
@@ -27,10 +27,10 @@ Purpose: keep `openclaw-mem` development driven by explicit files instead of cha
 
 ## File creation rules
 
-- Planning/control files live under `docs/project-management/`.
-- The browser checklist is `docs/project-management/progress-checklist.html`.
+- Planning/control files lived under the now-archived project-management folder.
+- The browser checklist is `docs/archive/project-management-2026-06-12/progress-checklist.html`.
 - Public product specs still live under `docs/specs/` when they become real user-facing contracts.
-- Receipts live under `docs/project-management/receipts/`.
+- Receipts live under `docs/archive/project-management-2026-06-12/receipts/`.
 - Benchmark outputs live under `benchmarks/` or `docs/showcase/artifacts/` when public-safe.
 - Do not mix internal phase management into `README.md`, `QUICKSTART.md`, or public docs until the corresponding slice is implemented.
 

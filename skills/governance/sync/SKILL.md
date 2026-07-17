@@ -7,7 +7,7 @@ description: >-
 metadata:
   ring: 1
   surface: [cli, plugin]
-  version: 1.9.32
+  version: 2.0.0
   requires: [openclaw-mem-memory]
 ---
 

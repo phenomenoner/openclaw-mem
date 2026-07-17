@@ -93,7 +93,7 @@ Behavior:
 ### 3) Auto-capture from markdown headings: `graph capture-md`
 ```bash
 openclaw-mem graph capture-md \
-  --path /root/.openclaw/workspace/lyria-working-ledger \
+  --path <workspace-root>/<project-ledger> \
   --include .md \
   --exclude-glob '**/.git/**' \
   --exclude-glob '**/node_modules/**' \
@@ -146,7 +146,7 @@ openclaw-mem graph capture-git \
 ```bash
 OPENCLAW_MEM_GRAPH_AUTO_CAPTURE_MD=1 \
 openclaw-mem graph capture-md \
-  --path /root/.openclaw/workspace/lyria-working-ledger \
+  --path <workspace-root>/<project-ledger> \
   --include .md \
   --min-heading-level 2 \
   --since-hours 24 \

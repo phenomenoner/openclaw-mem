@@ -1,6 +1,7 @@
 # Phase backlog
 
-Source: `D:\Warehouse\Research\Claude_Discuss\OpenClaw-mem\02-整合優化-Phase規劃與Backlog.md` v1.1, 2026-06-12.
+Source: private operator planning packet `02-整合優化-Phase規劃與Backlog.md`
+v1.1, 2026-06-12. The machine-local source path is intentionally omitted.
 
 Purpose: complete file-driven coverage of the phase plan before implementation.
 

@@ -59,7 +59,7 @@ Verification:
 
 Receipt:
 
-- `docs/project-management/receipts/2026-06-12-p1-9-context-pack-fixtures.md`
+- `docs/archive/project-management-2026-06-12/receipts/2026-06-12-p1-9-context-pack-fixtures.md`
 
 External follow-up:
 
@@ -69,7 +69,7 @@ External follow-up:
 
 Human-readable progress mirror:
 
-- `docs/project-management/progress-checklist.html`
+- `docs/archive/project-management-2026-06-12/progress-checklist.html`
 
 Whenever `phase-backlog.md` or this file changes status, update the HTML checklist in the same slice.
 

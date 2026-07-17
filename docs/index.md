@@ -36,6 +36,7 @@ hide:
 <div class="ocm-ctas" markdown="1">
 [Run the 30-second proof](showcase/trust-policy-synthetic-proof.md){ .md-button .md-button--primary }
 [Quickstart](quickstart.md){ .md-button }
+[Upgrade to v2](upgrade-checklist.md){ .md-button }
 [Choose an install path](install-modes.md){ .md-button }
 </div>
 

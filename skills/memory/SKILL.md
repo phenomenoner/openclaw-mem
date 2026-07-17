@@ -7,7 +7,7 @@ description: >-
 metadata:
   ring: 0
   surface: [cli, mcp, plugin]
-  version: 1.9.32
+  version: 2.0.0
   requires: []
 ---
 
