@@ -229,7 +229,7 @@ Mutations flow through explicit plans, checkpoints, diffs, and receipts. `self-c
 <details>
 <summary><b>Is this production ready?</b></summary>
 
-It is a young, actively developed project (v1.9.x, single maintainer, 800+ commits). Core Store/Pack/Observe and the trust-policy path are shipped and tested; advanced lanes are explicitly labeled labs. Start with the [reality check](docs/reality-check.md) — it tells you what is automatic, what is partial, and what is opt-in.
+It is a young, actively developed project (v2.0.0, single maintainer). Core Store/Pack/Observe and the trust-policy path are shipped and tested; advanced lanes are explicitly labeled labs. Start with the [reality check](docs/reality-check.md) — it tells you what is automatic, what is partial, and what is opt-in.
 
 </details>
 
