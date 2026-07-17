@@ -682,16 +682,16 @@ class TestDreamLiteApplyPhase1(unittest.TestCase):
             db_path = root / "mem.sqlite"
             init = subprocess.run([
                 sys.executable, "-m", "openclaw_mem", "--db", str(db_path), "store", "alpha source", "--json"
-            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=False)
+            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
             self.assertEqual(init.returncode, 0, init.stderr)
             compile_run = subprocess.run([
                 sys.executable, "-m", "openclaw_mem", "--db", str(db_path), "graph", "synth", "compile", "--query", "alpha", "--title", "Alpha", "--summary", "Alpha"
-            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=False)
+            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
             self.assertEqual(compile_run.returncode, 0, compile_run.stderr)
             card_ref = json.loads(compile_run.stdout)["cardRef"]
             newer = subprocess.run([
                 sys.executable, "-m", "openclaw_mem", "--db", str(db_path), "store", "alpha newer source", "--json"
-            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=False)
+            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
             self.assertEqual(newer.returncode, 0, newer.stderr)
             now = datetime.now(timezone.utc).isoformat()
             plan = root / "plan.json"
@@ -703,7 +703,7 @@ class TestDreamLiteApplyPhase1(unittest.TestCase):
             witness.write_text(json.dumps({"kind":"openclaw-mem.self-reflection.dream-witness.v0","plan_run_id":"plan-cli","verdict":"ok","coherence_risk":"low","reasons":[]}), encoding="utf-8")
             run = subprocess.run([
                 sys.executable, "-m", "openclaw_mem", "--db", str(db_path), "dream-lite", "apply", "run", "--plan", str(plan), "--witness", str(witness), "--run-dir", str(run_dir), "--json"
-            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=False)
+            ], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
             self.assertEqual(run.returncode, 0, run.stderr + run.stdout)
             out = json.loads(run.stdout)
             self.assertEqual(out["result"], "applied")

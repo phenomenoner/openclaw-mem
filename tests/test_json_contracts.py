@@ -56,7 +56,7 @@ class TestJsonContracts(unittest.TestCase):
         return subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             cwd=self.repo_root,
             input=input_data,
             env=env_vars,
@@ -105,7 +105,13 @@ class TestJsonContracts(unittest.TestCase):
         )
         self._assert_exact_keys(
             out,
-            {"bundle_text", "items", "citations", "trace", "context_pack"},
+            {
+                "bundle_text", "items", "citations", "trace", "context_pack", "vector_backend",
+                "query_lang", "lane_hits", "fallback_triggered", "cross_lang_recovered",
+                "vector_backend_selection",
+                "lifecycle_write",
+                "scoring_profile",
+            },
             "pack",
         )
 
@@ -366,6 +372,9 @@ class TestJsonContracts(unittest.TestCase):
                 "observations",
                 "importance",
                 "embeddings",
+                "lang_distribution",
+                "summary_en_coverage",
+                "lifecycle_state_distribution",
                 "recent",
             },
             "profile",
@@ -383,6 +392,12 @@ class TestJsonContracts(unittest.TestCase):
         self._assert_exact_keys(out["embeddings"], {"original", "english"}, "profile.embeddings")
         self._assert_exact_keys(out["embeddings"]["original"], {"count", "models"}, "profile.embeddings.original")
         self._assert_exact_keys(out["embeddings"]["english"], {"count", "models"}, "profile.embeddings.english")
+        self.assertIsInstance(out["lang_distribution"], dict)
+        self._assert_exact_keys(
+            out["summary_en_coverage"],
+            {"present", "total", "ratio"},
+            "profile.summary_en_coverage",
+        )
 
     def test_pack_trace_json_contract_v1(self):
         self._write_source_observation(
@@ -412,7 +427,30 @@ class TestJsonContracts(unittest.TestCase):
             "--budget-tokens",
             "200",
         )
-        self._assert_exact_keys(out, {"bundle_text", "items", "citations", "context_pack", "trace"}, "pack")
+        self._assert_exact_keys(
+            out,
+            {
+                "bundle_text",
+                "items",
+                "citations",
+                "context_pack",
+                "trace",
+                "vector_backend",
+                "query_lang",
+                "lane_hits",
+                "fallback_triggered",
+                "cross_lang_recovered",
+                "vector_backend_selection",
+                "lifecycle_write",
+                "scoring_profile",
+            },
+            "pack",
+        )
+        self._assert_exact_keys(
+            out["lane_hits"],
+            {"fts_original", "fts_en", "cjk_like", "trigram", "vector", "vector_en"},
+            "pack.lane_hits",
+        )
 
         context_pack = out["context_pack"]
         self.assertEqual(context_pack["schema"], "openclaw-mem.context-pack.v1")
@@ -453,6 +491,8 @@ class TestJsonContracts(unittest.TestCase):
                 "output",
                 "timing",
                 "extensions",
+                "quota_hits",
+                "refreshed_refs",
             },
             "pack.trace",
         )
@@ -480,7 +520,16 @@ class TestJsonContracts(unittest.TestCase):
             candidate = trace["candidates"][0]
             self._assert_exact_keys(
                 candidate,
-                {"id", "layer", "importance", "trust", "scores", "decision", "citations"},
+                {
+                    "id",
+                    "layer",
+                    "importance",
+                    "trust",
+                    "scores",
+                    "decision",
+                    "citations",
+                    "score_components",
+                },
                 "pack.trace.candidates[0]",
             )
             self._assert_exact_keys(
@@ -526,7 +575,13 @@ class TestJsonContracts(unittest.TestCase):
             },
             "pack.trace.output.coverage",
         )
-        self._assert_exact_keys(trace["timing"], {"durationMs"}, "pack.trace.timing")
+        self._assert_exact_keys(trace["timing"], {"durationMs", "stages", "total_ms"}, "pack.trace.timing")
+        self.assertEqual(
+            set(trace["timing"]["stages"]),
+            {"candidates", "trust_policy", "graph", "budget", "render"},
+        )
+        self.assertTrue(all(value >= 0 for value in trace["timing"]["stages"].values()))
+        self.assertGreaterEqual(trace["timing"]["total_ms"], 0)
         self.assertIsInstance(trace["extensions"], dict)
 
         lifecycle = trace["extensions"].get("lifecycle_shadow")
@@ -618,7 +673,13 @@ class TestJsonContracts(unittest.TestCase):
 
         self._assert_exact_keys(
             out,
-            {"bundle_text", "items", "citations", "context_pack", "trace", "trust_policy", "policy_surface"},
+            {
+                "bundle_text", "items", "citations", "context_pack", "trace", "trust_policy",
+                "policy_surface", "vector_backend", "query_lang", "lane_hits",
+                "fallback_triggered", "cross_lang_recovered", "vector_backend_selection",
+                "lifecycle_write",
+                "scoring_profile",
+            },
             "pack.trust_policy",
         )
 

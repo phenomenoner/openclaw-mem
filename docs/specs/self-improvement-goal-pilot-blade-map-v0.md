@@ -22,7 +22,7 @@ Ship the first OpenClaw Mem consolidation slice from the self-improvement plan:
 
 ## Inputs
 
-- Ledger report: `lyria-working-ledger/REPORTS/openclaw/2026-05-12_openclaw-self-improvement-consolidation-plan.md`
+- Ledger report: `<project-ledger>/REPORTS/openclaw/2026-05-12_openclaw-self-improvement-consolidation-plan.md`
 - Existing openclaw-mem surfaces:
   - `active-line pack`
   - `self-curator`

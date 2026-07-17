@@ -1,0 +1,47 @@
+{
+  "kind": "openclaw-mem.perf.report.v1",
+  "schema_version": 1,
+  "dataset": {
+    "rows": 10000,
+    "seed": 20260716,
+    "vector_dim": 16,
+    "search_queries": 50,
+    "vector_queries": 20,
+    "pack_queries": 20
+  },
+  "metrics": {
+    "ingest": {
+      "elapsed_ms": 1327.064,
+      "rows_per_second": 7535.432
+    },
+    "search": {
+      "p50_ms": 10.213,
+      "p95_ms": 15.248
+    },
+    "vsearch": {
+      "p95_ms": 102.642,
+      "python_p95_ms": 102.642,
+      "numpy_p95_ms": 6.522,
+      "numpy_speedup": 15.738
+    },
+    "pack": {
+      "p95_ms": 21.105
+    },
+    "connect": {
+      "legacy_first_connect_ms": 322.596,
+      "stamped_p50_ms": 3.473,
+      "stamped_p95_ms": 4.37
+    }
+  },
+  "environment": {
+    "python": "3.13.5",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "sqlite": "3.49.1"
+  },
+  "notes": [
+    "Fixed-seed synthetic data; no network or embedding API calls.",
+    "Timing values are observational baselines and are not CI thresholds.",
+    "Pack timing covers deterministic lexical retrieval and compact rendering.",
+    "Vector timing compares the exact Python and NumPy VectorIndex backends after NumPy cache warmup."
+  ]
+}

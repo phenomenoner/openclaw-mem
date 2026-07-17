@@ -11,7 +11,7 @@ def run_cli(*args: str, cwd: Path | None = None) -> dict:
         [sys.executable, "-m", "openclaw_mem", *args],
         cwd=cwd,
         check=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )

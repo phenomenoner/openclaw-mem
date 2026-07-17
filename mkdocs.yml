@@ -28,6 +28,21 @@ exclude_docs: |
   rerank-poc-plan.md
   releases-v1.6.0.md
   project-management/**
+  receipts/**
+  fixtures/**
+  releases-v1.*.md
+  !releases-v2.0.0.md
+  hermes-curator-adoption-review.md
+  tencentdb-agent-memory-adoption-review.md
+  archive/*.md
+  !archive/README.md
+  archive/decisions/*.md
+  !archive/decisions/README.md
+  archive/notes/*.md
+  !archive/notes/README.md
+  archive/thought-links/*.md
+  !archive/thought-links/README.md
+  archive/project-management-2026-06-12/**
 
 theme:
   name: material
@@ -103,6 +118,17 @@ nav:
       - Trust-policy synthetic proof: showcase/trust-policy-synthetic-proof.md
       - Evaluator path: evaluator-path.md
       - Quickstart: quickstart.md
+      - Upgrade an existing local agent: upgrade-checklist.md
+      - What's new in v2.0.0: releases-v2.0.0.md
+      - Command migration: command-migration.md
+      - Harness quickstarts:
+          - Claude Code: quickstart-claude-code.md
+          - Codex: quickstart-codex.md
+          - OpenClaw: quickstart-openclaw.md
+          - Generic: quickstart-generic.md
+          - Gemini CLI: quickstart-gemini.md
+          - Cursor: quickstart-cursor.md
+          - Windsurf: quickstart-windsurf.md
       - Choose an install path: install-modes.md
       - Core vs Advanced Labs: core-vs-advanced-labs.md
       - 60-second reality proof: reality-check.md
@@ -118,10 +144,15 @@ nav:
       - Trust-aware proof artifacts: showcase/artifacts/index.md
       - Inside-Out demo: showcase/inside-out-demo.md
       - Topology demo: showcase/topology-demo.md
+      - Command-aware compaction proof: showcase/command-aware-compaction-proof.md
+      - Plain context-pack benchmark: showcase/plain-vanilla-context-pack-benchmark.md
       - Proactive Pack: proactive-pack.md
+      - Portable pack capsules: portable-pack-capsules.md
   - Reference:
       - Architecture: architecture.md
       - Context pack: context-pack.md
+      - CLI exit codes: cli-exit-codes.md
+      - Database concurrency: db-concurrency.md
       - Ecosystem fit: ecosystem-fit.md
       - Deployment: deployment.md
       - Auto-capture (sidecar plugin): auto-capture.md
@@ -133,11 +164,12 @@ nav:
       - Temporal facts: temporal-facts.md
       - Symbolic Canvas: symbolic-canvas.md
       - Agent memory skill (SOP): agent-memory-skill.md
-      - Legacy gateway harness memory: harness-persistent-memory.md
+      - Generated agent skill cards: agent-memory-skill-cards.md
+      - Graph skill usage: graph-skill-usage.md
       - Importance grading: importance-grading.md
+      - Memory taxonomy: taxonomy-v1.md
+      - Document lifecycle: document-lifecycle.md
       - Product-facing improvement roadmap: openclaw-user-improvement-roadmap.md
-      - Legacy remote memory gateway: remote-memory-gateway.md
-      - Legacy shared memory gateway guide: shared-memory-gateway-agent-guide.md
       - Privacy/export rules: privacy-export-rules.md
   - Advanced Labs:
       - Core vs Advanced Labs: core-vs-advanced-labs.md
@@ -147,13 +179,16 @@ nav:
       - Self-improvement Slice 7: self-improvement-slice-7.md
       - L3/L4 advisory dossier: l3-l4-advisory-dossier.md
       - Governed optimize assist: optimize-assist.md
+      - AI compression governance: ai-compression.md
+      - Compounding Context OS roadmap: compounding-context-os.md
+      - Repo graph ingest experiment: repo-graph-ingest.md
+      - GBrain sidecar (experimental): experimental/gbrain-sidecar/README.md
       - Verbatim semantic lane: verbatim-semantic-lane.md
       - Dual-language memory strategy: dual-language-memory-strategy.md
       - Obsidian: obsidian.md
       - Obsidian durable graph: obsidian_durable_graph.md
       - Roadmap: roadmap.md
       - Completeness roadmap: completeness-roadmap.md
-      - Upgrade checklist: upgrade-checklist.md
       - Thought-links: thought-links.md
       - Release checklist (repo rule): release-checklist.md
   - Archive:
@@ -162,4 +197,7 @@ nav:
       - Thought-links (historical): archive/thought-links/README.md
       - Notes (historical): archive/notes/README.md
       - Adapter spec (v0.5.9, archived): v0.5.9-adapter-spec.md
+      - Legacy gateway harness memory: harness-persistent-memory.md
+      - Legacy remote memory gateway: remote-memory-gateway.md
+      - Legacy shared memory gateway guide: shared-memory-gateway-agent-guide.md
   - 繁體中文: zh/index.md

@@ -1,0 +1,94 @@
+{
+  "kind": "openclaw-mem.legacy-fixtures.v1",
+  "generator": "tools/gen_legacy_fixture.py",
+  "record_contract": {
+    "observations": 16,
+    "episodic_events": 4,
+    "total": 20
+  },
+  "golden_queries": [
+    {
+      "lane": "observations",
+      "query": "legacy anchor",
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    {
+      "lane": "observations",
+      "query": "舊版錨點",
+      "expected_ids": [
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ]
+    },
+    {
+      "lane": "observations",
+      "query": "translated",
+      "expected_ids": [
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ]
+    },
+    {
+      "lane": "observations",
+      "query": "legacy anchor memory 3",
+      "expected_ids": [
+        4
+      ]
+    },
+    {
+      "lane": "episodes",
+      "query": "bounded",
+      "expected_ids": [
+        1,
+        2,
+        3,
+        4
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "tag": "v1.9.26",
+      "commit": "5552051d247f14659bb18a80b08335bd8fea05bf",
+      "file": "v1.9.26.sqlite",
+      "sha256": "0e82d13c99f5af50093eafd5220da055ef2ee54d87b5a6a62d6d5cbabaedbd4f",
+      "observations": 16,
+      "episodic_events": 4,
+      "total_records": 20,
+      "sqlite_version": "3.49.1",
+      "user_version": 0
+    },
+    {
+      "tag": "v1.9.31",
+      "commit": "5772660fe2eec56f1bc728d89f64ff7d2d5a8e16",
+      "file": "v1.9.31.sqlite",
+      "sha256": "0e82d13c99f5af50093eafd5220da055ef2ee54d87b5a6a62d6d5cbabaedbd4f",
+      "observations": 16,
+      "episodic_events": 4,
+      "total_records": 20,
+      "sqlite_version": "3.49.1",
+      "user_version": 0
+    }
+  ]
+}

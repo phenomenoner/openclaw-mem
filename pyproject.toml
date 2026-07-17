@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openclaw-context-pack"
-version = "1.9.32"
+version = "2.0.0"
 description = "Local-first AI agent memory governance: Store / Pack / Observe with citations, receipts, and rollback"
 requires-python = ">=3.10"
 readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }
 dependencies = [
-  "qdrant-edge-py==0.6.1",
+  "tomli>=2.0; python_version < '3.11'",
 ]
 classifiers = [
   "License :: OSI Approved :: MIT License",
@@ -21,6 +21,15 @@ classifiers = [
 packages = ["openclaw_mem"]
 
 [project.optional-dependencies]
+qdrant = [
+  "qdrant-edge-py==0.6.1",
+]
+embed = [
+  "fastembed>=0.3",
+]
+vec = [
+  "sqlite-vec>=0.1",
+]
 # Build the (free) GitHub Pages documentation site locally or in CI.
 docs = [
   "mkdocs>=1.6",
@@ -30,7 +39,10 @@ docs = [
 [dependency-groups]
 # Keep the default contributor verification lane reproducible with `uv run pytest`.
 dev = [
+  "numpy>=2.0",
   "pytest>=8.0",
+  "qdrant-edge-py==0.6.1",
+  "sqlite-vec>=0.1",
 ]
 
 [project.scripts]

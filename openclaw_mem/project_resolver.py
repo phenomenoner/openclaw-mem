@@ -76,7 +76,7 @@ def _run_git(path: Path, *args: str) -> str | None:
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=2,
         )
     except Exception:

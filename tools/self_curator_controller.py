@@ -42,7 +42,7 @@ def main() -> None:
         str(args.max_mutations),
         "--json",
     ]
-    proc = subprocess.run(cmd, cwd=repo, text=True, capture_output=True)
+    proc = subprocess.run(cmd, cwd=repo, text=True, encoding="utf-8", errors="replace", capture_output=True)
     if proc.returncode != 0:
         print(json.dumps({"ok": False, "returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}, ensure_ascii=False, indent=2))
         raise SystemExit(proc.returncode)

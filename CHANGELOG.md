@@ -7,8 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-17
+
 ### Added
 
+- Add the primary `recall`, `curate`, and `sync` command families. `recall`
+  routes lexical/vector/hybrid/graph retrieval with fail-open receipts;
+  `curate` wraps governed scan/review/apply/verify/rollback flows; and `sync`
+  wraps LanceDB, service, and Qdrant status/run/init operations.
+- Add idempotent `init` bootstrap with a stamped SQLite database, fill-only
+  `~/.openclaw-mem/config.toml`, and an environment/config/capability receipt.
+- Add unified `install --harness` and `doctor --harness` adapters for Claude
+  Code, Codex, OpenClaw, generic hosts, Gemini CLI, Cursor, and Windsurf, with
+  dry-run planning, atomic writes, backups, verification, and repair hints.
+- Add MCP v2 read tools `mem_recall`, `graph_neighbors`, `graph_path`, and
+  `graph_impact`; `mem_pack` now shares the complete CLI policy handler.
+- Add optional persistent sqlite-vec indexes, freshness metadata, automatic
+  sqlite-vec → NumPy → Python fallback, `db reindex --vec`, and backend details
+  in `db info`.
+- Add the six-state memory lifecycle, transition/history receipts, retrieval
+  gates, `db lifecycle set`, kind-aware pack quotas, citation-only use tracking,
+  configurable use decay, and reversible governed soft archive.
+- Add the eight-kind deterministic bilingual taxonomy, automatic capture
+  classification, `db backfill --kind`, and kind distributions in DB receipts.
+- Add composite scoring evidence across search, recall, hybrid, MCP, and pack,
+  plus a 50-case R@5/MRR golden gate and committed adjudication receipt.
+- Add deterministic 10k/100k performance receipts, absolute SLO checks, a
+  file-backed regression gate, and scheduled 100k CI coverage.
+- Add governed SQLite schema inspection, migration, rollback, FTS rebuild, and
+  language backfill through `db info|migrate|rollback|reindex|backfill`.
+- Add exact optional NumPy vector search and a local FastEmbed provider
+  (`openclaw-context-pack[embed]`) while retaining the API provider as default.
+- Add deterministic bilingual language routing, CJK trigram retrieval, mixed
+  lexical fusion, retrieval KPI receipts, and a balanced golden recall gate.
+- Add embedding integrity diagnostics to `db info` and warn-level `doctor`
+  output, including orphan/model/dimension outlier counts.
+- Add ring-tiered memory/governance/labs skill cards and read-only
+  `skill-curator lint` validation against the live CLI command tree.
 - Add opt-in graph-assisted search: `search --graph --graph-path <graph.json>`
   blends deterministic graph-neighborhood evidence into FTS results with
   `rank_components` / `hybrid_score` trace fields
@@ -29,6 +64,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   correction|constraint|regression-risk`, `graph fact guard`, and guard lint
   over source-linked JSONL fixtures; guard output is advisory-only and always
   records `writes_performed=false`.
+- Add a rollback-first guide for upgrading an existing local agent, including
+  package/source channels, governed DB migration, seven harness adapters,
+  MCP/read-write smoke gates, and rollback.
+
+### Changed
+
+- Make default help center the six primary surfaces `recall`, `store`,
+  `curate`, `sync`, `graph`, and `db`; `--help-all` retains the complete legacy
+  and advanced command inventory.
+- Keep all converged legacy retrieval, governance, and writeback commands as
+  callable aliases with additive deprecation receipts instead of removing
+  compatibility surfaces.
+- Make composite retrieval scoring the default after the 50-case golden gate
+  held R@5 at 1.000 and improved MRR from 0.740 to 0.990; the explicit
+  `relevance` profile remains available for compatibility and diagnostics.
+- Move stable DB, records, episodic, search, pack, embedding, privacy, and
+  vector-index behavior behind output-free core APIs; keep CLI and MCP
+  compatibility adapters at their existing public import paths.
+- Move experimental continuity, self, Dream Lite, GBrain, and goal modules into
+  `openclaw_mem.labs`; legacy imports remain available with deprecation warnings
+  and labs commands remain callable through `--help-all`.
+- Make Qdrant and FastEmbed explicit optional extras so the default install
+  stays local SQLite-only and does not pull either vector runtime.
+- Classify public documentation by lifecycle: current guides stay searchable;
+  receipts, internal specs, adoption research, and completed control packets
+  remain in Git but are excluded from the public site. Legacy gateway guides
+  now live under Archive navigation without breaking their stable URLs.
+
+### Fixed
+
+- Guarantee actionable `hint` fields on CLI error receipts and document stable
+  exit-code semantics.
+- Preserve exact multi-token ASCII retrieval when bilingual fallback activates;
+  fallback now requires every ASCII term and cannot widen an established match.
+- Decode subprocess text explicitly as UTF-8 across supported Windows paths,
+  removing locale-dependent cp950 failures.
+- Preserve historical v1.9.26 and v1.9.31 database readability, row counts, and
+  rollback invariants through generated compatibility fixtures.
+- Avoid a 100k-row graph-scope rescan after citation use tracking: observation
+  UPDATE invalidation now fires only when the stored scope changes. Insert,
+  delete, and true scope changes still invalidate correctly.
 
 ### Safety
 
@@ -47,6 +123,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Verification
 
+- `openclaw-mem skill-curator lint --all --skill-root skills --json`
+- `python -m pytest tests/test_legacy_fixture_matrix.py tests/test_golden_recall_gate.py -q`
+- Run A full gate: `931 passed, 3 skipped, 87 subtests passed`.
+- Run B final full gate: `1171 passed, 3 skipped, 87 subtests passed`.
+- v2.0.0 release full gate: `1175 passed, 3 skipped, 5 expected
+  compatibility warnings, 87 subtests passed`.
+- 50-case composite gate: Recall@5 held at `1.000`; MRR improved from `0.740`
+  to `0.990`.
+- Final 10k and 100k absolute SLO receipts passed; 100k graph-auto pack p95 was
+  `62.160 ms` against the `<300 ms` target.
 - `uv run -- python -m unittest discover -s tests -p "test_*.py"`
 - `uv run python -m pytest tests\test_bridge_recall_v1.py tests\test_windows_console_wrapper_bridge.py -q`
 - `uv run --with pytest -- python -m pytest tests -q`

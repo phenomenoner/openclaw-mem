@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def run_cli(*args: str) -> dict:
-    proc = subprocess.run([sys.executable, "-m", "openclaw_mem", *args], check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.run([sys.executable, "-m", "openclaw_mem", *args], check=True, text=True, encoding="utf-8", errors="replace", stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return json.loads(proc.stdout)
 
 

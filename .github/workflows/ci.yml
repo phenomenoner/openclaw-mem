@@ -3,6 +3,8 @@ name: ci
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '17 3 * * *'
 
 jobs:
   test:
@@ -27,5 +29,47 @@ jobs:
       - name: Pytest tests
         run: uv run --with pytest -- python -m pytest tests -q
 
+      - name: Skill card lint
+        run: uv run --locked -- openclaw-mem skill-curator lint --all --skill-root skills --json
+
+      - name: Historical database compatibility matrix
+        run: uv run --locked --with pytest -- python -m pytest tests/test_legacy_fixture_matrix.py -q
+
+      - name: Golden bilingual recall gate
+        run: >-
+          uv run --locked --with pytest -- python -m pytest
+          tests/test_golden_recall_gate.py
+          tests/test_composite_golden_gate.py -q
+
       - name: Build (packaging)
         run: uv run --with build -- python -m build
+
+  nightly-perf:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13'
+          enable-cache: true
+
+      - name: Sync locked performance dependencies
+        run: uv sync --locked --group dev
+
+      - name: Run 100k performance regression gate
+        run: >-
+          uv run --group dev -- python benchmarks/perf/perf_suite.py
+          --rows 100000
+          --baseline "${RUNNER_TEMP}/RUN-B-nightly-100k.json"
+          --check-thresholds benchmarks/perf/RUN-B-thresholds.json
+          --check-slos
+          --json
+
+      - name: Upload nightly performance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-b-nightly-perf-${{ github.run_id }}
+          path: ${{ runner.temp }}/RUN-B-nightly-100k.json

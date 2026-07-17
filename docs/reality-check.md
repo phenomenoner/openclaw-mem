@@ -27,7 +27,7 @@ uv run --python 3.13 --frozen -- python -m openclaw_mem --help
 ```bash
 DB=/tmp/openclaw-mem-realitycheck.sqlite
 
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json status
+uv run --python 3.13 --frozen -- python -m openclaw_mem init --db "$DB" --json
 
 cat > /tmp/openclaw-mem-sample.jsonl <<'JSONL'
 {"ts":"2026-02-12T08:10:00Z","kind":"tool","tool_name":"web_search","summary":"searched docs status markers","detail":{"query":"status markers DONE PARTIAL ROADMAP"}}
@@ -35,26 +35,22 @@ cat > /tmp/openclaw-mem-sample.jsonl <<'JSONL'
 JSONL
 
 uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json ingest --file /tmp/openclaw-mem-sample.jsonl
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json search "Docs" --limit 5
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json timeline 2 --window 2
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json get 2
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize review --limit 200
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize consolidation-review --limit 200
-uv run --python 3.13 --frozen -- python -m openclaw_mem --db "$DB" --json optimize policy-loop --review-limit 200 --writeback-limit 100 --lifecycle-limit 100
+uv run --python 3.13 --frozen -- python -m openclaw_mem recall "Docs" --db "$DB" --mode auto --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem pack --db "$DB" --query "Docs status" --trace --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem curate scan --target memory --db "$DB" --json
+uv run --python 3.13 --frozen -- python -m openclaw_mem db info --db "$DB" --json
 ```
 
 **Expected output shape (minimal):**
 
-- `status` returns a JSON object containing at least:
-  - `db`, `count`, `min_ts`, `max_ts`
-  - `embeddings.count` and `embeddings.models`
+- `init` returns `openclaw-mem.init.v1` plus config/capability evidence.
 - `ingest` returns something like:
   - `{ "inserted": 2, "ids": [1,2] }`
-- `search` returns a JSON array of compact rows containing at least: `id`, `ts`, `kind`, `summary`, plus `snippet` and `score` (it does **not** include `detail_json`).
-- `timeline` and `get` return JSON arrays of full rows containing at least: `id`, `ts`, `kind`, `summary`, and `detail_json`.
-- `optimize review` returns a recommendation-only report (`openclaw-mem.optimize.review.v0`) with signal counts and non-destructive recommendations, including `signals.recent_use`, `staleness.protected_recent_use`, and `signals.importance_drift` (label distribution + mismatch spot-checks) when recent rows are available.
-- `optimize consolidation-review` returns a recommendation-only episodic maintenance report (`openclaw-mem.optimize.consolidation-review.v0`) with summary/archive/link candidates, source episode refs, recent-use archive protection, and receipt-first link evidence from lifecycle co-selection plus bounded lexical backfill (cold-start lexical fallback when lifecycle rows are absent).
-- `optimize policy-loop` returns a read-only rollout report (`openclaw-mem.optimize.policy-loop.v0`) with Stage B/C gate status, writeback linkage, and lifecycle-shadow evidence (no mutations).
+- `recall` reports the selected/fallback lane and returns attributable results.
+- `pack` returns bounded items, citations, composite score evidence, and a trace.
+- `curate scan` is review-only and emits governed candidates without applying a mutation.
+- `db info` reports schema, FTS, taxonomy/lifecycle distributions, embeddings,
+  and optional sqlite-vec posture.
 
 ### 3) Engine receipt debug smoke (local-only, no memory text)
 
@@ -77,14 +73,19 @@ Expected:
 - JSON receipts (`--json`)
 - Progressive recall: `ingest → search → timeline → get`
 - Context pack command (`pack`) with fail-open baseline behavior
+- Primary `recall` router across lexical/vector/hybrid/graph lanes
+- Six-state lifecycle, eight-kind taxonomy, pack quotas, composite scoring,
+  citation-only use tracking, and reversible soft archive
+- Exact sqlite-vec → NumPy → Python vector fallback chain with explicit receipts
 - Deterministic graph-preflight pack integration: `pack --use-graph=off|auto|on` with traceable trigger/probe receipts
 - Pack decision surfaces (`trust_policy`, graph `provenance_policy`, `policy_surface`, `lifecycle_shadow`) with bounded trace receipts
 - Deterministic triage for automation (`triage --mode heartbeat|cron-errors|tasks`)
 
 ### Quality layers — **PARTIAL**
 
-- Embeddings + vector search (`embed`, `vsearch`) — requires an API key
-- Hybrid retrieval (`hybrid`) + optional rerank providers — requires network/provider; still being evaluated
+- Embeddings + vector search (`embed`, `vsearch`) — API and optional local
+  FastEmbed providers are supported; missing optional providers degrade explicitly
+- Hybrid retrieval (`hybrid`) — shipped; optional rerank/network providers remain opt-in
 - AI compression (`summarize`) — requires an API key
 - Graph query plane (`graph topology-refresh`, `graph query ...`, `graph health`, drift/provenance checks) — shipped foundation; deeper integrations still evolving
 - Graph semantic match v0 (`graph match "<idea/query>"`) — shipped local-first idea → project slice with explanation paths; deeper typed graph automation still evolving
@@ -103,12 +104,15 @@ Expected:
 - Backend-aware annotations (records backend + memory tool actions for observability)
 - Gateway-assisted semantic recall (Route A): `index` + `semantic` — depends on OpenClaw gateway + `memory_search`
 - Host bridge envelopes (`bridge status|recall|store`) — per-operation versioned JSON envelopes (`openclaw-mem-engine.bridge.<op>.v1`); recall is read-only, store performs a canonical write only with explicit operator approval
+- Unified installer/doctor adapters for Claude Code, Codex, OpenClaw, generic,
+  Gemini CLI, Cursor, and Windsurf
+- MCP `mem_recall`/`mem_pack` equivalence plus read-only graph tools
 
 ### Near-term roadmap — **ROADMAP**
 
-- Package/distribution ergonomics so `openclaw-mem` install/run flow is cleaner across `uv sync` / pip contexts
 - Graph roadmap depth: richer typed-entity wiring + deeper operator queries/autonomy on top of the shipped query plane
 - Topology seed automation (`topology-seed`) so curated graph truth is easier to bootstrap and maintain
+- Consolidate/promotion/dissent workflows on top of v2 lifecycle and scoring evidence
 
 ### Graphic Memory compiled synthesis — **PARTIAL**
 

@@ -30,7 +30,7 @@ Start with the lightest path that solves your problem.
 
 - local DB
 - deterministic CLI receipts
-- proof that `search → timeline → get` works
+- proof that `init → store → recall → pack` works with receipts
 
 ### First step
 
@@ -38,7 +38,9 @@ Start with the lightest path that solves your problem.
 python -m venv .venv
 . .venv/bin/activate
 pip install openclaw-context-pack
-openclaw-mem --db /tmp/openclaw-mem-demo.sqlite status --json
+openclaw-mem init --db /tmp/openclaw-mem-demo.sqlite --json
+openclaw-mem store "Local proof memory" --db /tmp/openclaw-mem-demo.sqlite --no-file-write --json
+openclaw-mem recall "Local proof" --db /tmp/openclaw-mem-demo.sqlite --mode auto --json
 ```
 
 Then go to [Quickstart](quickstart.md).

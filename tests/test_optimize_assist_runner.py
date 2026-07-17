@@ -1320,7 +1320,7 @@ class TestOptimizeAssistRunnerE2E(unittest.TestCase):
             "--json",
             *extra_args,
         ]
-        return subprocess.run(cmd, cwd=str(repo_root), capture_output=True, text=True, env=env)
+        return subprocess.run(cmd, cwd=str(repo_root), capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
 
     def _rollback_arg(self, root: Path) -> list[str]:
         return ["--rollback-replay-receipt", str(_write_rollback_receipt(root))]
@@ -1716,10 +1716,13 @@ class TestOptimizeAssistRunnerE2E(unittest.TestCase):
                 "--json",
             ]
 
-            proc1 = subprocess.Popen(cmd, cwd=str(repo_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env1)
-            proc2 = subprocess.Popen(cmd, cwd=str(repo_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env2)
-            stdout1, stderr1 = proc1.communicate(timeout=30)
-            stdout2, stderr2 = proc2.communicate(timeout=30)
+            proc1 = subprocess.Popen(cmd, cwd=str(repo_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", env=env1)
+            proc2 = subprocess.Popen(cmd, cwd=str(repo_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", env=env2)
+            # Each runner executes five CLI subprocesses while holding the
+            # controller-state lock.  On Windows, two cold pipelines can take
+            # longer than 30 seconds even though lock hand-off is healthy.
+            stdout1, stderr1 = proc1.communicate(timeout=90)
+            stdout2, stderr2 = proc2.communicate(timeout=90)
 
             self.assertEqual(proc1.returncode, 0, stderr1)
             self.assertEqual(proc2.returncode, 0, stderr2)

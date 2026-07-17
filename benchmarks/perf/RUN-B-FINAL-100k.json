@@ -1,0 +1,106 @@
+{
+  "kind": "openclaw-mem.perf.report.v1",
+  "schema_version": 1,
+  "dataset": {
+    "rows": 100000,
+    "seed": 20260716,
+    "vector_dim": 16,
+    "search_queries": 50,
+    "recall_queries": {
+      "lexical": 50,
+      "hybrid": 20
+    },
+    "vector_queries": 20,
+    "pack_queries": 20,
+    "query_profile": "three-token-and-v1"
+  },
+  "metrics": {
+    "ingest": {
+      "elapsed_ms": 25229.362,
+      "rows_per_second": 3963.636
+    },
+    "search": {
+      "p50_ms": 165.628,
+      "p95_ms": 285.449
+    },
+    "vsearch": {
+      "p95_ms": 1338.415,
+      "python_p95_ms": 1338.415,
+      "numpy_p95_ms": 42.732,
+      "numpy_speedup": 31.321,
+      "sqlite_vec_p95_ms": 23.03,
+      "sqlite_vec_version": "v0.1.9",
+      "sqlite_vec_error": null
+    },
+    "recall": {
+      "lexical_p50_ms": 20.699,
+      "lexical_p95_ms": 26.805,
+      "hybrid_p50_ms": 53.992,
+      "hybrid_p95_ms": 75.397,
+      "hybrid_vector_backend": "sqlite-vec"
+    },
+    "pack": {
+      "p95_ms": 62.16,
+      "e2e_p50_ms": 50.067,
+      "e2e_p95_ms": 62.16,
+      "synthetic_render_p95_ms": 37.75,
+      "graph_mode": "auto"
+    },
+    "connect": {
+      "legacy_first_connect_ms": 326.592,
+      "stamped_p50_ms": 7.479,
+      "stamped_p95_ms": 10.754
+    }
+  },
+  "environment": {
+    "python": "3.13.5",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "sqlite": "3.49.1"
+  },
+  "notes": [
+    "Fixed-seed synthetic data; no network or embedding API calls.",
+    "Timing values are observational baselines and are not CI thresholds.",
+    "Search reports the broad single-token diagnostic; recall and pack SLO lanes use deterministic three-token product queries.",
+    "Pack timing covers deterministic lexical retrieval and compact rendering.",
+    "Vector timing compares the exact Python and NumPy VectorIndex backends after NumPy cache warmup.",
+    "sqlite-vec timing uses the persisted cosine vec0 index after an explicit rebuild.",
+    "Recall hybrid uses a fixed-seed in-process embedding provider; pack e2e uses the real CLI handler without network access."
+  ],
+  "slo_gate": {
+    "kind": "openclaw-mem.perf.slo-gate.v1",
+    "ok": true,
+    "tier": "100k",
+    "checks": [
+      {
+        "metric": "connect.stamped_p95_ms",
+        "actual": 10.754,
+        "limit": 30.0,
+        "ok": true
+      },
+      {
+        "metric": "recall.lexical_p95_ms",
+        "actual": 26.805,
+        "limit": 50.0,
+        "ok": true
+      },
+      {
+        "metric": "recall.hybrid_p95_ms",
+        "actual": 75.397,
+        "limit": 200.0,
+        "ok": true
+      },
+      {
+        "metric": "pack.e2e_p95_ms",
+        "actual": 62.16,
+        "limit": 300.0,
+        "ok": true
+      },
+      {
+        "metric": "vsearch.sqlite_vec_p95_ms",
+        "actual": 23.03,
+        "limit": 30.0,
+        "ok": true
+      }
+    ]
+  }
+}

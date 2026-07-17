@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional, Set
 from openclaw_mem import __version__
 from openclaw_mem.importance import is_parseable_importance, label_from_score, normalize_label, parse_importance_score
 from openclaw_mem.scope import normalize_scope_token as _normalize_scope_token
+from openclaw_mem.core.config import resolve_config
+from openclaw_mem.core.use_decay import decay_candidates
 
 
 _STOPWORDS: Set[str] = {
@@ -2004,7 +2006,7 @@ def build_evolution_review(
                     "auto_apply_eligible": False,
                     "safe_for_auto_apply": False,
                 }
-            if archive_reason_code not in {"stale_low_importance", "operator_override"}:
+            if archive_reason_code not in {"stale_low_importance", "use_decay", "operator_override"}:
                 return {
                     "risk_level": "high",
                     "risk_reasons": ["invalid_soft_archive_reason_code"],
@@ -2120,6 +2122,9 @@ def build_evolution_review(
             "safe_for_auto_apply": auto_apply_eligible,
         }
     candidate_obs_ids: Set[int] = set()
+    for raw in list(importance_drift.get("score_label_mismatch_items") or [])[:top]:
+        if isinstance(raw, dict) and int(raw.get("id") or 0) > 0:
+            candidate_obs_ids.add(int(raw["id"]))
     for raw in list(stale.get("items") or [])[:top]:
         if not isinstance(raw, dict):
             continue
@@ -2348,6 +2353,69 @@ def build_evolution_review(
         )
         items.append(item)
 
+    decay_config = resolve_config()["decay"]
+    decay = decay_candidates(
+        conn,
+        p1_unused_days=int(decay_config["p1_unused_days"]),
+        p2_unused_days=int(decay_config["p2_unused_days"]),
+        limit=limit,
+        scope=scope,
+    )
+    existing_soft_archive_ids = {
+        int((item.get("target") or {}).get("observationId") or 0)
+        for item in items
+        if item.get("action") == "set_soft_archive_candidate"
+    }
+    for raw in list(decay.get("items") or [])[:top]:
+        obs_id = int(raw.get("id") or 0)
+        if obs_id <= 0 or obs_id in existing_soft_archive_ids:
+            continue
+        item = {
+            "candidate_id": f"use-decay-{str(raw.get('priority') or 'P2').lower()}-{obs_id}",
+            "action": "set_soft_archive_candidate",
+            "confidence": 0.78,
+            "reasons": [
+                "use_decay",
+                f"priority_{str(raw.get('priority') or 'P2').lower()}",
+                f"unused_{int(raw.get('unused_days') or 0)}d",
+            ],
+            "target": {
+                "observationId": obs_id,
+                "recordRef": f"obs:{obs_id}",
+                "scope": scope,
+            },
+            "patch": {
+                "lifecycle": {
+                    "soft_archive_candidate": True,
+                    "set_archived_at": True,
+                    "archive_reason_code": "use_decay",
+                    "transition_to": "soft-archived",
+                }
+            },
+            "evidence_refs": [f"obs:{obs_id}"],
+            "evidence": {
+                "signal": "use_decay",
+                "priority": raw.get("priority"),
+                "kind": raw.get("kind"),
+                "trust": raw.get("trust"),
+                "age_days": raw.get("unused_days"),
+                "threshold_days": raw.get("threshold_days"),
+                "last_used_at": raw.get("last_used_at"),
+                "recent_use_count": 0,
+                "summary_preview": raw.get("summary_preview"),
+            },
+        }
+        item.update(
+            classify_candidate(
+                action=item["action"],
+                target=item["target"],
+                patch=item["patch"],
+                evidence=item["evidence"],
+                safe_for_auto_apply=False,
+            )
+        )
+        items.append(item)
+
     deferred_actions = [
         rec for rec in recommendations if str(rec.get("type") or "") != "mark_stale_candidate"
     ]
@@ -2385,6 +2453,7 @@ def build_evolution_review(
             "importanceDriftHighRiskContent": int(importance_drift.get("high_risk_content_mismatch_count") or 0),
         },
         "importance_drift_policy": importance_drift_policy_card,
+        "use_decay": decay,
         "items": items,
         "deferred": {
             "recommendation_types": [str(rec.get("type") or "") for rec in deferred_actions[:top]],

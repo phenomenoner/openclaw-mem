@@ -36,8 +36,8 @@ We frequently “do the right thing” operationally (write decisions, commit & 
 
 We treat these as the high-value “docs memory” sources:
 
-1) `lyria-working-ledger/DECISIONS/**`
-2) `lyria-working-ledger/REPORTS/captain-log/**`
+1) `<project-ledger>/DECISIONS/**`
+2) `<project-ledger>/REPORTS/captain-log/**`
 3) `openclaw-async-coding-playbook` project docs:
    - `projects/**` (roadmaps/specs/TECH_NOTES)
    - `**/ROADMAP*.md`, `**/*SPEC*.md`, `**/*PRD*.md`, `**/TECH_NOTES/**`

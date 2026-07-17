@@ -50,6 +50,42 @@
       "timeoutMs": 3000
     },
     {
+      "approvalRequired": false,
+      "description": "Recall memories through the shared lexical, vector, hybrid, or graph router.",
+      "descriptionSha256": "a37127feead00c6cd3c31e48e1b8a14221d704fe5cd37b35c036112dc1a979fa",
+      "inputSchemaSha256": "dfd38f11675246414558742b7ee94bb271705af595c46dd0ee2bd96ae7f6ac89",
+      "name": "mem_recall",
+      "readOnly": true,
+      "timeoutMs": 3000
+    },
+    {
+      "approvalRequired": false,
+      "description": "Read immediate upstream, downstream, or bidirectional neighbors from the graph store.",
+      "descriptionSha256": "bf95bcaf1c634d4e5731eb9146d8064637ef0dc76e16fb3843d5693ce0eb0a5b",
+      "inputSchemaSha256": "3d75ca1b45b867b39e35530e0f6d21292486daf9ea2ecfb8671cdbbf86abcd5d",
+      "name": "graph_neighbors",
+      "readOnly": true,
+      "timeoutMs": 3000
+    },
+    {
+      "approvalRequired": false,
+      "description": "Read a bounded multi-hop subgraph around one node from the graph store.",
+      "descriptionSha256": "63c3aaea3b9016030f698320d09813fa875f13c4de726bd6b90fb6f92816c02d",
+      "inputSchemaSha256": "0c0347dd940eb2ab5e943d122b1e627e57cd5225bbd128dd9d16a62d698f2bb1",
+      "name": "graph_path",
+      "readOnly": true,
+      "timeoutMs": 3000
+    },
+    {
+      "approvalRequired": false,
+      "description": "Read the bounded code-graph impact neighborhood for one repository-relative file path.",
+      "descriptionSha256": "46178acbea45ba05050d9e3789cb20be3e88a9d0d677af0d40285d630bcaeff4",
+      "inputSchemaSha256": "b2bb909d4ed3c9d7ca296f647fb723d7b720c84b178a47eec46a41e018c7ace4",
+      "name": "graph_impact",
+      "readOnly": true,
+      "timeoutMs": 3000
+    },
+    {
       "approvalRequired": true,
       "description": "Store one local observation without requiring embedding availability.",
       "descriptionSha256": "be0ab9ca2f10295d7690c9fb6c726d5a23f0157f9d1b5c3674aeff73cceb4a43",

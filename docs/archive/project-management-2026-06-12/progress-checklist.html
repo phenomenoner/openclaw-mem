@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>openclaw-mem phase progress checklist</title>
+  <style>
+    :root {
+      --bg: #f7f7f4;
+      --ink: #202124;
+      --muted: #626761;
+      --line: #d8d9d2;
+      --panel: #ffffff;
+      --done: #2f7d4f;
+      --active: #b15f16;
+      --blocked: #9b2f3b;
+      --ready: #2f5f8f;
+      --todo: #6a6f75;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", "Noto Sans TC", Arial, sans-serif;
+      line-height: 1.5;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 28px 18px 48px;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 22px;
+      padding-bottom: 16px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 26px 0 10px;
+      font-size: 19px;
+    }
+    p { margin: 6px 0; }
+    .meta, .note {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin: 14px 0 18px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .card strong { display: block; margin-bottom: 4px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+    th {
+      background: #ecede8;
+      font-weight: 650;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .status {
+      display: inline-block;
+      min-width: 92px;
+      border-radius: 999px;
+      padding: 3px 9px;
+      color: #fff;
+      font-size: 12px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .done { background: var(--done); }
+    .active { background: var(--active); }
+    .blocked { background: var(--blocked); }
+    .ready { background: var(--ready); }
+    .todo { background: var(--todo); }
+    .deferred { background: #7f668a; }
+    .phase {
+      margin-top: 20px;
+    }
+    code {
+      background: #ededeb;
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+    a { color: #245f9f; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>openclaw-mem phase progress checklist</h1>
+    <p class="meta">Updated: 2026-06-12 · Source files: <code>phase-backlog.md</code>, <code>next-step.md</code></p>
+    <p>Purpose: browser-readable mirror for the file-driven backlog. Update this page whenever item status changes.</p>
+  </header>
+
+  <section>
+    <h2>Current command picture</h2>
+    <div class="grid">
+      <div class="card">
+        <strong>Current focus</strong>
+        <span class="status done">published</span>
+        <p>P1-1 through P1-9 are implemented, verified, pushed, tagged, and released as v1.9.27.</p>
+      </div>
+      <div class="card">
+        <strong>Resolved decisions</strong>
+        <span class="status done">done</span>
+        <p>P1-2 schema id/casing posture and P0-3 PyPI naming posture are decided.</p>
+      </div>
+      <div class="card">
+        <strong>Latest published slice</strong>
+        <span class="status done">v1.9.27</span>
+        <p>Commit ed22b9d introduced the P1 integration surfaces; release receipts are tracked in project-management receipts.</p>
+      </div>
+      <div class="card">
+        <strong>Next operating gate</strong>
+        <span class="status ready">ready</span>
+        <p>Plan the next P0/P2 slice from the backlog after downstream harness fixture import is scheduled.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Decision ledger</h2>
+    <table>
+      <thead><tr><th>Decision</th><th>Status</th><th>Current rule</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>P1-2 schema id</td>
+          <td><span class="status done">done</span></td>
+          <td>Keep <code>openclaw-mem.context-pack.v1</code> canonical for v1; harness compatibility is proven with fixtures/adapters.</td>
+        </tr>
+        <tr>
+          <td>P1-2 field casing</td>
+          <td><span class="status done">done</span></td>
+          <td>Preserve shipped v1 field names and casing. Strict cleanup belongs in additive fields or v2.</td>
+        </tr>
+        <tr>
+          <td>P0-3 PyPI naming</td>
+          <td><span class="status done">done</span></td>
+          <td>Keep <code>openclaw-context-pack</code> as distribution; keep <code>openclaw-mem</code> as CLI/import-facing product name where shipped.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="phase">
+    <h2>P0 - Convergence and foundation</h2>
+    <table>
+      <thead><tr><th>Item</th><th>Status</th><th>Delivery</th></tr></thead>
+      <tbody>
+        <tr><td>P0-1</td><td><span class="status done">docs-retired</span></td><td>Gateway docs are marked legacy/retired; code-level deprecation remains a future compatibility slice.</td></tr>
+        <tr><td>P0-2</td><td><span class="status todo">todo</span></td><td>Docs reorg into user docs, specs, archive.</td></tr>
+        <tr><td>P0-3</td><td><span class="status done">decided</span></td><td>Distribution naming decision recorded; doc pass still needed.</td></tr>
+        <tr><td>P0-4</td><td><span class="status ready">ready</span></td><td>One-sentence story.</td></tr>
+        <tr><td>P0-5</td><td><span class="status todo">todo</span></td><td>CI and test baseline.</td></tr>
+        <tr><td>P0-6</td><td><span class="status todo">todo</span></td><td>KPI baseline.</td></tr>
+        <tr><td>P0-7</td><td><span class="status ready">partial</span></td><td>License alignment verification.</td></tr>
+        <tr><td>P0-8</td><td><span class="status ready">ready-after-P1-9</span></td><td>SQLite internal schema version marker.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="phase">
+    <h2>P1 - Integration base</h2>
+    <table>
+      <thead><tr><th>Item</th><th>Status</th><th>Delivery</th></tr></thead>
+      <tbody>
+        <tr><td>P1-1</td><td><span class="status done">released</span></td><td>stdio MCP server v1 with stable tool descriptions.</td></tr>
+        <tr><td>P1-2</td><td><span class="status done">released</span></td><td>ContextPack v1 compatibility posture and fixtures.</td></tr>
+        <tr><td>P1-3</td><td><span class="status done">released</span></td><td>Lifecycle hooks package.</td></tr>
+        <tr><td>P1-4</td><td><span class="status done">released</span></td><td>Quickstart refresh.</td></tr>
+        <tr><td>P1-5</td><td><span class="status done">released</span></td><td>Progressive reveal and token-cost visibility.</td></tr>
+        <tr><td>P1-6</td><td><span class="status done">released</span></td><td>Private/redaction labels.</td></tr>
+        <tr><td>P1-7</td><td><span class="status done">released</span></td><td>CLI UX pass via focused entrypoints/docs.</td></tr>
+        <tr><td>P1-8</td><td><span class="status done">released</span></td><td>Channel A file contract producer.</td></tr>
+        <tr><td>P1-9</td><td><span class="status done">released</span></td><td>Shared fixtures and local tests; harness-side import remains downstream.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="phase">
+    <h2>P2-P4 summary</h2>
+    <table>
+      <thead><tr><th>Phase</th><th>Status</th><th>Hold line</th></tr></thead>
+      <tbody>
+        <tr><td>P2 Retrieval catch-up</td><td><span class="status todo">todo</span></td><td>Wait until P0/P1 contract gates are stable.</td></tr>
+        <tr><td>P3 Governance benchmark</td><td><span class="status todo">todo</span></td><td>Wait until P2 benchmark harness is real.</td></tr>
+        <tr><td>P4 Ecosystem growth</td><td><span class="status todo">todo</span></td><td>Channel B waits on P1-1 and P1-8.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Open locally</h2>
+    <p class="note">Archived path: <code>docs/archive/project-management-2026-06-12/progress-checklist.html</code></p>
+    <p class="note">Latest verification: <code>uv run --python 3.13 --frozen pytest tests/test_context_pack_v1_compat_fixtures.py tests/test_context_pack_golden.py</code> -> 8 passed.</p>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,49 @@
+{
+  "kind": "openclaw-mem.perf.thresholds.v1",
+  "schema_version": 1,
+  "tier": "100k",
+  "source": "RUN-B-numbers.json",
+  "policy": "fail when a latency metric regresses by more than 20%; retain a 1.3x published tolerance band",
+  "metrics": {
+    "connect.stamped_p95_ms": {
+      "direction": "max",
+      "baseline": 4.102,
+      "regression_ratio": 0.2,
+      "regression_limit": 4.922,
+      "tolerance_limit": 5.333,
+      "unit": "ms"
+    },
+    "recall.lexical_p95_ms": {
+      "direction": "max",
+      "baseline": 25.559,
+      "regression_ratio": 0.2,
+      "regression_limit": 30.671,
+      "tolerance_limit": 33.227,
+      "unit": "ms"
+    },
+    "recall.hybrid_p95_ms": {
+      "direction": "max",
+      "baseline": 80.25,
+      "regression_ratio": 0.2,
+      "regression_limit": 96.3,
+      "tolerance_limit": 104.325,
+      "unit": "ms"
+    },
+    "pack.e2e_p95_ms": {
+      "direction": "max",
+      "baseline": 224.493,
+      "regression_ratio": 0.2,
+      "regression_limit": 269.392,
+      "tolerance_limit": 291.841,
+      "unit": "ms"
+    },
+    "vsearch.sqlite_vec_p95_ms": {
+      "direction": "max",
+      "baseline": 21.889,
+      "regression_ratio": 0.2,
+      "regression_limit": 26.267,
+      "tolerance_limit": 28.456,
+      "unit": "ms"
+    }
+  }
+}

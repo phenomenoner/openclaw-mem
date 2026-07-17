@@ -31,7 +31,7 @@ class TestWritebackLanceDbIntegration(unittest.TestCase):
             ["node", *args],
             cwd=cwd or self.engine_path,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             check=False,
         )
         if proc.returncode != 0:

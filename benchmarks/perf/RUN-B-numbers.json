@@ -1,0 +1,144 @@
+{
+  "kind": "openclaw-mem.perf.matrix.v1",
+  "schema_version": 1,
+  "tiers": {
+    "10k": {
+      "kind": "openclaw-mem.perf.report.v1",
+      "schema_version": 1,
+      "dataset": {
+        "rows": 10000,
+        "seed": 20260716,
+        "vector_dim": 16,
+        "search_queries": 50,
+        "recall_queries": {
+          "lexical": 50,
+          "hybrid": 20
+        },
+        "vector_queries": 20,
+        "pack_queries": 20,
+        "query_profile": "three-token-and-v1"
+      },
+      "metrics": {
+        "ingest": {
+          "elapsed_ms": 1444.144,
+          "rows_per_second": 6924.518
+        },
+        "search": {
+          "p50_ms": 8.087,
+          "p95_ms": 14.733
+        },
+        "vsearch": {
+          "p95_ms": 80.573,
+          "python_p95_ms": 80.573,
+          "numpy_p95_ms": 5.646,
+          "numpy_speedup": 14.271,
+          "sqlite_vec_p95_ms": 1.734,
+          "sqlite_vec_version": "v0.1.9",
+          "sqlite_vec_error": null
+        },
+        "recall": {
+          "lexical_p50_ms": 8.762,
+          "lexical_p95_ms": 9.872,
+          "hybrid_p50_ms": 12.297,
+          "hybrid_p95_ms": 14.728,
+          "hybrid_vector_backend": "sqlite-vec"
+        },
+        "pack": {
+          "p95_ms": 174.549,
+          "e2e_p50_ms": 142.997,
+          "e2e_p95_ms": 174.549,
+          "synthetic_render_p95_ms": 5.67,
+          "graph_mode": "auto"
+        },
+        "connect": {
+          "legacy_first_connect_ms": 234.916,
+          "stamped_p50_ms": 3.855,
+          "stamped_p95_ms": 5.233
+        }
+      },
+      "environment": {
+        "python": "3.13.5",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "sqlite": "3.49.1"
+      },
+      "notes": [
+        "Fixed-seed synthetic data; no network or embedding API calls.",
+        "Timing values are observational baselines and are not CI thresholds.",
+        "Search reports the broad single-token diagnostic; recall and pack SLO lanes use deterministic three-token product queries.",
+        "Pack timing covers deterministic lexical retrieval and compact rendering.",
+        "Vector timing compares the exact Python and NumPy VectorIndex backends after NumPy cache warmup.",
+        "sqlite-vec timing uses the persisted cosine vec0 index after an explicit rebuild.",
+        "Recall hybrid uses a fixed-seed in-process embedding provider; pack e2e uses the real CLI handler without network access."
+      ]
+    },
+    "100k": {
+      "kind": "openclaw-mem.perf.report.v1",
+      "schema_version": 1,
+      "dataset": {
+        "rows": 100000,
+        "seed": 20260716,
+        "vector_dim": 16,
+        "search_queries": 50,
+        "recall_queries": {
+          "lexical": 50,
+          "hybrid": 20
+        },
+        "vector_queries": 20,
+        "pack_queries": 20,
+        "query_profile": "three-token-and-v1"
+      },
+      "metrics": {
+        "ingest": {
+          "elapsed_ms": 16822.515,
+          "rows_per_second": 5944.414
+        },
+        "search": {
+          "p50_ms": 100.808,
+          "p95_ms": 126.646
+        },
+        "vsearch": {
+          "p95_ms": 1053.452,
+          "python_p95_ms": 1053.452,
+          "numpy_p95_ms": 40.871,
+          "numpy_speedup": 25.775,
+          "sqlite_vec_p95_ms": 21.889,
+          "sqlite_vec_version": "v0.1.9",
+          "sqlite_vec_error": null
+        },
+        "recall": {
+          "lexical_p50_ms": 16.496,
+          "lexical_p95_ms": 25.559,
+          "hybrid_p50_ms": 62.722,
+          "hybrid_p95_ms": 80.25,
+          "hybrid_vector_backend": "sqlite-vec"
+        },
+        "pack": {
+          "p95_ms": 224.493,
+          "e2e_p50_ms": 150.171,
+          "e2e_p95_ms": 224.493,
+          "synthetic_render_p95_ms": 42.719,
+          "graph_mode": "auto"
+        },
+        "connect": {
+          "legacy_first_connect_ms": 264.543,
+          "stamped_p50_ms": 3.0,
+          "stamped_p95_ms": 4.102
+        }
+      },
+      "environment": {
+        "python": "3.13.5",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "sqlite": "3.49.1"
+      },
+      "notes": [
+        "Fixed-seed synthetic data; no network or embedding API calls.",
+        "Timing values are observational baselines and are not CI thresholds.",
+        "Search reports the broad single-token diagnostic; recall and pack SLO lanes use deterministic three-token product queries.",
+        "Pack timing covers deterministic lexical retrieval and compact rendering.",
+        "Vector timing compares the exact Python and NumPy VectorIndex backends after NumPy cache warmup.",
+        "sqlite-vec timing uses the persisted cosine vec0 index after an explicit rebuild.",
+        "Recall hybrid uses a fixed-seed in-process embedding provider; pack e2e uses the real CLI handler without network access."
+      ]
+    }
+  }
+}

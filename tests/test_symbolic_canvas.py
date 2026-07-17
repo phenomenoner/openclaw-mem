@@ -77,7 +77,7 @@ def test_symbolic_canvas_cli_writes_receipts(tmp_path: Path):
             "--json",
         ],
         cwd=Path(__file__).resolve().parents[1],
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=True,
     )
@@ -130,7 +130,7 @@ def test_symbolic_canvas_cli_rejects_malformed_trace(tmp_path: Path):
             "--json",
         ],
         cwd=Path(__file__).resolve().parents[1],
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
     )
 
@@ -145,7 +145,7 @@ def test_symbolic_canvas_cli_accepts_stdin():
         [sys.executable, "-m", "openclaw_mem", "symbolic-canvas", "build", "--json"],
         cwd=Path(__file__).resolve().parents[1],
         input=json.dumps({"nodes": [{"id": "stdin", "label": "From stdin", "state": "done"}]}),
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         capture_output=True,
         check=True,
     )

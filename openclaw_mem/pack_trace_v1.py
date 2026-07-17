@@ -112,6 +112,8 @@ class PackTraceV1Output:
 @dataclass(frozen=True)
 class PackTraceV1Timing:
     durationMs: int
+    stages: Dict[str, float] = field(default_factory=dict)
+    total_ms: float = 0.0
 
 
 @dataclass(frozen=True)

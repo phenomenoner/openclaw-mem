@@ -206,7 +206,7 @@ class TestBridgeRecallV1(unittest.TestCase):
                 cwd=Path(__file__).resolve().parents[1],
                 env=env,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(p.stderr, "")

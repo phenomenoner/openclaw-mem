@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green)](#license)
 [![繁體中文](https://img.shields.io/badge/docs-%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87-orange)](docs/zh/index.md)
 
-[**Website**](https://phenomenoner.github.io/openclaw-mem/) · [**30-second proof**](#see-it-in-30-seconds) · [**Quickstart**](QUICKSTART.md) · [**Architecture**](docs/architecture.md) · [**FAQ**](#faq)
+[**Website**](https://phenomenoner.github.io/openclaw-mem/) · [**30-second proof**](#see-it-in-30-seconds) · [**Quickstart**](QUICKSTART.md) · [**Upgrade to v2**](docs/upgrade-checklist.md) · [**v2.0.0**](docs/releases-v2.0.0.md) · [**Architecture**](docs/architecture.md) · [**FAQ**](#faq)
 
 </div>
 
@@ -41,6 +41,30 @@ Recall-focused memory layers make these failures *more* likely as they get bette
 pip install openclaw-context-pack
 openclaw-mem --db /tmp/openclaw-mem-demo.sqlite status --json
 ```
+
+The PyPI distribution remains `openclaw-context-pack`; it installs the `openclaw-mem` CLI plus `openclaw-mem-mcp`, `openclaw-mem-channel-a`, and `openclaw-mem-hooks` for agent integration.
+
+The default install needs no external vector database. Add only the local
+capability you intend to use:
+
+```bash
+pip install "openclaw-context-pack[embed]"         # local FastEmbed embeddings
+pip install "openclaw-context-pack[qdrant]"       # optional Qdrant Edge lane
+pip install "openclaw-context-pack[embed,qdrant]" # both extras
+```
+
+Before upgrading an existing database, inspect it and preview the governed
+migration. The write step creates a backup and can emit the rollback receipt:
+
+```bash
+openclaw-mem db info --db /path/to/openclaw-mem.sqlite --json
+openclaw-mem db migrate --db /path/to/openclaw-mem.sqlite --dry-run --json
+openclaw-mem db migrate --db /path/to/openclaw-mem.sqlite \
+  --receipt-out migration-receipt.json --json
+```
+
+See the [database upgrade checklist](docs/upgrade-checklist.md) before applying
+the migration to operator state.
 
 Or run the reproducible trust-policy proof from the repo — no OpenClaw config, no real memory store, synthetic fixture only:
 

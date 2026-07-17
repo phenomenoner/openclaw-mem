@@ -1,4 +1,5 @@
 import io
+import itertools
 import json
 import os
 import sqlite3
@@ -3911,7 +3912,7 @@ class TestCliM0(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
                 env=env,
             )
@@ -3943,7 +3944,7 @@ class TestCliM0(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             out = json.loads(proc.stdout)
@@ -3969,7 +3970,7 @@ class TestCliM0(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             service_payload = json.loads(service_init.stdout)
@@ -3991,7 +3992,7 @@ class TestCliM0(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             writeback_payload = json.loads(writeback_status.stdout)
@@ -4011,7 +4012,7 @@ class TestCliM0(unittest.TestCase):
                     "--json",
                 ],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             writeback_init_payload = json.loads(writeback_init.stdout)
@@ -4024,7 +4025,7 @@ class TestCliM0(unittest.TestCase):
             service = subprocess.run(
                 [sys.executable, "-m", "openclaw_mem", "--db", str(db), "service", "status", "--json"],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             service_payload = json.loads(service.stdout)
@@ -4036,7 +4037,7 @@ class TestCliM0(unittest.TestCase):
             lease = subprocess.run(
                 [sys.executable, "-m", "openclaw_mem", "--db", str(db), "service", "lease", "--owner", "agent-harness", "--ttl-ms", "60000", "--json"],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             lease_payload = json.loads(lease.stdout)
@@ -4046,7 +4047,7 @@ class TestCliM0(unittest.TestCase):
             qdrant = subprocess.run(
                 [sys.executable, "-m", "openclaw_mem", "--db", str(db), "qdrant", "status", "--json"],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             qdrant_payload = json.loads(qdrant.stdout)
@@ -4057,7 +4058,7 @@ class TestCliM0(unittest.TestCase):
             qdrant_recall = subprocess.run(
                 [sys.executable, "-m", "openclaw_mem", "--db", str(db), "qdrant", "recall", "--vector", "[0.1]", "--json"],
                 check=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 capture_output=True,
             )
             qdrant_recall_payload = json.loads(qdrant_recall.stdout)
@@ -5582,6 +5583,7 @@ class TestCliM0(unittest.TestCase):
         out = json.loads(buf.getvalue())
         lifecycle_write = out["trace"]["extensions"]["lifecycle_write"]
         self.assertEqual(lifecycle_write["selection"]["refreshed_record_refs"], ["obs:1"])
+        self.assertEqual(out["trace"]["refreshed_refs"], ["obs:1"])
         self.assertEqual(lifecycle_write["mutation"]["writes_observations"], 1)
         self.assertEqual(lifecycle_write["mutation"]["hard_delete_applied"], 0)
 
@@ -5597,9 +5599,9 @@ class TestCliM0(unittest.TestCase):
         self.assertNotIn("last_used_at", detail2["lifecycle"])
         conn.close()
 
-    def test_pack_lifecycle_write_defaults_off(self):
+    def test_pack_lifecycle_write_defaults_on(self):
         args = build_parser().parse_args(["pack", "--query", "x", "--json"])
-        self.assertEqual(args.pack_lifecycle_write, "off")
+        self.assertEqual(args.pack_lifecycle_write, "on")
 
     def test_pack_lifecycle_write_failure_rolls_back_before_shadow_log_commit(self):
         conn = _connect(":memory:")
@@ -5968,7 +5970,10 @@ class TestCliM0(unittest.TestCase):
             "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
         ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload), patch(
             "openclaw_mem.cli._pack_graph_stage1_keywords", return_value={"hit": True, "categories": ["D"], "matched_keywords": ["latest"]}
-        ), patch("openclaw_mem.cli.time.perf_counter", side_effect=[100.0, 100.010, 100.030, 100.050]):
+        ), patch(
+            "openclaw_mem.cli.time.perf_counter",
+            side_effect=itertools.chain([100.0, 100.010, 100.030, 100.050], itertools.repeat(100.050)),
+        ):
             with redirect_stdout(buf):
                 args.func(conn, args)
 
@@ -6018,7 +6023,10 @@ class TestCliM0(unittest.TestCase):
             "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
         ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload), patch(
             "openclaw_mem.cli._pack_graph_stage1_keywords", return_value={"hit": True, "categories": ["D"], "matched_keywords": ["latest"]}
-        ), patch("openclaw_mem.cli.time.perf_counter", side_effect=[200.0, 200.010, 200.040, 200.080]):
+        ), patch(
+            "openclaw_mem.cli.time.perf_counter",
+            side_effect=itertools.chain([200.0, 200.010, 200.040, 200.080], itertools.repeat(200.080)),
+        ):
             with redirect_stdout(buf):
                 args.func(conn, args)
 
@@ -6068,7 +6076,10 @@ class TestCliM0(unittest.TestCase):
             "openclaw_mem.cli._graph_index_payload", return_value=fake_index_payload
         ), patch("openclaw_mem.cli._graph_pack_payload", return_value=fake_graph_pack_payload), patch(
             "openclaw_mem.cli._pack_graph_stage1_keywords", return_value={"hit": True, "categories": ["D"], "matched_keywords": ["latest"]}
-        ), patch("openclaw_mem.cli.time.perf_counter", side_effect=[300.0, 300.010, 300.040, 300.080]):
+        ), patch(
+            "openclaw_mem.cli.time.perf_counter",
+            side_effect=itertools.chain([300.0, 300.010, 300.040, 300.080], itertools.repeat(300.080)),
+        ):
             with redirect_stdout(buf):
                 args.func(conn, args)
 
@@ -6398,6 +6409,8 @@ class TestCliM0(unittest.TestCase):
                 "output",
                 "timing",
                 "extensions",
+                "quota_hits",
+                "refreshed_refs",
             },
         )
 
