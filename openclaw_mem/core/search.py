@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
 from openclaw_mem.scope import normalize_scope_token
+from openclaw_mem.core.lifecycle import filter_retrieval_results
 from openclaw_mem.core.records import detect_lang
 from openclaw_mem.core.vector_index import create_vector_index
 from openclaw_mem.vector import rank_rrf
@@ -227,6 +228,7 @@ def _lexical_search_impl(
     *,
     limit: int = 20,
     scope: Optional[str] = None,
+    include_archived: bool = False,
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     query_text = str(query or "").strip()
     if not query_text:
@@ -350,6 +352,9 @@ def _lexical_search_impl(
         if len(result) >= bounded_limit:
             break
 
+    result = filter_retrieval_results(
+        conn, result, include_archived=include_archived
+    )
     result_ids = {int(item["id"]) for item in result}
     lane_hits = {
         "fts_original": len(
@@ -393,8 +398,11 @@ def lexical_search(
     *,
     limit: int = 20,
     scope: Optional[str] = None,
+    include_archived: bool = False,
 ) -> List[Dict[str, Any]]:
-    results, _receipt = _lexical_search_impl(conn, query, limit=limit, scope=scope)
+    results, _receipt = _lexical_search_impl(
+        conn, query, limit=limit, scope=scope, include_archived=include_archived
+    )
     return results
 
 
@@ -404,8 +412,11 @@ def lexical_search_with_receipt(
     *,
     limit: int = 20,
     scope: Optional[str] = None,
+    include_archived: bool = False,
 ) -> Dict[str, Any]:
-    results, receipt = _lexical_search_impl(conn, query, limit=limit, scope=scope)
+    results, receipt = _lexical_search_impl(
+        conn, query, limit=limit, scope=scope, include_archived=include_archived
+    )
     return {**receipt, "results": results}
 
 
@@ -417,6 +428,7 @@ def vector_search(
     limit: int = 20,
     table: str = "observation_embeddings",
     vector_backend: str = "auto",
+    include_archived: bool = False,
 ) -> List[Dict[str, Any]]:
     if table not in {"observation_embeddings", "observation_embeddings_en"}:
         raise ValueError("unsupported embeddings table")
@@ -443,7 +455,9 @@ def vector_search(
             item["score"] = float(score)
             item["vector_backend"] = index.name
             result.append(item)
-    return result
+    return filter_retrieval_results(
+        conn, result, include_archived=include_archived
+    )
 
 
 def _hybrid_search_impl(
@@ -454,9 +468,13 @@ def _hybrid_search_impl(
     vector_ids: Optional[List[int]] = None,
     vector_en_ids: Optional[List[int]] = None,
     k: int = 60,
+    include_archived: bool = False,
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     lexical_receipt = lexical_search_with_receipt(
-        conn, query, limit=max(1, int(limit)) * 2
+        conn,
+        query,
+        limit=max(1, int(limit)) * 2,
+        include_archived=include_archived,
     )
     lexical = list(lexical_receipt.pop("results"))
     fts_ids = [int(item["id"]) for item in lexical]
@@ -487,6 +505,9 @@ def _hybrid_search_impl(
             if present
         ]
         result.append(item)
+    result = filter_retrieval_results(
+        conn, result, include_archived=include_archived
+    )
     selected_ids = {int(item["id"]) for item in result}
     lane_hits = dict(lexical_receipt.get("lane_hits") or {})
     lane_hits["vector"] = len(selected_ids.intersection(vector_ids or []))
@@ -515,6 +536,7 @@ def hybrid_search(
     vector_ids: Optional[List[int]] = None,
     vector_en_ids: Optional[List[int]] = None,
     k: int = 60,
+    include_archived: bool = False,
 ) -> List[Dict[str, Any]]:
     results, _receipt = _hybrid_search_impl(
         conn,
@@ -523,6 +545,7 @@ def hybrid_search(
         vector_ids=vector_ids,
         vector_en_ids=vector_en_ids,
         k=k,
+        include_archived=include_archived,
     )
     return results
 
@@ -535,6 +558,7 @@ def hybrid_search_with_receipt(
     vector_ids: Optional[List[int]] = None,
     vector_en_ids: Optional[List[int]] = None,
     k: int = 60,
+    include_archived: bool = False,
 ) -> Dict[str, Any]:
     results, receipt = _hybrid_search_impl(
         conn,
@@ -543,5 +567,6 @@ def hybrid_search_with_receipt(
         vector_ids=vector_ids,
         vector_en_ids=vector_en_ids,
         k=k,
+        include_archived=include_archived,
     )
     return {**receipt, "results": results}

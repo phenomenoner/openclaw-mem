@@ -74,8 +74,15 @@ def _lexical(
     *,
     limit: int,
     scope: Optional[str],
+    include_archived: bool,
 ) -> tuple[list[Dict[str, Any]], Dict[str, Any]]:
-    receipt = lexical_search_with_receipt(conn, query, limit=limit, scope=scope)
+    receipt = lexical_search_with_receipt(
+        conn,
+        query,
+        limit=limit,
+        scope=scope,
+        include_archived=include_archived,
+    )
     results = list(receipt.pop("results"))
     return results, receipt
 
@@ -93,6 +100,7 @@ def recall(
     graph_path: Optional[str | Path] = None,
     graph_readiness_state: Optional[str | Path] = None,
     graph_stale_after_days: int = 30,
+    include_archived: bool = False,
     provider_factory: Optional[Callable[..., EmbeddingProvider]] = None,
 ) -> Dict[str, Any]:
     """Route recall without throwing for an unavailable optional lane."""
@@ -127,7 +135,11 @@ def recall(
 
     if selected == "graph":
         lexical_results, lexical_receipt = _lexical(
-            conn, query_text, limit=bounded_limit, scope=scope
+            conn,
+            query_text,
+            limit=bounded_limit,
+            scope=scope,
+            include_archived=include_archived,
         )
         graph_receipt = (
             graph_search_candidates(
@@ -168,7 +180,13 @@ def recall(
         }
 
     if selected == "lexical":
-        results, lexical_receipt = _lexical(conn, query_text, limit=bounded_limit, scope=scope)
+        results, lexical_receipt = _lexical(
+            conn,
+            query_text,
+            limit=bounded_limit,
+            scope=scope,
+            include_archived=include_archived,
+        )
         return {
             "kind": RECALL_KIND,
             "query": query_text,
@@ -182,7 +200,11 @@ def recall(
 
     if selected == "hybrid" and not has_vectors and requested == "auto":
         hybrid_receipt = hybrid_search_with_receipt(
-            conn, query_text, limit=bounded_limit, vector_ids=[]
+            conn,
+            query_text,
+            limit=bounded_limit,
+            vector_ids=[],
+            include_archived=include_archived,
         )
         results = _scope_filter(conn, list(hybrid_receipt.pop("results")), scope)
         return {
@@ -217,7 +239,13 @@ def recall(
             failure = f"embedding_unavailable:{type(exc).__name__}"
 
     if failure or query_vector is None:
-        results, lexical_receipt = _lexical(conn, query_text, limit=bounded_limit, scope=scope)
+        results, lexical_receipt = _lexical(
+            conn,
+            query_text,
+            limit=bounded_limit,
+            scope=scope,
+            include_archived=include_archived,
+        )
         return {
             "kind": RECALL_KIND,
             "query": query_text,
@@ -237,13 +265,20 @@ def recall(
             model=selected_model,
             limit=max(bounded_limit * 4, bounded_limit),
             vector_backend=vector_backend,
+            include_archived=include_archived,
         )
     except Exception as exc:
         vector_results = []
         failure = f"vector_index_unavailable:{type(exc).__name__}"
     vector_results = _scope_filter(conn, vector_results, scope)[:bounded_limit]
     if not vector_results and not scope:
-        results, lexical_receipt = _lexical(conn, query_text, limit=bounded_limit, scope=scope)
+        results, lexical_receipt = _lexical(
+            conn,
+            query_text,
+            limit=bounded_limit,
+            scope=scope,
+            include_archived=include_archived,
+        )
         return {
             "kind": RECALL_KIND,
             "query": query_text,
@@ -273,9 +308,16 @@ def recall(
             query_text,
             limit=bounded_limit,
             vector_ids=[int(item["id"]) for item in vector_results],
+            include_archived=include_archived,
         )
     except Exception as exc:
-        results, lexical_receipt = _lexical(conn, query_text, limit=bounded_limit, scope=scope)
+        results, lexical_receipt = _lexical(
+            conn,
+            query_text,
+            limit=bounded_limit,
+            scope=scope,
+            include_archived=include_archived,
+        )
         return {
             "kind": RECALL_KIND,
             "query": query_text,

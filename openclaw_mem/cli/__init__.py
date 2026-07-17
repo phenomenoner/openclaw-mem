@@ -75,6 +75,14 @@ from openclaw_mem.core.vector_index import (
 )
 from openclaw_mem.core.skill_lint import command_schema_from_parser, lint_skill_tree
 from openclaw_mem.core.recall import recall as core_recall
+from openclaw_mem.core.lifecycle import (
+    STATES as LIFECYCLE_STATES,
+    LifecycleTransitionError,
+    filter_retrieval_results as filter_lifecycle_results,
+    is_soft_archived as lifecycle_is_soft_archived,
+    state_distribution as lifecycle_state_distribution,
+    transition as transition_lifecycle,
+)
 from openclaw_mem.core.curation import rollback_optimize_assist
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
@@ -2001,6 +2009,7 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "qdrant": _qdrant_dependency_status(),
             "lang_distribution": lang_distribution,
             "summary_en_coverage": summary_en_coverage,
+            "lifecycle_state_distribution": lifecycle_state_distribution(conn),
             "compat_mode": migration_status["compat_mode"],
             "pending_migrations": migration_status["pending"],
             "migration_hint": migration_status["hint"],
@@ -2062,6 +2071,35 @@ def cmd_db_reindex(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         },
         args.json,
     )
+
+
+def cmd_db_lifecycle_set(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
+    try:
+        receipt = transition_lifecycle(
+            conn,
+            int(args.observation_id),
+            str(args.state),
+            str(args.reason),
+            str(getattr(args, "actor", "operator") or "operator"),
+        )
+    except LifecycleTransitionError as exc:
+        _emit_error(
+            str(exc),
+            exc.hint,
+            2,
+            as_json=bool(getattr(args, "json", False)),
+            kind="openclaw-mem.lifecycle.transition.error.v1",
+        )
+    except ValueError as exc:
+        _emit_error(
+            str(exc),
+            f"use a valid observation id and state: {', '.join(sorted(LIFECYCLE_STATES))}",
+            2,
+            as_json=bool(getattr(args, "json", False)),
+            kind="openclaw-mem.lifecycle.transition.error.v1",
+        )
+    conn.commit()
+    _emit(receipt, bool(getattr(args, "json", False)))
 
 
 
@@ -2348,6 +2386,7 @@ def cmd_profile(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         },
         "lang_distribution": lang_distribution,
         "summary_en_coverage": summary_en_coverage,
+        "lifecycle_state_distribution": lifecycle_state_distribution(conn),
         "recent": [dict(r) for r in recent_rows],
     }
 
@@ -5998,6 +6037,7 @@ def cmd_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             graph_path=getattr(args, "graph_path", None),
             graph_readiness_state=getattr(args, "graph_readiness_state", None),
             graph_stale_after_days=int(getattr(args, "graph_stale_after_days", 30)),
+            include_archived=bool(getattr(args, "include_archived", False)),
         )
     except ValueError as exc:
         _emit_error(
@@ -6394,6 +6434,7 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         q,
         limit=max(1, int(args.limit)),
         scope=getattr(args, "scope", None),
+        include_archived=bool(getattr(args, "include_archived", False)),
     )
     rows = list(lexical_receipt.pop("results"))
     kpi_fields = _retrieval_kpi_fields(lexical_receipt)
@@ -8282,6 +8323,7 @@ def _hybrid_retrieve(
         conn,
         query,
         limit=candidate_limit,
+        include_archived=bool(getattr(args, "include_archived", False)),
     )
     lexical_rows = list(lexical_receipt.pop("results"))
     fts_ids = [int(row["id"]) for row in lexical_rows]
@@ -8323,6 +8365,14 @@ def _hybrid_retrieve(
     q_sql = f"SELECT id, ts, kind, tool_name, summary, summary_en, lang FROM observations WHERE id IN ({','.join(['?']*len(ordered_ids))})"
     rows = conn.execute(q_sql, ordered_ids).fetchall()
     obs_map = {int(r["id"]): dict(r) for r in rows}
+    visible = filter_lifecycle_results(
+        conn,
+        [{"id": rid} for rid in ordered_ids],
+        include_archived=bool(getattr(args, "include_archived", False)),
+    )
+    visible_ids = {int(item["id"]) for item in visible}
+    ordered_ids = [rid for rid in ordered_ids if rid in visible_ids]
+    obs_map = {rid: row for rid, row in obs_map.items() if rid in visible_ids}
 
     rerank_scores: Dict[int, float] = {}
     rerank_applied = False
@@ -9058,6 +9108,7 @@ def _pack_graph_probe_observations(
     *,
     probe_limit: int,
     scope: Optional[str] = None,
+    include_archived: bool = False,
 ) -> dict:
     """Lightweight deterministic FTS probe (semantic-by-retrieval).
 
@@ -9073,7 +9124,13 @@ def _pack_graph_probe_observations(
         return {"ran": False, "reason": "empty_after_strip"}
 
     started = time.perf_counter()
-    rows = _graph_search_rows(conn, q, int(max(1, probe_limit)), scope=scope)
+    rows = _graph_search_rows(
+        conn,
+        q,
+        int(max(1, probe_limit)),
+        scope=scope,
+        include_archived=include_archived,
+    )
     dt_ms = int((time.perf_counter() - started) * 1000)
 
     scores = []
@@ -10239,6 +10296,7 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             query,
             probe_limit=probe_limit,
             scope=out.get("scope"),
+            include_archived=bool(getattr(args, "include_archived", False)),
         )
         out["probe"] = {
             "ran": bool(probe.get("ran")),
@@ -10288,6 +10346,27 @@ def _pack_graph_preflight_optional(conn: sqlite3.Connection, *, query: str, args
             budget_tokens=int(out["budget_tokens"]),
         )
         selected_refs_pre_policy = _graph_preflight_selection(index_payload, take=int(out["take"]))
+        if not bool(getattr(args, "include_archived", False)):
+            obs_ids = [
+                int(ref.removeprefix("obs:"))
+                for ref in selected_refs_pre_policy
+                if str(ref).startswith("obs:") and str(ref).removeprefix("obs:").isdigit()
+            ]
+            visible_obs_ids = {
+                int(item["id"])
+                for item in filter_lifecycle_results(
+                    conn,
+                    [{"id": obs_id} for obs_id in obs_ids],
+                    include_archived=False,
+                )
+            }
+            selected_refs_pre_policy = [
+                ref
+                for ref in selected_refs_pre_policy
+                if not str(ref).startswith("obs:")
+                or not str(ref).removeprefix("obs:").isdigit()
+                or int(str(ref).removeprefix("obs:")) in visible_obs_ids
+            ]
         provenance_policy = _pack_graph_apply_provenance_policy(
             selected_refs=selected_refs_pre_policy,
             args=args,
@@ -10596,6 +10675,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         rerank_base_url=None,
         rerank_timeout_sec=15,
         vector_backend=str(getattr(args, "vector_backend", "auto") or "auto"),
+        include_archived=bool(getattr(args, "include_archived", False)),
     )
 
     candidates_started = time.perf_counter()
@@ -14232,6 +14312,7 @@ def _graph_search_rows(
     limit: int,
     *,
     scope: Optional[str] = None,
+    include_archived: bool = False,
 ) -> List[sqlite3.Row]:
     q = (query or "").strip()
     if not q:
@@ -14260,6 +14341,10 @@ def _graph_search_rows(
         ).fetchall()
 
     def _apply_scope(rows_in: List[sqlite3.Row]) -> List[sqlite3.Row]:
+        if not include_archived:
+            rows_in = [
+                row for row in rows_in if not lifecycle_is_soft_archived(row["detail_json"])
+            ]
         if not scope_norm:
             return rows_in[:limit_n]
 
@@ -14295,6 +14380,10 @@ def _graph_search_rows(
     # Fallback for CJK keyword queries when FTS5 tokenizer cannot split terms well.
     if not rows and _has_cjk(q):
         rows = _search_cjk_fallback(conn, q, int(fetch_limit), scope=scope_norm)
+        if not include_archived:
+            rows = [
+                row for row in rows if not lifecycle_is_soft_archived(row["detail_json"])
+            ]
         rows = rows[:limit_n]
 
     return rows
@@ -20549,6 +20638,16 @@ def build_parser() -> argparse.ArgumentParser:
     db_reindex.add_argument("--fts", action="store_true", help="Rebuild FTS5 indexes and episodic search text")
     db_reindex.add_argument("--vec", action="store_true", help="Rebuild persisted sqlite-vec indexes from embeddings")
     db_reindex.set_defaults(func=cmd_db_reindex)
+    db_lifecycle = db_sub.add_parser("lifecycle", help="Inspect or transition observation lifecycle state")
+    add_common(db_lifecycle)
+    db_lifecycle_sub = db_lifecycle.add_subparsers(dest="db_lifecycle_cmd", required=True)
+    db_lifecycle_set = db_lifecycle_sub.add_parser("set", help="Apply one legal lifecycle transition")
+    add_common(db_lifecycle_set)
+    db_lifecycle_set.add_argument("observation_id", type=int, help="Observation id")
+    db_lifecycle_set.add_argument("--state", required=True, choices=sorted(LIFECYCLE_STATES))
+    db_lifecycle_set.add_argument("--reason", required=True, help="Stable operator reason code")
+    db_lifecycle_set.add_argument("--actor", default="operator", help="Actor recorded in the receipt")
+    db_lifecycle_set.set_defaults(func=cmd_db_lifecycle_set)
 
     sp = sub.add_parser("service-store", help="Inspect or initialize harness service-store readiness file")
     add_common(sp)
@@ -21121,6 +21220,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.add_argument("query", help="Search query (FTS5 syntax)")
     sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--include-archived", action="store_true", help="Include soft-archived observations")
     sp.add_argument("--graph", action="store_true", help="Opt in to derived graph-assisted search output")
     sp.add_argument("--graph-path", default="", help="Portable graph JSON path for graph-assisted search")
     sp.add_argument(
@@ -21141,6 +21241,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("query", help="Recall query text")
     sp.add_argument("--mode", choices=["auto", "lexical", "vector", "hybrid", "graph"], default="auto")
     sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--include-archived", action="store_true", help="Include soft-archived observations")
     sp.add_argument("--scope", default=configured_scope, help="Optional exact memory scope")
     sp.add_argument("--model", help="Embedding model; defaults to the dominant stored model")
     sp.add_argument("--base-url", default=defaults.openai_base_url(), help="Embedding API base URL")
@@ -21410,6 +21511,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--query-en", help="Optional English query for bilingual retrieval")
     sp.add_argument("--vector-backend", choices=["auto", "sqlite-vec", "python", "numpy"], default=configured_vector_backend)
     sp.add_argument("--limit", type=int, default=12, help="Max packed items (default: 12)")
+    sp.add_argument("--include-archived", action="store_true", help="Include soft-archived observations")
     sp.add_argument("--budget-tokens", dest="budget_tokens", type=int, default=configured_pack_budget, help="Token budget for bundle text")
     sp.add_argument("--tail-text", action="append", default=None, help="Protected recent-tail line to append at assembly time (repeatable)")
     sp.add_argument("--tail-file", help="Optional file containing protected tail lines (plain text or JSON list)")

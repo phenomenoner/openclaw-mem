@@ -69,6 +69,8 @@ continuity wording-lint
 db
 db backfill
 db info
+db lifecycle
+db lifecycle set
 db migrate
 db reindex
 db rollback

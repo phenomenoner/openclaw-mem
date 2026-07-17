@@ -23,8 +23,15 @@ def search(
     query: str,
     limit: int = 20,
     scope: str | None = None,
+    include_archived: bool = False,
 ) -> Any:
-    return lexical_search(conn, query, limit=limit, scope=scope)
+    return lexical_search(
+        conn,
+        query,
+        limit=limit,
+        scope=scope,
+        include_archived=include_archived,
+    )
 
 
 def pack(conn: sqlite3.Connection, query: str, **kwargs: Any) -> Any:

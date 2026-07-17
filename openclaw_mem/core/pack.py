@@ -50,6 +50,7 @@ def build_pack(
     model: Optional[str] = None,
     base_url: Optional[str] = None,
     vector_backend: str = "auto",
+    include_archived: bool = False,
 ) -> Dict[str, Any]:
     query_text = str(query or "").strip()
     if not query_text:
@@ -62,6 +63,7 @@ def build_pack(
         query_text,
         limit=candidate_limit,
         scope=scope,
+        include_archived=include_archived,
     )
     model_name = str(model or defaults.embed_model())
     vector_ids: List[int] = []
@@ -82,6 +84,7 @@ def build_pack(
                 model=model_name,
                 limit=candidate_limit,
                 vector_backend=requested_vector_backend,
+                include_archived=include_archived,
             )
             if vector_rows:
                 actual_vector_backend = str(vector_rows[0].get("vector_backend") or actual_vector_backend)
@@ -94,6 +97,7 @@ def build_pack(
                     limit=candidate_limit,
                     table="observation_embeddings_en",
                     vector_backend=requested_vector_backend,
+                    include_archived=include_archived,
                 )
                 if not english_rows:
                     english_rows = vector_search(
@@ -102,6 +106,7 @@ def build_pack(
                         model=model_name,
                         limit=candidate_limit,
                         vector_backend=requested_vector_backend,
+                        include_archived=include_archived,
                     )
                 vector_en_ids = [int(item["id"]) for item in english_rows]
             candidates = hybrid_search(
@@ -110,6 +115,7 @@ def build_pack(
                 limit=candidate_limit,
                 vector_ids=vector_ids,
                 vector_en_ids=vector_en_ids,
+                include_archived=include_archived,
             )
         except Exception:
             # Embedding/network failures are fail-open to the lexical lane.
