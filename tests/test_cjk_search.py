@@ -44,7 +44,6 @@ def test_trigram_migration_registry_and_new_database_generation() -> None:
     finally:
         conn.close()
 
-
 def test_cjk_query_router_recovers_four_pain_points_after_migration() -> None:
     conn = _connect(":memory:")
     try:
@@ -110,4 +109,3 @@ def test_english_result_order_is_unchanged_by_trigram_lane() -> None:
         assert after == before
     finally:
         conn.close()
-

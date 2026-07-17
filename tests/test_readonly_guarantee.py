@@ -82,4 +82,3 @@ def test_readonly_mode_still_rejects_newer_database_generation(tmp_path: Path) -
     assert completed.returncode != 0
     assert "db_version_unsupported" in completed.stderr
     assert _snapshot(db) == before
-

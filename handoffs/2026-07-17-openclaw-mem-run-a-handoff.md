@@ -30,7 +30,7 @@ Current state:
 ### Active local repository
 
 ```text
-D:\Warehouse\Rust-OpenClaw-Core\.agent-harness\workspace\repos\openclaw-mem
+<existing-openclaw-mem-worktree>
 ```
 
 This is the existing workspace repository selected by CK. Do not download or create
@@ -48,21 +48,21 @@ branch HEAD:               documentation-only handoff commit directly above e500
 ### Planning sources
 
 ```text
-D:\Warehouse\Topics\openclaw-mem-upgrade\MASTER-PLAN.md
-D:\Warehouse\Topics\openclaw-mem-upgrade\RUNBOOK.md
-D:\Warehouse\Topics\openclaw-mem-upgrade\docs\01-current-state.md
-D:\Warehouse\Topics\openclaw-mem-upgrade\docs\02-reference-lessons.md
-D:\Warehouse\Topics\openclaw-mem-upgrade\docs\03-target-architecture.md
-D:\Warehouse\Topics\openclaw-mem-upgrade\docs\04-db-compatibility.md
-D:\Warehouse\Topics\openclaw-mem-upgrade\docs\05-performance.md
-D:\Warehouse\Topics\openclaw-mem-upgrade\docs\06-graph-upgrade.md
-D:\Warehouse\Topics\openclaw-mem-upgrade\docs\07-skills-optimization.md
-D:\Warehouse\Topics\openclaw-mem-upgrade\docs\08-backlog.md
-D:\Warehouse\Topics\openclaw-mem-upgrade\docs\09-dual-language.md
+<planning-workspace>/MASTER-PLAN.md
+<planning-workspace>/RUNBOOK.md
+<planning-workspace>/docs/01-current-state.md
+<planning-workspace>/docs/02-reference-lessons.md
+<planning-workspace>/docs/03-target-architecture.md
+<planning-workspace>/docs/04-db-compatibility.md
+<planning-workspace>/docs/05-performance.md
+<planning-workspace>/docs/06-graph-upgrade.md
+<planning-workspace>/docs/07-skills-optimization.md
+<planning-workspace>/docs/08-backlog.md
+<planning-workspace>/docs/09-dual-language.md
 ```
 
 The runbook's original working-directory instruction points to
-`D:\Warehouse\Topics\openclaw-mem-upgrade\repo`. CK explicitly replaced that
+`<planning-workspace>/repo`. CK explicitly replaced that
 location with the existing workspace repository above. All other useful runbook
 requirements remain guidance: follow them when sound, but adjust when current code
 or verification evidence calls for a safer implementation.
@@ -70,7 +70,7 @@ or verification evidence calls for a safer implementation.
 ### Progress source of truth
 
 ```text
-D:\Warehouse\Rust-OpenClaw-Core\.agent-harness\workspace\repos\openclaw-mem\PROGRESS-RUN-A.md
+PROGRESS-RUN-A.md
 ```
 
 Read this file plus `git log --oneline -15` before resuming.
@@ -287,7 +287,7 @@ stdout/stderr; and retain exact CLI error/output behavior.
 From PowerShell:
 
 ```powershell
-Set-Location -LiteralPath 'D:\Warehouse\Rust-OpenClaw-Core\.agent-harness\workspace\repos\openclaw-mem'
+Set-Location -LiteralPath '<existing-openclaw-mem-worktree>'
 git status --short --branch
 git log --oneline -15
 Get-Content -LiteralPath 'PROGRESS-RUN-A.md'
@@ -332,7 +332,7 @@ interruption: first inspect the last visible receipt and git state.
 Before claiming a software task complete, read and apply:
 
 ```text
-D:\Warehouse\Rust-OpenClaw-Core\.agent-harness\skills\openclaw-imports\workspace\completeness-and-test-synthesis\SKILL.md
+Use the available `completeness-and-test-synthesis` Codex skill.
 ```
 
 ## 10. Out-of-scope gates
