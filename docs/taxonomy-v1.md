@@ -17,6 +17,10 @@ OpenClaw Memory uses eight canonical kinds for durable memories:
 
 Taxonomy is enabled by default. Automatically classified `note`, `tool`, and empty-kind writes add `detail_json.classification = {method, confidence}`; stronger explicit kinds keep their existing stored shape. Set `[taxonomy] enabled = false` in `~/.openclaw-mem/config.toml`, or `OPENCLAW_MEM_TAXONOMY_ENABLED=0`, to preserve the pre-taxonomy write shape for classifiable captures too.
 
+Kinds also inform retrieval policy without replacing relevance. Composite scoring is the default after the 50-case golden gate: it multiplies relevance by importance, kind-aware recency, citation use, and lifecycle state. Preferences decay most slowly; short-lived events decay fastest. Set `OPENCLAW_MEM_SCORING_PROFILE=relevance` (or `scoring.profile = "relevance"` in the config file) for compatibility diagnostics.
+
+For use-based decay, explicit `detail_json.lifecycle.priority` wins over kind mapping. `preference`, `decision`, `fact`, `learning`, and `plan` default to P1; `event`, `note`, and legacy `tool` default to P2. P0 is explicit-only and is never automatically archived. Soft-archived records remain stored and reversible but are excluded from normal retrieval and packs.
+
 Existing databases require no migration. Preview and apply the idempotent backfill explicitly:
 
 ```text

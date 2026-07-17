@@ -63,6 +63,7 @@ nav:
       - Core vs Advanced Labs: core-vs-advanced-labs.md
       - 60-second reality proof: reality-check.md
       - Quickstart: quickstart.md
+      - Command migration: command-migration.md
       - Harness quickstarts:
           - Claude Code: quickstart-claude-code.md
           - Codex: quickstart-codex.md
@@ -101,6 +102,7 @@ nav:
       - Agent memory skill (SOP): agent-memory-skill.md
       - Legacy gateway harness memory: harness-persistent-memory.md
       - Importance grading: importance-grading.md
+      - Memory taxonomy: taxonomy-v1.md
       - Automation status: automation-status.md
       - Product-facing improvement roadmap: openclaw-user-improvement-roadmap.md
       - Legacy remote memory gateway: remote-memory-gateway.md

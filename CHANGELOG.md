@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add the primary `recall`, `curate`, and `sync` command families. `recall`
+  routes lexical/vector/hybrid/graph retrieval with fail-open receipts;
+  `curate` wraps governed scan/review/apply/verify/rollback flows; and `sync`
+  wraps LanceDB, service, and Qdrant status/run/init operations.
+- Add idempotent `init` bootstrap with a stamped SQLite database, fill-only
+  `~/.openclaw-mem/config.toml`, and an environment/config/capability receipt.
+- Add unified `install --harness` and `doctor --harness` adapters for Claude
+  Code, Codex, OpenClaw, generic hosts, Gemini CLI, Cursor, and Windsurf, with
+  dry-run planning, atomic writes, backups, verification, and repair hints.
+- Add MCP v2 read tools `mem_recall`, `graph_neighbors`, `graph_path`, and
+  `graph_impact`; `mem_pack` now shares the complete CLI policy handler.
+- Add optional persistent sqlite-vec indexes, freshness metadata, automatic
+  sqlite-vec → NumPy → Python fallback, `db reindex --vec`, and backend details
+  in `db info`.
+- Add the six-state memory lifecycle, transition/history receipts, retrieval
+  gates, `db lifecycle set`, kind-aware pack quotas, citation-only use tracking,
+  configurable use decay, and reversible governed soft archive.
+- Add the eight-kind deterministic bilingual taxonomy, automatic capture
+  classification, `db backfill --kind`, and kind distributions in DB receipts.
+- Add composite scoring evidence across search, recall, hybrid, MCP, and pack,
+  plus a 50-case R@5/MRR golden gate and committed adjudication receipt.
+- Add deterministic 10k/100k performance receipts, absolute SLO checks, a
+  file-backed regression gate, and scheduled 100k CI coverage.
 - Add governed SQLite schema inspection, migration, rollback, FTS rebuild, and
   language backfill through `db info|migrate|rollback|reindex|backfill`.
 - Add exact optional NumPy vector search and a local FastEmbed provider
@@ -42,6 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Make default help center the six primary surfaces `recall`, `store`,
+  `curate`, `sync`, `graph`, and `db`; `--help-all` retains the complete legacy
+  and advanced command inventory.
+- Keep all converged legacy retrieval, governance, and writeback commands as
+  callable aliases with additive deprecation receipts instead of removing
+  compatibility surfaces.
 - Make composite retrieval scoring the default after the 50-case golden gate
   held R@5 at 1.000 and improved MRR from 0.740 to 0.990; the explicit
   `relevance` profile remains available for compatibility and diagnostics.
@@ -56,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Guarantee actionable `hint` fields on CLI error receipts and document stable
+  exit-code semantics.
 - Preserve exact multi-token ASCII retrieval when bilingual fallback activates;
   fallback now requires every ASCII term and cannot widen an established match.
 - Decode subprocess text explicitly as UTF-8 across supported Windows paths,
