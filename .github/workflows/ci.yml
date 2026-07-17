@@ -36,7 +36,10 @@ jobs:
         run: uv run --locked --with pytest -- python -m pytest tests/test_legacy_fixture_matrix.py -q
 
       - name: Golden bilingual recall gate
-        run: uv run --locked --with pytest -- python -m pytest tests/test_golden_recall_gate.py -q
+        run: >-
+          uv run --locked --with pytest -- python -m pytest
+          tests/test_golden_recall_gate.py
+          tests/test_composite_golden_gate.py -q
 
       - name: Build (packaging)
         run: uv run --with build -- python -m build
@@ -61,6 +64,7 @@ jobs:
           --rows 100000
           --baseline "${RUNNER_TEMP}/RUN-B-nightly-100k.json"
           --check-thresholds benchmarks/perf/RUN-B-thresholds.json
+          --check-slos
           --json
 
       - name: Upload nightly performance receipt

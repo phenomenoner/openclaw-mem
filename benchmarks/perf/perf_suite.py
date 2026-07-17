@@ -57,6 +57,13 @@ SLO_METRICS = {
     "pack.e2e_p95_ms": ("metrics", "pack", "e2e_p95_ms"),
     "vsearch.sqlite_vec_p95_ms": ("metrics", "vsearch", "sqlite_vec_p95_ms"),
 }
+ABSOLUTE_SLOS_MS = {
+    "connect.stamped_p95_ms": 30.0,
+    "recall.lexical_p95_ms": 50.0,
+    "recall.hybrid_p95_ms": 200.0,
+    "pack.e2e_p95_ms": 300.0,
+    "vsearch.sqlite_vec_p95_ms": 30.0,
+}
 
 
 class _PerfEmbeddingProvider:
@@ -457,6 +464,26 @@ def evaluate_thresholds(report: dict[str, Any], thresholds: dict[str, Any]) -> d
     }
 
 
+def evaluate_absolute_slos(report: dict[str, Any], *, tier: str) -> dict[str, Any]:
+    checks = []
+    for name, limit in ABSOLUTE_SLOS_MS.items():
+        actual = _metric_value(report, SLO_METRICS[name])
+        checks.append(
+            {
+                "metric": name,
+                "actual": round(actual, 3),
+                "limit": limit,
+                "ok": actual < limit,
+            }
+        )
+    return {
+        "kind": "openclaw-mem.perf.slo-gate.v1",
+        "ok": all(item["ok"] for item in checks),
+        "tier": tier,
+        "checks": checks,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rows", type=int, default=10_000)
@@ -470,18 +497,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--write-thresholds", type=Path, help="Write thresholds derived from the 100k matrix tier")
     parser.add_argument("--check-thresholds", type=Path, help="Fail if the report regresses over the stored 20%% limits")
+    parser.add_argument("--check-slos", action="store_true", help="Fail if the selected tier misses a published absolute SLO")
     return parser
 
 
 def main() -> int:
     args = _parser().parse_args()
     report = run_matrix(args.vector_dim) if args.matrix else run_suite(args.rows, args.vector_dim)
-    baseline = args.baseline
-    if baseline is None and not args.matrix and args.rows == 10_000:
-        baseline = Path(__file__).with_name("BASELINE-10k.json")
-    if baseline is not None:
-        baseline.parent.mkdir(parents=True, exist_ok=True)
-        baseline.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.write_thresholds:
         if report.get("kind") != MATRIX_KIND:
             raise ValueError("--write-thresholds requires --matrix")
@@ -496,9 +518,23 @@ def main() -> int:
         thresholds = json.loads(args.check_thresholds.read_text(encoding="utf-8"))
         target = report["tiers"][thresholds["tier"]] if report.get("kind") == MATRIX_KIND else report
         gate = evaluate_thresholds(target, thresholds)
-    payload = {**report, "gate": gate} if gate is not None else report
+    target_tier = "100k" if args.matrix else f"{args.rows // 1000}k"
+    target = report["tiers"][target_tier] if report.get("kind") == MATRIX_KIND else report
+    slo_gate = evaluate_absolute_slos(target, tier=target_tier) if args.check_slos else None
+    payload = dict(report)
+    if gate is not None:
+        payload["gate"] = gate
+    if slo_gate is not None:
+        payload["slo_gate"] = slo_gate
+    baseline = args.baseline
+    if baseline is None and not args.matrix and args.rows == 10_000:
+        baseline = Path(__file__).with_name("BASELINE-10k.json")
+    if baseline is not None:
+        baseline.parent.mkdir(parents=True, exist_ok=True)
+        baseline.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) if args.json else json.dumps(payload, ensure_ascii=False, indent=2))
-    return 0 if gate is None or gate["ok"] else 1
+    requested_gates = [item for item in (gate, slo_gate) if item is not None]
+    return 0 if all(item["ok"] for item in requested_gates) else 1
 
 
 if __name__ == "__main__":

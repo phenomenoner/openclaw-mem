@@ -10171,9 +10171,15 @@ def _pack_graph_scope_revision(conn: sqlite3.Connection) -> int:
             "INSERT OR IGNORE INTO temp.openclaw_pack_scope_revision(id, revision) VALUES (1, 0)"
         )
         for action in ("INSERT", "UPDATE", "DELETE"):
+            when = (
+                " WHEN COALESCE(json_extract(old.detail_json, '$.scope'), '') "
+                "IS NOT COALESCE(json_extract(new.detail_json, '$.scope'), '')"
+                if action == "UPDATE"
+                else ""
+            )
             conn.execute(
                 f"CREATE TEMP TRIGGER IF NOT EXISTS openclaw_pack_scope_{action.lower()} "
-                f"AFTER {action} ON main.observations BEGIN "
+                f"AFTER {action} ON main.observations{when} BEGIN "
                 "UPDATE openclaw_pack_scope_revision SET revision = revision + 1 WHERE id = 1; END"
             )
         return int(

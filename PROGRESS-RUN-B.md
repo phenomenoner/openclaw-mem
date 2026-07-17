@@ -44,7 +44,8 @@ Run A baseline; no new skip was introduced.
 | T15 | done | `144b0e2` | Added opt-in composite scoring across core API, CLI, MCP, search, recall, hybrid, and pack while retaining byte-shape/order compatibility under the default relevance profile. Importance, kind-aware recency, use, and lifecycle state factors are independently configurable and emit per-candidate evidence only in composite mode; trust remains a pack hard gate. Curate drift scanning now produces governed label-calibration candidates for every detected mismatch, with before/after rollback evidence. Integrated retrieval/config/MCP/quota/curation slice: 104 passed. The opt-in 10k profile remained within SLO at 28.129 ms search p95, 30.898 ms hybrid recall p95, and 43.497 ms pack p95. |
 | T16 | done | `708fc2f` | Added pack-citation-only use tracking with bulk same-connection updates, readonly/env opt-out, top-level and trace receipts, explicit-priority-first protection tiers, configurable P1/P2 decay windows, governed lifecycle-chained soft archive, rollback revival, and archive aggregation by priority/kind/trust. Focused use/config coverage passed 20 tests; the integrated legacy optimization/lifecycle/pack slice passed 79 tests. Exact JSON/MCP fixtures were updated only for planned additive receipts and sequential use counters. A Windows concurrency test was corrected from a race-prone 30-second ceiling to 90 seconds after measurement showed healthy serialized cold pipelines take 45.32 seconds; its controller revisions still pass as `[1, 2]`. Batch 4 full suite: 1166 passed, 3 skipped, 5 expected warnings, and 87 unittest subtests in 695.15 seconds. |
 | T17 | done | `616d6e0` | Extended the existing 30-case bilingual golden gate with 20 auditable competing-record lifecycle cases across superseded history, frequently used preferences, active/stale state, and soft-archived noise. The reusable gate compares both profiles on all 50 cases and emits a committed receipt. R@5 held at 1.000 for both profiles; MRR improved from 0.740 relevance to 0.990 composite (+33.78% relative), satisfying the non-regression plus ≥5% rule, so the built-in scoring default flipped to composite while the relevance override remains supported. UTC-day score references make equivalent receipts stable. Focused gate/config/scoring: 21 passed; expanded CLI/core/recall/pack/contracts/MCP slice: 205 passed plus 36 subtests. |
-| T18 | done | pending commit | Completed the Unreleased changelog across command convergence, init/config, seven harness adapters, MCP v2, sqlite-vec, lifecycle/taxonomy/quota/decay/scoring, and perf gates. Added the public legacy-to-primary command migration guide and navigation, and updated taxonomy and MCP references for lifecycle priorities, composite default, policy sharing, and graph tools. Seven quickstarts remain ≤5 steps. Skill lint checked 10 files and 68 commands with zero errors; MkDocs strict build passed; docs/quickstart/skill tests passed 25 tests plus 3 subtests. |
+| T18 | done | `d26d30e` | Completed the Unreleased changelog across command convergence, init/config, seven harness adapters, MCP v2, sqlite-vec, lifecycle/taxonomy/quota/decay/scoring, and perf gates. Added the public legacy-to-primary command migration guide and navigation, and updated taxonomy and MCP references for lifecycle priorities, composite default, policy sharing, and graph tools. Seven quickstarts remain ≤5 steps. Skill lint checked 10 files and 68 commands with zero errors; MkDocs strict build passed; docs/quickstart/skill tests passed 25 tests plus 3 subtests. |
+| T19 | done | pending commit | Final repository suite: 1171 passed, 3 skipped, 5 expected warnings, and 87 subtests in 713.62 seconds. Surface/alias/MCP/golden slice passed 123 tests. The init→auto-classified store→auto recall→composite pack trace→curate scan→db info→generic installer dry-run smoke passed, including citation-only `used_count` 0→1, `refreshed_refs`, and quota receipts. Final fixed-seed 10k and 100k receipts pass all published absolute SLOs. During verification, citation use tracking exposed an observations-update trigger that invalidated the graph-scope cache and caused a 100k scope rescan; the trigger now invalidates only when the stored scope changes, reducing measured 100k pack p95 from 308.552 ms to 62.160 ms while retaining true scope-change invalidation coverage. CI now runs the composite golden gate and enforces both the fixed-runner 20% regression gate and absolute product SLOs. |
 
 ## T11 100k SLO evidence
 
@@ -65,3 +66,19 @@ The 10k tier also passed every corresponding absolute SLO. The graph-auto pack
 lane includes one cold scope discovery followed by correctly invalidated hot
 reads; the report's p95 therefore represents the persistent CLI/MCP handler
 path while retaining the cold-start sample in the distribution.
+
+## T19 final SLO evidence
+
+The final receipts are `benchmarks/perf/RUN-B-FINAL-10k.json` and
+`benchmarks/perf/RUN-B-FINAL-100k.json`. Both embed a machine-readable
+`openclaw-mem.perf.slo-gate.v1` result with `ok=true`.
+
+| tier | stamped connect | lexical recall | hybrid recall | graph-auto pack | sqlite-vec | ingest rows/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | 5.576 ms | 47.104 ms | 37.576 ms | 40.802 ms | 3.246 ms | 3,147.542 |
+| 100k | 10.754 ms | 26.805 ms | 75.397 ms | 62.160 ms | 23.030 ms | 3,963.636 |
+
+The portable absolute SLO gate is green on this Windows workstation. The
+stored 20% historical comparison is intentionally retained for the scheduled,
+fixed Ubuntu runner; ad-hoc cross-machine comparisons were noisy enough to be
+misleading and are not reported as a local product failure or a false pass.
