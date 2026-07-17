@@ -22,7 +22,8 @@ explicit compatibility contracts:
   and Qdrant are optional/fail-open according to their receipts
 
 Existing local agents should follow [Upgrade an existing local agent to
-openclaw-mem v2](upgrade-checklist.md) before resuming writers.
+openclaw-mem v2](https://phenomenoner.github.io/openclaw-mem/upgrade-checklist/)
+before resuming writers.
 
 ## Highlights
 
@@ -69,7 +70,15 @@ Final verification fixed a use-tracking regression in which any observation
 UPDATE invalidated the graph-scope cache and forced a 100k-row scope rescan.
 Invalidation now occurs only for insert/delete or a real scope change.
 
-## Install from this GitHub release
+## Install v2.0.0
+
+From PyPI:
+
+```bash
+python -m pip install --upgrade "openclaw-context-pack==2.0.0"
+```
+
+Directly from the GitHub tag:
 
 ```bash
 python -m pip install --upgrade \
@@ -84,9 +93,6 @@ git checkout v2.0.0
 uv sync --locked
 ```
 
-PyPI publication is a separate release action; the PyPI badge may continue to
-show the last registry-published version until that action occurs.
-
 ## Verification
 
 - local v2.0.0 full suite: 1175 passed, 3 skipped, 5 expected compatibility warnings,
@@ -96,6 +102,7 @@ show the last registry-published version until that action occurs.
 - strict MkDocs build and docs/skill tests passed
 - wheel and sdist built; both `openclaw-mem` and `openclaw-mem-mcp` started from
   an isolated wheel installation
+- tag CI, main CI, GitHub Pages deployment, and trusted PyPI publication passed
 - public diff scan found no high-confidence secrets or private absolute paths
 
 The full task ledger, deviations, and Run C entry conditions are in
@@ -103,7 +110,6 @@ The full task ledger, deviations, and Run C entry conditions are in
 
 ## Still gated
 
-- PyPI publication and docs deployment
 - live memory-owner cutover in an operator environment
 - public LongMemEval/LoCoMo product claims
 - Qdrant L3 promotion beyond the optional read-index/cache posture

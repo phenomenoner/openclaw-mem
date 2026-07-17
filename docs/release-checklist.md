@@ -54,9 +54,12 @@ This repo runs CI in **locked** mode:
     --notes-file docs/releases-vX.Y.Z.md --verify-tag
   ```
 
-GitHub Release, PyPI publication, ClawHub publication, docs deployment, and a
-live memory-owner cutover are separate state changes. Perform only the surfaces
-explicitly authorized for that release.
+Publishing a GitHub Release triggers `.github/workflows/publish-pypi.yml`, which
+tests, builds, checks, and publishes the matching tag to PyPI through trusted
+publishing. Treat GitHub Release plus PyPI as one authorized release action in
+this repository. A merge to `main` also triggers the GitHub Pages deployment.
+ClawHub publication and a live memory-owner cutover remain separate state
+changes; perform only explicitly authorized surfaces.
 
 ## Optional ClawHub marketplace publish
 
