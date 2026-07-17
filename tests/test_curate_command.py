@@ -153,6 +153,11 @@ def test_scan_review_apply_verify_rollback_soft_archive_e2e(tmp_path: Path) -> N
             "detail": original_detail,
         },
     )
+    original_detail = json.loads(
+        conn.execute(
+            "SELECT detail_json FROM observations WHERE id = ?", (observation_id,)
+        ).fetchone()["detail_json"]
+    )
 
     scan = _run(conn, ["curate", "scan", "--target", "memory"])
     assert scan["ok"] is True
@@ -243,6 +248,7 @@ def test_memory_rollback_is_atomic_when_any_target_drifted(tmp_path: Path) -> No
         observation_id = _insert_observation(
             conn,
             {"kind": "note", "summary": f"atomic {index}", "detail": after},
+            taxonomy_enabled=False,
         )
         ids.append(observation_id)
         before_values.append(before)

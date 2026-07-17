@@ -34,6 +34,7 @@ from collections import OrderedDict
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Callable, Dict, Any, List, Mapping, Optional, Set, Tuple
 
@@ -84,6 +85,7 @@ from openclaw_mem.core.lifecycle import (
     transition as transition_lifecycle,
 )
 from openclaw_mem.core.curation import rollback_optimize_assist
+from openclaw_mem.core.taxonomy import CANONICAL_KINDS, backfill_kinds
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -1770,6 +1772,7 @@ def cmd_init(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "embed_provider": resolved["embed_provider"],
         "pack": {"budget_tokens": int(resolved["pack"]["budget_tokens"])},
         "scoring": {"profile": resolved["scoring"]["profile"]},
+        "taxonomy": {"enabled": bool(resolved["taxonomy"]["enabled"])},
     }
     try:
         config_receipt = core_config.ensure_config(values)
@@ -1958,6 +1961,7 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     embedding_integrity = _embedding_integrity(conn)
 
     lang_distribution: Dict[str, int] = {}
+    kind_distribution: Dict[str, int] = {}
     summary_en_coverage = {"present": 0, "total": 0, "ratio": 0.0}
     if _table_exists(conn, "observations"):
         for row in conn.execute(
@@ -1965,6 +1969,11 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             "FROM observations GROUP BY 1 ORDER BY 1"
         ).fetchall():
             lang_distribution[str(row[0])] = int(row[1])
+        for row in conn.execute(
+            "SELECT COALESCE(NULLIF(kind, ''), 'unknown'), COUNT(*) "
+            "FROM observations GROUP BY 1 ORDER BY 1"
+        ).fetchall():
+            kind_distribution[str(row[0])] = int(row[1])
         coverage = conn.execute(
             "SELECT COUNT(*), SUM(CASE WHEN COALESCE(summary_en, '') <> '' THEN 1 ELSE 0 END) "
             "FROM observations"
@@ -2008,6 +2017,7 @@ def cmd_db_info(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             },
             "qdrant": _qdrant_dependency_status(),
             "lang_distribution": lang_distribution,
+            "kind_distribution": kind_distribution,
             "summary_en_coverage": summary_en_coverage,
             "lifecycle_state_distribution": lifecycle_state_distribution(conn),
             "compat_mode": migration_status["compat_mode"],
@@ -2035,13 +2045,24 @@ def cmd_db_rollback(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
 
 def cmd_db_backfill(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
-    if not bool(getattr(args, "lang", False)):
-        raise ValueError("db backfill requires --lang")
-    payload = _backfill_lang(
-        conn,
-        batch_size=int(getattr(args, "batch_size", 500) or 500),
-    )
-    conn.commit()
+    if bool(getattr(args, "kind", False)):
+        payload = backfill_kinds(
+            conn,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            batch_size=int(getattr(args, "batch_size", 500) or 500),
+        )
+        if not bool(getattr(args, "dry_run", False)):
+            conn.commit()
+    elif bool(getattr(args, "lang", False)):
+        if bool(getattr(args, "dry_run", False)):
+            raise ValueError("--dry-run is supported only with db backfill --kind")
+        payload = _backfill_lang(
+            conn,
+            batch_size=int(getattr(args, "batch_size", 500) or 500),
+        )
+        conn.commit()
+    else:
+        raise ValueError("db backfill requires --lang or --kind")
     _emit(payload, args.json)
 
 
@@ -6049,10 +6070,34 @@ def cmd_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     _emit(receipt, bool(getattr(args, "json", False)))
 
 
+@lru_cache(maxsize=8)
+def _cached_invoke_parser(
+    config_path: str,
+    config_stamp: tuple[int, int] | None,
+    config_environment: tuple[tuple[str, str], ...],
+) -> argparse.ArgumentParser:
+    del config_path, config_stamp, config_environment
+    return build_parser()
+
+
+def _invoke_parser() -> argparse.ArgumentParser:
+    path = core_config.default_config_path()
+    try:
+        stat = path.stat()
+        stamp: tuple[int, int] | None = (int(stat.st_mtime_ns), int(stat.st_size))
+    except OSError:
+        stamp = None
+    environment = tuple(
+        (name, str(os.getenv(name) or ""))
+        for name in sorted(core_config._ENV_KEYS.values())
+    )
+    return _cached_invoke_parser(str(path), stamp, environment)
+
+
 def _invoke_cli_json(conn: sqlite3.Connection, argv: List[str]) -> Dict[str, Any]:
     """Invoke an existing CLI handler in-process and preserve its JSON receipt."""
 
-    nested = build_parser().parse_args(["--json", *argv])
+    nested = _invoke_parser().parse_args(["--json", *argv])
     nested.json = True
     nested.db = (
         getattr(nested, "db", None)
@@ -20630,7 +20675,10 @@ def build_parser() -> argparse.ArgumentParser:
     db_rollback.set_defaults(func=cmd_db_rollback)
     db_backfill = db_sub.add_parser("backfill", help="Backfill deterministic derived observation fields")
     add_common(db_backfill)
-    db_backfill.add_argument("--lang", action="store_true", required=True, help="Fill only missing language labels")
+    db_backfill_fields = db_backfill.add_mutually_exclusive_group(required=True)
+    db_backfill_fields.add_argument("--lang", action="store_true", help="Fill only missing language labels")
+    db_backfill_fields.add_argument("--kind", action="store_true", help="Classify eligible note/tool/empty kinds")
+    db_backfill.add_argument("--dry-run", action="store_true", help="Preview kind backfill without writing")
     db_backfill.add_argument("--batch-size", type=int, default=500, help="Rows per deterministic batch")
     db_backfill.set_defaults(func=cmd_db_backfill)
     db_reindex = db_sub.add_parser("reindex", help="Explicitly rebuild derived database indexes")
@@ -22310,7 +22358,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--text-en", help="Optional English translation/summary")
     sp.add_argument("--lang", help="Original text language code (e.g., ko, ja, es)")
     sp.add_argument("--scope", default=configured_scope, help="Optional memory scope")
-    sp.add_argument("--category", default="fact", choices=["fact", "preference", "decision", "entity", "task", "other"])
+    sp.add_argument(
+        "--category",
+        default=None,
+        choices=sorted(CANONICAL_KINDS | {"tool", "task", "other"}),
+        help="Explicit memory kind; omit to use deterministic taxonomy",
+    )
     sp.add_argument("--importance", type=float, default=0.7)
     sp.add_argument(
         "--model",

@@ -69,6 +69,7 @@ def test_db_info_reports_rows_language_and_embedding_distribution(tmp_path: Path
         conn.close()
     assert payload["tables"]["observations"] == 2
     assert payload["lang_distribution"] == {"en": 1, "zh": 1}
+    assert payload["kind_distribution"] == {"note": 2}
     assert payload["summary_en_coverage"] == {"present": 1, "total": 2, "ratio": 0.5}
     assert payload["embeddings"]["observation_embeddings"]["distributions"] == [
         {"model": "fixture", "dim": 2, "count": 1}

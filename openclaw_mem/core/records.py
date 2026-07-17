@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import tempfile
 import unicodedata
+from functools import lru_cache
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,25 @@ CJK_MIXED_RATIO = 0.30
 CJK_ZH_RATIO = 0.70
 _CJK_RE = re.compile(r"[\u3400-\u9fff]")
 _ASCII_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
+
+
+@lru_cache(maxsize=16)
+def _taxonomy_enabled_for_process(
+    config_path_marker: str,
+    environment_marker: str,
+) -> bool:
+    """Resolve taxonomy once per process/config selection, not once per row."""
+
+    from openclaw_mem.core.config import resolve_config
+
+    return bool(resolve_config()["taxonomy"]["enabled"])
+
+
+def _taxonomy_enabled() -> bool:
+    return _taxonomy_enabled_for_process(
+        str(os.getenv("OPENCLAW_MEM_CONFIG") or ""),
+        str(os.getenv("OPENCLAW_MEM_TAXONOMY_ENABLED") or ""),
+    )
 
 
 def detect_lang(text: Any) -> str:
@@ -173,7 +193,16 @@ def ingest_observations(
 
     apply_importance_scorer_override(importance_scorer)
     summary = IngestRunSummary()
-    inserted = [_insert_observation(conn, obs, summary) for obs in observations]
+    taxonomy_enabled = _taxonomy_enabled()
+    inserted = [
+        _insert_observation(
+            conn,
+            obs,
+            summary,
+            taxonomy_enabled=taxonomy_enabled,
+        )
+        for obs in observations
+    ]
     conn.commit()
     return {
         "inserted": len(inserted),
@@ -209,7 +238,7 @@ def store_memory(
     conn: sqlite3.Connection,
     *,
     text: str,
-    category: str,
+    category: str | None,
     importance: float,
     text_en: str | None = None,
     lang: str | None = None,
@@ -245,6 +274,7 @@ def store_memory(
     detail: Dict[str, Any] = {"importance": importance_obj}
     if str(scope or "").strip():
         detail["scope"] = str(scope).strip()
+    taxonomy_enabled = _taxonomy_enabled()
     rowid = _insert_observation(
         conn,
         {
@@ -255,6 +285,11 @@ def store_memory(
             "tool_name": "memory_store",
             "detail": detail,
         },
+        taxonomy_enabled=taxonomy_enabled,
+    )
+    stored_kind = str(
+        conn.execute("SELECT kind FROM observations WHERE id = ?", (rowid,)).fetchone()[0]
+        or "note"
     )
 
     warnings: List[str] = []
@@ -299,7 +334,7 @@ def store_memory(
     if memory_dir is not None:
         md_file = memory_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
         md_entry = (
-            f"- [{category.upper()}] {normalized_text} "
+            f"- [{stored_kind.upper()}] {normalized_text} "
             f"(importance: {importance_obj['score']:.2f}, {importance_obj['label']})\n"
         )
         try:
@@ -318,6 +353,7 @@ def store_memory(
         "embedded": embedded,
         "embedding_model": model if embedded else None,
         "embedding_provider": getattr(client, "provider_name", None) if embedded else None,
+        "kind": stored_kind,
     }
     if str(scope or "").strip():
         receipt["scope"] = str(scope).strip()
@@ -361,6 +397,7 @@ def harvest_observations(
 
     apply_importance_scorer_override(importance_scorer)
     summary = IngestRunSummary()
+    taxonomy_enabled = _taxonomy_enabled()
     warnings: List[str] = []
     processing_files = sorted(source.parent.glob(f"{source.name}.*.processing"))
     recovered = bool(processing_files)
@@ -399,7 +436,14 @@ def harvest_observations(
         try:
             with processing.open("r", encoding="utf-8") as fp:
                 for observation in _iter_jsonl(fp):
-                    inserted_ids.append(_insert_observation(conn, observation, summary))
+                    inserted_ids.append(
+                        _insert_observation(
+                            conn,
+                            observation,
+                            summary,
+                            taxonomy_enabled=taxonomy_enabled,
+                        )
+                    )
             conn.commit()
         except Exception as exc:
             raise HarvestError({"error": f"Ingest failed: {exc}", "file": str(processing)}) from exc
@@ -505,7 +549,13 @@ def harvest_observations(
     return receipt, warnings
 
 
-def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summary: IngestRunSummaryLike | None = None) -> int:
+def _insert_observation(
+    conn: sqlite3.Connection,
+    obs: Dict[str, Any],
+    run_summary: IngestRunSummaryLike | None = None,
+    *,
+    taxonomy_enabled: bool | None = None,
+) -> int:
     ts = obs.get("ts") or _utcnow_iso()
 
     kind = obs.get("kind")
@@ -556,6 +606,18 @@ def _insert_observation(conn: sqlite3.Connection, obs: Dict[str, Any], run_summa
     extras = {k: v for k, v in obs.items() if k not in known_keys}
     if extras:
         detail_obj.update(extras)
+
+    if taxonomy_enabled is None:
+        taxonomy_enabled = _taxonomy_enabled()
+    if taxonomy_enabled:
+        from openclaw_mem.core.taxonomy import CLASSIFIABLE_KINDS, classify
+
+        if str(kind or "").strip().lower() in CLASSIFIABLE_KINDS:
+            kind, confidence, method = classify(summary, tool_name, kind)
+            detail_obj.setdefault(
+                "classification",
+                {"method": method, "confidence": confidence},
+            )
 
     # Sanitize any invalid unicode surrogate codepoints before binding to SQLite.
     detail_obj = _sanitize_jsonable_surrogates(detail_obj)

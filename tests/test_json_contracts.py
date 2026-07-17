@@ -372,6 +372,7 @@ class TestJsonContracts(unittest.TestCase):
                 "embeddings",
                 "lang_distribution",
                 "summary_en_coverage",
+                "lifecycle_state_distribution",
                 "recent",
             },
             "profile",

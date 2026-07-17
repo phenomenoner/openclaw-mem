@@ -90,6 +90,7 @@ def test_ensure_config_only_fills_missing_keys_and_is_idempotent(
         "vector_backend",
         "embed_provider",
         "scoring.profile",
+        "taxonomy.enabled",
     ]
     assert 'db_path = "keep.sqlite"' in first_content
     assert "# operator choice" in first_content

@@ -31,6 +31,7 @@ _ENV_KEYS = {
     "embed_provider": "OPENCLAW_MEM_EMBED_PROVIDER",
     "pack.budget_tokens": "OPENCLAW_MEM_PACK_BUDGET_TOKENS",
     "scoring.profile": "OPENCLAW_MEM_SCORING_PROFILE",
+    "taxonomy.enabled": "OPENCLAW_MEM_TAXONOMY_ENABLED",
 }
 
 
@@ -55,6 +56,7 @@ def built_in_defaults() -> Dict[str, Any]:
         "embed_provider": "openai",
         "pack": {"budget_tokens": 1200},
         "scoring": {"profile": "relevance"},
+        "taxonomy": {"enabled": True},
     }
 
 
@@ -102,6 +104,15 @@ def _nested_set(value: Dict[str, Any], dotted: str, item: Any) -> None:
 
 
 def _coerce(dotted: str, value: Any, fallback: Any) -> Any:
+    if dotted == "taxonomy.enabled":
+        if isinstance(value, bool):
+            return value
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return fallback
     if dotted == "pack.budget_tokens":
         try:
             parsed = int(value)
@@ -183,6 +194,7 @@ def ensure_config(
 
     target = Path(path).expanduser() if path is not None else default_config_path()
     existing = _read(target)
+    defaults = built_in_defaults()
     lines = target.read_text(encoding="utf-8").splitlines() if target.exists() else []
     added: list[str] = []
 
@@ -193,12 +205,22 @@ def ensure_config(
             added.append(key)
     _insert_before_first_table(lines, top_additions)
 
-    for table, key in (("pack", "budget_tokens"), ("scoring", "profile")):
+    for table, key in (
+        ("pack", "budget_tokens"),
+        ("scoring", "profile"),
+        ("taxonomy", "enabled"),
+    ):
         table_value = existing.get(table)
         if table in existing and not isinstance(table_value, Mapping):
             raise ConfigError(f"config key {table!r} must be a TOML table: {target}")
         if not isinstance(table_value, Mapping) or key not in table_value:
-            _append_table_keys(lines, table, [f"{key} = {_toml_value(values[table][key])}"])
+            requested_table = values.get(table)
+            requested = (
+                requested_table.get(key)
+                if isinstance(requested_table, Mapping) and key in requested_table
+                else defaults[table][key]
+            )
+            _append_table_keys(lines, table, [f"{key} = {_toml_value(requested)}"])
             added.append(f"{table}.{key}")
 
     changed = bool(added)
