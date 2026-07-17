@@ -69,6 +69,7 @@ def test_programmatic_pack_prevents_event_washout_and_disabled_matches_baseline(
             quota_preference_min=1,
             quota_decision_min=1,
             quota_event_max_ratio=0.4,
+            scoring_profile="relevance",
         )
         assert [item["id"] for item in disabled["items"]] == list(reversed(event_ids))[:3]
         assert "quota_hits" not in disabled
@@ -81,6 +82,7 @@ def test_programmatic_pack_prevents_event_washout_and_disabled_matches_baseline(
             quota_preference_min=1,
             quota_decision_min=1,
             quota_event_max_ratio=0.4,
+            scoring_profile="relevance",
         )
         selected_ids = [item["id"] for item in enabled["items"]]
         assert preference_id in selected_ids

@@ -110,6 +110,7 @@ class TestJsonContracts(unittest.TestCase):
                 "query_lang", "lane_hits", "fallback_triggered", "cross_lang_recovered",
                 "vector_backend_selection",
                 "lifecycle_write",
+                "scoring_profile",
             },
             "pack",
         )
@@ -441,6 +442,7 @@ class TestJsonContracts(unittest.TestCase):
                 "cross_lang_recovered",
                 "vector_backend_selection",
                 "lifecycle_write",
+                "scoring_profile",
             },
             "pack",
         )
@@ -518,7 +520,16 @@ class TestJsonContracts(unittest.TestCase):
             candidate = trace["candidates"][0]
             self._assert_exact_keys(
                 candidate,
-                {"id", "layer", "importance", "trust", "scores", "decision", "citations"},
+                {
+                    "id",
+                    "layer",
+                    "importance",
+                    "trust",
+                    "scores",
+                    "decision",
+                    "citations",
+                    "score_components",
+                },
                 "pack.trace.candidates[0]",
             )
             self._assert_exact_keys(
@@ -667,6 +678,7 @@ class TestJsonContracts(unittest.TestCase):
                 "policy_surface", "vector_backend", "query_lang", "lane_hits",
                 "fallback_triggered", "cross_lang_recovered", "vector_backend_selection",
                 "lifecycle_write",
+                "scoring_profile",
             },
             "pack.trust_policy",
         )

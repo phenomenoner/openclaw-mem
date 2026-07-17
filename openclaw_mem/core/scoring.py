@@ -182,7 +182,11 @@ def score_results(
         }
         for row in rows
     }
+    # Recency half-lives are measured in days.  A UTC-day reference keeps
+    # receipts deterministic across equivalent CLI/MCP calls without changing
+    # any meaningful decay boundary.
     reference_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    reference_time = reference_time.replace(hour=0, minute=0, second=0, microsecond=0)
     scored: list[tuple[float, int, dict[str, Any]]] = []
     for index, item in enumerate(items):
         row_id = int(item.get("id") or -1)

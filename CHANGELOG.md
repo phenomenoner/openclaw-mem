@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Make composite retrieval scoring the default after the 50-case golden gate
+  held R@5 at 1.000 and improved MRR from 0.740 to 0.990; the explicit
+  `relevance` profile remains available for compatibility and diagnostics.
 - Move stable DB, records, episodic, search, pack, embedding, privacy, and
   vector-index behavior behind output-free core APIs; keep CLI and MCP
   compatibility adapters at their existing public import paths.

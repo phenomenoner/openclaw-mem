@@ -68,7 +68,7 @@ def built_in_defaults() -> Dict[str, Any]:
         "embed_provider": "openai",
         "pack": {"budget_tokens": 1200},
         "scoring": {
-            "profile": "relevance",
+            "profile": "composite",
             "relevance": {"enabled": True},
             "importance": {"enabled": True},
             "recency": {"enabled": True},

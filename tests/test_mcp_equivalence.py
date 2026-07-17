@@ -70,30 +70,36 @@ def _seed(conn) -> None:
 
 
 def test_mem_recall_is_deeply_equivalent_to_cli_json() -> None:
-    conn = _connect(":memory:")
+    cli_conn = _connect(":memory:")
+    mcp_conn = _connect(":memory:")
     try:
-        _seed(conn)
-        cli = _invoke_cli_json(conn, ["recall", "contract", "--mode", "lexical", "--limit", "5"])
-        mcp = _mcp_payload(conn, "mem_recall", {"query": "contract", "mode": "lexical", "limit": 5})
+        _seed(cli_conn)
+        _seed(mcp_conn)
+        cli = _invoke_cli_json(cli_conn, ["recall", "contract", "--mode", "lexical", "--limit", "5"])
+        mcp = _mcp_payload(mcp_conn, "mem_recall", {"query": "contract", "mode": "lexical", "limit": 5})
         assert _without_transport_and_timing(mcp) == _without_transport_and_timing(cli)
     finally:
-        conn.close()
+        cli_conn.close()
+        mcp_conn.close()
 
 
 def test_mem_pack_is_deeply_equivalent_to_cli_json() -> None:
-    conn = _connect(":memory:")
+    cli_conn = _connect(":memory:")
+    mcp_conn = _connect(":memory:")
     try:
-        _seed(conn)
+        _seed(cli_conn)
+        _seed(mcp_conn)
         argv = ["pack", "--query", "ContextPack evidence", "--limit", "5", "--budget-tokens", "300"]
-        cli = _invoke_cli_json(conn, argv)
+        cli = _invoke_cli_json(cli_conn, argv)
         mcp = _mcp_payload(
-            conn,
+            mcp_conn,
             "mem_pack",
             {"query": "ContextPack evidence", "limit": 5, "budgetTokens": 300},
         )
         assert _without_transport_and_timing(mcp) == _without_transport_and_timing(cli)
     finally:
-        conn.close()
+        cli_conn.close()
+        mcp_conn.close()
 
 
 def test_graph_read_tools_wrap_existing_query_engines(tmp_path: Path) -> None:
