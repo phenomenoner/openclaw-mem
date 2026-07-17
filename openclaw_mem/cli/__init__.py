@@ -86,6 +86,7 @@ from openclaw_mem.core.lifecycle import (
 )
 from openclaw_mem.core.curation import rollback_optimize_assist
 from openclaw_mem.core.taxonomy import CANONICAL_KINDS, backfill_kinds
+from openclaw_mem.core.quotas import apply_soft_quotas, finalize_quota_hits
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -1773,6 +1774,12 @@ def cmd_init(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "pack": {"budget_tokens": int(resolved["pack"]["budget_tokens"])},
         "scoring": {"profile": resolved["scoring"]["profile"]},
         "taxonomy": {"enabled": bool(resolved["taxonomy"]["enabled"])},
+        "quota": {
+            "enabled": bool(resolved["quota"]["enabled"]),
+            "preference": {"min": int(resolved["quota"]["preference"]["min"])},
+            "decision": {"min": int(resolved["quota"]["decision"]["min"])},
+            "event": {"max_ratio": float(resolved["quota"]["event"]["max_ratio"])},
+        },
     }
     try:
         config_receipt = core_config.ensure_config(values)
@@ -10786,6 +10793,23 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     reserved_tail_slots = min(limit, tail_requested_count) if reserved_tail_budget > 0 else 0
     primary_budget_tokens = max(0, budget_tokens - reserved_tail_budget)
     primary_item_limit = max(0, limit - reserved_tail_slots)
+    quota_enabled = bool(getattr(args, "quota_enabled", True))
+    if quota_enabled:
+        for candidate in memory_candidates:
+            trust_decision = trust_policy_decisions.get(str(candidate.get("recordRef") or ""))
+            candidate["_quota_eligible"] = bool(candidate.get("row")) and bool(candidate.get("text")) and (
+                trust_policy_mode == "off"
+                or trust_decision is None
+                or bool(trust_decision.get("included", False))
+            )
+    memory_candidates, quota_hits = apply_soft_quotas(
+        memory_candidates,
+        limit=primary_item_limit,
+        enabled=quota_enabled,
+        preference_min=int(getattr(args, "quota_preference_min", 1) or 0),
+        decision_min=int(getattr(args, "quota_decision_min", 1) or 0),
+        event_max_ratio=float(getattr(args, "quota_event_max_ratio", 0.4)),
+    )
 
     selected_items: List[Dict[str, Any]] = []
     citations: List[Dict[str, Any]] = []
@@ -10821,6 +10845,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             reasons.append("missing_summary")
         elif not trust_allowed:
             reasons.append(str(trust_decision.get("reason") or "trust_quarantined_excluded") if trust_decision is not None else "trust_quarantined_excluded")
+        elif bool(candidate.get("quota_capped")):
+            reasons.append("quota_event_capped")
         elif selected_memory_count >= primary_item_limit:
             reasons.append("max_items_reached")
         elif primary_budget_tokens <= 0:
@@ -10905,6 +10931,11 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                 ),
             )
         )
+
+    quota_hits = finalize_quota_hits(
+        quota_hits,
+        selected_refs=[str(item.get("recordRef") or "") for item in selected_items],
+    )
 
     used_tail_tokens = 0
     selected_tail_count = 0
@@ -11311,6 +11342,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             extensions=trace_extensions,
         )
         payload["trace"] = pack_trace_v1.to_dict(trace)
+        if quota_enabled:
+            payload["trace"]["quota_hits"] = quota_hits
 
     if bool(args.json):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -20540,6 +20573,7 @@ def build_parser() -> argparse.ArgumentParser:
     configured_scope = str(resolved_config["default_scope"] or "") or None
     configured_vector_backend = str(resolved_config["vector_backend"])
     configured_pack_budget = int(resolved_config["pack"]["budget_tokens"])
+    configured_quota = resolved_config["quota"]
     epilog = (
         "Examples:\n"
         "  # Observation store\n"
@@ -21660,7 +21694,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--graph-latency-hard-ms", type=int, default=300, help="Hard latency threshold for auto graph composition (default: 300)")
 
     sp.add_argument("--trace", action="store_true", help="Include redaction-safe retrieval trace (`openclaw-mem.pack.trace.v1`) with include/exclude decisions")
-    sp.set_defaults(func=cmd_pack)
+    sp.set_defaults(
+        func=cmd_pack,
+        quota_enabled=bool(configured_quota["enabled"]),
+        quota_preference_min=int(configured_quota["preference"]["min"]),
+        quota_decision_min=int(configured_quota["decision"]["min"]),
+        quota_event_max_ratio=float(configured_quota["event"]["max_ratio"]),
+    )
 
     sp = sub.add_parser("pack-artifacts-observe", help="Summarize Pack artifact receipts and strategy health")
     sp.add_argument("--receipts-dir", required=True, help="Directory containing Pack artifact JSONL receipts")

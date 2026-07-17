@@ -71,6 +71,31 @@ def test_invalid_env_values_fall_back_without_corrupting_config(
     assert resolved["pack"]["budget_tokens"] == 1200
 
 
+def test_quota_config_nested_values_and_environment_priority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_config_env(monkeypatch)
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[quota]\nenabled = false\n"
+        "[quota.preference]\nmin = 2\n"
+        "[quota.decision]\nmin = 3\n"
+        "[quota.event]\nmax_ratio = 0.25\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCLAW_MEM_QUOTA_ENABLED", "true")
+    monkeypatch.setenv("OPENCLAW_MEM_QUOTA_PREFERENCE_MIN", "4")
+
+    resolved = config.resolve_config(path)
+
+    assert resolved["quota"] == {
+        "enabled": True,
+        "preference": {"min": 4},
+        "decision": {"min": 3},
+        "event": {"max_ratio": 0.25},
+    }
+
+
 def test_ensure_config_only_fills_missing_keys_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
@@ -91,6 +116,10 @@ def test_ensure_config_only_fills_missing_keys_and_is_idempotent(
         "embed_provider",
         "scoring.profile",
         "taxonomy.enabled",
+        "quota.enabled",
+        "quota.preference.min",
+        "quota.decision.min",
+        "quota.event.max_ratio",
     ]
     assert 'db_path = "keep.sqlite"' in first_content
     assert "# operator choice" in first_content

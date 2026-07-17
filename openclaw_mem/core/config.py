@@ -32,6 +32,10 @@ _ENV_KEYS = {
     "pack.budget_tokens": "OPENCLAW_MEM_PACK_BUDGET_TOKENS",
     "scoring.profile": "OPENCLAW_MEM_SCORING_PROFILE",
     "taxonomy.enabled": "OPENCLAW_MEM_TAXONOMY_ENABLED",
+    "quota.enabled": "OPENCLAW_MEM_QUOTA_ENABLED",
+    "quota.preference.min": "OPENCLAW_MEM_QUOTA_PREFERENCE_MIN",
+    "quota.decision.min": "OPENCLAW_MEM_QUOTA_DECISION_MIN",
+    "quota.event.max_ratio": "OPENCLAW_MEM_QUOTA_EVENT_MAX_RATIO",
 }
 
 
@@ -57,6 +61,12 @@ def built_in_defaults() -> Dict[str, Any]:
         "pack": {"budget_tokens": 1200},
         "scoring": {"profile": "relevance"},
         "taxonomy": {"enabled": True},
+        "quota": {
+            "enabled": True,
+            "preference": {"min": 1},
+            "decision": {"min": 1},
+            "event": {"max_ratio": 0.4},
+        },
     }
 
 
@@ -104,7 +114,7 @@ def _nested_set(value: Dict[str, Any], dotted: str, item: Any) -> None:
 
 
 def _coerce(dotted: str, value: Any, fallback: Any) -> Any:
-    if dotted == "taxonomy.enabled":
+    if dotted in {"taxonomy.enabled", "quota.enabled"}:
         if isinstance(value, bool):
             return value
         normalized = str(value).strip().lower()
@@ -113,6 +123,18 @@ def _coerce(dotted: str, value: Any, fallback: Any) -> Any:
         if normalized in {"0", "false", "no", "off"}:
             return False
         return fallback
+    if dotted in {"quota.preference.min", "quota.decision.min"}:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return fallback
+        return parsed if parsed >= 0 else fallback
+    if dotted == "quota.event.max_ratio":
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        return parsed if 0.0 <= parsed <= 1.0 else fallback
     if dotted == "pack.budget_tokens":
         try:
             parsed = int(value)
@@ -151,7 +173,7 @@ def resolve_config(path: Path | str | None = None) -> Dict[str, Any]:
 def _toml_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, int):
+    if isinstance(value, (int, float)):
         return str(value)
     return json.dumps(str(value), ensure_ascii=False)
 
@@ -209,17 +231,22 @@ def ensure_config(
         ("pack", "budget_tokens"),
         ("scoring", "profile"),
         ("taxonomy", "enabled"),
+        ("quota", "enabled"),
+        ("quota.preference", "min"),
+        ("quota.decision", "min"),
+        ("quota.event", "max_ratio"),
     ):
-        table_value = existing.get(table)
-        if table in existing and not isinstance(table_value, Mapping):
+        root = table.split(".", 1)[0]
+        root_value = existing.get(root)
+        if root in existing and not isinstance(root_value, Mapping):
+            raise ConfigError(f"config key {root!r} must be a TOML table: {target}")
+        table_value = _nested_get(existing, table)
+        if table_value is not None and not isinstance(table_value, Mapping):
             raise ConfigError(f"config key {table!r} must be a TOML table: {target}")
         if not isinstance(table_value, Mapping) or key not in table_value:
-            requested_table = values.get(table)
-            requested = (
-                requested_table.get(key)
-                if isinstance(requested_table, Mapping) and key in requested_table
-                else defaults[table][key]
-            )
+            requested = _nested_get(values, f"{table}.{key}")
+            if requested is None:
+                requested = _nested_get(defaults, f"{table}.{key}")
             _append_table_keys(lines, table, [f"{key} = {_toml_value(requested)}"])
             added.append(f"{table}.{key}")
 

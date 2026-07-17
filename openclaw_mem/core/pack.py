@@ -12,6 +12,7 @@ from openclaw_mem import context_pack_v1
 from openclaw_mem.core.embeddings import OpenAIEmbeddingsClient, get_api_key
 from openclaw_mem.core.search import hybrid_search, lexical_search, vector_search
 from openclaw_mem.core.vector_index import create_vector_index
+from openclaw_mem.core.quotas import apply_soft_quotas, finalize_quota_hits
 
 
 def _utcnow_iso() -> str:
@@ -51,6 +52,10 @@ def build_pack(
     base_url: Optional[str] = None,
     vector_backend: str = "auto",
     include_archived: bool = False,
+    quota_enabled: bool | None = None,
+    quota_preference_min: int | None = None,
+    quota_decision_min: int | None = None,
+    quota_event_max_ratio: float | None = None,
 ) -> Dict[str, Any]:
     query_text = str(query or "").strip()
     if not query_text:
@@ -150,6 +155,37 @@ def build_pack(
             -int(item.get("id") or 0),
         )
     )
+    for candidate in candidates:
+        row_id = int(candidate["id"])
+        detail = detail_map.get(row_id, {})
+        candidate["_quota_eligible"] = bool(candidate_text(candidate, detail)) and not bool(
+            detail.get("quarantined") or detail.get("quarantine")
+        )
+    if (
+        quota_enabled is None
+        or quota_preference_min is None
+        or quota_decision_min is None
+        or quota_event_max_ratio is None
+    ):
+        from openclaw_mem.core.config import resolve_config
+
+        quota_config = resolve_config()["quota"]
+        if quota_enabled is None:
+            quota_enabled = bool(quota_config["enabled"])
+        if quota_preference_min is None:
+            quota_preference_min = int(quota_config["preference"]["min"])
+        if quota_decision_min is None:
+            quota_decision_min = int(quota_config["decision"]["min"])
+        if quota_event_max_ratio is None:
+            quota_event_max_ratio = float(quota_config["event"]["max_ratio"])
+    candidates, quota_hits = apply_soft_quotas(
+        candidates,
+        limit=bounded_limit,
+        enabled=bool(quota_enabled),
+        preference_min=int(quota_preference_min),
+        decision_min=int(quota_decision_min),
+        event_max_ratio=float(quota_event_max_ratio),
+    )
     selected_items: List[Dict[str, Any]] = []
     citations: List[Dict[str, Any]] = []
     context_items: List[context_pack_v1.ContextPackV1Item] = []
@@ -159,6 +195,8 @@ def build_pack(
             break
         row_id = int(candidate["id"])
         detail = detail_map.get(row_id, {})
+        if bool(candidate.get("quota_capped")):
+            continue
         text = candidate_text(candidate, detail)
         if not text:
             continue
@@ -194,6 +232,10 @@ def build_pack(
             )
         )
     bundle_text = "\n".join(f"- [{item['recordRef']}] {item['summary']}" for item in selected_items)
+    quota_hits = finalize_quota_hits(
+        quota_hits,
+        selected_refs=[str(item.get("recordRef") or "") for item in selected_items],
+    )
     context_pack = context_pack_v1.ContextPackV1(
         schema=context_pack_v1.CONTEXT_PACK_V1_SCHEMA,
         meta=context_pack_v1.ContextPackV1Meta(
@@ -213,7 +255,7 @@ def build_pack(
             ]
         ),
     )
-    return {
+    payload = {
         "bundle_text": bundle_text,
         "items": selected_items,
         "citations": citations,
@@ -226,3 +268,6 @@ def build_pack(
         },
         "vector_backend": actual_vector_backend,
     }
+    if bool(quota_enabled):
+        payload["quota_hits"] = quota_hits
+    return payload
