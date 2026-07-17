@@ -24,6 +24,12 @@ def search(
     limit: int = 20,
     scope: str | None = None,
     include_archived: bool = False,
+    scoring_profile: str = "relevance",
+    scoring_relevance_enabled: bool = True,
+    scoring_importance_enabled: bool = True,
+    scoring_recency_enabled: bool = True,
+    scoring_use_enabled: bool = True,
+    scoring_state_enabled: bool = True,
 ) -> Any:
     return lexical_search(
         conn,
@@ -31,6 +37,12 @@ def search(
         limit=limit,
         scope=scope,
         include_archived=include_archived,
+        scoring_profile=scoring_profile,
+        scoring_relevance_enabled=scoring_relevance_enabled,
+        scoring_importance_enabled=scoring_importance_enabled,
+        scoring_recency_enabled=scoring_recency_enabled,
+        scoring_use_enabled=scoring_use_enabled,
+        scoring_state_enabled=scoring_state_enabled,
     )
 
 

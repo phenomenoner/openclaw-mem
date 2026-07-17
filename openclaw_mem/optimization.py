@@ -2120,6 +2120,9 @@ def build_evolution_review(
             "safe_for_auto_apply": auto_apply_eligible,
         }
     candidate_obs_ids: Set[int] = set()
+    for raw in list(importance_drift.get("score_label_mismatch_items") or [])[:top]:
+        if isinstance(raw, dict) and int(raw.get("id") or 0) > 0:
+            candidate_obs_ids.add(int(raw["id"]))
     for raw in list(stale.get("items") or [])[:top]:
         if not isinstance(raw, dict):
             continue

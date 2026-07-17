@@ -13,6 +13,7 @@ from openclaw_mem.core.embeddings import OpenAIEmbeddingsClient, get_api_key
 from openclaw_mem.core.search import hybrid_search, lexical_search, vector_search
 from openclaw_mem.core.vector_index import create_vector_index
 from openclaw_mem.core.quotas import apply_soft_quotas, finalize_quota_hits
+from openclaw_mem.core.scoring import scoring_kwargs
 
 
 def _utcnow_iso() -> str:
@@ -56,12 +57,49 @@ def build_pack(
     quota_preference_min: int | None = None,
     quota_decision_min: int | None = None,
     quota_event_max_ratio: float | None = None,
+    scoring_profile: str | None = None,
+    scoring_relevance_enabled: bool | None = None,
+    scoring_importance_enabled: bool | None = None,
+    scoring_recency_enabled: bool | None = None,
+    scoring_use_enabled: bool | None = None,
+    scoring_state_enabled: bool | None = None,
 ) -> Dict[str, Any]:
     query_text = str(query or "").strip()
     if not query_text:
         raise ValueError("empty query")
     bounded_limit = max(1, int(limit))
     bounded_budget = max(1, int(budget_tokens))
+    if (
+        scoring_profile is None
+        or scoring_relevance_enabled is None
+        or scoring_importance_enabled is None
+        or scoring_recency_enabled is None
+        or scoring_use_enabled is None
+        or scoring_state_enabled is None
+    ):
+        from openclaw_mem.core.config import resolve_config
+
+        configured_scoring = scoring_kwargs(resolve_config())
+        if scoring_profile is None:
+            scoring_profile = str(configured_scoring["scoring_profile"])
+        if scoring_relevance_enabled is None:
+            scoring_relevance_enabled = bool(configured_scoring["scoring_relevance_enabled"])
+        if scoring_importance_enabled is None:
+            scoring_importance_enabled = bool(configured_scoring["scoring_importance_enabled"])
+        if scoring_recency_enabled is None:
+            scoring_recency_enabled = bool(configured_scoring["scoring_recency_enabled"])
+        if scoring_use_enabled is None:
+            scoring_use_enabled = bool(configured_scoring["scoring_use_enabled"])
+        if scoring_state_enabled is None:
+            scoring_state_enabled = bool(configured_scoring["scoring_state_enabled"])
+    scoring_options = {
+        "scoring_profile": scoring_profile,
+        "scoring_relevance_enabled": scoring_relevance_enabled,
+        "scoring_importance_enabled": scoring_importance_enabled,
+        "scoring_recency_enabled": scoring_recency_enabled,
+        "scoring_use_enabled": scoring_use_enabled,
+        "scoring_state_enabled": scoring_state_enabled,
+    }
     candidate_limit = max(bounded_limit * 3, bounded_limit + 8)
     candidates = lexical_search(
         conn,
@@ -69,6 +107,7 @@ def build_pack(
         limit=candidate_limit,
         scope=scope,
         include_archived=include_archived,
+        **scoring_options,
     )
     model_name = str(model or defaults.embed_model())
     vector_ids: List[int] = []
@@ -90,6 +129,7 @@ def build_pack(
                 limit=candidate_limit,
                 vector_backend=requested_vector_backend,
                 include_archived=include_archived,
+                **scoring_options,
             )
             if vector_rows:
                 actual_vector_backend = str(vector_rows[0].get("vector_backend") or actual_vector_backend)
@@ -103,6 +143,7 @@ def build_pack(
                     table="observation_embeddings_en",
                     vector_backend=requested_vector_backend,
                     include_archived=include_archived,
+                    **scoring_options,
                 )
                 if not english_rows:
                     english_rows = vector_search(
@@ -112,6 +153,7 @@ def build_pack(
                         limit=candidate_limit,
                         vector_backend=requested_vector_backend,
                         include_archived=include_archived,
+                        **scoring_options,
                     )
                 vector_en_ids = [int(item["id"]) for item in english_rows]
             candidates = hybrid_search(
@@ -121,6 +163,7 @@ def build_pack(
                 vector_ids=vector_ids,
                 vector_en_ids=vector_en_ids,
                 include_archived=include_archived,
+                **scoring_options,
             )
         except Exception:
             # Embedding/network failures are fail-open to the lexical lane.
@@ -146,15 +189,25 @@ def build_pack(
             label = str(detail.get("importance_label") or importance or "unknown").strip().lower()
         return {"high": "must_remember", "medium": "nice_to_have", "low": "ignore"}.get(label, label)
 
-    candidates.sort(
-        key=lambda item: (
-            0 if item.get("tool_name") == "graph.synth-compile" else 1,
-            trust_rank.get(str(detail_map.get(int(item["id"]), {}).get("trust") or "unknown"), 99),
-            importance_rank.get(importance_label(detail_map.get(int(item["id"]), {})), 99),
-            -float(item.get("rrf_score") or 0.0),
-            -int(item.get("id") or 0),
+    if scoring_profile == "composite":
+        candidates.sort(
+            key=lambda item: (
+                0 if item.get("tool_name") == "graph.synth-compile" else 1,
+                trust_rank.get(str(detail_map.get(int(item["id"]), {}).get("trust") or "unknown"), 99),
+                -float(item.get("final_score") or 0.0),
+                -int(item.get("id") or 0),
+            )
         )
-    )
+    else:
+        candidates.sort(
+            key=lambda item: (
+                0 if item.get("tool_name") == "graph.synth-compile" else 1,
+                trust_rank.get(str(detail_map.get(int(item["id"]), {}).get("trust") or "unknown"), 99),
+                importance_rank.get(importance_label(detail_map.get(int(item["id"]), {})), 99),
+                -float(item.get("rrf_score") or 0.0),
+                -int(item.get("id") or 0),
+            )
+        )
     for candidate in candidates:
         row_id = int(candidate["id"])
         detail = detail_map.get(row_id, {})
@@ -209,8 +262,7 @@ def build_pack(
             continue
         importance = importance_label(detail)
         used_tokens += token_estimate
-        selected_items.append(
-            {
+        selected_item = {
                 "recordRef": record_ref,
                 "layer": "L1",
                 "id": row_id,
@@ -218,7 +270,10 @@ def build_pack(
                 "kind": candidate.get("kind"),
                 "lang": candidate.get("lang"),
             }
-        )
+        if scoring_profile == "composite":
+            selected_item["final_score"] = float(candidate.get("final_score") or 0.0)
+            selected_item["score_components"] = dict(candidate.get("score_components") or {})
+        selected_items.append(selected_item)
         citations.append({"recordRef": record_ref, "url": None})
         context_items.append(
             context_pack_v1.ContextPackV1Item(
@@ -270,4 +325,6 @@ def build_pack(
     }
     if bool(quota_enabled):
         payload["quota_hits"] = quota_hits
+    if scoring_profile == "composite":
+        payload["scoring_profile"] = "composite"
     return payload

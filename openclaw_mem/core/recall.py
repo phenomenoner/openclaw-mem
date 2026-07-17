@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 from openclaw_mem import defaults
 from openclaw_mem.core.embeddings import (
@@ -75,6 +75,7 @@ def _lexical(
     limit: int,
     scope: Optional[str],
     include_archived: bool,
+    scoring_options: Mapping[str, Any],
 ) -> tuple[list[Dict[str, Any]], Dict[str, Any]]:
     receipt = lexical_search_with_receipt(
         conn,
@@ -82,6 +83,7 @@ def _lexical(
         limit=limit,
         scope=scope,
         include_archived=include_archived,
+        **dict(scoring_options),
     )
     results = list(receipt.pop("results"))
     return results, receipt
@@ -101,6 +103,12 @@ def recall(
     graph_readiness_state: Optional[str | Path] = None,
     graph_stale_after_days: int = 30,
     include_archived: bool = False,
+    scoring_profile: str = "relevance",
+    scoring_relevance_enabled: bool = True,
+    scoring_importance_enabled: bool = True,
+    scoring_recency_enabled: bool = True,
+    scoring_use_enabled: bool = True,
+    scoring_state_enabled: bool = True,
     provider_factory: Optional[Callable[..., EmbeddingProvider]] = None,
 ) -> Dict[str, Any]:
     """Route recall without throwing for an unavailable optional lane."""
@@ -112,6 +120,14 @@ def recall(
     if requested not in RECALL_MODES:
         raise ValueError(f"unsupported recall mode: {requested}")
     bounded_limit = max(1, int(limit))
+    scoring_options = {
+        "scoring_profile": scoring_profile,
+        "scoring_relevance_enabled": scoring_relevance_enabled,
+        "scoring_importance_enabled": scoring_importance_enabled,
+        "scoring_recency_enabled": scoring_recency_enabled,
+        "scoring_use_enabled": scoring_use_enabled,
+        "scoring_state_enabled": scoring_state_enabled,
+    }
     models = _stored_embedding_models(conn)
     has_vectors = bool(models)
     provider_hint = embedding_provider_name()
@@ -140,6 +156,7 @@ def recall(
             limit=bounded_limit,
             scope=scope,
             include_archived=include_archived,
+            scoring_options=scoring_options,
         )
         graph_receipt = (
             graph_search_candidates(
@@ -186,6 +203,7 @@ def recall(
             limit=bounded_limit,
             scope=scope,
             include_archived=include_archived,
+            scoring_options=scoring_options,
         )
         return {
             "kind": RECALL_KIND,
@@ -205,6 +223,7 @@ def recall(
             limit=bounded_limit,
             vector_ids=[],
             include_archived=include_archived,
+            **scoring_options,
         )
         results = _scope_filter(conn, list(hybrid_receipt.pop("results")), scope)
         return {
@@ -245,6 +264,7 @@ def recall(
             limit=bounded_limit,
             scope=scope,
             include_archived=include_archived,
+            scoring_options=scoring_options,
         )
         return {
             "kind": RECALL_KIND,
@@ -266,6 +286,7 @@ def recall(
             limit=max(bounded_limit * 4, bounded_limit),
             vector_backend=vector_backend,
             include_archived=include_archived,
+            **scoring_options,
         )
     except Exception as exc:
         vector_results = []
@@ -278,6 +299,7 @@ def recall(
             limit=bounded_limit,
             scope=scope,
             include_archived=include_archived,
+            scoring_options=scoring_options,
         )
         return {
             "kind": RECALL_KIND,
@@ -309,6 +331,7 @@ def recall(
             limit=bounded_limit,
             vector_ids=[int(item["id"]) for item in vector_results],
             include_archived=include_archived,
+            **scoring_options,
         )
     except Exception as exc:
         results, lexical_receipt = _lexical(
@@ -317,6 +340,7 @@ def recall(
             limit=bounded_limit,
             scope=scope,
             include_archived=include_archived,
+            scoring_options=scoring_options,
         )
         return {
             "kind": RECALL_KIND,

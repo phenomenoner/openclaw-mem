@@ -31,6 +31,11 @@ _ENV_KEYS = {
     "embed_provider": "OPENCLAW_MEM_EMBED_PROVIDER",
     "pack.budget_tokens": "OPENCLAW_MEM_PACK_BUDGET_TOKENS",
     "scoring.profile": "OPENCLAW_MEM_SCORING_PROFILE",
+    "scoring.relevance.enabled": "OPENCLAW_MEM_SCORING_RELEVANCE_ENABLED",
+    "scoring.importance.enabled": "OPENCLAW_MEM_SCORING_IMPORTANCE_ENABLED",
+    "scoring.recency.enabled": "OPENCLAW_MEM_SCORING_RECENCY_ENABLED",
+    "scoring.use.enabled": "OPENCLAW_MEM_SCORING_USE_ENABLED",
+    "scoring.state.enabled": "OPENCLAW_MEM_SCORING_STATE_ENABLED",
     "taxonomy.enabled": "OPENCLAW_MEM_TAXONOMY_ENABLED",
     "quota.enabled": "OPENCLAW_MEM_QUOTA_ENABLED",
     "quota.preference.min": "OPENCLAW_MEM_QUOTA_PREFERENCE_MIN",
@@ -59,7 +64,14 @@ def built_in_defaults() -> Dict[str, Any]:
         "vector_backend": "auto",
         "embed_provider": "openai",
         "pack": {"budget_tokens": 1200},
-        "scoring": {"profile": "relevance"},
+        "scoring": {
+            "profile": "relevance",
+            "relevance": {"enabled": True},
+            "importance": {"enabled": True},
+            "recency": {"enabled": True},
+            "use": {"enabled": True},
+            "state": {"enabled": True},
+        },
         "taxonomy": {"enabled": True},
         "quota": {
             "enabled": True,
@@ -114,7 +126,15 @@ def _nested_set(value: Dict[str, Any], dotted: str, item: Any) -> None:
 
 
 def _coerce(dotted: str, value: Any, fallback: Any) -> Any:
-    if dotted in {"taxonomy.enabled", "quota.enabled"}:
+    if dotted in {
+        "taxonomy.enabled",
+        "quota.enabled",
+        "scoring.relevance.enabled",
+        "scoring.importance.enabled",
+        "scoring.recency.enabled",
+        "scoring.use.enabled",
+        "scoring.state.enabled",
+    }:
         if isinstance(value, bool):
             return value
         normalized = str(value).strip().lower()
@@ -147,6 +167,8 @@ def _coerce(dotted: str, value: Any, fallback: Any) -> Any:
     if dotted == "vector_backend" and text not in {"auto", "python", "numpy", "sqlite-vec"}:
         return fallback
     if dotted == "embed_provider" and text not in {"openai", "local"}:
+        return fallback
+    if dotted == "scoring.profile" and text not in {"relevance", "composite"}:
         return fallback
     return text
 
@@ -230,6 +252,11 @@ def ensure_config(
     for table, key in (
         ("pack", "budget_tokens"),
         ("scoring", "profile"),
+        ("scoring.relevance", "enabled"),
+        ("scoring.importance", "enabled"),
+        ("scoring.recency", "enabled"),
+        ("scoring.use", "enabled"),
+        ("scoring.state", "enabled"),
         ("taxonomy", "enabled"),
         ("quota", "enabled"),
         ("quota.preference", "min"),

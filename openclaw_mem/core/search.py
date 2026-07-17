@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Mapping, Optional
 from openclaw_mem.scope import normalize_scope_token
 from openclaw_mem.core.lifecycle import filter_retrieval_results
 from openclaw_mem.core.records import detect_lang
+from openclaw_mem.core.scoring import score_results
 from openclaw_mem.core.vector_index import create_vector_index
 from openclaw_mem.vector import rank_rrf
 
@@ -399,11 +400,27 @@ def lexical_search(
     limit: int = 20,
     scope: Optional[str] = None,
     include_archived: bool = False,
+    scoring_profile: str = "relevance",
+    scoring_relevance_enabled: bool = True,
+    scoring_importance_enabled: bool = True,
+    scoring_recency_enabled: bool = True,
+    scoring_use_enabled: bool = True,
+    scoring_state_enabled: bool = True,
 ) -> List[Dict[str, Any]]:
+    candidate_limit = max(1, int(limit)) * (4 if scoring_profile == "composite" else 1)
     results, _receipt = _lexical_search_impl(
-        conn, query, limit=limit, scope=scope, include_archived=include_archived
+        conn, query, limit=candidate_limit, scope=scope, include_archived=include_archived
     )
-    return results
+    return score_results(
+        conn,
+        results,
+        profile=scoring_profile,
+        relevance_enabled=scoring_relevance_enabled,
+        importance_enabled=scoring_importance_enabled,
+        recency_enabled=scoring_recency_enabled,
+        use_enabled=scoring_use_enabled,
+        state_enabled=scoring_state_enabled,
+    )[: max(1, int(limit))]
 
 
 def lexical_search_with_receipt(
@@ -413,10 +430,30 @@ def lexical_search_with_receipt(
     limit: int = 20,
     scope: Optional[str] = None,
     include_archived: bool = False,
+    scoring_profile: str = "relevance",
+    scoring_relevance_enabled: bool = True,
+    scoring_importance_enabled: bool = True,
+    scoring_recency_enabled: bool = True,
+    scoring_use_enabled: bool = True,
+    scoring_state_enabled: bool = True,
 ) -> Dict[str, Any]:
+    candidate_limit = max(1, int(limit)) * (4 if scoring_profile == "composite" else 1)
     results, receipt = _lexical_search_impl(
-        conn, query, limit=limit, scope=scope, include_archived=include_archived
+        conn, query, limit=candidate_limit, scope=scope, include_archived=include_archived
     )
+    results = score_results(
+        conn,
+        results,
+        profile=scoring_profile,
+        relevance_enabled=scoring_relevance_enabled,
+        importance_enabled=scoring_importance_enabled,
+        recency_enabled=scoring_recency_enabled,
+        use_enabled=scoring_use_enabled,
+        state_enabled=scoring_state_enabled,
+    )[: max(1, int(limit))]
+    receipt["result_count"] = len(results)
+    if scoring_profile == "composite":
+        receipt["scoring_profile"] = "composite"
     return {**receipt, "results": results}
 
 
@@ -429,6 +466,12 @@ def vector_search(
     table: str = "observation_embeddings",
     vector_backend: str = "auto",
     include_archived: bool = False,
+    scoring_profile: str = "relevance",
+    scoring_relevance_enabled: bool = True,
+    scoring_importance_enabled: bool = True,
+    scoring_recency_enabled: bool = True,
+    scoring_use_enabled: bool = True,
+    scoring_state_enabled: bool = True,
 ) -> List[Dict[str, Any]]:
     if table not in {"observation_embeddings", "observation_embeddings_en"}:
         raise ValueError("unsupported embeddings table")
@@ -437,7 +480,7 @@ def vector_search(
         conn,
         query_vector,
         model=model,
-        limit=max(1, int(limit)),
+        limit=max(1, int(limit)) * (4 if scoring_profile == "composite" else 1),
         table=table,
     )
     if not ranked:
@@ -455,9 +498,19 @@ def vector_search(
             item["score"] = float(score)
             item["vector_backend"] = index.name
             result.append(item)
-    return filter_retrieval_results(
+    visible = filter_retrieval_results(
         conn, result, include_archived=include_archived
     )
+    return score_results(
+        conn,
+        visible,
+        profile=scoring_profile,
+        relevance_enabled=scoring_relevance_enabled,
+        importance_enabled=scoring_importance_enabled,
+        recency_enabled=scoring_recency_enabled,
+        use_enabled=scoring_use_enabled,
+        state_enabled=scoring_state_enabled,
+    )[: max(1, int(limit))]
 
 
 def _hybrid_search_impl(
@@ -469,16 +522,23 @@ def _hybrid_search_impl(
     vector_en_ids: Optional[List[int]] = None,
     k: int = 60,
     include_archived: bool = False,
+    scoring_profile: str = "relevance",
+    scoring_relevance_enabled: bool = True,
+    scoring_importance_enabled: bool = True,
+    scoring_recency_enabled: bool = True,
+    scoring_use_enabled: bool = True,
+    scoring_state_enabled: bool = True,
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    candidate_limit = max(1, int(limit)) * (4 if scoring_profile == "composite" else 1)
     lexical_receipt = lexical_search_with_receipt(
         conn,
         query,
-        limit=max(1, int(limit)) * 2,
+        limit=candidate_limit * 2,
         include_archived=include_archived,
     )
     lexical = list(lexical_receipt.pop("results"))
     fts_ids = [int(item["id"]) for item in lexical]
-    ranked = rank_rrf([fts_ids, vector_ids or [], vector_en_ids or []], k=max(1, int(k)), limit=max(1, int(limit)))
+    ranked = rank_rrf([fts_ids, vector_ids or [], vector_en_ids or []], k=max(1, int(k)), limit=candidate_limit)
     if not ranked:
         return [], lexical_receipt
     lexical_map = {int(item["id"]): dict(item) for item in lexical}
@@ -508,11 +568,23 @@ def _hybrid_search_impl(
     result = filter_retrieval_results(
         conn, result, include_archived=include_archived
     )
+    result = score_results(
+        conn,
+        result,
+        profile=scoring_profile,
+        relevance_enabled=scoring_relevance_enabled,
+        importance_enabled=scoring_importance_enabled,
+        recency_enabled=scoring_recency_enabled,
+        use_enabled=scoring_use_enabled,
+        state_enabled=scoring_state_enabled,
+    )[: max(1, int(limit))]
     selected_ids = {int(item["id"]) for item in result}
     lane_hits = dict(lexical_receipt.get("lane_hits") or {})
     lane_hits["vector"] = len(selected_ids.intersection(vector_ids or []))
     lane_hits["vector_en"] = len(selected_ids.intersection(vector_en_ids or []))
     receipt = {**lexical_receipt, "lane_hits": lane_hits, "result_count": len(result)}
+    if scoring_profile == "composite":
+        receipt["scoring_profile"] = "composite"
     for item in result:
         item.update(
             {
@@ -537,6 +609,12 @@ def hybrid_search(
     vector_en_ids: Optional[List[int]] = None,
     k: int = 60,
     include_archived: bool = False,
+    scoring_profile: str = "relevance",
+    scoring_relevance_enabled: bool = True,
+    scoring_importance_enabled: bool = True,
+    scoring_recency_enabled: bool = True,
+    scoring_use_enabled: bool = True,
+    scoring_state_enabled: bool = True,
 ) -> List[Dict[str, Any]]:
     results, _receipt = _hybrid_search_impl(
         conn,
@@ -546,6 +624,12 @@ def hybrid_search(
         vector_en_ids=vector_en_ids,
         k=k,
         include_archived=include_archived,
+        scoring_profile=scoring_profile,
+        scoring_relevance_enabled=scoring_relevance_enabled,
+        scoring_importance_enabled=scoring_importance_enabled,
+        scoring_recency_enabled=scoring_recency_enabled,
+        scoring_use_enabled=scoring_use_enabled,
+        scoring_state_enabled=scoring_state_enabled,
     )
     return results
 
@@ -559,6 +643,12 @@ def hybrid_search_with_receipt(
     vector_en_ids: Optional[List[int]] = None,
     k: int = 60,
     include_archived: bool = False,
+    scoring_profile: str = "relevance",
+    scoring_relevance_enabled: bool = True,
+    scoring_importance_enabled: bool = True,
+    scoring_recency_enabled: bool = True,
+    scoring_use_enabled: bool = True,
+    scoring_state_enabled: bool = True,
 ) -> Dict[str, Any]:
     results, receipt = _hybrid_search_impl(
         conn,
@@ -568,5 +658,11 @@ def hybrid_search_with_receipt(
         vector_en_ids=vector_en_ids,
         k=k,
         include_archived=include_archived,
+        scoring_profile=scoring_profile,
+        scoring_relevance_enabled=scoring_relevance_enabled,
+        scoring_importance_enabled=scoring_importance_enabled,
+        scoring_recency_enabled=scoring_recency_enabled,
+        scoring_use_enabled=scoring_use_enabled,
+        scoring_state_enabled=scoring_state_enabled,
     )
     return {**receipt, "results": results}

@@ -283,3 +283,84 @@ def test_memory_rollback_is_atomic_when_any_target_drifted(tmp_path: Path) -> No
     assert first == after_values[0]
     assert second["value"] == 999
     conn.close()
+
+
+def test_importance_drift_scan_governor_apply_records_before_after(tmp_path: Path) -> None:
+    conn = _connect(":memory:")
+    observation_id = _insert_observation(
+        conn,
+        {
+            "kind": "fact",
+            "summary": "Importance drift calibration fixture",
+            "detail": {"importance": {"score": 0.92, "label": "ignore"}},
+        },
+    )
+    before = json.loads(
+        conn.execute(
+            "SELECT detail_json FROM observations WHERE id = ?", (observation_id,)
+        ).fetchone()["detail_json"]
+    )
+
+    scan = _run(conn, ["curate", "scan", "--target", "memory", "--top", "20"])
+    evolution = scan["inner"][1]["receipt"]
+    candidates = [
+        item
+        for item in evolution["items"]
+        if item.get("action") == "adjust_importance_score"
+        and item.get("target", {}).get("observationId") == observation_id
+    ]
+    assert candidates
+    assert evolution["importance_drift_policy"]["metrics"]["score_label_mismatch_count"] >= 1
+
+    recommendation_path = tmp_path / "importance-drift.json"
+    recommendation_path.write_text(json.dumps(evolution), encoding="utf-8")
+    reviewed = _run(
+        conn,
+        [
+            "curate",
+            "review",
+            "--target",
+            "memory",
+            "--from-file",
+            str(recommendation_path),
+            "--approve-importance",
+        ],
+    )
+    approved = [
+        item
+        for item in reviewed["inner"]["items"]
+        if item.get("target", {}).get("observationId") == observation_id
+        and item.get("decision") == "approved_for_apply"
+    ]
+    assert approved
+    governor_path = tmp_path / "importance-governor.json"
+    governor_path.write_text(json.dumps({**reviewed["inner"], "items": approved}), encoding="utf-8")
+
+    applied = _run(
+        conn,
+        [
+            "curate",
+            "apply",
+            "--target",
+            "memory",
+            "--from-file",
+            str(governor_path),
+            "--run-dir",
+            str(tmp_path / "assist"),
+        ],
+    )
+    rollback = json.loads(
+        Path(applied["inner"]["artifacts"]["rollback_ref"]).read_text(encoding="utf-8")
+    )
+    mutation = rollback["mutations"][0]
+    after = json.loads(
+        conn.execute(
+            "SELECT detail_json FROM observations WHERE id = ?", (observation_id,)
+        ).fetchone()["detail_json"]
+    )
+
+    assert applied["inner"]["applied_action_counts"]["adjust_importance_score"] == 1
+    assert mutation["before_detail_json"] == before
+    assert mutation["after_detail_json"] == after
+    assert after["importance"]["label"] == "must_remember"
+    conn.close()

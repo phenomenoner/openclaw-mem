@@ -87,6 +87,7 @@ from openclaw_mem.core.lifecycle import (
 from openclaw_mem.core.curation import rollback_optimize_assist
 from openclaw_mem.core.taxonomy import CANONICAL_KINDS, backfill_kinds
 from openclaw_mem.core.quotas import apply_soft_quotas, finalize_quota_hits
+from openclaw_mem.core.scoring import score_results, scoring_kwargs
 from openclaw_mem.artifact_sidecar import (
     fetch_artifact,
     parse_artifact_handle,
@@ -1772,7 +1773,14 @@ def cmd_init(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "vector_backend": resolved["vector_backend"],
         "embed_provider": resolved["embed_provider"],
         "pack": {"budget_tokens": int(resolved["pack"]["budget_tokens"])},
-        "scoring": {"profile": resolved["scoring"]["profile"]},
+        "scoring": {
+            "profile": resolved["scoring"]["profile"],
+            "relevance": {"enabled": bool(resolved["scoring"]["relevance"]["enabled"])},
+            "importance": {"enabled": bool(resolved["scoring"]["importance"]["enabled"])},
+            "recency": {"enabled": bool(resolved["scoring"]["recency"]["enabled"])},
+            "use": {"enabled": bool(resolved["scoring"]["use"]["enabled"])},
+            "state": {"enabled": bool(resolved["scoring"]["state"]["enabled"])},
+        },
         "taxonomy": {"enabled": bool(resolved["taxonomy"]["enabled"])},
         "quota": {
             "enabled": bool(resolved["quota"]["enabled"]),
@@ -6051,6 +6059,17 @@ def _retrieval_kpi_fields(receipt: Dict[str, Any]) -> Dict[str, Any]:
     return {key: receipt[key] for key in _RETRIEVAL_KPI_FIELDS if key in receipt}
 
 
+def _scoring_options_from_args(args: argparse.Namespace) -> Dict[str, Any]:
+    return {
+        "scoring_profile": str(getattr(args, "scoring_profile", "relevance") or "relevance"),
+        "scoring_relevance_enabled": bool(getattr(args, "scoring_relevance_enabled", True)),
+        "scoring_importance_enabled": bool(getattr(args, "scoring_importance_enabled", True)),
+        "scoring_recency_enabled": bool(getattr(args, "scoring_recency_enabled", True)),
+        "scoring_use_enabled": bool(getattr(args, "scoring_use_enabled", True)),
+        "scoring_state_enabled": bool(getattr(args, "scoring_state_enabled", True)),
+    }
+
+
 def cmd_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
     try:
         receipt = core_recall(
@@ -6066,6 +6085,7 @@ def cmd_recall(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             graph_readiness_state=getattr(args, "graph_readiness_state", None),
             graph_stale_after_days=int(getattr(args, "graph_stale_after_days", 30)),
             include_archived=bool(getattr(args, "include_archived", False)),
+            **_scoring_options_from_args(args),
         )
     except ValueError as exc:
         _emit_error(
@@ -6487,6 +6507,7 @@ def cmd_search(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         limit=max(1, int(args.limit)),
         scope=getattr(args, "scope", None),
         include_archived=bool(getattr(args, "include_archived", False)),
+        **_scoring_options_from_args(args),
     )
     rows = list(lexical_receipt.pop("results"))
     kpi_fields = _retrieval_kpi_fields(lexical_receipt)
@@ -8399,6 +8420,8 @@ def _hybrid_retrieve(
             "ordered_ids": [],
             "obs_map": {},
             "rrf_scores": {},
+            "score_components": {},
+            "final_scores": {},
             "fts_ids": fts_ids,
             "vec_ids": vec_ids,
             "vec_en_ids": vec_en_ids,
@@ -8425,6 +8448,35 @@ def _hybrid_retrieve(
     visible_ids = {int(item["id"]) for item in visible}
     ordered_ids = [rid for rid in ordered_ids if rid in visible_ids]
     obs_map = {rid: row for rid, row in obs_map.items() if rid in visible_ids}
+
+    scoring_options = _scoring_options_from_args(args)
+    scored_rows = score_results(
+        conn,
+        [
+            {**obs_map[rid], "rrf_score": float(rrf_scores.get(rid, 0.0))}
+            for rid in ordered_ids
+            if rid in obs_map
+        ],
+        profile=str(scoring_options["scoring_profile"]),
+        relevance_enabled=bool(scoring_options["scoring_relevance_enabled"]),
+        importance_enabled=bool(scoring_options["scoring_importance_enabled"]),
+        recency_enabled=bool(scoring_options["scoring_recency_enabled"]),
+        use_enabled=bool(scoring_options["scoring_use_enabled"]),
+        state_enabled=bool(scoring_options["scoring_state_enabled"]),
+    )
+    ordered_ids = [int(item["id"]) for item in scored_rows]
+    score_components_by_id = {
+        int(item["id"]): dict(item.get("score_components") or {})
+        for item in scored_rows
+        if item.get("score_components") is not None
+    }
+    final_scores = {
+        int(item["id"]): float(item.get("final_score") or 0.0)
+        for item in scored_rows
+        if item.get("final_score") is not None
+    }
+    if scoring_options["scoring_profile"] == "composite":
+        retrieval_receipt["scoring_profile"] = "composite"
 
     rerank_scores: Dict[int, float] = {}
     rerank_applied = False
@@ -8488,6 +8540,8 @@ def _hybrid_retrieve(
         "ordered_ids": ordered_ids,
         "obs_map": obs_map,
         "rrf_scores": rrf_scores,
+        "score_components": score_components_by_id,
+        "final_scores": final_scores,
         "fts_ids": fts_ids,
         "vec_ids": vec_ids,
         "vec_en_ids": vec_en_ids,
@@ -8607,6 +8661,9 @@ def cmd_hybrid(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
 
         record_ref = _graph_record_ref(rid)
         r["rrf_score"] = float(state["rrf_scores"].get(rid, 0.0))
+        if rid in state.get("score_components", {}):
+            r["score_components"] = dict(state["score_components"][rid])
+            r["final_score"] = float(state["final_scores"].get(rid, 0.0))
         r["vector_backend"] = state.get("vector_backend", "python")
         r["match"] = []
         if rid in state["fts_ids"]:
@@ -8948,6 +9005,13 @@ def _pack_policy_sort_key(candidate: Dict[str, Any]) -> Tuple[Any, ...]:
     matched_count = int(candidate.get("matched_count") or 0)
     ts_value = float(candidate.get("ts_value") or 0.0)
     original_index = int(candidate.get("original_index") or 0)
+    if candidate.get("score_components") is not None:
+        return (
+            0 if bool(candidate.get("is_graph_synthesis")) else 1,
+            int(_PACK_TRUST_RANK.get(trust, 99)),
+            -float(candidate.get("final_score") or 0.0),
+            original_index,
+        )
     return (
         0 if bool(candidate.get("is_graph_synthesis")) else 1,
         int(_PACK_TRUST_RANK.get(trust, 99)),
@@ -8986,6 +9050,8 @@ def _pack_build_memory_candidates(
                 "importance": importance_label,
                 "trust": trust_tier,
                 "rrf": float(state["rrf_scores"].get(rid, 0.0)),
+                "final_score": state.get("final_scores", {}).get(rid),
+                "score_components": state.get("score_components", {}).get(rid),
                 "matched_fts": matched_fts,
                 "matched_vector": matched_vector,
                 "matched_count": int(bool(matched_fts)) + int(bool(matched_vector)),
@@ -10728,6 +10794,7 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         rerank_timeout_sec=15,
         vector_backend=str(getattr(args, "vector_backend", "auto") or "auto"),
         include_archived=bool(getattr(args, "include_archived", False)),
+        **_scoring_options_from_args(args),
     )
 
     candidates_started = time.perf_counter()
@@ -10868,6 +10935,9 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
                     "lang": row.get("lang"),
                 }
             )
+            if candidate.get("score_components") is not None:
+                selected_items[-1]["final_score"] = float(candidate.get("final_score") or 0.0)
+                selected_items[-1]["score_components"] = dict(candidate["score_components"])
             if compaction_receipt is not None:
                 selected_items[-1]["compaction"] = {
                     "family": compaction_receipt.get("family"),
@@ -11049,6 +11119,8 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
         "vector_backend": state.get("vector_backend", "python"),
         **dict(state.get("retrieval_receipt") or {}),
     }
+    if str(getattr(args, "scoring_profile", "relevance")) == "composite":
+        payload["scoring_profile"] = "composite"
 
     gbrain_consult = _pack_gbrain_consult_optional(args, query)
     if gbrain_consult is not None:
@@ -11342,6 +11414,16 @@ def cmd_pack(conn: sqlite3.Connection, args: argparse.Namespace) -> None:
             extensions=trace_extensions,
         )
         payload["trace"] = pack_trace_v1.to_dict(trace)
+        if str(getattr(args, "scoring_profile", "relevance")) == "composite":
+            score_by_ref = {
+                str(candidate.get("recordRef") or ""): dict(candidate.get("score_components") or {})
+                for candidate in memory_candidates
+                if candidate.get("score_components") is not None
+            }
+            for trace_candidate in payload["trace"].get("candidates", []):
+                record_ref = str(trace_candidate.get("id") or "")
+                if record_ref in score_by_ref:
+                    trace_candidate["score_components"] = score_by_ref[record_ref]
         if quota_enabled:
             payload["trace"]["quota_hits"] = quota_hits
 
@@ -20574,6 +20656,7 @@ def build_parser() -> argparse.ArgumentParser:
     configured_vector_backend = str(resolved_config["vector_backend"])
     configured_pack_budget = int(resolved_config["pack"]["budget_tokens"])
     configured_quota = resolved_config["quota"]
+    configured_scoring = scoring_kwargs(resolved_config)
     epilog = (
         "Examples:\n"
         "  # Observation store\n"
@@ -21316,7 +21399,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=30,
         help="Exclude graph facts with ISO freshness older than this many days",
     )
-    sp.set_defaults(func=cmd_search)
+    sp.set_defaults(func=cmd_search, **configured_scoring)
 
     sp = sub.add_parser("recall", help="Unified fail-open retrieval across lexical, vector, hybrid, and graph lanes")
     add_common(sp)
@@ -21331,7 +21414,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--graph-path", help="Portable graph JSON used by graph mode")
     sp.add_argument("--graph-readiness-state", help="Optional graph readiness JSON state")
     sp.add_argument("--graph-stale-after-days", type=int, default=30)
-    sp.set_defaults(func=cmd_recall)
+    sp.set_defaults(func=cmd_recall, **configured_scoring)
 
     sp = sub.add_parser("curate", help="Unified governed scan, review, apply, verify, and rollback surface")
     add_common(sp)
@@ -21577,7 +21660,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--rerank-base-url", help="Optional reranker endpoint override")
     sp.add_argument("--rerank-timeout-sec", type=int, default=15, help="Reranker HTTP timeout in seconds")
     sp.add_argument("--vector-backend", choices=["auto", "sqlite-vec", "python", "numpy"], default=configured_vector_backend)
-    sp.set_defaults(func=cmd_hybrid)
+    sp.set_defaults(func=cmd_hybrid, **configured_scoring)
 
     sp = sub.add_parser("pack", help="Build a compact, cited bundle from hybrid retrieval")
     sp.add_argument("--db", default=None, help="SQLite DB path")
@@ -21700,6 +21783,7 @@ def build_parser() -> argparse.ArgumentParser:
         quota_preference_min=int(configured_quota["preference"]["min"]),
         quota_decision_min=int(configured_quota["decision"]["min"]),
         quota_event_max_ratio=float(configured_quota["event"]["max_ratio"]),
+        **configured_scoring,
     )
 
     sp = sub.add_parser("pack-artifacts-observe", help="Summarize Pack artifact receipts and strategy health")

@@ -26,6 +26,8 @@ from openclaw_mem.core.api import connect as _connect, store_observation as _ins
 from openclaw_mem.core.db import DEFAULT_DB
 from openclaw_mem.core.privacy import is_private_text
 from openclaw_mem.core.recall import recall as core_recall
+from openclaw_mem.core.config import resolve_config
+from openclaw_mem.core.scoring import scoring_kwargs
 from openclaw_mem.graph.code_extract import query_impact as query_code_impact
 from openclaw_mem.graph.query import query_downstream, query_subgraph, query_upstream
 
@@ -428,6 +430,7 @@ def mem_recall(conn: sqlite3.Connection, args: dict[str, Any]) -> dict[str, Any]
             else None
         ),
         graph_stale_after_days=max(0, int(args.get("graphStaleAfterDays") or 30)),
+        **scoring_kwargs(resolve_config()),
     )
 
 

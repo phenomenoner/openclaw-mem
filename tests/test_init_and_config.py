@@ -34,7 +34,9 @@ def test_config_priority_env_then_toml_then_builtin(
         "\n[pack]\n"
         "budget_tokens = 777\n"
         "\n[scoring]\n"
-        'profile = "file-profile"\n',
+        'profile = "composite"\n'
+        "[scoring.recency]\n"
+        "enabled = false\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("OPENCLAW_MEM_DB", "from-env.sqlite")
@@ -47,7 +49,8 @@ def test_config_priority_env_then_toml_then_builtin(
     assert resolved["vector_backend"] == "python"
     assert resolved["embed_provider"] == "local"
     assert resolved["pack"]["budget_tokens"] == 888
-    assert resolved["scoring"]["profile"] == "file-profile"
+    assert resolved["scoring"]["profile"] == "composite"
+    assert resolved["scoring"]["recency"]["enabled"] is False
 
 
 def test_invalid_env_values_fall_back_without_corrupting_config(
@@ -115,6 +118,11 @@ def test_ensure_config_only_fills_missing_keys_and_is_idempotent(
         "vector_backend",
         "embed_provider",
         "scoring.profile",
+        "scoring.relevance.enabled",
+        "scoring.importance.enabled",
+        "scoring.recency.enabled",
+        "scoring.use.enabled",
+        "scoring.state.enabled",
         "taxonomy.enabled",
         "quota.enabled",
         "quota.preference.min",
