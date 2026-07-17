@@ -1,99 +1,357 @@
+/* ============================================================
+   openclaw-mem — site design system (cosmetic layer only)
+   Brand: ink base + emerald "verified" accent + amber "receipt"
+   Scopes: material palette hooks, landing components (.ocm-*),
+   light global polish. Safe for both color schemes.
+   ============================================================ */
+
+/* ---------- brand tokens ---------- */
+:root {
+  --ocm-ink: #0b1220;
+  --ocm-ink-2: #101a2e;
+  --ocm-accent: #10b981;
+  --ocm-accent-strong: #059669;
+  --ocm-accent-soft: rgba(16, 185, 129, 0.14);
+  --ocm-amber: #f59e0b;
+  --ocm-cyan: #22d3ee;
+  --ocm-radius-lg: 18px;
+  --ocm-radius: 14px;
+  --ocm-border: rgba(100, 116, 139, 0.28);
+  --ocm-card-bg: #ffffff;
+  --ocm-card-hover: rgba(16, 185, 129, 0.55);
+  --ocm-muted: #64748b;
+}
+
+[data-md-color-scheme="slate"] {
+  --ocm-border: rgba(148, 163, 184, 0.22);
+  --ocm-card-bg: rgba(15, 23, 42, 0.55);
+  --ocm-muted: #94a3b8;
+}
+
+/* ---------- material palette (primary/accent: custom) ---------- */
+:root,
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #0b1220;
+  --md-primary-fg-color--light: #1e293b;
+  --md-primary-fg-color--dark: #060b16;
+  --md-accent-fg-color: #059669;
+  --md-typeset-a-color: #047857;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #0b1220;
+  --md-primary-fg-color--light: #1e293b;
+  --md-primary-fg-color--dark: #060b16;
+  --md-accent-fg-color: #34d399;
+  --md-typeset-a-color: #34d399;
+  --md-default-bg-color: #0b1220;
+}
+
+/* header: ink with hairline + subtle blur depth */
+.md-header {
+  background-color: rgba(11, 18, 32, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: none;
+}
+.md-tabs {
+  background-color: rgba(11, 18, 32, 0.88);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+/* ---------- light global polish ---------- */
+.md-typeset code {
+  border-radius: 6px;
+}
+.md-typeset pre > code {
+  border-radius: 10px;
+}
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 10px;
+}
+.md-typeset .md-button {
+  border-radius: 10px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.md-typeset .md-button:hover {
+  transform: translateY(-1px);
+}
+.md-typeset .md-button--primary {
+  background: linear-gradient(120deg, var(--ocm-accent-strong), var(--ocm-accent));
+  border-color: transparent;
+  box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35);
+}
+.md-typeset .md-button--primary:hover {
+  box-shadow: 0 10px 24px rgba(16, 185, 129, 0.45);
+}
+
+/* ============================================================
+   landing components
+   ============================================================ */
+
+/* ---------- hero ---------- */
 .ocm-hero {
-  margin: 1.4rem 0 2rem;
-  padding: 2rem;
-  border: 1px solid rgba(125, 125, 255, 0.24);
-  border-radius: 1.1rem;
+  position: relative;
+  margin: 0.6rem 0 2.2rem;
+  padding: clamp(1.6rem, 4vw, 3rem);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-top: 3px solid var(--ocm-accent);
+  border-radius: var(--ocm-radius-lg);
   background:
-    radial-gradient(circle at top left, rgba(99, 102, 241, 0.22), transparent 34rem),
-    radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.18), transparent 28rem),
-    linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(2, 6, 23, 0.98));
+    radial-gradient(60rem 30rem at 12% -10%, rgba(16, 185, 129, 0.16), transparent 60%),
+    radial-gradient(50rem 26rem at 95% 110%, rgba(34, 211, 238, 0.12), transparent 55%),
+    linear-gradient(150deg, #0d1526 0%, var(--ocm-ink) 55%, #060b16 100%);
   color: #f8fafc;
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.35);
 }
 
 .ocm-hero h1 {
-  max-width: 14ch;
-  margin: 0.35rem 0 0.7rem;
-  color: #fff;
-  font-size: clamp(2.05rem, 5vw, 4rem);
-  line-height: 0.96;
-  letter-spacing: -0.055em;
+  margin: 0.5rem 0 0.9rem;
+  max-width: 21ch;
+  color: #ffffff;
+  font-size: clamp(2rem, 4.6vw, 3.4rem);
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  font-weight: 800;
 }
 
-.ocm-hero p {
-  max-width: 47rem;
-  color: #dbeafe;
-  font-size: 1.02rem;
+.ocm-hero .ocm-sub {
+  max-width: 46rem;
+  color: #cbd5e1;
+  font-size: 1.06rem;
+  line-height: 1.65;
+}
+.ocm-hero .ocm-sub strong { color: #f1f5f9; }
+.ocm-hero .ocm-sub code {
+  background: rgba(148, 163, 184, 0.16);
+  color: #e2e8f0;
 }
 
 .ocm-eyebrow {
-  color: #93c5fd;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #6ee7b7;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.ocm-eyebrow::before {
+  content: "";
+  width: 1.6rem;
+  height: 2px;
+  background: var(--ocm-accent);
+  border-radius: 2px;
+}
+
+/* pills */
+.ocm-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 1.05rem 0 0.4rem;
+}
+.ocm-pills span {
+  padding: 0.28rem 0.72rem;
+  border: 1px solid rgba(110, 231, 183, 0.35);
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.1);
+  color: #a7f3d0;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* CTA row */
+.ocm-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1.35rem;
+}
+.ocm-hero .md-button {
+  color: #e2e8f0;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+.ocm-hero .md-button:hover {
+  border-color: var(--ocm-accent);
+  color: #ffffff;
+}
+.ocm-hero .md-button--primary {
+  color: #052e1f;
+  font-weight: 700;
+}
+
+/* terminal window */
+.ocm-terminal {
+  margin: 1.4rem 0 0.2rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 14px 34px rgba(2, 6, 23, 0.4);
+  overflow: hidden;
+}
+.ocm-terminal::before {
+  content: "trust-policy proof — same memory, same query, governed context";
+  display: block;
+  padding: 0.5rem 0.9rem 0.5rem 3.4rem;
+  background:
+    radial-gradient(circle 5px at 1.05rem 50%, #f87171 49%, transparent 51%),
+    radial-gradient(circle 5px at 1.85rem 50%, #fbbf24 49%, transparent 51%),
+    radial-gradient(circle 5px at 2.65rem 50%, #34d399 49%, transparent 51%),
+    rgba(148, 163, 184, 0.08);
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+.ocm-terminal .highlight { margin: 0; }
+.ocm-terminal pre {
+  margin: 0;
+  border-radius: 0;
+  background: transparent !important;
+}
+.ocm-terminal pre > code {
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+/* trinity stat strip */
+.ocm-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.7rem;
+  margin: 1.5rem 0 0.2rem;
+}
+.ocm-stat {
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-left: 3px solid var(--ocm-accent);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.5);
+}
+.ocm-stat b {
+  display: block;
+  color: #ffffff;
+  font-size: 0.92rem;
+  letter-spacing: -0.01em;
+}
+.ocm-stat span {
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+.ocm-stat:nth-child(2) { border-left-color: var(--ocm-amber); }
+.ocm-stat:nth-child(3) { border-left-color: var(--ocm-cyan); }
+
+/* ---------- section eyebrow (light+dark content area) ---------- */
+.ocm-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  color: var(--ocm-accent-strong);
   font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
-
-.ocm-ctas {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  margin-top: 1.1rem;
+[data-md-color-scheme="slate"] .ocm-kicker { color: #6ee7b7; }
+.ocm-kicker::before {
+  content: "";
+  width: 1.4rem;
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+  opacity: 0.7;
 }
 
+/* ---------- card grid ---------- */
 .ocm-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
   gap: 0.9rem;
   margin: 1.1rem 0 2rem;
 }
-
 .ocm-card {
-  padding: 1rem;
-  border: 1px solid rgba(99, 102, 241, 0.18);
-  border-radius: 0.85rem;
-  background: linear-gradient(180deg, rgba(255,255,255,0.86), rgba(248,250,252,0.72));
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+  position: relative;
+  padding: 1.05rem 1.15rem 1.1rem;
+  border: 1px solid var(--ocm-border);
+  border-radius: var(--ocm-radius);
+  background: var(--ocm-card-bg);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
 }
-
-[data-md-color-scheme="slate"] .ocm-card {
-  background: linear-gradient(180deg, rgba(30,41,59,0.86), rgba(15,23,42,0.72));
-  border-color: rgba(147, 197, 253, 0.18);
+.ocm-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--ocm-card-hover);
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.12);
 }
-
+[data-md-color-scheme="slate"] .ocm-card:hover {
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+}
 .ocm-card h3 {
-  margin-top: 0;
-}
-
-.ocm-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  margin: 1rem 0;
-}
-
-.ocm-pills span {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid rgba(191, 219, 254, 0.28);
-  border-radius: 999px;
-  padding: 0.24rem 0.6rem;
-  color: #bfdbfe;
-  background: rgba(15, 23, 42, 0.42);
-  font-size: 0.76rem;
+  margin: 0.15rem 0 0.4rem;
+  font-size: 1.02rem;
   font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.ocm-card p {
+  margin: 0 0 0.35rem;
+  color: var(--ocm-muted);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+.ocm-card > p:last-child { margin-bottom: 0; }
+.ocm-card a { font-weight: 600; }
+.ocm-card .ocm-ico {
+  display: inline-grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  margin-bottom: 0.55rem;
+  border-radius: 9px;
+  background: var(--ocm-accent-soft);
+  font-size: 1.05rem;
 }
 
-.ocm-terminal {
-  max-width: 48rem;
-  margin: 1rem 0;
-  border: 1px solid rgba(147, 197, 253, 0.18);
-  border-radius: 0.75rem;
-  overflow: hidden;
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.06);
+/* numbered step badge variant */
+.ocm-card .ocm-step {
+  position: absolute;
+  top: 0.9rem;
+  right: 1rem;
+  color: rgba(100, 116, 139, 0.5);
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
 }
 
-.ocm-terminal pre {
-  margin: 0;
-  background: rgba(2, 6, 23, 0.72) !important;
+/* ---------- CTA banner (footer) ---------- */
+.ocm-banner {
+  margin: 2.2rem 0 1rem;
+  padding: 1.7rem clamp(1.2rem, 3vw, 2.2rem);
+  border-radius: var(--ocm-radius-lg);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-top: 3px solid var(--ocm-accent);
+  background:
+    radial-gradient(40rem 18rem at 90% -20%, rgba(16, 185, 129, 0.18), transparent 60%),
+    linear-gradient(150deg, #0d1526, var(--ocm-ink) 70%);
+  color: #e2e8f0;
+}
+.ocm-banner h2 {
+  margin: 0 0 0.4rem;
+  color: #ffffff;
+  font-size: 1.4rem;
+  letter-spacing: -0.02em;
+}
+.ocm-banner p { color: #94a3b8; max-width: 44rem; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 44rem) {
+  .ocm-hero { padding: 1.4rem 1.1rem; }
+  .ocm-stats { grid-template-columns: 1fr; }
 }

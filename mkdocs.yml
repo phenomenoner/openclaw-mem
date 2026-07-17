@@ -31,16 +31,50 @@ exclude_docs: |
 
 theme:
   name: material
+  icon:
+    logo: material/database-check
+    repo: fontawesome/brands/github
+  favicon: assets/favicon.svg
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
   features:
     - navigation.instant
     - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.top
+    - navigation.footer
+    - toc.follow
     - content.code.copy
+    - content.tabs.link
     - search.suggest
     - search.highlight
 
 extra_css:
   - stylesheets/landing.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/phenomenoner/openclaw-mem
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/openclaw-context-pack/
 
 plugins:
   - search
@@ -50,25 +84,33 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - toc:
       permalink: true
 
 nav:
   - Home: index.md
-  - Traditional Chinese (zh-Hant): zh/index.md
   - Start here:
       - Trust-policy synthetic proof: showcase/trust-policy-synthetic-proof.md
       - Evaluator path: evaluator-path.md
-      - Core vs Advanced Labs: core-vs-advanced-labs.md
-      - 60-second reality proof: reality-check.md
       - Quickstart: quickstart.md
       - Choose an install path: install-modes.md
+      - Core vs Advanced Labs: core-vs-advanced-labs.md
+      - 60-second reality proof: reality-check.md
       - Automation status: automation-status.md
-  - Why openclaw-mem still exists: why-openclaw-mem-still-exists.md
-  - OpenClaw 2026.4.15 comparison: openclaw-2026-4-15-comparison.md
-  - About: about.md
-  - Proactive Pack: proactive-pack.md
+      - Why openclaw-mem still exists: why-openclaw-mem-still-exists.md
+      - OpenClaw 2026.4.15 comparison: openclaw-2026-4-15-comparison.md
+      - About: about.md
+      - Releases: https://github.com/phenomenoner/openclaw-mem/releases
   - Showcase:
       - Trust-policy synthetic proof: showcase/trust-policy-synthetic-proof.md
       - LongMemEval_s retrieval slice: showcase/longmemeval-s-retrieval-slice.md
@@ -76,15 +118,15 @@ nav:
       - Trust-aware proof artifacts: showcase/artifacts/index.md
       - Inside-Out demo: showcase/inside-out-demo.md
       - Topology demo: showcase/topology-demo.md
-  - Releases: https://github.com/phenomenoner/openclaw-mem/releases
+      - Proactive Pack: proactive-pack.md
   - Reference:
+      - Architecture: architecture.md
+      - Context pack: context-pack.md
       - Ecosystem fit: ecosystem-fit.md
       - Deployment: deployment.md
       - Auto-capture (sidecar plugin): auto-capture.md
       - Mem Engine (slot backend): mem-engine.md
       - Engine admin ops: mem-engine-admin-ops.md
-      - Architecture: architecture.md
-      - Context pack: context-pack.md
       - MCP integration: mcp-integration.md
       - Channel A file contract: channel-a-file-contract.md
       - Lifecycle hooks: lifecycle-hooks.md
@@ -93,7 +135,6 @@ nav:
       - Agent memory skill (SOP): agent-memory-skill.md
       - Legacy gateway harness memory: harness-persistent-memory.md
       - Importance grading: importance-grading.md
-      - Automation status: automation-status.md
       - Product-facing improvement roadmap: openclaw-user-improvement-roadmap.md
       - Legacy remote memory gateway: remote-memory-gateway.md
       - Legacy shared memory gateway guide: shared-memory-gateway-agent-guide.md
@@ -121,3 +162,4 @@ nav:
       - Thought-links (historical): archive/thought-links/README.md
       - Notes (historical): archive/notes/README.md
       - Adapter spec (v0.5.9, archived): v0.5.9-adapter-spec.md
+  - 繁體中文: zh/index.md

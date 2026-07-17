@@ -1,12 +1,11 @@
 ---
+title: 會留底的代理人記憶
 canonical: https://phenomenoner.github.io/openclaw-mem/
 lang: zh-Hant
 ---
 
 > **English is canonical.**  
 > 本頁是獨立撰寫的繁體中文產品說明，方便中文讀者快速理解 `openclaw-mem`。若內容與英文文件有出入，請以 [English home](../index.md) 與 [README](https://github.com/phenomenoner/openclaw-mem#readme) 為準。
-
-# 會留底的代理人記憶
 
 <div class="ocm-hero" markdown="1">
 

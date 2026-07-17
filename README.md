@@ -1,21 +1,28 @@
+<div align="center">
+
 # openclaw-mem
 
-> **The AI agent memory layer you can audit.**
-> Local-first memory governance for AI agents — every context item cited, every exclusion explained, every mutation reversible.
+### The AI agent memory layer you can audit.
 
-[![PyPI](https://img.shields.io/pypi/v/openclaw-context-pack?label=PyPI)](https://pypi.org/project/openclaw-context-pack/)
+**Local-first memory governance for AI agents** — every context item cited,<br/>every exclusion explained, every mutation reversible.
+
+[![PyPI](https://img.shields.io/pypi/v/openclaw-context-pack?label=PyPI&color=059669)](https://pypi.org/project/openclaw-context-pack/)
 [![CI](https://github.com/phenomenoner/openclaw-mem/actions/workflows/ci.yml/badge.svg)](https://github.com/phenomenoner/openclaw-mem/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-phenomenoner.github.io-blue)](https://phenomenoner.github.io/openclaw-mem/)
+[![Docs](https://img.shields.io/badge/docs-phenomenoner.github.io-0b1220)](https://phenomenoner.github.io/openclaw-mem/)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green)](#license)
 [![繁體中文](https://img.shields.io/badge/docs-%E7%B9%81%E9%AB%94%E4%B8%AD%E6%96%87-orange)](docs/zh/index.md)
+
+[**Website**](https://phenomenoner.github.io/openclaw-mem/) · [**30-second proof**](#see-it-in-30-seconds) · [**Quickstart**](QUICKSTART.md) · [**Architecture**](docs/architecture.md) · [**FAQ**](#faq)
+
+</div>
+
+---
 
 Most AI agent memory systems compete on **recall** — remember more, retrieve better. `openclaw-mem` competes on a different axis: **governance**. It captures agent activity as durable local records (SQLite + JSONL, no external database), then assembles bounded `ContextPack` bundles where every included memory carries a **citation**, every excluded memory carries a **written reason**, and every memory mutation ships with a **rollback receipt**.
 
 Built sidecar-first for [OpenClaw](https://github.com/openclaw), usable with Claude, Codex, Gemini, and generic agent harnesses.
 
-**Not bigger memory — safer, explainable context.**
-
----
+> **Not bigger memory — safer, explainable context.**
 
 ## Why agent memory needs governance, not just recall
 
@@ -34,8 +41,6 @@ Recall-focused memory layers make these failures *more* likely as they get bette
 pip install openclaw-context-pack
 openclaw-mem --db /tmp/openclaw-mem-demo.sqlite status --json
 ```
-
-The PyPI distribution remains `openclaw-context-pack`; it installs the `openclaw-mem` CLI plus `openclaw-mem-mcp`, `openclaw-mem-channel-a`, and `openclaw-mem-hooks` for agent integration.
 
 Or run the reproducible trust-policy proof from the repo — no OpenClaw config, no real memory store, synthetic fixture only:
 
@@ -86,15 +91,15 @@ When the optional mem-engine is active, **Proactive Pack** extends the same cont
 
 | Capability | What you get |
 | --- | --- |
-| **Trust-aware packing** | Quarantined/untrusted records are excluded by policy, with written reasons in the receipt — a defense-in-depth layer against memory poisoning |
-| **Citations everywhere** | Every packed item traces back to its source record; citation coverage is measured |
-| **Trace receipts** | Include/exclude decisions are structured JSON, not vibes — auditable after the fact |
-| **Rollback** | Memory and skill mutations go through plan → checkpoint → apply → receipt → rollback |
-| **Hybrid recall** | SQLite FTS + vector search, with scopes and auditable policies |
-| **Temporal facts** | "What is currently true about X" — source-linked assertions, timelines, conflict/staleness lint |
-| **Graph query plane** | `graph query` for upstream/downstream/lineage over a SQLite-derived graph |
-| **Contract-first harness integration** | MCP hash manifests, Channel A file packs, harness-home env bridge, and shadow-only service/Qdrant probes for safe cutover checks |
-| **Local-first** | JSONL + SQLite. No cloud service, no external vector DB required, data stays on your machine |
+| 🛡️ **Trust-aware packing** | Quarantined/untrusted records are excluded by policy, with written reasons in the receipt — a defense-in-depth layer against memory poisoning |
+| 🔗 **Citations everywhere** | Every packed item traces back to its source record; citation coverage is measured |
+| 🧾 **Trace receipts** | Include/exclude decisions are structured JSON, not vibes — auditable after the fact |
+| ⏪ **Rollback** | Memory and skill mutations go through plan → checkpoint → apply → receipt → rollback |
+| 🔍 **Hybrid recall** | SQLite FTS + vector search, with scopes and auditable policies |
+| 🕰️ **Temporal facts** | "What is currently true about X" — source-linked assertions, timelines, conflict/staleness lint |
+| 🕸️ **Graph query plane** | `graph query` for upstream/downstream/lineage over a SQLite-derived graph |
+| 🔌 **Contract-first harness integration** | MCP hash manifests, Channel A file packs, harness-home env bridge, and shadow-only service/Qdrant probes for safe cutover checks |
+| 💻 **Local-first** | JSONL + SQLite. No cloud service, no external vector DB required, data stays on your machine |
 
 Advanced opt-in labs (graph routing, GBrain sidecar, governed continuity, Dream Lite, Self Curator engine) stay out of the first evaluation path: [Core vs Advanced Labs](docs/core-vs-advanced-labs.md).
 
@@ -117,11 +122,12 @@ They are **complementary**: openclaw-mem already pushes bounded metadata to Lanc
 
 | Time | Path | Where |
 | --- | --- | --- |
-| 5 min | pip CLI + synthetic proof | [Evaluator path](docs/evaluator-path.md) |
-| 30 min | Sidecar install, real capture, first governed pack | [Install modes](docs/install-modes.md) |
-| Afternoon | OpenClaw plugin / mem-engine promotion, MCP/Channel A/hooks integration for Codex/Claude/Gemini | [MCP integration](docs/mcp-integration.md), [Channel A](docs/channel-a-file-contract.md), [Lifecycle hooks](docs/lifecycle-hooks.md) |
+| ⚡ 5 min | pip CLI + synthetic proof | [Evaluator path](docs/evaluator-path.md) |
+| ☕ 30 min | Sidecar install, real capture, first governed pack | [Install modes](docs/install-modes.md) |
+| 🌆 Afternoon | OpenClaw plugin / mem-engine promotion, MCP/Channel A/hooks integration for Codex/Claude/Gemini | [MCP integration](docs/mcp-integration.md), [Channel A](docs/channel-a-file-contract.md), [Lifecycle hooks](docs/lifecycle-hooks.md) |
 
-Harness operators can verify integration without promoting a new memory owner:
+<details>
+<summary><b>Harness operators: verify integration without promoting a new memory owner</b></summary>
 
 ```bash
 openclaw-mem --harness-home /path/to/.agent-harness status --json
@@ -136,43 +142,72 @@ openclaw-mem-mcp --tool-descriptions --json
 
 The status, topology, service, and Qdrant probes are contract-first v0 surfaces. Store `init` commands only create empty readiness JSONL files under the harness-managed memory/state trees; they do not promote active prompt ownership or write memory content. Qdrant vector recall remains optional/fail-closed and falls back to the SQLite/search lane when the shard or dependency is unavailable.
 
+</details>
+
 ## FAQ
 
-### What is memory governance for AI agents?
+<details>
+<summary><b>What is memory governance for AI agents?</b></summary>
 
 Memory governance means treating an agent's memory like a supply chain with controls: provenance for every record, trust tiers for every source, explicit policy decisions about what may enter the context window, receipts documenting those decisions, and rollback when something was wrong. Recall answers *"what matches?"*; governance answers *"what is allowed in, and why?"*
 
-### How is openclaw-mem different from mem0, claude-mem, or mempalace?
+</details>
+
+<details>
+<summary><b>How is openclaw-mem different from mem0, claude-mem, or mempalace?</b></summary>
 
 Those projects optimize recall quality and token efficiency — and do it well. openclaw-mem optimizes **auditability**: citations, trust policies, trace receipts, and rollback are the core contract, not add-ons. See [How it compares](#how-it-compares). You can use them together.
 
-### Does it protect against memory poisoning / prompt injection via memory?
+</details>
+
+<details>
+<summary><b>Does it protect against memory poisoning / prompt injection via memory?</b></summary>
 
 It is a defense-in-depth layer, not a silver bullet. Content from tools, web pages, and skills starts untrusted; trust policies keep quarantined records out of packs even when they match the query, and the receipt documents the exclusion. The [synthetic proof](docs/showcase/trust-policy-synthetic-proof.md) demonstrates exactly this behavior, reproducibly.
 
-### Do I need a vector database or a cloud service?
+</details>
+
+<details>
+<summary><b>Do I need a vector database or a cloud service?</b></summary>
 
 No. The default stack is SQLite + JSONL on your own machine. Hybrid recall (FTS + vector) works locally. There is no hosted service and no telemetry.
 
-### Can I use it outside OpenClaw — with Claude, Codex, or Gemini?
+</details>
+
+<details>
+<summary><b>Can I use it outside OpenClaw — with Claude, Codex, or Gemini?</b></summary>
 
 Yes. `openclaw-mem harness install` writes a managed persistent-memory instruction card for Codex, Claude, Gemini, or a generic agent surface. OpenClaw is the first-class host, not a requirement.
 
-### What is a ContextPack?
+</details>
+
+<details>
+<summary><b>What is a ContextPack?</b></summary>
 
 A bounded, injectable bundle (`openclaw-mem.context-pack.v1`) containing the selected memory text plus structured metadata: citations for every item, trust-policy decisions, and a trace receipt explaining the selection. It is designed to be small, inspectable, and stable as a contract.
 
-### Is the retrieval quality competitive?
+</details>
+
+<details>
+<summary><b>Is the retrieval quality competitive?</b></summary>
 
 Retrieval is hybrid (FTS + vector) with scopes and policy-aware ranking — solid, but openclaw-mem does not currently publish comparative recall benchmarks, and the [reality check](docs/reality-check.md) is candid about what is and isn't measured. The differentiated value is governance; broader public benchmarks are on the roadmap.
 
-### How do I undo a bad memory change?
+</details>
+
+<details>
+<summary><b>How do I undo a bad memory change?</b></summary>
 
 Mutations flow through explicit plans, checkpoints, diffs, and receipts. `self-curator rollback --receipt <apply-receipt.json>` restores the previous state from the receipt. The same posture applies to engine adoption: promotion is a one-line slot switch, and so is retreat.
 
-### Is this production ready?
+</details>
+
+<details>
+<summary><b>Is this production ready?</b></summary>
 
 It is a young, actively developed project (v1.9.x, single maintainer, 800+ commits). Core Store/Pack/Observe and the trust-policy path are shipped and tested; advanced lanes are explicitly labeled labs. Start with the [reality check](docs/reality-check.md) — it tells you what is automatic, what is partial, and what is opt-in.
+
+</details>
 
 ## OpenClaw native memory and openclaw-mem
 
