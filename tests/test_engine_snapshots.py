@@ -28,11 +28,14 @@ class TestEngineSnapshotsCli(unittest.TestCase):
         return json.loads(out) if out else None
 
     def test_snapshot_create_list_checkout_delete_roundtrip(self):
-        with tempfile.TemporaryDirectory() as td:
+        source_payload = "snapshot-source-payload::v1::must-not-enter-receipt"
+        # Keep ``v1`` in the temp path deliberately: receipt paths may contain
+        # that harmless substring and must not be confused with source payload.
+        with tempfile.TemporaryDirectory(prefix="v1-snapshot-") as td:
             root = Path(td)
             db = root / "lancedb"
             db.mkdir()
-            (db / "table.lance").write_text("v1", encoding="utf-8")
+            (db / "table.lance").write_text(source_payload, encoding="utf-8")
             snaps = root / "snapshots"
 
             created = self._run(
@@ -58,7 +61,7 @@ class TestEngineSnapshotsCli(unittest.TestCase):
             self.assertRegex(created["stats"]["files"][0]["sha256"], r"^[0-9a-f]{64}$")
             self.assertRegex(created["stats"]["sha256"], r"^[0-9a-f]{64}$")
             self.assertNotIn("reason", created)
-            self.assertNotIn("v1", json.dumps(created))
+            self.assertNotIn(source_payload, json.dumps(created))
             self.assertNotIn("before risky test", json.dumps(created))
             self.assertTrue((snaps / "pre-change_1" / "manifest.json").exists())
             manifest = json.loads((snaps / "pre-change_1" / "manifest.json").read_text(encoding="utf-8"))
@@ -96,7 +99,7 @@ class TestEngineSnapshotsCli(unittest.TestCase):
             )
             self.assertTrue(checked["ok"])
             self.assertTrue(checked["restartRequired"])
-            self.assertEqual((db / "table.lance").read_text(encoding="utf-8"), "v1")
+            self.assertEqual((db / "table.lance").read_text(encoding="utf-8"), source_payload)
             self.assertTrue(Path(checked["previousDbPath"]).exists())
 
             delete_blocked = self._run(
