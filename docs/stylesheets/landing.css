@@ -355,3 +355,268 @@
   .ocm-hero { padding: 1.4rem 1.1rem; }
   .ocm-stats { grid-template-columns: 1fr; }
 }
+
+/* ============================================================
+   product landing (overrides/home.html only — .ocm-home scope)
+   Section anatomy + editing rules:
+   ops-rules/docs-and-website-update-guide.md
+   ============================================================ */
+
+.ocm-home {
+  --ocm-wrap: 61rem;
+  font-size: 0.85rem;
+}
+.ocm-wrap {
+  max-width: var(--ocm-wrap);
+  margin: 0 auto;
+  padding: 0 1.1rem;
+}
+.ocm-hp { padding: 3.4rem 0; }
+.ocm-hp h2 {
+  margin: 0.35rem 0 0.7rem;
+  font-size: clamp(1.5rem, 3vw, 2.15rem);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+.ocm-lede {
+  max-width: 42rem;
+  color: var(--ocm-muted);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+.ocm-after { margin-top: 1.1rem; color: var(--ocm-muted); }
+.ocm-after a { font-weight: 600; }
+
+/* alternating section background */
+.ocm-alt { background: #f1f5f9; }
+[data-md-color-scheme="slate"] .ocm-alt { background: #0d1526; }
+
+/* ---------- full-bleed hero ---------- */
+.ocm-hp-hero {
+  padding: clamp(3rem, 7vw, 5rem) 0 2.6rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  background:
+    radial-gradient(70rem 34rem at 8% -12%, rgba(16, 185, 129, 0.17), transparent 60%),
+    radial-gradient(56rem 30rem at 100% 115%, rgba(34, 211, 238, 0.12), transparent 55%),
+    linear-gradient(155deg, #0d1526 0%, var(--ocm-ink) 55%, #060b16 100%);
+  color: #f8fafc;
+}
+.ocm-hp-hero h1 {
+  margin: 0.7rem 0 1rem;
+  color: #ffffff;
+  font-size: clamp(2.3rem, 5.4vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: -0.04em;
+  font-weight: 800;
+}
+.ocm-hp-hero .ocm-sub {
+  max-width: 47rem;
+  color: #cbd5e1;
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+.ocm-hp-hero .ocm-sub strong { color: #f1f5f9; }
+.ocm-hp-hero .ocm-sub code { background: rgba(148, 163, 184, 0.16); color: #e2e8f0; }
+.ocm-hp-hero .md-button { color: #e2e8f0; border-color: rgba(148, 163, 184, 0.4); }
+.ocm-hp-hero .md-button:hover { border-color: var(--ocm-accent); color: #fff; }
+.ocm-hp-hero .md-button--primary { color: #052e1f; font-weight: 700; }
+
+/* install one-liner + copy */
+.ocm-install {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1.35rem;
+  padding: 0.55rem 0.65rem 0.55rem 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.6);
+}
+.ocm-install code {
+  background: transparent;
+  color: #a7f3d0;
+  font-size: 0.82rem;
+}
+.ocm-copy {
+  padding: 0.28rem 0.7rem;
+  border: 1px solid rgba(110, 231, 183, 0.4);
+  border-radius: 7px;
+  background: rgba(16, 185, 129, 0.14);
+  color: #a7f3d0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.ocm-copy:hover { background: rgba(16, 185, 129, 0.28); }
+
+/* integrations strip */
+.ocm-integrations {
+  margin-top: 1.5rem;
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+.ocm-integrations span {
+  display: inline-block;
+  margin: 0.15rem 0.15rem;
+  padding: 0.18rem 0.55rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+.ocm-integrations a { color: #6ee7b7; font-weight: 700; }
+
+/* ---------- receipt strip ---------- */
+.ocm-hp-strip {
+  padding: 1.4rem 0;
+  border-bottom: 1px solid var(--ocm-border);
+  background: var(--md-default-bg-color);
+}
+.ocm-strip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12.5rem, 1fr));
+  gap: 0.8rem;
+}
+.ocm-tile {
+  padding: 0.75rem 0.95rem;
+  border-left: 3px solid var(--ocm-accent);
+}
+.ocm-tile:nth-child(2) { border-left-color: var(--ocm-cyan); }
+.ocm-tile:nth-child(3) { border-left-color: var(--ocm-amber); }
+.ocm-tile:nth-child(4) { border-left-color: #a78bfa; }
+.ocm-tile b {
+  display: block;
+  font-size: 1.06rem;
+  letter-spacing: -0.02em;
+}
+.ocm-tile span { color: var(--ocm-muted); font-size: 0.74rem; line-height: 1.45; display: block; margin-top: 0.15rem; }
+
+/* ---------- steps ---------- */
+.ocm-steps {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
+  gap: 0.7rem;
+  align-items: stretch;
+  margin-top: 1.3rem;
+}
+.ocm-step-card {
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--ocm-border);
+  border-radius: var(--ocm-radius);
+  background: var(--ocm-card-bg);
+}
+.ocm-step-card b { display: block; margin-bottom: 0.35rem; color: var(--ocm-accent-strong); }
+[data-md-color-scheme="slate"] .ocm-step-card b { color: #6ee7b7; }
+.ocm-step-card p { margin: 0; color: var(--ocm-muted); font-size: 0.84rem; line-height: 1.6; }
+.ocm-step-arrow {
+  align-self: center;
+  color: var(--ocm-accent);
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+
+/* ---------- proof 2-col ---------- */
+.ocm-proof {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 2rem;
+  align-items: center;
+}
+.ocm-proof .ocm-terminal { margin: 0; }
+.ocm-home .ocm-terminal code .k { color: #7dd3fc; }
+.ocm-home .ocm-terminal code .t { color: #6ee7b7; }
+.ocm-home .ocm-terminal code .c { color: #64748b; }
+.ocm-home .ocm-terminal code { color: #e2e8f0; }
+
+/* quickstart terminal gets its own title bar text */
+.ocm-qs-term::before { content: "five-minute quickstart"; }
+
+/* ---------- SLO + comparison tables ---------- */
+.ocm-slo table, .ocm-compare table {
+  width: 100%;
+  margin-top: 1rem;
+  border: 1px solid var(--ocm-border);
+  border-radius: 12px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  font-size: 0.84rem;
+}
+.ocm-slo th, .ocm-compare th {
+  padding: 0.6rem 0.9rem;
+  text-align: left;
+  background: rgba(16, 185, 129, 0.08);
+  font-weight: 700;
+}
+.ocm-slo td, .ocm-compare td {
+  padding: 0.55rem 0.9rem;
+  border-top: 1px solid var(--ocm-border);
+  vertical-align: top;
+}
+.ocm-slo td:nth-child(2), .ocm-slo td:nth-child(3) {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ocm-slo td:nth-child(3) { font-weight: 700; color: var(--ocm-accent-strong); }
+[data-md-color-scheme="slate"] .ocm-slo td:nth-child(3) { color: #6ee7b7; }
+.ocm-compare td:first-child { font-weight: 600; white-space: nowrap; }
+.ocm-compare td:last-child { background: rgba(16, 185, 129, 0.05); }
+
+/* ---------- quickstart 2-col ---------- */
+.ocm-qs {
+  display: grid;
+  grid-template-columns: 1.25fr 0.75fr;
+  gap: 1.6rem;
+  align-items: start;
+  margin-top: 1.2rem;
+}
+.ocm-qs-side p { color: var(--ocm-muted); font-size: 0.87rem; line-height: 1.65; }
+.ocm-qs-side b { color: var(--md-typeset-color); }
+.ocm-qs-side a { font-weight: 600; }
+
+/* ---------- FAQ ---------- */
+.ocm-faq details {
+  margin: 0.55rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--ocm-border);
+  border-radius: 10px;
+  background: var(--ocm-card-bg);
+}
+.ocm-faq summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.ocm-faq details p { margin: 0.6rem 0 0; color: var(--ocm-muted); font-size: 0.85rem; line-height: 1.65; }
+
+/* ---------- final CTA ---------- */
+.ocm-hp-final {
+  padding: 4rem 0 4.4rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  background:
+    radial-gradient(46rem 22rem at 88% -25%, rgba(16, 185, 129, 0.16), transparent 60%),
+    linear-gradient(155deg, #0d1526, var(--ocm-ink) 70%);
+  color: #e2e8f0;
+  text-align: center;
+}
+.ocm-hp-final h2 { color: #ffffff; }
+.ocm-hp-final p { max-width: 40rem; margin: 0.5rem auto 0; color: #94a3b8; }
+.ocm-hp-final .ocm-ctas { justify-content: center; margin-top: 1.5rem; }
+.ocm-hp-final .md-button { color: #e2e8f0; border-color: rgba(148, 163, 184, 0.4); }
+.ocm-hp-final .md-button:hover { border-color: var(--ocm-accent); color: #fff; }
+.ocm-hp-final .md-button--primary { color: #052e1f; font-weight: 700; }
+.ocm-fineprint { margin-top: 1.6rem; font-size: 0.76rem; color: #64748b; }
+.ocm-fineprint a { color: #6ee7b7; }
+
+/* ---------- landing responsive ---------- */
+@media (max-width: 56rem) {
+  .ocm-proof, .ocm-qs { grid-template-columns: 1fr; }
+  .ocm-steps { grid-template-columns: 1fr; }
+  .ocm-step-arrow { transform: rotate(90deg); justify-self: center; }
+}
+@media (max-width: 44rem) {
+  .ocm-hp { padding: 2.4rem 0; }
+  .ocm-compare table { display: block; overflow-x: auto; }
+}

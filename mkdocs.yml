@@ -46,6 +46,7 @@ exclude_docs: |
 
 theme:
   name: material
+  custom_dir: overrides
   icon:
     logo: material/database-check
     repo: fontawesome/brands/github

@@ -1,0 +1,303 @@
+{% extends "main.html" %}
+
+{#-
+  Product landing page for openclaw-mem (rendered only by docs/index.md via
+  `template: home.html`). Docs pages are untouched Material pages.
+
+  Editing rules, design tokens, and the claim-source table live in:
+  ops-rules/docs-and-website-update-guide.md  — read it before changing copy.
+
+  Layout: sections render inside the `tabs` block (full-bleed, outside the
+  content grid); the normal content shell is emptied below.
+-#}
+
+{% block tabs %}
+{{ super() }}
+
+<style>
+  /* page-scoped layout: collapse the empty docs content shell */
+  .md-content { display: none; }
+  .md-main__inner { margin: 0; }
+  .md-main { flex-grow: 0; }
+</style>
+
+<div class="ocm-home">
+
+  <!-- ============ HERO ============ -->
+  <section class="ocm-hp ocm-hp-hero">
+    <div class="ocm-wrap">
+      <div class="ocm-eyebrow">Local-first memory governance for AI agents</div>
+      <h1>Memory your agent<br/>can't lie about.</h1>
+      <p class="ocm-sub">
+        <code>openclaw-mem</code> gives any agent durable, governed memory:
+        unified <strong>recall</strong> across lexical, vector, and graph lanes;
+        a lifecycle that keeps memories fresh; and receipts for everything —
+        every inclusion <strong>cited</strong>, every exclusion
+        <strong>explained</strong>, every mutation <strong>reversible</strong>.
+        SQLite on your machine. No cloud. No telemetry.
+      </p>
+
+      <div class="ocm-ctas">
+        <a class="md-button md-button--primary" href="showcase/trust-policy-synthetic-proof/">Run the 30-second proof</a>
+        <a class="md-button" href="quickstart/">Get started</a>
+        <a class="md-button" href="upgrade-checklist/">Upgrade to v2</a>
+      </div>
+
+      <div class="ocm-install">
+        <code id="ocm-pip">pip install openclaw-context-pack</code>
+        <button class="ocm-copy" type="button"
+          onclick="navigator.clipboard.writeText('pip install openclaw-context-pack');this.textContent='copied ✓';setTimeout(()=>{this.textContent='copy'},1400)">copy</button>
+      </div>
+
+      <div class="ocm-integrations">
+        Installs into
+        <span>Claude Code</span><span>Codex</span><span>OpenClaw</span>
+        <span>Gemini CLI</span><span>Cursor</span><span>Windsurf</span>
+        <span>any MCP client</span>
+        — one command each: <a href="quickstart-claude-code/">harness quickstarts →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RECEIPT STRIP (update via ops-rules guide §4.1) ============ -->
+  <section class="ocm-hp ocm-hp-strip">
+    <div class="ocm-wrap ocm-strip-grid">
+      <div class="ocm-tile" data-stat="version">
+        <b>v2.0.0</b><span>governed core: stable APIs, explicit DB migration, converged commands</span>
+      </div>
+      <div class="ocm-tile" data-stat="tests">
+        <b>1,175 tests passing</b><span>plus surface, alias, MCP, and golden-slice gates</span>
+      </div>
+      <div class="ocm-tile" data-stat="slo">
+        <b>26.8 ms recall p95</b><span>lexical lane at 100k rows — fixed-seed SLO receipts in repo</span>
+      </div>
+      <div class="ocm-tile" data-stat="quality">
+        <b>MRR +33.8%</b><span>composite scoring passed its 50-case gate with Recall@5 held at 1.000</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PROBLEM ============ -->
+  <section class="ocm-hp">
+    <div class="ocm-wrap">
+      <div class="ocm-kicker">The problem</div>
+      <h2>Agent memory fails silently.</h2>
+      <p class="ocm-lede">
+        Long-running agents don't just forget. Their memory degrades in ways
+        similarity search can't fix — and gets <em>worse</em> as retrieval gets better.
+      </p>
+      <div class="ocm-grid">
+        <div class="ocm-card">
+          <span class="ocm-ico">🕳️</span>
+          <h3>Stale notes keep matching</h3>
+          <p>Yesterday's truth outranks today's correction, long after it stopped being true.</p>
+        </div>
+        <div class="ocm-card">
+          <span class="ocm-ico">☠️</span>
+          <h3>Poisoned content retrieves well</h3>
+          <p>Tool output, scraped text, injected instructions — hostile content that matches the query slips straight into the prompt.</p>
+        </div>
+        <div class="ocm-card">
+          <span class="ocm-ico">🤷</span>
+          <h3>Nobody can explain the prompt</h3>
+          <p>When the agent goes wrong, nothing says <em>why</em> a memory was included — or what was silently left out.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section class="ocm-hp ocm-alt">
+    <div class="ocm-wrap">
+      <div class="ocm-kicker">The answer</div>
+      <h2>Store → Pack → Observe</h2>
+      <div class="ocm-steps">
+        <div class="ocm-step-card">
+          <b>1 · Store</b>
+          <p>Capture agent activity into append-only JSONL and a SQLite ledger — categorized into eight deterministic kinds with a six-state lifecycle.</p>
+        </div>
+        <div class="ocm-step-arrow">→</div>
+        <div class="ocm-step-card">
+          <b>2 · Pack</b>
+          <p>Assemble bounded, cited <code>ContextPack</code> bundles: trust policy filters, category quotas, composite scoring — under an explicit token budget.</p>
+        </div>
+        <div class="ocm-step-arrow">→</div>
+        <div class="ocm-step-card">
+          <b>3 · Observe</b>
+          <p>Trace receipts explain every include and exclude. Mutations are checkpointed and reversible. The evidence is already on disk.</p>
+        </div>
+      </div>
+      <p class="ocm-after">
+        One entrypoint for agents: <code>openclaw-mem recall "…"</code> routes
+        lexical / vector / hybrid / graph lanes fail-open, with routing evidence in the receipt.
+        <a href="architecture/">Architecture →</a> · <a href="command-migration/">Command migration →</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ PROOF ============ -->
+  <section class="ocm-hp">
+    <div class="ocm-wrap ocm-proof">
+      <div>
+        <div class="ocm-kicker">Receipts, not vibes</div>
+        <h2>Same memory. Same query.<br/>Governed context — with evidence.</h2>
+        <p>
+          The reproducible proof runs one query twice against the same synthetic
+          memory. Vanilla packing selects a <em>quarantined</em> row because its
+          text matches. The trust-aware pack excludes it <strong>with a written
+          reason</strong> — while citation coverage stays intact.
+        </p>
+        <a class="md-button md-button--primary" href="showcase/trust-policy-synthetic-proof/">Reproduce it locally</a>
+      </div>
+      <div class="ocm-terminal">
+<pre><code>{
+  <span class="k">"synthetic_fixture_only"</span>: <span class="t">true</span>,
+  <span class="k">"quarantined_removed"</span>: <span class="t">true</span>,
+  <span class="k">"citation_coverage_preserved"</span>: <span class="t">true</span>,
+  <span class="k">"trust_policy_explains_exclusion"</span>: <span class="t">true</span>
+}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURES ============ -->
+  <section class="ocm-hp ocm-alt">
+    <div class="ocm-wrap">
+      <div class="ocm-kicker">What you get</div>
+      <h2>Governance built in, not bolted on.</h2>
+      <div class="ocm-grid">
+        <div class="ocm-card"><span class="ocm-ico">🛡️</span><h3>Trust-aware packing</h3><p>Quarantined and untrusted records are excluded by policy with written reasons — defense-in-depth against memory poisoning.</p></div>
+        <div class="ocm-card"><span class="ocm-ico">🔗</span><h3>Citations everywhere</h3><p>Every packed item traces to its source record; citation coverage is measured, not assumed.</p></div>
+        <div class="ocm-card"><span class="ocm-ico">🧬</span><h3>Lifecycle &amp; taxonomy</h3><p>Eight bilingual kinds, six lifecycle states, category quotas, use-based decay with protected tiers, reversible soft-archive.</p></div>
+        <div class="ocm-card"><span class="ocm-ico">⏪</span><h3>Rollback by receipt</h3><p>Mutations flow through plan → checkpoint → apply → receipt. DB migration is dry-runnable, backup-first, rollbackable.</p></div>
+        <div class="ocm-card"><span class="ocm-ico">🕰️</span><h3>Temporal facts</h3><p>"What is currently true about X" — source-linked assertions, timelines, supersession, conflict lint.</p></div>
+        <div class="ocm-card"><span class="ocm-ico">🕸️</span><h3>Graph query plane</h3><p>Upstream, downstream, lineage, and impact over a SQLite-derived graph — also exposed as read-only MCP tools.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ NUMBERS (update via ops-rules guide §4.1) ============ -->
+  <section class="ocm-hp">
+    <div class="ocm-wrap">
+      <div class="ocm-kicker">Numbers with receipts</div>
+      <h2>Fast enough to sit in every turn.</h2>
+      <p class="ocm-lede">Fixed-seed p95 latencies at 100k rows, committed as SLO receipts — reproduce them from the repo.</p>
+      <div class="ocm-slo">
+        <table>
+          <thead><tr><th>100k-row lane</th><th>target</th><th>p95</th><th></th></tr></thead>
+          <tbody>
+            <tr><td>stamped connect</td><td>&lt;30 ms</td><td>10.754 ms</td><td>✅</td></tr>
+            <tr><td>lexical recall</td><td>&lt;50 ms</td><td>26.805 ms</td><td>✅</td></tr>
+            <tr><td>hybrid recall</td><td>&lt;200 ms</td><td>75.397 ms</td><td>✅</td></tr>
+            <tr><td>graph-auto pack</td><td>&lt;300 ms</td><td>62.160 ms</td><td>✅</td></tr>
+            <tr><td>sqlite-vec exact search</td><td>&lt;30 ms</td><td>23.030 ms</td><td>✅</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="ocm-after">
+        Default install is SQLite-only; NumPy, sqlite-vec, FastEmbed, and Qdrant are optional lanes that fail open.
+        Details and methodology: <a href="releases-v2.0.0/">v2.0.0 release notes →</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ COMPARISON ============ -->
+  <section class="ocm-hp ocm-alt">
+    <div class="ocm-wrap">
+      <div class="ocm-kicker">Positioning</div>
+      <h2>Recall engines optimize matching.<br/>This governs what enters the prompt.</h2>
+      <p class="ocm-lede">
+        Honest framing: mem0, supermemory, and mempalace are excellent at recall benchmarks —
+        openclaw-mem is not trying to beat them at that game. Use them together.
+      </p>
+      <div class="ocm-compare">
+        <table>
+          <thead><tr><th></th><th>Recall-focused memory layers</th><th><code>openclaw-mem</code></th></tr></thead>
+          <tbody>
+            <tr><td>Primary question</td><td>"Did the agent remember the right thing?"</td><td>"Should this memory be trusted — and can you prove why it's in the prompt?"</td></tr>
+            <tr><td>Inclusion logic</td><td>Similarity scores (opaque)</td><td>Explicit receipts with include &amp; exclude reasons</td></tr>
+            <tr><td>Untrusted content</td><td>Retrieves whenever it matches</td><td>Quarantined by trust policy; exclusion documented</td></tr>
+            <tr><td>Mistake recovery</td><td>Delete and hope</td><td>Checkpointed mutations with rollback receipts</td></tr>
+            <tr><td>Storage default</td><td>Vector DB, often cloud</td><td>SQLite + JSONL, local-first</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ QUICKSTART ============ -->
+  <section class="ocm-hp">
+    <div class="ocm-wrap">
+      <div class="ocm-kicker">Five minutes, honestly</div>
+      <h2>Init. Recall. Install into your agent.</h2>
+      <div class="ocm-qs">
+        <div class="ocm-terminal ocm-qs-term">
+<pre><code><span class="c"># a governed memory, from zero</span>
+pip install openclaw-context-pack
+openclaw-mem init
+openclaw-mem store --category preference "Prefers Asia/Taipei for time displays."
+openclaw-mem recall "timezone preference" --json
+
+<span class="c"># wire it into your coding agent</span>
+openclaw-mem install --harness claude-code
+openclaw-mem doctor --harness claude-code</code></pre>
+        </div>
+        <div class="ocm-qs-side">
+          <p><b>Every harness, one command.</b> Installers are dry-runnable and atomic, write backups, and verify themselves.</p>
+          <p>
+            <a href="quickstart-claude-code/">Claude Code</a> ·
+            <a href="quickstart-codex/">Codex</a> ·
+            <a href="quickstart-openclaw/">OpenClaw</a> ·
+            <a href="quickstart-gemini/">Gemini CLI</a> ·
+            <a href="quickstart-cursor/">Cursor</a> ·
+            <a href="quickstart-windsurf/">Windsurf</a> ·
+            <a href="quickstart-generic/">generic</a>
+          </p>
+          <p><a href="install-modes/">Choose an install path →</a></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FAQ ============ -->
+  <section class="ocm-hp ocm-alt">
+    <div class="ocm-wrap ocm-faq">
+      <div class="ocm-kicker">Quick answers</div>
+      <h2>Asked before installing</h2>
+      <details>
+        <summary>Do I need a vector database or a cloud service?</summary>
+        <p>No. The default stack is SQLite + JSONL on your machine. Hybrid recall works locally; there is no hosted service and no telemetry.</p>
+      </details>
+      <details>
+        <summary>Will v2 read my existing v1.x database?</summary>
+        <p>Yes — v1.9.x databases stay readable, and migration is explicit: <code>db info</code> to inspect, <code>db migrate --dry-run</code> to preview, backup-first apply with a rollback receipt. Legacy commands remain callable with deprecation guidance.</p>
+      </details>
+      <details>
+        <summary>Is this a recall benchmark winner?</summary>
+        <p>That's not the axis it competes on. Retrieval is solid (see the SLO and gate receipts above), but the differentiated value is governance: citations, trust policies, receipts, rollback. The <a href="reality-check/">reality check</a> stays candid about what is and isn't measured.</p>
+      </details>
+      <p class="ocm-after"><a href="https://github.com/phenomenoner/openclaw-mem#faq">Full FAQ on GitHub →</a></p>
+    </div>
+  </section>
+
+  <!-- ============ FINAL CTA ============ -->
+  <section class="ocm-hp ocm-hp-final">
+    <div class="ocm-wrap">
+      <h2>Start with the proof.<br/>Keep the receipts.</h2>
+      <p>Local-first, inspectable, reversible — evaluate it in five minutes with synthetic data, then let it earn its way into your agent stack.</p>
+      <div class="ocm-ctas">
+        <a class="md-button md-button--primary" href="showcase/trust-policy-synthetic-proof/">Run the 30-second proof</a>
+        <a class="md-button" href="quickstart/">Read the docs</a>
+        <a class="md-button" href="https://github.com/phenomenoner/openclaw-mem">GitHub</a>
+      </div>
+      <p class="ocm-fineprint">
+        MIT OR Apache-2.0 · built sidecar-first for OpenClaw, at home in any harness ·
+        繁體中文讀者：<a href="zh/">中文版文件</a>
+      </p>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block content %}{% endblock %}

@@ -59,6 +59,21 @@ uv run openclaw-mem pack --db "$DB" --query "timezone privacy demo style" --trac
 - `OPENCLAW_MEM_OPENAI_BASE_URL` (optional)
 - `OPENCLAW_MEM_EMBED_MODEL` (optional)
 
+## Docs & website updates
+
+Before editing `README.md`, `docs/`, `overrides/`, or `mkdocs.yml`, read
+**`ops-rules/docs-and-website-update-guide.md`** — it defines the design
+system (`.ocm-*` components, brand tokens), the claim→source-of-truth table,
+content voice rules, and update recipes. Verification gate:
+
+```bash
+uv sync --locked --extra docs
+uv run mkdocs build --strict   # must pass; same gate as Pages CI
+```
+
+The product landing lives in `overrides/home.html` (bound via
+`docs/index.md` front-matter); `docs/index.md` itself stays content-free.
+
 ## Guardrails
 
 - Keep demos **synthetic** (no secrets / no personal notes).
