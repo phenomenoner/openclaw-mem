@@ -1,3 +1,4 @@
+import gzip
 import os
 import stat
 import json
@@ -103,6 +104,28 @@ class TestArtifactSidecar(unittest.TestCase):
 
             fetched = fetch_artifact(stash["handle"], root=root, mode="head", max_chars=1000)
             self.assertEqual(fetched["text"], good)
+
+    def test_fetch_rejects_blob_hash_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "artifacts"
+
+            stash = stash_artifact(b"original payload", root=root)
+            blob, _meta = _artifact_paths(root, stash["sha256"], gzip_blob=False)
+            blob.write_text("tampered payload", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "sha256 mismatch"):
+                fetch_artifact(stash["handle"], root=root)
+
+    def test_fetch_rejects_gzip_blob_hash_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "artifacts"
+
+            stash = stash_artifact(b"original gzip payload", root=root, compress=True)
+            blob, _meta = _artifact_paths(root, stash["sha256"], gzip_blob=True)
+            blob.write_bytes(gzip.compress(b"tampered gzip payload", mtime=0))
+
+            with self.assertRaisesRegex(ValueError, "sha256 mismatch"):
+                fetch_artifact(stash["handle"], root=root)
 
 
 if __name__ == "__main__":
