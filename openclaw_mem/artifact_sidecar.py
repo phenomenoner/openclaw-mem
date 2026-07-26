@@ -199,6 +199,13 @@ def _read_artifact_bytes(*, handle: str, root: Optional[Path] = None) -> Tuple[b
     if is_gzip:
         data = gzip.decompress(data)
 
+    actual_sha256 = hashlib.sha256(data).hexdigest()
+    if actual_sha256 != sha256_hex:
+        raise ValueError(
+            f"artifact blob sha256 mismatch for handle {handle}: "
+            f"expected {sha256_hex}, got {actual_sha256}"
+        )
+
     return data, meta, blob_path
 
 
