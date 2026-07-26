@@ -5,7 +5,9 @@ import copy
 from benchmarks.perf.perf_suite import (
     ABSOLUTE_SLOS_MS,
     MATRIX_KIND,
+    PACK_QUERY_ITERATIONS,
     SLO_METRICS,
+    _percentile,
     build_thresholds,
     evaluate_absolute_slos,
     evaluate_thresholds,
@@ -21,6 +23,22 @@ def test_perf_suite_includes_sqlite_vec_recall_and_real_pack_lanes() -> None:
     assert report["metrics"]["recall"]["lexical_p95_ms"] > 0
     assert report["metrics"]["pack"]["e2e_p95_ms"] > 0
     assert report["metrics"]["pack"]["graph_mode"] == "auto"
+    assert report["dataset"]["pack_queries"] == PACK_QUERY_ITERATIONS
+    diagnostics = report["metrics"]["pack"]["diagnostics"]
+    assert diagnostics["sample_count"] == PACK_QUERY_ITERATIONS
+    assert diagnostics["max_ms"] >= report["metrics"]["pack"]["e2e_p95_ms"]
+    assert len(diagnostics["slowest_samples"]) == 5
+    assert len(diagnostics["slowest_replays"]) == 3
+    assert all(item["replay_stages_ms"] for item in diagnostics["slowest_replays"])
+
+
+def test_pack_p95_ignores_one_runner_pause_but_catches_persistent_regression() -> None:
+    one_runner_pause = [20.0] * (PACK_QUERY_ITERATIONS - 1) + [7_000.0]
+    persistent_regression = [20.0] * (PACK_QUERY_ITERATIONS - 5) + [350.0] * 5
+
+    assert _percentile(one_runner_pause, 0.95) == 20.0
+    assert max(one_runner_pause) == 7_000.0
+    assert _percentile(persistent_regression, 0.95) == 350.0
 
 
 def test_thresholds_record_20_percent_gate_and_30_percent_tolerance() -> None:

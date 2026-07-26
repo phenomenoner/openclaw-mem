@@ -64,6 +64,9 @@ ABSOLUTE_SLOS_MS = {
     "pack.e2e_p95_ms": 300.0,
     "vsearch.sqlite_vec_p95_ms": 30.0,
 }
+PACK_QUERY_ITERATIONS = 50
+PACK_SLOW_SAMPLE_COUNT = 5
+PACK_SLOW_REPLAY_COUNT = 3
 
 
 class _PerfEmbeddingProvider:
@@ -97,12 +100,39 @@ def _percentile(values: list[float], percentile: float) -> float:
 
 
 def _latencies_ms(iterations: int, fn: Callable[[int], Any]) -> list[float]:
-    values: list[float] = []
+    return [elapsed_ms for _index, elapsed_ms in _latency_samples_ms(iterations, fn)]
+
+
+def _latency_samples_ms(
+    iterations: int,
+    fn: Callable[[int], Any],
+) -> list[tuple[int, float]]:
+    """Measure indexed samples so slow benchmark calls remain diagnosable."""
+
+    samples: list[tuple[int, float]] = []
     for index in range(iterations):
         started = time.perf_counter()
         fn(index)
-        values.append((time.perf_counter() - started) * 1000.0)
-    return values
+        samples.append((index, (time.perf_counter() - started) * 1000.0))
+    return samples
+
+
+def _slowest_samples(
+    samples: list[tuple[int, float]],
+    queries: list[str],
+    *,
+    limit: int = PACK_SLOW_SAMPLE_COUNT,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "sample_index": index,
+            "query": queries[index % len(queries)],
+            "elapsed_ms": round(elapsed_ms, 3),
+        }
+        for index, elapsed_ms in sorted(samples, key=lambda item: item[1], reverse=True)[
+            : max(1, int(limit))
+        ]
+    ]
 
 
 def _observation(index: int, rng: random.Random) -> dict[str, Any]:
@@ -266,29 +296,45 @@ def run_suite(rows: int, vector_dim: int) -> dict[str, Any]:
                 sort_keys=True,
             )
 
-        synthetic_pack_values = _latencies_ms(20, build_pack)
+        synthetic_pack_values = _latencies_ms(PACK_QUERY_ITERATIONS, build_pack)
 
-        def build_e2e_pack(index: int) -> dict[str, Any]:
+        def build_e2e_pack(index: int, *, trace: bool = False) -> dict[str, Any]:
+            argv = [
+                "pack",
+                "--query",
+                product_queries[index % len(product_queries)],
+                "--limit",
+                "12",
+                "--budget-tokens",
+                "1200",
+                "--use-graph",
+                "auto",
+                "--vector-backend",
+                "auto",
+            ]
+            if trace:
+                argv.append("--trace")
             with redirect_stderr(io.StringIO()):
-                return _invoke_cli_json(
-                    conn,
-                    [
-                        "pack",
-                        "--query",
-                        product_queries[index % len(product_queries)],
-                        "--limit",
-                        "12",
-                        "--budget-tokens",
-                        "1200",
-                        "--use-graph",
-                        "auto",
-                        "--vector-backend",
-                        "auto",
-                    ],
-                )
+                return _invoke_cli_json(conn, argv)
 
         build_e2e_pack(0)
-        e2e_pack_values = _latencies_ms(20, build_e2e_pack)
+        e2e_pack_samples = _latency_samples_ms(PACK_QUERY_ITERATIONS, build_e2e_pack)
+        e2e_pack_values = [elapsed_ms for _index, elapsed_ms in e2e_pack_samples]
+        slowest_pack_samples = _slowest_samples(e2e_pack_samples, product_queries)
+        slowest_pack_replays: list[dict[str, Any]] = []
+        for sample in slowest_pack_samples[:PACK_SLOW_REPLAY_COUNT]:
+            sample_index = int(sample["sample_index"])
+            replay = build_e2e_pack(sample_index, trace=True)
+            timing = dict(((replay.get("trace") or {}).get("timing") or {}))
+            slowest_pack_replays.append(
+                {
+                    "sample_index": sample_index,
+                    "query": sample["query"],
+                    "observed_elapsed_ms": sample["elapsed_ms"],
+                    "replay_total_ms": timing.get("total_ms"),
+                    "replay_stages_ms": dict(timing.get("stages") or {}),
+                }
+            )
 
         # Keep the allocation-heavy exact backends after the product SLO lanes.
         # Pure Python materializes every embedding row per query and would
@@ -332,7 +378,7 @@ def run_suite(rows: int, vector_dim: int) -> dict[str, Any]:
             "search_queries": 50,
             "recall_queries": {"lexical": 50, "hybrid": 20},
             "vector_queries": 20,
-            "pack_queries": 20,
+            "pack_queries": PACK_QUERY_ITERATIONS,
             "query_profile": "three-token-and-v1",
         },
         "metrics": {
@@ -382,6 +428,12 @@ def run_suite(rows: int, vector_dim: int) -> dict[str, Any]:
                 "e2e_p95_ms": round(_percentile(e2e_pack_values, 0.95), 3),
                 "synthetic_render_p95_ms": round(_percentile(synthetic_pack_values, 0.95), 3),
                 "graph_mode": "auto",
+                "diagnostics": {
+                    "sample_count": len(e2e_pack_values),
+                    "max_ms": round(max(e2e_pack_values), 3),
+                    "slowest_samples": slowest_pack_samples,
+                    "slowest_replays": slowest_pack_replays,
+                },
             },
             "connect": connect_metrics,
         },
